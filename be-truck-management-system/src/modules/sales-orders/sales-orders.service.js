@@ -1,0 +1,300 @@
+import {
+  cancelSalesOrder,
+  createSalesOrder,
+  findSalesOrderById,
+  findSalesOrdersPage,
+  updateSalesOrder,
+} from './sales-orders.repository.js';
+
+const SERVICE_OPTIONS = [
+  'Jasa Angkut D20',
+  'Jasa Angkut D40',
+  'Bon Muat/Bongkar',
+  'Tila/Gatepass',
+];
+
+function isContainerService(serviceName) {
+  return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
+}
+
+function normalizeLineItem(item = {}) {
+  const serviceName = SERVICE_OPTIONS.includes(item.serviceName) ? item.serviceName : 'Jasa Angkut D20';
+  const qty = Math.max(1, Number(item.qty || 0));
+  const price = Math.max(0, Number(item.price || 0));
+  return {
+    id: item.id || '',
+    serviceName,
+    containerType: isContainerService(serviceName) ? (item.containerType || item.cargoType || '') : '',
+    qty,
+    price,
+    total: Number(item.total || qty * price),
+  };
+}
+
+function normalizeLineItems(payload) {
+  if (Array.isArray(payload.lineItems) && payload.lineItems.length) {
+    return payload.lineItems.map(normalizeLineItem);
+  }
+
+  const legacyItems = [];
+  const serviceName = SERVICE_OPTIONS.includes(payload.serviceName) ? payload.serviceName : '';
+  const price = Number(payload.price || 0);
+  const d20Qty = Math.max(0, Number(payload.container20Qty || 0));
+  const d40Qty = Math.max(0, Number(payload.container40Qty || 0));
+
+  if (serviceName && serviceName !== 'Campuran') {
+    legacyItems.push(normalizeLineItem({
+      serviceName,
+      containerType: payload.cargoType || payload.container || '',
+      qty: Math.max(1, Number(payload.quantity || d20Qty || d40Qty || 1)),
+      price,
+    }));
+  } else if (d20Qty || d40Qty) {
+    if (d20Qty) {
+      legacyItems.push(normalizeLineItem({
+        serviceName: 'Jasa Angkut D20',
+        containerType: payload.cargoType || payload.container || '',
+        qty: d20Qty,
+        price,
+      }));
+    }
+    if (d40Qty) {
+      legacyItems.push(normalizeLineItem({
+        serviceName: 'Jasa Angkut D40',
+        containerType: payload.cargoType || payload.container || '',
+        qty: d40Qty,
+        price,
+      }));
+    }
+    if (!d20Qty && !d40Qty && payload.serviceName) {
+      legacyItems.push(normalizeLineItem({
+        serviceName: 'Bon Muat/Bongkar',
+        qty: Math.max(1, Number(payload.quantity || 1)),
+        price,
+      }));
+    }
+  } else if (price || payload.quantity) {
+    legacyItems.push(normalizeLineItem({
+      serviceName: payload.serviceName && SERVICE_OPTIONS.includes(payload.serviceName) ? payload.serviceName : 'Bon Muat/Bongkar',
+      containerType: payload.cargoType || payload.container || '',
+      qty: Math.max(1, Number(payload.quantity || 1)),
+      price,
+    }));
+  }
+
+  return legacyItems;
+}
+
+function normalizeContainerSize(size) {
+  return String(size || '20FT').toUpperCase().replace(/\s/g, '') === '40FT' ? '40FT' : '20FT';
+}
+
+function normalizeReferenceDocuments(referenceDocuments = []) {
+  return referenceDocuments
+    .filter((document) => document && (document.documentType || document.referenceNumber || document.documentDate || document.file || document.notes))
+    .map((document) => ({
+      documentType: document.documentType || 'Delivery Order',
+      referenceNumber: document.referenceNumber || '',
+      documentDate: document.documentDate || '',
+      file: document.file
+        ? {
+            name: document.file.name || '',
+            size: document.file.size || 0,
+            type: document.file.type || '',
+          }
+        : null,
+      notes: document.notes || '',
+    }));
+}
+
+function generateFallbackContainerNumber(soNumber, size, index) {
+  const base = String(soNumber || 'SO').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase() || 'SO';
+  const suffix = normalizeContainerSize(size) === '40FT' ? '40' : '20';
+  return `${base}-${suffix}-${String(index + 1).padStart(2, '0')}`;
+}
+
+function normalizeContainers(payload) {
+  const source = Array.isArray(payload.containers) ? payload.containers : [];
+  if (source.length) {
+    return source.map((container, index) => ({
+      ...container,
+      containerNumber: String(container.containerNumber || '').trim().toUpperCase() || generateFallbackContainerNumber(payload.soNumber, container.size, index),
+      size: normalizeContainerSize(container.size),
+      type: container.type || 'Dry',
+      notes: container.notes || '',
+      rpujStatus: container.rpujStatus || 'pending',
+      status: container.status || 'received',
+      receivedAt: container.receivedAt || payload.receivedAt || new Date().toISOString(),
+      runningAt: container.runningAt || null,
+      completedAt: container.completedAt || null,
+    }));
+  }
+
+  const lineItems = normalizeLineItems(payload);
+  if (lineItems.length) {
+    const containers = [];
+    lineItems.forEach((item) => {
+      if (!isContainerService(item.serviceName)) return;
+      const size = item.serviceName === 'Jasa Angkut D40' ? '40FT' : '20FT';
+      for (let index = 0; index < Math.max(0, Number(item.qty || 0)); index += 1) {
+        containers.push({
+          containerNumber: generateFallbackContainerNumber(payload.soNumber, size, containers.length),
+          size,
+          type: item.containerType || 'Dry',
+          notes: item.serviceName,
+          rpujStatus: 'pending',
+          status: 'received',
+        });
+      }
+    });
+    return containers;
+  }
+
+  const container20Qty = Math.max(0, Number(payload.container20Qty || 0));
+  const container40Qty = Math.max(0, Number(payload.container40Qty || 0));
+  const containers = [];
+
+  for (let index = 0; index < container20Qty; index += 1) {
+    containers.push({
+      containerNumber: generateFallbackContainerNumber(payload.soNumber, '20FT', containers.length),
+      size: '20FT',
+      type: 'Dry',
+      notes: '',
+      rpujStatus: 'pending',
+      status: 'received',
+    });
+  }
+
+  for (let index = 0; index < container40Qty; index += 1) {
+    containers.push({
+      containerNumber: generateFallbackContainerNumber(payload.soNumber, '40FT', containers.length),
+      size: '40FT',
+      type: 'Dry',
+      notes: '',
+      rpujStatus: 'pending',
+      status: 'received',
+    });
+  }
+
+  return containers;
+}
+
+function normalizeSalesOrderPayload(payload) {
+  const lineItems = normalizeLineItems(payload);
+  const containers = normalizeContainers({ ...payload, lineItems });
+  const price = Number(payload.price || 0);
+  const quantity = Number(payload.quantity || lineItems.reduce((total, item) => total + Number(item.qty || 0), 0) || containers.length || 0);
+  const totalAmount = Number(
+    payload.totalAmount
+    || lineItems.reduce((total, item) => total + Number(item.total || Number(item.qty || 0) * Number(item.price || 0)), 0)
+    || price * (quantity || containers.length)
+    || 0,
+  );
+  const uniqueServices = [...new Set(lineItems.map((item) => item.serviceName).filter(Boolean))];
+  const summaryName = uniqueServices.length === 1 ? uniqueServices[0] : uniqueServices.length > 1 ? 'Campuran' : payload.serviceName || null;
+  const uniqueContainerTypes = [...new Set(lineItems.map((item) => item.containerType).filter(Boolean))];
+
+  return {
+    ...payload,
+    shipment: payload.shipment || 'import',
+    jobType: payload.jobType || 'Trucking Container',
+    lineItems,
+    serviceName: summaryName,
+    price,
+    quantity: quantity || containers.length,
+    totalAmount,
+    unit: payload.unit || 'Container',
+    container: payload.container || lineItems.map((item) => {
+      const typeLabel = item.containerType ? ` - ${item.containerType}` : '';
+      return `${item.serviceName}${typeLabel} x${item.qty}`;
+    }).join(' + ') || null,
+    cargoType: uniqueContainerTypes.length === 1 ? uniqueContainerTypes[0] : payload.cargoType || null,
+    containers,
+    referenceDocuments: normalizeReferenceDocuments(payload.referenceDocuments),
+  };
+}
+
+function validateSalesOrderPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    const error = new Error('Payload Sales Order harus berupa object.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const required = ['soNumber', 'customer', 'origin', 'destination'];
+  const missing = required.filter((field) => !payload[field]);
+  if (missing.length) {
+    const error = new Error(`Field wajib belum lengkap: ${missing.join(', ')}.`);
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const hasLineItems = Array.isArray(payload.lineItems) && payload.lineItems.length > 0;
+  if ((!Array.isArray(payload.containers) || payload.containers.length === 0) && !hasLineItems) {
+    const error = new Error('Sales Order minimal memiliki 1 container.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  if (hasLineItems) {
+    const invalidLineItem = payload.lineItems.find((item) => !item.serviceName || Number(item.qty || 0) < 1 || Number(item.price || 0) < 0);
+    if (invalidLineItem) {
+      const error = new Error('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.');
+      error.statusCode = 400;
+      error.code = 'VALIDATION_ERROR';
+      throw error;
+    }
+  }
+
+  const invalidContainer = payload.containers.find((container) => !container.containerNumber);
+  if (invalidContainer) {
+    const error = new Error('Setiap container wajib memiliki nomor container.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const duplicatedContainer = payload.containers.some((container, index) =>
+    payload.containers.findIndex((item) => item.containerNumber === container.containerNumber) !== index,
+  );
+  if (duplicatedContainer) {
+    const error = new Error('Nomor container wajib unik di dalam Sales Order.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+}
+
+export function listSalesOrders(query) {
+  return findSalesOrdersPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || '',
+    status: query.status || '',
+    invoiced: query.invoiced || '',
+  });
+}
+
+export async function getSalesOrder(id) {
+  const order = await findSalesOrderById(id);
+  if (!order) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  return order;
+}
+
+export function saveSalesOrder(payload, id) {
+  const normalizedPayload = normalizeSalesOrderPayload(payload);
+  validateSalesOrderPayload(normalizedPayload);
+  return id ? updateSalesOrder(id, normalizedPayload) : createSalesOrder(normalizedPayload);
+}
+
+export function removeSalesOrder(id) {
+  return cancelSalesOrder(id);
+}

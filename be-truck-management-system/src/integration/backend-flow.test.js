@@ -1,0 +1,499 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { rm } from 'node:fs/promises';
+import test, { after } from 'node:test';
+
+process.env.NODE_ENV = 'test';
+process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
+process.env.PASSWORD_HASH_COST ||= '4';
+process.env.UPLOAD_DIR ||= 'uploads/test';
+
+await import('dotenv/config');
+
+const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+if (!hasDatabase) {
+  test('backend integration flow skipped without DATABASE_URL', { skip: 'DATABASE_URL belum dikonfigurasi.' }, () => {});
+} else {
+  const { createApp } = await import('../app.js');
+  const { closePool, query } = await import('../db/client.js');
+  const { hashPassword } = await import('../modules/auth/auth.utils.js');
+
+  const runId = `sprint-2c-${Date.now()}`;
+  const password = 'TestPassword123!';
+  const users = {
+    admin: { name: `Sprint2C Admin ${runId}`, email: `${runId}.admin@example.test`, role: 'admin' },
+    sales: { name: `Sprint2C Sales ${runId}`, email: `${runId}.sales@example.test`, role: 'sales' },
+    observer: { name: `Sprint2C Observer ${runId}`, email: `${runId}.observer@example.test`, role: 'pengamat' },
+    legacy: { name: `Sprint2C Legacy ${runId}`, email: `${runId}.legacy@example.test`, role: 'sales' },
+    locked: { name: `Sprint2C Locked ${runId}`, email: `${runId}.locked@example.test`, role: 'sales' },
+  };
+  const created = {
+    orderId: '',
+    orderSoNumber: `SO-${runId}-MAIN`.toUpperCase(),
+    cancelOrderId: '',
+    cancelSoNumber: `SO-${runId}-CANCEL`.toUpperCase(),
+    jobId: '',
+    attachmentId: '',
+  };
+
+  const server = createApp();
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  after(async () => {
+    await cleanupTestData().catch(() => {});
+    await new Promise((resolve) => server.close(resolve));
+    await closePool();
+  });
+
+  async function cleanupTestData() {
+    const attachments = await query(
+      `
+        select storage_path
+        from attachments
+        where entity_id in (
+          select id from sales_orders where so_number like $1
+          union
+          select cj.id from container_jobs cj
+          join sales_orders so on so.id = cj.sales_order_id
+          where so.so_number like $1
+        )
+        or storage_path like $2
+      `,
+      [`SO-${runId}%`, `%${runId}%`],
+    );
+
+    await query('delete from activity_logs where metadata::text like $1 or actor_name like $2', [`%${runId}%`, `%${runId}%`]);
+    await query('delete from attachments where storage_path like $1 or entity_id in (select id from sales_orders where so_number like $2)', [`%${runId}%`, `SO-${runId}%`]);
+    await query('delete from sales_orders where so_number like $1', [`SO-${runId}%`]);
+    await query('delete from vehicles where plate_number like $1', [`B-${String(runId).slice(-4)}%`]);
+    await query('delete from users where email like $1', [`${runId}.%@example.test`]);
+
+    await Promise.all(attachments.rows.map((row) => (
+      row.storage_path
+        ? rm(`${process.env.UPLOAD_DIR}/${row.storage_path}`, { force: true }).catch(() => {})
+        : Promise.resolve()
+    )));
+  }
+
+  async function seedUsers() {
+    await cleanupTestData();
+    await Promise.all(Object.values(users).map((user) => {
+      const passwordHash = user === users.legacy
+        ? createHash('sha256').update(password).digest('hex')
+        : hashPassword(password);
+      return query(
+      `
+        insert into users (name, email, password_hash, role, status)
+        values ($1, $2, $3, $4, 'Aktif')
+        on conflict (email) do update
+        set name = excluded.name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            status = 'Aktif',
+            updated_at = now()
+      `,
+      [user.name, user.email, passwordHash, user.role],
+      );
+    }));
+  }
+
+  async function api(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
+    if (options.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+    const text = await response.text();
+    return {
+      status: response.status,
+      body: text ? JSON.parse(text) : null,
+    };
+  }
+
+  async function login(email, pass = password) {
+    const response = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email, password: pass },
+      headers: { 'User-Agent': 'backend-flow-test' },
+    });
+    return response;
+  }
+
+  function salesOrderPayload(overrides = {}) {
+    const soNumber = overrides.soNumber || created.orderSoNumber;
+    return {
+      soNumber,
+      doNumber: `${soNumber}-DO`,
+      soDate: '2026-07-10',
+      tripDate: '2026-07-11',
+      customer: `Customer ${runId}`,
+      shipment: 'import',
+      jobType: 'Trucking Container',
+      origin: 'Tanjung Priok',
+      destination: 'Cikarang',
+      salesName: 'Sprint2C Sales',
+      createdBy: 'Sprint2C Sales',
+      lineItems: [
+        { serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 1500000 },
+      ],
+      containers: [
+        {
+          id: overrides.containerId || '',
+          containerNumber: overrides.containerNumber || `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          size: '20FT',
+          type: 'Dry',
+          status: 'received',
+        },
+      ],
+      notes: `Automated test ${runId}`,
+      ...overrides,
+    };
+  }
+
+  async function latestActivity(action) {
+    const result = await query(
+      `
+        select action, actor_name, actor_role, target, metadata
+        from activity_logs
+        where action = $1
+          and (metadata::text like $2 or actor_name like $3)
+        order by created_at desc
+        limit 1
+      `,
+      [action, `%${runId}%`, `%${runId}%`],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function latestActivityForEntity(action, entityId) {
+    const result = await query(
+      `
+        select action, actor_name, actor_role, target, metadata
+        from activity_logs
+        where action = $1
+          and metadata->>'entityId' = $2
+        order by created_at desc
+        limit 1
+      `,
+      [action, entityId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async function latestLoginActivity(action, email) {
+    const result = await query(
+      `
+        select action, actor_name, actor_role, target, metadata
+        from activity_logs
+        where action = $1
+          and metadata->>'email' = $2
+        order by created_at desc
+        limit 1
+      `,
+      [action, email],
+    );
+    return result.rows[0] || null;
+  }
+
+  test('backend API flow utama terlindungi oleh automated tests', async (t) => {
+    await seedUsers();
+    let adminToken = '';
+    let salesToken = '';
+    let observerToken = '';
+
+    await t.test('auth: login sukses, login gagal, me valid, me tanpa token ditolak', async () => {
+      const adminLogin = await login(users.admin.email);
+      assert.equal(adminLogin.status, 200);
+      assert.equal(adminLogin.body.data.user.email, users.admin.email);
+      assert.ok(adminLogin.body.data.token);
+      adminToken = adminLogin.body.data.token;
+
+      const failedLogin = await login(users.admin.email, 'wrong-password');
+      assert.equal(failedLogin.status, 401);
+      assert.equal(failedLogin.body.error.code, 'INVALID_CREDENTIALS');
+
+      const me = await api('/api/auth/me', { token: adminToken });
+      assert.equal(me.status, 200);
+      assert.equal(me.body.data.email, users.admin.email);
+
+      const meWithoutToken = await api('/api/auth/me');
+      assert.equal(meWithoutToken.status, 401);
+
+      const legacyBefore = await query('select password_hash from users where email = $1', [users.legacy.email]);
+      assert.match(legacyBefore.rows[0].password_hash, /^[a-f0-9]{64}$/i);
+
+      const legacyLogin = await login(users.legacy.email);
+      assert.equal(legacyLogin.status, 200);
+      const legacyAfter = await query('select password_hash from users where email = $1', [users.legacy.email]);
+      assert.match(legacyAfter.rows[0].password_hash, /^\$2[aby]\$/);
+
+      for (let index = 0; index < 5; index += 1) {
+        const failedAttempt = await login(users.locked.email, `wrong-password-${index}`);
+        assert.equal(failedAttempt.status, 401);
+      }
+      const lockedAttempt = await login(users.locked.email, 'wrong-password-lockout');
+      assert.equal(lockedAttempt.status, 429);
+      assert.equal(lockedAttempt.body.error.code, 'LOGIN_LOCKED');
+    });
+
+    await t.test('activity log: login sukses dan gagal tercatat', async () => {
+      const successLog = await latestLoginActivity('LOGIN_SUCCESS', users.admin.email);
+      assert.equal(successLog.action, 'LOGIN_SUCCESS');
+      assert.equal(successLog.metadata.email, users.admin.email);
+
+      const failedLog = await latestLoginActivity('LOGIN_FAILED', users.admin.email);
+      assert.equal(failedLog.action, 'LOGIN_FAILED');
+      assert.equal(failedLog.metadata.email, users.admin.email);
+      assert.equal(failedLog.metadata.code, 'INVALID_CREDENTIALS');
+
+      const lockoutLog = await latestLoginActivity('LOGIN_FAILED', users.locked.email);
+      assert.equal(lockoutLog.action, 'LOGIN_FAILED');
+      assert.equal(lockoutLog.metadata.code, 'LOGIN_LOCKED');
+    });
+
+    await t.test('permission: role tanpa permission ditolak dan role dengan permission diterima', async () => {
+      const salesLogin = await login(users.sales.email);
+      const observerLogin = await login(users.observer.email);
+      assert.equal(salesLogin.status, 200);
+      assert.equal(observerLogin.status, 200);
+      salesToken = salesLogin.body.data.token;
+      observerToken = observerLogin.body.data.token;
+
+      const allowed = await api('/api/sales-orders?pageSize=1', { token: salesToken });
+      assert.equal(allowed.status, 200);
+      assert.ok(Array.isArray(allowed.body.data.rows));
+
+      const salesDashboard = await api('/api/reports/dashboard', { token: salesToken });
+      assert.equal(salesDashboard.status, 200);
+      assert.ok(Array.isArray(salesDashboard.body.data.trucks));
+
+      const salesReport = await api('/api/reports/sales-orders?pageSize=1', { token: salesToken });
+      assert.equal(salesReport.status, 403);
+      assert.equal(salesReport.body.error.code, 'FORBIDDEN');
+
+      const forbidden = await api('/api/sales-orders', {
+        method: 'POST',
+        token: observerToken,
+        body: salesOrderPayload(),
+      });
+      assert.equal(forbidden.status, 403);
+      assert.equal(forbidden.body.error.code, 'FORBIDDEN');
+    });
+
+    await t.test('sales order: list, create, update, cancel', async () => {
+      const createdOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: adminToken,
+        body: salesOrderPayload(),
+      });
+      assert.equal(createdOrder.status, 201);
+      assert.equal(createdOrder.body.data.soNumber, created.orderSoNumber);
+      assert.equal(createdOrder.body.data.containers.length, 1);
+      created.orderId = createdOrder.body.data.id;
+      created.jobId = createdOrder.body.data.containers[0].id;
+
+      const list = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
+      assert.equal(list.status, 200);
+      assert.ok(list.body.data.rows.some((row) => row.id === created.orderId));
+
+      const updatedOrder = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Karawang',
+          updatedBy: 'Sprint2C Admin',
+        }),
+      });
+      assert.equal(updatedOrder.status, 200);
+      assert.equal(updatedOrder.body.data.destination, 'Karawang');
+
+      const cancelCandidate = await api('/api/sales-orders', {
+        method: 'POST',
+        token: adminToken,
+        body: salesOrderPayload({ soNumber: created.cancelSoNumber }),
+      });
+      assert.equal(cancelCandidate.status, 201);
+      created.cancelOrderId = cancelCandidate.body.data.id;
+
+      const cancelled = await api(`/api/sales-orders/${created.cancelOrderId}/cancel`, {
+        method: 'PATCH',
+        token: adminToken,
+      });
+      assert.equal(cancelled.status, 200);
+      assert.equal(cancelled.body.data.id, created.cancelOrderId);
+    });
+
+    await t.test('activity log: create/update/cancel sales order tercatat', async () => {
+      const createLog = await latestActivity('CREATE_SALES_ORDER');
+      assert.equal(createLog.action, 'CREATE_SALES_ORDER');
+      assert.equal(createLog.metadata.entityType, 'sales_order');
+
+      const updateLog = await latestActivity('UPDATE_SALES_ORDER');
+      assert.equal(updateLog.action, 'UPDATE_SALES_ORDER');
+      assert.equal(updateLog.metadata.entityId, created.orderId);
+
+      const cancelLog = await latestActivity('CANCEL_SALES_ORDER');
+      assert.equal(cancelLog.action, 'CANCEL_SALES_ORDER');
+      assert.equal(cancelLog.metadata.entityId, created.cancelOrderId);
+    });
+
+    await t.test('container job: list, create via sales order, update, update status', async () => {
+      const list = await api(`/api/container-jobs?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
+      assert.equal(list.status, 200);
+      assert.ok(list.body.data.rows.some((row) => row.id === created.jobId));
+
+      const createJobLog = await latestActivityForEntity('CREATE_CONTAINER_JOB', created.jobId);
+      assert.equal(createJobLog.action, 'CREATE_CONTAINER_JOB');
+      assert.equal(createJobLog.metadata.entityId, created.jobId);
+
+      const plate20 = `B-${String(runId).slice(-4)}-20T`;
+      const plate40 = `B-${String(runId).slice(-4)}-40T`;
+      await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif'),
+                 ($3, $4, 'Fuso', 'FN', '40FT', 'Aktif')
+          on conflict (plate_number) do update
+          set container_size = excluded.container_size,
+              operational_status = 'Aktif',
+              archived_at = null
+        `,
+        [`TRK-${String(runId).slice(-4)}-20`, plate20, `TRK-${String(runId).slice(-4)}-40`, plate40],
+      );
+
+      const mismatchedJob = await api(`/api/container-jobs/${created.jobId}/assignment`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: `Driver ${runId}`,
+          plateNumber: plate40,
+          status: 'running',
+          runningAt: '2026-07-11T07:00:00.000Z',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(mismatchedJob.status, 400);
+      assert.equal(mismatchedJob.body.error.code, 'VEHICLE_SIZE_MISMATCH');
+
+      const updatedJob = await api(`/api/container-jobs/${created.jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: `Driver ${runId}`,
+          plateNumber: plate20,
+          status: 'running',
+          runningAt: '2026-07-11T08:00:00.000Z',
+          rpujStatus: 'submitted',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(updatedJob.status, 200);
+      assert.equal(updatedJob.body.data.status, 'running');
+
+      const updateLog = await latestActivity('UPDATE_CONTAINER_JOB');
+      assert.equal(updateLog.action, 'UPDATE_CONTAINER_JOB');
+      assert.equal(updateLog.metadata.entityId, created.jobId);
+
+      const statusLog = await latestActivity('UPDATE_JOB_STATUS');
+      assert.equal(statusLog.action, 'UPDATE_JOB_STATUS');
+      assert.equal(statusLog.metadata.fromStatus, 'received');
+      assert.equal(statusLog.metadata.toStatus, 'running');
+    });
+
+    await t.test('attachments: upload, list, delete, fileBase64 tidak masuk activity log metadata', async () => {
+      const invalidUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: created.jobId,
+          category: 'otherDocument',
+          fileName: `${runId}.exe`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from('%PDF-1.4\n% Invalid extension\n').toString('base64'),
+        },
+      });
+      assert.equal(invalidUpload.status, 400);
+      assert.equal(invalidUpload.body.error.code, 'INVALID_FILE_EXTENSION');
+
+      const upload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: created.jobId,
+          category: 'otherDocument',
+          referenceNumber: `REF-${runId}`,
+          documentDate: '2026-07-10',
+          fileName: `${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from('%PDF-1.4\n% Sprint 2C test\n').toString('base64'),
+          notes: `Attachment ${runId}`,
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(upload.status, 201);
+      assert.equal(upload.body.data.entityId, created.jobId);
+      assert.match(upload.body.data.storagePath, /^sales-orders[\\/]+2026[\\/]+Juli[\\/]+2026-07-11[\\/]+SO-/);
+      assert.match(upload.body.data.storagePath, /[\\/]+03-container-jobs[\\/]+[^\\/]+[\\/]+99-other-documents[\\/]+/);
+      created.attachmentId = upload.body.data.id;
+
+      const list = await api(`/api/attachments?entityType=container_job&entityId=${created.jobId}`, { token: adminToken });
+      assert.equal(list.status, 200);
+      assert.ok(list.body.data.some((attachment) => attachment.id === created.attachmentId));
+
+      const downloaded = await fetch(`${baseUrl}/api/attachments/${created.attachmentId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(downloaded.status, 200);
+      assert.equal(downloaded.headers.get('content-type'), 'application/pdf');
+
+      const uploadLog = await latestActivity('UPLOAD_ATTACHMENT');
+      assert.equal(uploadLog.action, 'UPLOAD_ATTACHMENT');
+      assert.equal(JSON.stringify(uploadLog.metadata).includes('fileBase64'), false);
+      assert.equal(JSON.stringify(uploadLog.metadata).includes('%PDF'), false);
+
+      const deleted = await api(`/api/attachments/${created.attachmentId}`, {
+        method: 'DELETE',
+        token: adminToken,
+      });
+      assert.equal(deleted.status, 200);
+      assert.equal(deleted.body.data.id, created.attachmentId);
+    });
+
+    await t.test('reports: dashboard, sales-orders, operations, driver-performance', async () => {
+      const dashboard = await api('/api/reports/dashboard', { token: observerToken });
+      assert.equal(dashboard.status, 200);
+      assert.ok(Array.isArray(dashboard.body.data.trucks));
+      assert.ok(Array.isArray(dashboard.body.data.activeJobs));
+      assert.ok(Array.isArray(dashboard.body.data.upcomingJobs));
+
+      const salesReport = await api(`/api/reports/sales-orders?query=${encodeURIComponent(runId)}`, { token: observerToken });
+      assert.equal(salesReport.status, 200);
+      assert.ok(Array.isArray(salesReport.body.data.rows));
+      assert.equal(typeof salesReport.body.data.total, 'number');
+      assert.ok(salesReport.body.data.summary);
+
+      const operationsReport = await api(`/api/reports/operations?query=${encodeURIComponent(runId)}`, { token: observerToken });
+      assert.equal(operationsReport.status, 200);
+      assert.ok(Array.isArray(operationsReport.body.data.rows));
+      assert.equal(typeof operationsReport.body.data.total, 'number');
+      assert.ok(operationsReport.body.data.summary);
+
+      const driverReport = await api('/api/reports/driver-performance?month=all', { token: observerToken });
+      assert.equal(driverReport.status, 200);
+      assert.ok(Array.isArray(driverReport.body.data.rows));
+      assert.equal(typeof driverReport.body.data.total, 'number');
+      assert.ok(Array.isArray(driverReport.body.data.months));
+    });
+  });
+}

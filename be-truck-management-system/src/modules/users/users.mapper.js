@@ -1,0 +1,57 @@
+export const ROLE_PERMISSIONS = {
+  admin: [
+    'sales_order.read',
+    'sales_order.create',
+    'sales_order.update',
+    'sales_order.cancel',
+    'container_job.read',
+    'container_job.assign',
+    'container_job.update',
+    'container_job.update_status',
+    'container_job.complete',
+    'master_data.read',
+    'master_data.create',
+    'master_data.update',
+    'master_data.delete',
+    'document.read',
+    'document.upload',
+    'document.delete',
+    'settings.read',
+    'settings.update',
+    'user.read',
+    'user.create',
+    'user.update',
+    'user.disable',
+    'user.reset_password',
+    'activity_log.read',
+    'report.read',
+  ],
+  sales: ['sales_order.read', 'sales_order.create', 'sales_order.update', 'master_data.read', 'document.read', 'document.upload'],
+  operational: ['sales_order.read', 'container_job.read', 'container_job.assign', 'container_job.update', 'container_job.update_status', 'container_job.complete', 'master_data.read', 'document.read', 'document.upload'],
+  pengamat: ['sales_order.read', 'container_job.read', 'master_data.read', 'document.read', 'report.read', 'activity_log.read'],
+};
+
+export function mapUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    lastLoginAt: row.last_login_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    permissions: ROLE_PERMISSIONS[row.role] || [],
+  };
+}
+
+export function toUserDb(payload, passwordHash) {
+  return {
+    name: payload.name,
+    email: String(payload.email || '').trim().toLowerCase(),
+    password_hash: passwordHash,
+    role: payload.role || 'pengamat',
+    status: payload.status || 'Aktif',
+  };
+}

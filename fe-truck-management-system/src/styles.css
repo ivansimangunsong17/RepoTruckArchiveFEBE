@@ -1,0 +1,10 @@
+@import './styles/tokens.css';
+@import './styles/layout.css';
+@import './styles/components.css';
+@import './styles/sales-order.css';
+@import './styles/operational.css';
+@import './styles/master-data.css';
+@import './styles/responsive.css';
+
+@tailwind components;
+@tailwind utilities;

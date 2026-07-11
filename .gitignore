@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+uploads/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+
+# Local editor/runtime state
+.agents/
+.vite/
+
+# Keep production examples, never real secrets
+!*.env.example
+!*.env.production.example

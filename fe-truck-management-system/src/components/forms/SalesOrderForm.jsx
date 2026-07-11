@@ -1,0 +1,727 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Plus, Trash2, X } from 'lucide-react';
+import { fallbackCustomers } from '../../data/masterData';
+import AttachmentUploadField from '../common/AttachmentUploadField';
+
+const REFERENCE_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
+
+const SERVICE_OPTIONS = [
+  'Jasa Angkut D20',
+  'Jasa Angkut D40',
+  'Bon Muat/Bongkar',
+  'Tila/Gatepass',
+];
+
+const CONTAINER_TYPE_OPTIONS = ['Dry', 'Reefer', 'Special'];
+const DEFAULT_LINE_ITEM_SERVICE = 'Jasa Angkut D20';
+
+const EMPTY_DOCUMENT = {
+  documentType: 'Delivery Order',
+  referenceNumber: '',
+  documentDate: '',
+  file: null,
+  notes: '',
+};
+
+function normalizeDateTime(value) {
+  return value ? value.slice(0, 16) : '';
+}
+
+function createDocumentDraft(document = {}) {
+  return {
+    ...EMPTY_DOCUMENT,
+    ...document,
+    file: document.file
+      ? {
+          name: document.file.name || '',
+          size: document.file.size || 0,
+          type: document.file.type || '',
+          path: document.file.path || '',
+          storagePath: document.file.storagePath || '',
+          rawFile: document.file.rawFile instanceof File ? document.file.rawFile : null,
+        }
+      : null,
+  };
+}
+
+function isContainerService(serviceName) {
+  return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
+}
+
+function createLineItemDraft(item = {}) {
+  return {
+    id: item.id || `line-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    serviceName: item.serviceName || DEFAULT_LINE_ITEM_SERVICE,
+    containerType: item.containerType || '',
+    qty: item.qty == null ? '1' : String(item.qty),
+    price: item.price == null ? '0' : String(item.price),
+  };
+}
+
+function normalizeLineItems(order) {
+  if (Array.isArray(order?.lineItems) && order.lineItems.length) {
+    return order.lineItems.map(createLineItemDraft);
+  }
+
+  const legacyItems = [];
+  const serviceName = SERVICE_OPTIONS.includes(order?.serviceName) ? order.serviceName : '';
+  if (serviceName) {
+    legacyItems.push(createLineItemDraft({
+      serviceName,
+      containerType: order?.cargoType || order?.container || '',
+      qty: order?.quantity == null ? 1 : order.quantity,
+      price: order?.price == null ? 0 : order.price,
+    }));
+  } else {
+    const d20Qty = Number(order?.container20Qty || 0);
+    const d40Qty = Number(order?.container40Qty || 0);
+    if (d20Qty) {
+      legacyItems.push(createLineItemDraft({
+        serviceName: 'Jasa Angkut D20',
+        containerType: order?.cargoType || order?.container || '',
+        qty: d20Qty,
+        price: order?.price == null ? 0 : order.price,
+      }));
+    }
+    if (d40Qty) {
+      legacyItems.push(createLineItemDraft({
+        serviceName: 'Jasa Angkut D40',
+        containerType: order?.cargoType || order?.container || '',
+        qty: d40Qty,
+        price: order?.price == null ? 0 : order.price,
+      }));
+    }
+    if (!d20Qty && !d40Qty && order?.serviceName) {
+      legacyItems.push(createLineItemDraft({
+        serviceName: 'Bon Muat/Bongkar',
+        qty: order?.quantity == null ? 1 : order.quantity,
+        price: order?.price == null ? 0 : order.price,
+      }));
+    }
+  }
+
+  return legacyItems.length ? legacyItems : [createLineItemDraft()];
+}
+
+function formatLineItemLabel(item) {
+  const typeLabel = item.containerType ? ` - ${item.containerType}` : '';
+  return `${item.serviceName}${typeLabel} x${item.qty}`;
+}
+
+function calculateLineItemTotal(item) {
+  return Number(item.qty || 0) * Number(item.price || 0);
+}
+
+function summarizeLineItems(items) {
+  const uniqueServices = [...new Set(items.map((item) => item.serviceName).filter(Boolean))];
+  if (!uniqueServices.length) return 'Campuran';
+  if (uniqueServices.length === 1) return uniqueServices[0];
+  return 'Campuran';
+}
+
+function summarizeContainerType(items) {
+  const types = [...new Set(items
+    .filter((item) => isContainerService(item.serviceName))
+    .map((item) => item.containerType)
+    .filter(Boolean))];
+  return types.length === 1 ? types[0] : '';
+}
+
+function buildContainersFromLineItems(soNumber, lineItems, receivedAt) {
+  const containers = [];
+
+  lineItems.forEach((item) => {
+    if (!isContainerService(item.serviceName)) return;
+    const size = item.serviceName === 'Jasa Angkut D40' ? '40FT' : '20FT';
+    const qty = Math.max(0, Number(item.qty || 0));
+    for (let index = 0; index < qty; index += 1) {
+      containers.push({
+        containerNumber: `${String(soNumber || 'SO').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase() || 'SO'}-${size === '40FT' ? '40' : '20'}-${String(containers.length + 1).padStart(2, '0')}`,
+        size,
+        type: item.containerType || 'Dry',
+        notes: item.serviceName,
+        rpujStatus: 'pending',
+        status: 'received',
+        receivedAt: receivedAt || new Date().toISOString(),
+      });
+    }
+  });
+
+  return containers;
+}
+
+function createInitialForm(order) {
+  const lineItems = normalizeLineItems(order);
+  const serviceName = summarizeLineItems(lineItems);
+  const totalQuantity = lineItems.reduce((total, item) => total + Number(item.qty || 0), 0);
+  const totalAmount = lineItems.reduce((total, item) => total + calculateLineItemTotal(item), 0);
+  const containerType = summarizeContainerType(lineItems);
+
+  return {
+    soNumber: order?.soNumber || '',
+    doNumber: order?.doNumber || '',
+    soDate: order?.soDate || new Date().toISOString().slice(0, 10),
+    tripDate: order?.tripDate || order?.plannedDate || order?.soDate || new Date().toISOString().slice(0, 10),
+    receivedAt: normalizeDateTime(order?.receivedAt),
+    customer: order?.customer || '',
+    customerPic: order?.customerPic || '',
+    customerPhone: order?.customerPhone || '',
+    customerAddress: order?.customerAddress || '',
+    shipment: order?.shipment || 'import',
+    jobType: order?.jobType || 'Trucking Container',
+    invoiceNumber: order?.invoiceNumber || '',
+    origin: order?.origin || '',
+    destination: order?.destination || '',
+    terminal: order?.terminal || '',
+    jobDescription: order?.jobDescription || order?.notes || '',
+    price: order?.price ? String(order.price) : '',
+    unit: order?.unit || 'Container',
+    serviceName,
+    cargoType: containerType,
+    quantity: order?.quantity == null ? String(totalQuantity || '') : String(order.quantity),
+    totalAmount: order?.totalAmount == null ? String(totalAmount || '') : String(order.totalAmount),
+    lineItems,
+    referenceDocuments: order?.referenceDocuments?.length
+      ? order.referenceDocuments.map(createDocumentDraft)
+      : [createDocumentDraft()],
+  };
+}
+
+function SalesOrderForm({ onClose, onSubmit, order, existingOrders = [], customers: providedCustomers }) {
+  const customers = useMemo(() => (
+    (providedCustomers?.length ? providedCustomers : fallbackCustomers).filter((customer) => customer.contract === 'Aktif')
+  ), [providedCustomers]);
+
+  const [form, setForm] = useState(() => createInitialForm(order));
+  const [error, setError] = useState('');
+  const editing = Boolean(order);
+
+  useEffect(() => {
+    setForm(createInitialForm(order));
+    setError('');
+  }, [order]);
+
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.name === form.customer),
+    [customers, form.customer],
+  );
+
+  const lineItems = form.lineItems;
+  const totalQuantity = lineItems.reduce((total, item) => total + Number(item.qty || 0), 0);
+  const totalAmount = lineItems.reduce((total, item) => total + calculateLineItemTotal(item), 0);
+  const containerType = summarizeContainerType(lineItems);
+  const container20Qty = lineItems
+    .filter((item) => item.serviceName === 'Jasa Angkut D20')
+    .reduce((total, item) => total + Number(item.qty || 0), 0);
+  const container40Qty = lineItems
+    .filter((item) => item.serviceName === 'Jasa Angkut D40')
+    .reduce((total, item) => total + Number(item.qty || 0), 0);
+
+  useEffect(() => {
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [onClose]);
+
+  function updateField(event) {
+    const { name, value } = event.target;
+    setForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  function updateLineItem(index, field, value) {
+    setForm((current) => ({
+      ...current,
+      lineItems: current.lineItems.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              [field]: value,
+              ...(field === 'serviceName' && !isContainerService(value) ? { containerType: '' } : {}),
+              ...(field === 'serviceName' && isContainerService(value) ? { containerType: item.containerType || 'Dry' } : {}),
+            }
+          : item,
+      ),
+    }));
+  }
+
+  function addLineItem() {
+    setForm((current) => ({
+      ...current,
+      lineItems: [...current.lineItems, createLineItemDraft()],
+    }));
+  }
+
+  function removeLineItem(index) {
+    setForm((current) => ({
+      ...current,
+      lineItems: current.lineItems.length === 1
+        ? current.lineItems
+        : current.lineItems.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }
+
+  function updateCustomer(event) {
+    const customer = customers.find((item) => item.name === event.target.value);
+
+    setForm((current) => ({
+      ...current,
+      customer: customer?.name || '',
+      customerPic: customer?.pic || '',
+      customerPhone: customer?.phone || '',
+      customerAddress: customer?.address || '',
+    }));
+  }
+
+  function updateDocument(index, field, value) {
+    setForm((current) => ({
+      ...current,
+      referenceDocuments: current.referenceDocuments.map((document, itemIndex) =>
+        itemIndex === index ? { ...document, [field]: value } : document,
+      ),
+    }));
+  }
+
+  function addDocument() {
+    setForm((current) => ({
+      ...current,
+      referenceDocuments: [...current.referenceDocuments, createDocumentDraft()],
+    }));
+  }
+
+  function removeDocument(index) {
+    setForm((current) => ({
+      ...current,
+      referenceDocuments: current.referenceDocuments.length === 1
+        ? current.referenceDocuments
+        : current.referenceDocuments.filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }
+
+  function handleFile(index, file, validationError) {
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    if (!file) return;
+
+    setError('');
+    updateDocument(index, 'file', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      rawFile: file,
+    });
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+
+    const soNumber = form.soNumber.trim();
+    const duplicates = existingOrders.some((item) =>
+      item.id !== order?.id &&
+      item.soNumber.toLowerCase() === soNumber.toLowerCase(),
+    );
+
+    if (duplicates) return setError('Nomor Sales Order sudah digunakan.');
+    if (!selectedCustomer) return setError('Pilih customer dari Master Customer.');
+    if (!soNumber) return setError('Nomor Sales Order wajib diisi.');
+    if (!form.origin.trim()) return setError('Depo wajib diisi.');
+    if (!form.destination.trim()) return setError('Lokasi tujuan wajib diisi.');
+    if (!lineItems.length) return setError('Tambahkan minimal 1 rincian.');
+    const invalidLineItem = lineItems.find((item) => !item.serviceName || Number(item.qty || 0) < 1 || Number(item.price || 0) < 0);
+    if (invalidLineItem) return setError('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.');
+    const requiresContainerType = lineItems.find((item) => isContainerService(item.serviceName) && !item.containerType);
+    if (requiresContainerType) return setError('Pilih jenis container untuk rincian D20 atau D40.');
+
+    setError('');
+    const normalizedLineItems = lineItems.map((item) => ({
+      ...item,
+      qty: Number(item.qty || 0),
+      price: Number(item.price || 0),
+      total: calculateLineItemTotal(item),
+    }));
+    const price = normalizedLineItems.length === 1 ? Number(normalizedLineItems[0].price || 0) : 0;
+    const serviceSummary = summarizeLineItems(normalizedLineItems);
+    const containerSummary = normalizedLineItems.map(formatLineItemLabel).join(' + ');
+    const containers = buildContainersFromLineItems(soNumber, normalizedLineItems, form.receivedAt);
+    onSubmit({
+      ...form,
+      soNumber,
+      origin: form.origin.trim(),
+      destination: form.destination.trim(),
+      invoiceNumber: form.invoiceNumber.trim(),
+      container: containerSummary,
+      terminal: form.terminal.trim(),
+      serviceName: serviceSummary,
+      lineItems: normalizedLineItems,
+      container20Qty,
+      container40Qty,
+      cargoType: containerType,
+      price,
+      quantity: totalQuantity,
+      totalAmount,
+      unit: form.unit || 'Container',
+      containers,
+      referenceDocuments: form.referenceDocuments,
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="order-modal sales-order-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sales-order-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">{editing ? 'Edit Sales' : 'Input Sales'}</p>
+            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber}` : 'Sales Order Baru'}</h2>
+            <span>Lengkapi customer, rincian order, dan dokumen referensi.</span>
+          </div>
+
+          <button type="button" onClick={onClose} aria-label="Tutup form">
+            <X size={20} />
+          </button>
+        </header>
+
+        <form onSubmit={handleSubmit} noValidate>
+          {error ? <div className="alert error sales-order-error">{error}</div> : null}
+
+          <div className="form-section">
+            <h3>Informasi Customer</h3>
+
+            <div className="order-form-grid">
+              <label>
+                Customer
+                <select name="customer" value={form.customer} onChange={updateCustomer} required>
+                  <option value="">Pilih customer</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.name}>
+                      {customer.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                PIC Customer
+                <input value={form.customerPic} readOnly />
+              </label>
+
+              <label>
+                Kontak PIC
+                <input value={form.customerPhone} readOnly />
+              </label>
+
+              <label>
+                Alamat Customer
+                <textarea value={form.customerAddress} readOnly rows="2" />
+              </label>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h3>Informasi Order</h3>
+            <p className="section-helper-text">No. Invoice diisi setelah pekerjaan selesai dan invoice dibuat.</p>
+
+            <div className="order-form-grid">
+              <label>
+                No. Sales Order
+                <input
+                  name="soNumber"
+                  value={form.soNumber}
+                  onChange={updateField}
+                  placeholder="SO-2026-001"
+                  required
+                />
+              </label>
+
+              <label>
+                No. DO Customer
+                <input
+                  name="doNumber"
+                  value={form.doNumber}
+                  onChange={updateField}
+                  placeholder="DO-CUST-0001"
+                />
+              </label>
+
+              <label>
+                Tanggal Sales Order
+                <input
+                  name="soDate"
+                  type="date"
+                  value={form.soDate}
+                  onChange={updateField}
+                  required
+                />
+              </label>
+
+              <label>
+                Tanggal Jalan
+                <input
+                  name="tripDate"
+                  type="date"
+                  value={form.tripDate}
+                  onChange={updateField}
+                  required
+                />
+              </label>
+
+              <label>
+                Shipment
+                <select name="shipment" value={form.shipment} onChange={updateField}>
+                  <option value="import">Import</option>
+                  <option value="export">Export</option>
+                  <option value="domestik inward">Domestik Inward</option>
+                  <option value="domestik outward">Domestik Outward</option>
+                </select>
+              </label>
+
+              <label>
+                Depo
+                <input
+                  name="origin"
+                  value={form.origin}
+                  onChange={updateField}
+                  placeholder="Contoh: Depo Marunda"
+                  required
+                />
+              </label>
+
+              <label>
+                Lokasi Tujuan
+                <input
+                  name="destination"
+                  value={form.destination}
+                  onChange={updateField}
+                  placeholder="Contoh: Gudang Customer"
+                  required
+                />
+              </label>
+
+              <label>
+                Terminal
+                <input
+                  name="terminal"
+                  value={form.terminal}
+                  onChange={updateField}
+                  placeholder="Contoh: Terminal 3 / NPCT1"
+                />
+              </label>
+
+              <label className="span-two">
+                Job Description
+                <textarea
+                  name="jobDescription"
+                  value={form.jobDescription}
+                  onChange={updateField}
+                  rows="2"
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="form-section information-section">
+            <h3>Rincian</h3>
+
+            <div className="line-item-toolbar">
+              <p>Tambahkan rincian jasa per baris. Satu SO bisa berisi campuran D20, D40, Bon Muat/Bongkar, dan Tila/Gatepass.</p>
+              <button className="secondary-button" type="button" onClick={addLineItem}>
+                <Plus size={16} /> Tambah Rincian
+              </button>
+            </div>
+
+            <div className="line-item-table-head" aria-hidden="true">
+              <span>No</span>
+              <span>Jenis Rincian</span>
+              <span>Jenis Container</span>
+              <span>Qty</span>
+              <span>Price</span>
+              <span>Total</span>
+              <span />
+            </div>
+
+            <div className="line-item-list">
+              {lineItems.map((item, index) => {
+                const itemTotal = calculateLineItemTotal(item);
+                const showContainerType = isContainerService(item.serviceName);
+                return (
+                  <div className="line-item-card" key={item.id}>
+                    <div className="line-item-row">
+                      <div className="line-item-no">{index + 1}</div>
+
+                      <div className="line-item-field">
+                        <select
+                          aria-label="Jenis Rincian"
+                          value={item.serviceName}
+                          onChange={(event) => updateLineItem(index, 'serviceName', event.target.value)}
+                        >
+                          {SERVICE_OPTIONS.map((service) => (
+                            <option key={service} value={service}>{service}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="line-item-field">
+                        {showContainerType ? (
+                          <select
+                            aria-label="Jenis Container"
+                            value={item.containerType}
+                            onChange={(event) => updateLineItem(index, 'containerType', event.target.value)}
+                          >
+                            <option value="">Pilih jenis container</option>
+                            {CONTAINER_TYPE_OPTIONS.map((type) => (
+                              <option key={type} value={type}>{type}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input aria-label="Jenis Container" value="-" readOnly />
+                        )}
+                      </div>
+
+                      <div className="line-item-field">
+                        <input
+                          aria-label="Qty"
+                          type="number"
+                          min="1"
+                          value={item.qty}
+                          onChange={(event) => updateLineItem(index, 'qty', event.target.value)}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="line-item-field">
+                        <input
+                          aria-label="Price"
+                          type="number"
+                          min="0"
+                          value={item.price}
+                          onChange={(event) => updateLineItem(index, 'price', event.target.value)}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <div className="line-item-field">
+                        <input aria-label="Total" value={itemTotal.toLocaleString('id-ID')} readOnly />
+                      </div>
+
+                      <button type="button" className="line-item-delete" onClick={() => removeLineItem(index)} aria-label={`Hapus rincian ${index + 1}`}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="rincian-summary">
+              <div>
+                <span>Total</span>
+                <strong>{totalAmount.toLocaleString('id-ID')}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-section-heading">
+              <div>
+                <h3>Dokumen Referensi Customer</h3>
+                <p>Tambahkan DO, SPK, email, WhatsApp instruction, atau dokumen pendukung lainnya.</p>
+              </div>
+
+              <button className="secondary-button" type="button" onClick={addDocument}>
+                <Plus size={16} /> Tambah Dokumen
+              </button>
+            </div>
+
+            <div className="reference-document-list">
+              {form.referenceDocuments.map((document, index) => (
+                <div className="reference-document-card" key={`document-${index}`}>
+                  <label>
+                    Jenis
+                    <select
+                      value={document.documentType}
+                      onChange={(event) => updateDocument(index, 'documentType', event.target.value)}
+                    >
+                      <option>Delivery Order</option>
+                      <option>Customer SPK</option>
+                      <option>Email Instruction</option>
+                      <option>WhatsApp Instruction</option>
+                      <option>Other Document</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Tanggal Dokumen
+                    <input
+                      type="date"
+                      value={document.documentDate}
+                      onChange={(event) => updateDocument(index, 'documentDate', event.target.value)}
+                    />
+                  </label>
+
+                  <div className="document-file-button">
+                    <AttachmentUploadField
+                      id={`reference-document-${index}`}
+                      label="Upload Dokumen"
+                      value={document.file}
+                      title={document.file?.name ? 'Ubah File' : 'Pilih File'}
+                      helper="PDF, JPG, PNG"
+                      compact
+                      accept={REFERENCE_FILE_ACCEPT}
+                      validationOptions={{
+                        label: 'Dokumen referensi',
+                      }}
+                      onSelect={(file, validationError) => handleFile(index, file, validationError)}
+                      onClear={() => updateDocument(index, 'file', null)}
+                    />
+                  </div>
+
+                  <label className="document-notes">
+                    Catatan
+                    <input
+                      value={document.notes}
+                      onChange={(event) => updateDocument(index, 'notes', event.target.value)}
+                      placeholder="Catatan dokumen"
+                    />
+                  </label>
+
+                  <button type="button" onClick={() => removeDocument(index)} aria-label="Hapus dokumen">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <footer>
+            <button className="secondary-button" type="button" onClick={onClose}>
+              Batal
+            </button>
+
+            <button className="primary-button" type="submit">
+              {editing ? 'Simpan Perubahan' : 'Simpan Sales Order'}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+export default SalesOrderForm;

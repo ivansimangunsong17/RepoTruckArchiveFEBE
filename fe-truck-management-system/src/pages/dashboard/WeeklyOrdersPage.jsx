@@ -1,0 +1,296 @@
+import { useEffect, useMemo, useState } from 'react';
+import { X } from 'lucide-react';
+import PageHeader from '../../components/common/PageHeader';
+import WeeklyOrderSummary from '../../components/dashboard/WeeklyOrderSummary';
+import { buildOperationalJobs, formatShortDate, todayKey, toDateKey } from '../../data/operationalDashboard';
+import { fetchSalesOrders } from '../../services/archive/salesOrderService';
+import { fetchDashboardReport } from '../../services/reports/reportService';
+import { buildWeeklyOrderDays } from '../../utils/weeklyOrderDays';
+
+const orderTargets = {
+  twentyFt: 12,
+  eightFt: 8,
+};
+const targetNote = 'Target';
+
+function formatShipment(value) {
+  const shipmentMap = {
+    import: 'Import',
+    export: 'Export',
+    'domestik inward': 'Domestik Inward',
+    'domestik outward': 'Domestik Outward',
+  };
+  return shipmentMap[String(value || '').toLowerCase()] || value || '-';
+}
+
+function routeText(job) {
+  if (!job?.origin || !job?.destination) return '-';
+  return `${job.origin} -> ${job.destination}`;
+}
+
+function normalizeWeeklyJob(job) {
+  const tripDateKey = toDateKey(job?.tripDateKey || job?.tripDate);
+  return {
+    ...job,
+    tripDate: job?.tripDate || tripDateKey,
+    tripDateKey,
+  };
+}
+
+function mergeWeeklyJobs(...jobGroups) {
+  const merged = new Map();
+  jobGroups.flat().filter(Boolean).map(normalizeWeeklyJob).forEach((job) => {
+    if (!job.tripDateKey) return;
+    const key = job.id || `${job.soNumber || '-'}-${job.containerNumber || '-'}-${job.tripDateKey}`;
+    merged.set(key, { ...merged.get(key), ...job });
+  });
+  return Array.from(merged.values());
+}
+
+function summarizeSelectedJobs(jobs) {
+  const summary = (jobs || []).reduce((result, job) => {
+    const size = String(job.size || '').toUpperCase();
+    result.customers.add(job.customer || '-');
+    result.orders.add(job.soNumber || job.id);
+    result.containers += 1;
+    result.twentyFt += size === '20FT' ? 1 : 0;
+    result.fortyFt += size === '40FT' ? 1 : 0;
+    return result;
+  }, {
+    customers: new Set(),
+    orders: new Set(),
+    containers: 0,
+    twentyFt: 0,
+    fortyFt: 0,
+  });
+
+  return {
+    customerCount: summary.customers.size,
+    orderCount: summary.orders.size,
+    containers: summary.containers,
+    twentyFt: summary.twentyFt,
+    fortyFt: summary.fortyFt,
+  };
+}
+
+function getOrderGap(item) {
+  const kurangTwentyFt = Math.max(orderTargets.twentyFt - (item.twentyFt || 0), 0);
+  const kurangEightFt = Math.max(orderTargets.eightFt - (item.fortyFt || 0), 0);
+  return { kurangTwentyFt, kurangEightFt };
+}
+
+function shortageText(item) {
+  const gap = getOrderGap(item);
+  if (!gap.kurangTwentyFt && !gap.kurangEightFt) return 'Cukup';
+  return [
+    gap.kurangTwentyFt ? `20 FT x ${gap.kurangTwentyFt}` : null,
+    gap.kurangEightFt ? `40FT x ${gap.kurangEightFt}` : null,
+  ].filter(Boolean).join(' | ');
+}
+
+function WeeklyOrdersPage() {
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [dashboard, setDashboard] = useState({ upcomingJobs: [] });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const currentDateKey = todayKey();
+  const visibleFutureJobs = dashboard.upcomingJobs;
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+
+    Promise.allSettled([fetchDashboardReport(), fetchSalesOrders()])
+      .then(([dashboardResult, salesOrdersResult]) => {
+        if (!active) return;
+        const dashboardData = dashboardResult.status === 'fulfilled' ? dashboardResult.value : {};
+        const upcomingJobs = Array.isArray(dashboardData.upcomingJobs)
+          ? dashboardData.upcomingJobs
+          : [];
+        const activeJobs = Array.isArray(dashboardData.activeJobs) ? dashboardData.activeJobs : [];
+        const salesOrders = salesOrdersResult.status === 'fulfilled' && Array.isArray(salesOrdersResult.value)
+          ? salesOrdersResult.value
+          : [];
+        const salesOrderJobs = buildOperationalJobs(salesOrders, currentDateKey, false);
+        const nextJobs = mergeWeeklyJobs(upcomingJobs.length ? upcomingJobs : activeJobs, salesOrderJobs);
+        setDashboard({
+          upcomingJobs: nextJobs,
+        });
+        if (dashboardResult.status === 'rejected' && salesOrdersResult.status === 'rejected') {
+          setError(dashboardResult.reason?.message || salesOrdersResult.reason?.message || 'Order mingguan gagal dimuat.');
+        }
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setDashboard({ upcomingJobs: [] });
+        setError(requestError.message || 'Order mingguan gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentDateKey]);
+
+  const days = buildWeeklyOrderDays(visibleFutureJobs, currentDateKey);
+  const jobsByDate = useMemo(() => visibleFutureJobs.reduce((result, job) => {
+    if (!job?.tripDateKey) return result;
+    result[job.tripDateKey] = [...(result[job.tripDateKey] || []), job];
+    return result;
+  }, {}), [visibleFutureJobs]);
+  const selectedJobs = selectedDay ? jobsByDate[selectedDay.dateKey] || [] : [];
+  const selectedSummary = summarizeSelectedJobs(selectedJobs);
+
+  return (
+    <div className="page weekly-orders-page">
+      <PageHeader
+        eyebrow="Overview"
+        title="Order Mingguan"
+        description="Ringkasan jumlah order tujuh hari ke depan berdasarkan tanggal jalan."
+      />
+
+      <div className="weekly-orders-summary-wrap">
+        <WeeklyOrderSummary jobs={visibleFutureJobs} currentDateKey={currentDateKey} orderTargets={orderTargets} />
+      </div>
+
+      {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat order mingguan...</p></div> : null}
+      {error ? <div className="archive-inline-state is-error"><h3>Order mingguan gagal dimuat</h3><p>{error}</p></div> : null}
+
+      <section className="panel weekly-orders-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Detail Per Hari</h2>
+            <p>Jumlah order 20FT dan 40FT berdasarkan tanggal jalan.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table className="data-table weekly-orders-table responsive-data-table">
+            <thead>
+              <tr>
+                <th>No.</th>
+                <th>Tanggal Jalan</th>
+                <th>Order</th>
+                <th>20FT</th>
+                <th>40FT</th>
+                <th>Catatan</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && !error && days.map((item, index) => (
+                <tr className={item.orderCount ? 'has-order' : 'empty'} key={item.dateKey}>
+                  <td><strong>{index + 1}.</strong></td>
+                  <td><strong>{formatShortDate(item.dateKey)}</strong></td>
+                  <td>{item.orderCount}</td>
+                  <td>{item.twentyFt}</td>
+                  <td>{item.fortyFt}</td>
+                  <td>
+                    {shortageText(item) !== 'Cukup' ? (
+                      <span className="weekly-target-stack table-note">
+                        <span className="weekly-shortage-note">{shortageText(item)}</span>
+                        <em>{targetNote}</em>
+                      </span>
+                    ) : (
+                      <span className="weekly-target-stack table-note">
+                        <span className="weekly-ok-note">Cukup</span>
+                        <em>{targetNote}</em>
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className="ops-detail-button weekly-detail-button"
+                      type="button"
+                      disabled={!item.totalContainers}
+                      onClick={() => setSelectedDay(item)}
+                    >
+                      Detail
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!loading && !error && !visibleFutureJobs.length ? (
+            <div className="role-empty-state">
+              <h3>Belum ada order mingguan</h3>
+              <p>Belum ada container job mendatang dari backend API.</p>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {selectedDay ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelectedDay(null)}>
+          <section className="ops-trip-modal weekly-order-detail-modal" role="dialog" aria-modal="true" aria-labelledby="weekly-order-detail-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <span>Detail Order Mingguan</span>
+                <h2 id="weekly-order-detail-title">{formatShortDate(selectedDay.dateKey)}</h2>
+                <p>{selectedDay.orderCount} order, {selectedDay.totalContainers} container dijadwalkan jalan.</p>
+              </div>
+              <button type="button" onClick={() => setSelectedDay(null)} aria-label="Tutup detail"><X size={19} /></button>
+            </header>
+
+            <div className="weekly-order-detail-body">
+              {selectedJobs.length ? (
+                <>
+                  <div className="weekly-customer-summary">
+                    <div><span>Customer</span><strong>{selectedSummary.customerCount}</strong></div>
+                    <div><span>Order</span><strong>{selectedSummary.orderCount}</strong></div>
+                    <div><span>Container</span><strong>{selectedSummary.containers}</strong></div>
+                    <div><span>20FT</span><strong>{selectedSummary.twentyFt}</strong></div>
+                    <div><span>40FT</span><strong>{selectedSummary.fortyFt}</strong></div>
+                  </div>
+
+                  <div className="table-wrap">
+                    <table className="data-table weekly-order-detail-table responsive-data-table">
+                      <thead>
+                        <tr>
+                          <th>SO</th>
+                          <th>Customer</th>
+                          <th>Container</th>
+                          <th>Size</th>
+                          <th>Jenis</th>
+                          <th>Rute</th>
+                          <th>Sales</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedJobs.map((job) => (
+                          <tr key={job.id}>
+                            <td data-label="SO"><strong>{job.soNumber || '-'}</strong></td>
+                            <td data-label="Customer">{job.customer || '-'}</td>
+                            <td data-label="Container">{job.containerNumber || '-'}</td>
+                            <td data-label="Size">{job.size || '-'}</td>
+                            <td data-label="Jenis">{formatShipment(job.shipment)}</td>
+                            <td data-label="Rute" title={routeText(job)}>{routeText(job)}</td>
+                            <td data-label="Sales">{job.salesName || job.createdBy || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="role-empty-state">
+                  <h3>Belum ada order</h3>
+                  <p>Tanggal ini belum memiliki order/container yang dijadwalkan jalan.</p>
+                </div>
+              )}
+            </div>
+
+            <footer>
+              <button className="secondary-button" type="button" onClick={() => setSelectedDay(null)}>Tutup</button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export default WeeklyOrdersPage;

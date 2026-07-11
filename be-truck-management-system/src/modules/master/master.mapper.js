@@ -1,0 +1,117 @@
+const fileView = (file) => file || null;
+
+export const resourceConfig = {
+  customers: {
+    table: 'customers',
+    searchable: ['name', 'address', 'pic_name', 'phone', 'contract_status'],
+    filters: { contract: 'contract_status' },
+    archivedColumn: 'archived_at',
+    orderColumn: 'created_at',
+    toApi: (row) => ({
+      id: row.id,
+      name: row.name,
+      npwp: row.npwp || '',
+      address: row.address || '',
+      pic: row.pic_name || '',
+      phone: row.phone || '',
+      email: row.email || '',
+      contractNumber: row.contract_number || '',
+      contractStart: row.contract_start || '',
+      contractEnd: row.contract_end || '',
+      contract: row.contract_status || 'Aktif',
+      npwpDocument: fileView(row.npwp_document),
+      contractDocument: fileView(row.contract_document),
+    }),
+    toDb: (row) => ({
+      name: row.name,
+      npwp: row.npwp || null,
+      address: row.address || null,
+      pic_name: row.pic || null,
+      phone: row.phone || null,
+      email: row.email || null,
+      contract_number: row.contractNumber || null,
+      contract_start: row.contractStart || null,
+      contract_end: row.contractEnd || null,
+      contract_status: row.contract || 'Aktif',
+    }),
+  },
+  drivers: {
+    table: 'drivers',
+    searchable: ['name', 'phone', 'license_type', 'operational_status'],
+    filters: { status: 'operational_status' },
+    archivedColumn: 'archived_at',
+    orderColumn: 'created_at',
+    toApi: (row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone || '',
+      licenseType: row.license_type || '',
+      licenseExpiry: row.license_expiry_date || '',
+      status: row.operational_status || 'Aktif',
+      healthStatus: row.health_status || 'Aman',
+      notes: row.notes || '',
+      driverPhoto: fileView(row.driver_photo),
+      identityDocument: fileView(row.identity_document),
+      licenseDocument: fileView(row.license_document),
+      partnershipLetter: fileView(row.partnership_letter),
+    }),
+    toDb: (row) => ({
+      name: row.name,
+      phone: row.phone || null,
+      license_type: row.licenseType || null,
+      license_expiry_date: row.licenseExpiry || null,
+      operational_status: row.status || 'Aktif',
+      health_status: row.healthStatus || 'Aman',
+      notes: row.notes || null,
+    }),
+  },
+  trucks: {
+    table: 'vehicles',
+    searchable: ['unit_code', 'plate_number', 'stnk_number', 'brand', 'vehicle_type', 'default_driver_name', 'operational_status'],
+    filters: { status: 'operational_status' },
+    archivedColumn: 'archived_at',
+    orderColumn: 'created_at',
+    toApi: (row) => ({
+      id: row.id,
+      unitCode: row.unit_code,
+      plateNumber: row.plate_number,
+      capacity: row.container_size || '20FT',
+      stnkNumber: row.stnk_number || '',
+      stnkExpiryDate: row.stnk_expiry_date || null,
+      brand: row.brand || '',
+      type: row.vehicle_type || '',
+      vin: row.vin || '',
+      engineNumber: row.engine_number || '',
+      kirNumber: row.kir_number || '',
+      defaultDriver: row.default_driver_name || '',
+      status: row.operational_status || 'Aktif',
+      stnkDocument: fileView(row.stnk_document),
+      kirDocument: fileView(row.kir_document),
+    }),
+    toDb: (row) => ({
+      unit_code: row.unitCode,
+      plate_number: row.plateNumber,
+      container_size: row.capacity || '20FT',
+      stnk_number: row.stnkNumber || null,
+      stnk_expiry_date: row.stnkExpiryDate || null,
+      brand: row.brand || null,
+      vehicle_type: row.type || null,
+      vin: row.vin || null,
+      engine_number: row.engineNumber || null,
+      kir_number: row.kirNumber || null,
+      default_driver_name: row.defaultDriver || null,
+      operational_status: row.status || 'Aktif',
+    }),
+  },
+};
+
+export function getResourceConfig(resource) {
+  const config = resourceConfig[resource];
+  if (!config) {
+    const error = new Error(`Resource ${resource} tidak dikenal.`);
+    error.statusCode = 404;
+    error.code = 'RESOURCE_NOT_FOUND';
+    throw error;
+  }
+  return config;
+}

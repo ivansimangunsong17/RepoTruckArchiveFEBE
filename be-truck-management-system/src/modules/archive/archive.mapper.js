@@ -1,0 +1,30 @@
+export function mapArchiveTrip(row) {
+  const assignment = row.assignment_snapshot || {};
+  return {
+    id: row.id,
+    orderId: row.sales_order_id,
+    soNumber: row.so_number,
+    doNumber: row.do_number,
+    customer: row.customer_name,
+    shipment: row.shipment_type,
+    origin: row.origin,
+    destination: row.destination,
+    tripDate: row.trip_date,
+    containerNumber: row.container_number,
+    size: row.container_size,
+    type: row.container_type,
+    driver: assignment.driver || null,
+    plateNumber: assignment.plateNumber || null,
+    chassis: assignment.vehicleDetail || null,
+    spkNumber: row.spk_number,
+    loadingVoucher: row.loading_voucher_number,
+    unloadingVoucher: row.unloading_voucher_number,
+    travelDocument: row.travel_document_number,
+    weighingDocument: row.weighing_document_number,
+    receivedAt: row.received_at,
+    runningAt: row.running_at,
+    completedAt: row.completed_at,
+    updatedBy: row.updated_by_name,
+    status: row.status,
+  };
+}
