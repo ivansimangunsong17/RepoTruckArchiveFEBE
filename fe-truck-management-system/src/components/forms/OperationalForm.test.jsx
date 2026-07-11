@@ -15,6 +15,20 @@ const container = {
 };
 
 describe('OperationalForm', () => {
+  it('tidak memakai truck dummy ketika master truck API kosong', () => {
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('option', { name: /B 1234 XYZ/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Truck')).toHaveValue('');
+  });
+
   it('menolak status selesai jika assignment dan dokumen wajib belum lengkap', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

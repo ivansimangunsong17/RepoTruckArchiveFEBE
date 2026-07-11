@@ -85,4 +85,61 @@ describe('operationalDashboard', () => {
     expect(result.jobs[0].soNumber).toBe('SO-001');
     expect(result.activeJobs).toHaveLength(1);
   });
+
+  it('tidak menambah prospek demo saat mode live API sudah punya data', () => {
+    const result = getOperationalDashboardData([{
+      id: 'so-1',
+      soNumber: 'SO-001',
+      customer: 'PT Test',
+      origin: 'Jakarta',
+      destination: 'Bekasi',
+      tripDate: '2026-07-08',
+      status: 'waiting_operational',
+      containers: [{
+        id: 'job-1',
+        size: '20FT',
+        status: 'received',
+      }],
+    }], {
+      currentDateKey: '2026-07-07',
+      hasLiveOrders: true,
+      allowDemoFallback: true,
+    });
+
+    expect(result.visibleFutureJobs).toHaveLength(1);
+    expect(result.visibleFutureJobs[0].soNumber).toBe('SO-001');
+  });
+
+  it('tidak menampilkan job selesai sebagai prospek di tanggal SO awal', () => {
+    const result = getOperationalDashboardData([{
+      id: 'so-1',
+      soNumber: 'SO-001',
+      customer: 'PT Test',
+      origin: 'Jakarta',
+      destination: 'Bekasi',
+      tripDate: '2026-07-12',
+      status: 'completed',
+      containers: [{
+        id: 'job-1',
+        containerNumber: 'CONT-1',
+        plateNumber: 'B 1234 XYZ',
+        driver: 'Andi',
+        status: 'completed',
+        runningAt: '2026-07-11T08:00:00.000Z',
+        completedAt: '2026-07-11T12:00:00.000Z',
+      }],
+    }], {
+      currentDateKey: '2026-07-11',
+      hasLiveOrders: true,
+      allowDemoFallback: false,
+    });
+
+    expect(result.futureJobs).toHaveLength(0);
+    expect(result.visibleFutureJobs).toHaveLength(0);
+    expect(result.jobs[0]).toMatchObject({
+      id: 'job-1',
+      tripDateKey: '2026-07-11',
+      status: 'completed',
+    });
+  });
 });

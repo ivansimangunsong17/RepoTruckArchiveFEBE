@@ -205,18 +205,12 @@ async function uploadReferenceDocuments(orderId, referenceDocuments = [], user) 
   return uploadedDocuments;
 }
 
-function generateFallbackContainerNumber(soNumber, size, index) {
-  const base = String(soNumber || 'SO').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase() || 'SO';
-  const suffix = normalizeContainerSize(size) === '40FT' ? '40' : '20';
-  return `${base}-${suffix}-${String(index + 1).padStart(2, '0')}`;
-}
-
 function normalizeContainers(form) {
   const source = Array.isArray(form.containers) ? form.containers : [];
   if (source.length) {
-    return source.map((container, index) => ({
+    return source.map((container) => ({
       id: container.id,
-      containerNumber: String(container.containerNumber || '').trim().toUpperCase() || generateFallbackContainerNumber(form.soNumber, container.size, index),
+      containerNumber: String(container.containerNumber || '').trim().toUpperCase(),
       size: normalizeContainerSize(container.size),
       type: container.type || 'Dry',
       notes: container.notes || '',
@@ -238,7 +232,7 @@ function normalizeContainers(form) {
       const size = item.serviceName === 'Jasa Angkut D40' ? '40FT' : '20FT';
       for (let index = 0; index < Math.max(0, Number(item.qty || 0)); index += 1) {
         containers.push({
-          containerNumber: generateFallbackContainerNumber(form.soNumber, size, containers.length),
+          containerNumber: '',
           size,
           type: item.containerType || 'Dry',
           notes: item.serviceName,
@@ -256,7 +250,7 @@ function normalizeContainers(form) {
 
   for (let index = 0; index < container20Qty; index += 1) {
     containers.push({
-      containerNumber: generateFallbackContainerNumber(form.soNumber, '20FT', containers.length),
+      containerNumber: '',
       size: '20FT',
       type: 'Dry',
       notes: '',
@@ -267,7 +261,7 @@ function normalizeContainers(form) {
 
   for (let index = 0; index < container40Qty; index += 1) {
     containers.push({
-      containerNumber: generateFallbackContainerNumber(form.soNumber, '40FT', containers.length),
+      containerNumber: '',
       size: '40FT',
       type: 'Dry',
       notes: '',

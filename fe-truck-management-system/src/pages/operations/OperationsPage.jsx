@@ -70,6 +70,10 @@ function documentState(job) {
   return { completed: required.filter(Boolean).length, total: required.length || 1 };
 }
 
+function containerLabel(job) {
+  return job?.containerNumber || 'Container belum diisi';
+}
+
 function flattenDemoJobs(orders) {
   return orders.filter((order) => order.status !== 'cancelled').flatMap((order) => order.containers.map((container) => ({
     ...container,
@@ -183,7 +187,7 @@ function OperationsPage() {
   }, [page, totalPages]);
 
   async function updateOperational(form) {
-    const containerNumber = editing.containerNumber;
+    const containerNumber = containerLabel(editing);
     try {
       await archive.updateJob(editing.id, form);
       if (archive.isDatabaseMode) setListVersion((value) => value + 1);
@@ -216,7 +220,7 @@ function OperationsPage() {
   async function cancelOperational(job) {
     const confirmed = await confirmAction({
       title: 'Batalkan Container Job?',
-      message: `${job.containerNumber} akan ditandai batal dan tidak masuk pekerjaan aktif.`,
+      message: `${containerLabel(job)} akan ditandai batal dan tidak masuk pekerjaan aktif.`,
       confirmLabel: 'Batalkan Job',
       tone: 'danger',
     });
@@ -232,7 +236,7 @@ function OperationsPage() {
       setDetail(null);
       notify({
         title: 'Container Job dibatalkan',
-        message: `${job.containerNumber} berhasil ditandai batal.`,
+        message: `${containerLabel(job)} berhasil ditandai batal.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Container Job gagal dibatalkan', message: requestError.message });
@@ -349,7 +353,7 @@ function OperationsPage() {
         <div className="master-modal-backdrop" role="presentation" onMouseDown={() => setDetail(null)}>
           <section className="container-job-detail-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <header>
-              <div><span>{detail.soNumber}</span><h2>{detail.containerNumber}</h2><p>{detail.customer} - {detail.origin} - {detail.destination}</p></div>
+              <div><span>{detail.soNumber}</span><h2>{containerLabel(detail)}</h2><p>{detail.customer} - {detail.origin} - {detail.destination}</p></div>
               <button className="modal-close-button" type="button" aria-label="Tutup detail Container Job" onClick={() => setDetail(null)}><X size={19} /></button>
             </header>
             <div className="container-job-detail-body">

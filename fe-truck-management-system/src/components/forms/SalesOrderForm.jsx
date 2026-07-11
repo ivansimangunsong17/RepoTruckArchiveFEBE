@@ -127,7 +127,7 @@ function summarizeContainerType(items) {
   return types.length === 1 ? types[0] : '';
 }
 
-function buildContainersFromLineItems(soNumber, lineItems, receivedAt) {
+function buildContainersFromLineItems(lineItems, receivedAt) {
   const containers = [];
 
   lineItems.forEach((item) => {
@@ -136,7 +136,7 @@ function buildContainersFromLineItems(soNumber, lineItems, receivedAt) {
     const qty = Math.max(0, Number(item.qty || 0));
     for (let index = 0; index < qty; index += 1) {
       containers.push({
-        containerNumber: `${String(soNumber || 'SO').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase() || 'SO'}-${size === '40FT' ? '40' : '20'}-${String(containers.length + 1).padStart(2, '0')}`,
+        containerNumber: '',
         size,
         type: item.containerType || 'Dry',
         notes: item.serviceName,
@@ -189,7 +189,8 @@ function createInitialForm(order) {
 
 function SalesOrderForm({ onClose, onSubmit, order, existingOrders = [], customers: providedCustomers }) {
   const customers = useMemo(() => (
-    (providedCustomers?.length ? providedCustomers : fallbackCustomers).filter((customer) => customer.contract === 'Aktif')
+    (Array.isArray(providedCustomers) ? providedCustomers : fallbackCustomers)
+      .filter((customer) => customer.contract === 'Aktif')
   ), [providedCustomers]);
 
   const [form, setForm] = useState(() => createInitialForm(order));
@@ -354,7 +355,7 @@ function SalesOrderForm({ onClose, onSubmit, order, existingOrders = [], custome
     const price = normalizedLineItems.length === 1 ? Number(normalizedLineItems[0].price || 0) : 0;
     const serviceSummary = summarizeLineItems(normalizedLineItems);
     const containerSummary = normalizedLineItems.map(formatLineItemLabel).join(' + ');
-    const containers = buildContainersFromLineItems(soNumber, normalizedLineItems, form.receivedAt);
+    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt);
     onSubmit({
       ...form,
       soNumber,

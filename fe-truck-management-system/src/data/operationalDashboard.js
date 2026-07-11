@@ -64,6 +64,9 @@ export function getActiveOperationalJobs(jobs = [], currentDateKey = todayKey())
 }
 
 function getContainerTripDate(container, orderTripDate) {
+  if (isCompleted(container)) {
+    return container.completedAt || container.updatedAt || container.runningAt || orderTripDate;
+  }
   if (!isCompleted(container) && isAssigned(container)) {
     return container.runningAt || container.updatedAt || orderTripDate;
   }
@@ -173,7 +176,7 @@ export function getOperationalDashboardData(orders, options = {}) {
   const todayJobs = jobs.filter((job) => job && job.tripDateKey === currentDateKey && !isCompleted(job));
   const activeJobs = getActiveOperationalJobs(jobs, currentDateKey);
   const futureJobs = jobs.filter((job) => job && job.tripDateKey > currentDateKey && !isCompleted(job));
-  const visibleFutureJobs = allowDemoFallback && futureJobs.length < 4 ? [...futureJobs, ...createDemoProspectJobs()] : futureJobs;
+  const visibleFutureJobs = allowDemoFallback && !hasLiveOrders && futureJobs.length < 4 ? [...futureJobs, ...createDemoProspectJobs()] : futureJobs;
   const prospectSchedule = groupFutureJobsByDate(visibleFutureJobs);
 
   return {

@@ -46,6 +46,20 @@ async function fillFirstLineItem(user, overrides = {}) {
 }
 
 describe('SalesOrderForm', () => {
+  it('tidak memakai customer dummy ketika master customer API kosong', () => {
+    render(
+      <SalesOrderForm
+        customers={[]}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('option', { name: /PT Nusantara/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Customer')).toHaveValue('');
+  });
+
   it('menolak nomor Sales Order yang sudah digunakan', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

@@ -34,6 +34,15 @@ function readLocalOrders() {
   }
 }
 
+function emptyApiMasters() {
+  return {
+    customers: [],
+    trucks: [],
+    drivers: [],
+    users: [],
+  };
+}
+
 function persistLocalOrders(nextOrders) {
   try {
     localStorage.setItem(LOCAL_ORDERS_KEY, JSON.stringify(nextOrders));
@@ -83,9 +92,11 @@ function normalizeLocalContainers(containers, receivedAt) {
 }
 
 function deriveOrderStatus(containers) {
-  const allCompleted = containers.length > 0 && containers.every((container) => container.status === 'completed');
-  const hasActive = containers.some((container) => container.status === 'running');
-  return allCompleted ? 'completed' : hasActive ? 'running' : 'waiting_operational';
+  const activeContainers = containers.filter((container) => container.status !== 'cancelled');
+  const allCancelled = containers.length > 0 && activeContainers.length === 0;
+  const allCompleted = activeContainers.length > 0 && activeContainers.every((container) => container.status === 'completed');
+  const hasProgress = activeContainers.some((container) => ['running', 'completed'].includes(container.status));
+  return allCancelled ? 'cancelled' : allCompleted ? 'completed' : hasProgress ? 'running' : 'waiting_operational';
 }
 
 function normalizeAssignedJobForm(form) {
@@ -117,8 +128,8 @@ export function ArchiveDataProvider({ children }) {
     }
 
     if (apiDataMode && !user) {
-      setMasters(readLocalMasters());
-      setOrders(readLocalOrders());
+      setMasters(emptyApiMasters());
+      setOrders([]);
       setLoading(false);
       return;
     }
@@ -136,7 +147,7 @@ export function ArchiveDataProvider({ children }) {
           masterDatabaseMode ? fetchMaster('customers') : Promise.resolve(readLocalMaster('customers')),
           masterDatabaseMode ? fetchMaster('trucks') : Promise.resolve(readLocalMaster('trucks')),
           masterDatabaseMode ? fetchMaster('drivers') : Promise.resolve(readLocalMaster('drivers')),
-          masterDatabaseMode && canReadUsers ? fetchMaster('users') : Promise.resolve(readLocalMaster('users')),
+          masterDatabaseMode ? (canReadUsers ? fetchMaster('users') : Promise.resolve([])) : Promise.resolve(readLocalMaster('users')),
           salesOrderDatabaseMode ? fetchSalesOrders() : Promise.resolve(readLocalOrders()),
         ]);
 
@@ -148,17 +159,17 @@ export function ArchiveDataProvider({ children }) {
         };
 
         setMasters({
-          customers: readSettledValue(customersResult, readLocalMaster('customers'), 'Customer'),
-          trucks: readSettledValue(trucksResult, readLocalMaster('trucks'), 'Truck'),
-          drivers: readSettledValue(driversResult, readLocalMaster('drivers'), 'Driver'),
-          users: readSettledValue(usersResult, readLocalMaster('users'), 'User'),
+          customers: readSettledValue(customersResult, [], 'Customer'),
+          trucks: readSettledValue(trucksResult, [], 'Truck'),
+          drivers: readSettledValue(driversResult, [], 'Driver'),
+          users: readSettledValue(usersResult, [], 'User'),
         });
-        setOrders(readSettledValue(ordersResult, readLocalOrders(), 'Sales order'));
+        setOrders(readSettledValue(ordersResult, [], 'Sales order'));
         setError(fallbackErrors.length ? `Sebagian data archive gagal dimuat. ${fallbackErrors[0]}` : '');
       } catch (requestError) {
         setError(requestError.message || 'Data gagal dimuat dari API.');
-        setMasters(readLocalMasters());
-        setOrders(readLocalOrders());
+        setMasters(emptyApiMasters());
+        setOrders([]);
       } finally {
         setLoading(false);
       }

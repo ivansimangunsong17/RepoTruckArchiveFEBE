@@ -107,18 +107,12 @@ function normalizeReferenceDocuments(referenceDocuments = []) {
     }));
 }
 
-function generateFallbackContainerNumber(soNumber, size, index) {
-  const base = String(soNumber || 'SO').trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toUpperCase() || 'SO';
-  const suffix = normalizeContainerSize(size) === '40FT' ? '40' : '20';
-  return `${base}-${suffix}-${String(index + 1).padStart(2, '0')}`;
-}
-
 function normalizeContainers(payload) {
   const source = Array.isArray(payload.containers) ? payload.containers : [];
   if (source.length) {
-    return source.map((container, index) => ({
+    return source.map((container) => ({
       ...container,
-      containerNumber: String(container.containerNumber || '').trim().toUpperCase() || generateFallbackContainerNumber(payload.soNumber, container.size, index),
+      containerNumber: String(container.containerNumber || '').trim().toUpperCase(),
       size: normalizeContainerSize(container.size),
       type: container.type || 'Dry',
       notes: container.notes || '',
@@ -138,7 +132,7 @@ function normalizeContainers(payload) {
       const size = item.serviceName === 'Jasa Angkut D40' ? '40FT' : '20FT';
       for (let index = 0; index < Math.max(0, Number(item.qty || 0)); index += 1) {
         containers.push({
-          containerNumber: generateFallbackContainerNumber(payload.soNumber, size, containers.length),
+          containerNumber: '',
           size,
           type: item.containerType || 'Dry',
           notes: item.serviceName,
@@ -156,7 +150,7 @@ function normalizeContainers(payload) {
 
   for (let index = 0; index < container20Qty; index += 1) {
     containers.push({
-      containerNumber: generateFallbackContainerNumber(payload.soNumber, '20FT', containers.length),
+      containerNumber: '',
       size: '20FT',
       type: 'Dry',
       notes: '',
@@ -167,7 +161,7 @@ function normalizeContainers(payload) {
 
   for (let index = 0; index < container40Qty; index += 1) {
     containers.push({
-      containerNumber: generateFallbackContainerNumber(payload.soNumber, '40FT', containers.length),
+      containerNumber: '',
       size: '40FT',
       type: 'Dry',
       notes: '',
@@ -249,16 +243,9 @@ function validateSalesOrderPayload(payload) {
     }
   }
 
-  const invalidContainer = payload.containers.find((container) => !container.containerNumber);
-  if (invalidContainer) {
-    const error = new Error('Setiap container wajib memiliki nomor container.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-
-  const duplicatedContainer = payload.containers.some((container, index) =>
-    payload.containers.findIndex((item) => item.containerNumber === container.containerNumber) !== index,
+  const containersWithNumber = payload.containers.filter((container) => container.containerNumber);
+  const duplicatedContainer = containersWithNumber.some((container, index) =>
+    containersWithNumber.findIndex((item) => item.containerNumber === container.containerNumber) !== index,
   );
   if (duplicatedContainer) {
     const error = new Error('Nomor container wajib unik di dalam Sales Order.');

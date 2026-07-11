@@ -145,7 +145,7 @@ function ContainerDetail({ container }) {
   return (
     <div className="container-detail">
       <div className="container-detail-head">
-        <div><strong>{container.containerNumber}</strong><span>Container {container.size} - {valueOrDash(container.type)}</span></div>
+        <div><strong>{container.containerNumber || 'Container belum diisi'}</strong><span>Container {container.size} - {valueOrDash(container.type)}</span></div>
         <StatusBadge status={container.status} />
       </div>
       <div className="sales-container-fields">

@@ -23,6 +23,10 @@ function routeView(job) {
   );
 }
 
+function containerLabel(job) {
+  return job?.containerNumber || 'Container belum diisi';
+}
+
 function OperationalDashboard() {
   const [activeDashboard, setActiveDashboard] = useState('existing');
   const [selectedProspectGroup, setSelectedProspectGroup] = useState(null);
@@ -92,7 +96,7 @@ function OperationalDashboard() {
                   </div>
                   <div className="ops-job-main">
                     <span>Container</span>
-                    <strong>{job.containerNumber}</strong>
+                    <strong>{containerLabel(job)}</strong>
                     <small>{normalizeSize(job.size) || '-'}</small>
                   </div>
                   <div className="ops-job-truck">
@@ -174,7 +178,7 @@ function OperationalDashboard() {
             <header>
               <div>
                 <span>Detail Eksisting</span>
-                <h2 id="existing-detail-title">{selectedExistingJob.containerNumber || '-'}</h2>
+                <h2 id="existing-detail-title">{containerLabel(selectedExistingJob)}</h2>
                 <p>{selectedExistingJob.customer || '-'} - {formatShortDate(selectedExistingJob.tripDate)}</p>
               </div>
               <button type="button" onClick={() => setSelectedExistingJob(null)} aria-label="Tutup detail"><X size={19} /></button>

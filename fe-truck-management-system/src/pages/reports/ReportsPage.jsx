@@ -70,6 +70,10 @@ function normalizeOperationRow(row = {}) {
   };
 }
 
+function containerLabel(job) {
+  return job?.containerNumber || 'Container belum diisi';
+}
+
 function normalizeStatus(value) {
   return value === 'all' ? '' : value;
 }
@@ -458,9 +462,9 @@ function ReportsPage() {
                   <tbody>
                     {paginatedRows.map((job) => (
                       <tr key={job.id}>
-                        <td data-label={activeReport === 'archive' ? 'SO' : 'Container Job'}><div className="cell-main"><strong>{activeReport === 'archive' ? job.soNumber : job.containerNumber}</strong><span>{activeReport === 'archive' ? job.doNumber || '-' : job.soNumber}</span></div></td>
+                        <td data-label={activeReport === 'archive' ? 'SO' : 'Container Job'}><div className="cell-main"><strong>{activeReport === 'archive' ? job.soNumber : containerLabel(job)}</strong><span>{activeReport === 'archive' ? job.doNumber || '-' : job.soNumber}</span></div></td>
                         <td data-label="Customer">{job.customer}</td>
-                        <td data-label="Container"><div className="cell-main"><strong>{job.containerNumber}</strong><span>{job.size || '-'}</span></div></td>
+                        <td data-label="Container"><div className="cell-main"><strong>{containerLabel(job)}</strong><span>{job.size || '-'}</span></div></td>
                         <td data-label="Rute">{job.origin}{' -> '}{job.destination}</td>
                         <td data-label="Driver / Truck"><div className="cell-main"><strong>{job.driver || '-'}</strong><span>{job.plateNumber || '-'}</span></div></td>
                         <td data-label={activeReport === 'archive' ? 'Selesai' : 'Diterima'}>{activeReport === 'archive' ? formatDateTime(job.completedAt) : formatDateTime(job.receivedAt)}</td>

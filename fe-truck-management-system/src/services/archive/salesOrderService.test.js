@@ -67,7 +67,7 @@ describe('salesOrderService', () => {
       ],
       containers: [
         expect.objectContaining({
-          containerNumber: expect.stringContaining('SO-001'),
+          containerNumber: '',
           size: '20FT',
           type: 'Dry',
           notes: 'Jasa Angkut D20',
@@ -75,7 +75,7 @@ describe('salesOrderService', () => {
           status: 'received',
         }),
         expect.objectContaining({
-          containerNumber: expect.stringContaining('SO-001'),
+          containerNumber: '',
           size: '20FT',
           type: 'Dry',
         }),

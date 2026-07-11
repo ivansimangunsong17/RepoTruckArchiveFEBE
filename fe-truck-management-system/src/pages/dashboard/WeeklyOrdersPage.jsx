@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import WeeklyOrderSummary from '../../components/dashboard/WeeklyOrderSummary';
-import { buildOperationalJobs, formatShortDate, todayKey, toDateKey } from '../../data/operationalDashboard';
+import { buildOperationalJobs, formatShortDate, isCompleted, todayKey, toDateKey } from '../../data/operationalDashboard';
 import { fetchSalesOrders } from '../../services/archive/salesOrderService';
 import { fetchDashboardReport } from '../../services/reports/reportService';
 import { buildWeeklyOrderDays } from '../../utils/weeklyOrderDays';
@@ -41,6 +41,7 @@ function mergeWeeklyJobs(...jobGroups) {
   const merged = new Map();
   jobGroups.flat().filter(Boolean).map(normalizeWeeklyJob).forEach((job) => {
     if (!job.tripDateKey) return;
+    if (isCompleted(job) || job.tripDateKey < todayKey()) return;
     const key = job.id || `${job.soNumber || '-'}-${job.containerNumber || '-'}-${job.tripDateKey}`;
     merged.set(key, { ...merged.get(key), ...job });
   });
@@ -214,12 +215,6 @@ function WeeklyOrdersPage() {
               ))}
             </tbody>
           </table>
-          {!loading && !error && !visibleFutureJobs.length ? (
-            <div className="role-empty-state">
-              <h3>Belum ada order mingguan</h3>
-              <p>Belum ada container job mendatang dari backend API.</p>
-            </div>
-          ) : null}
         </div>
       </section>
 

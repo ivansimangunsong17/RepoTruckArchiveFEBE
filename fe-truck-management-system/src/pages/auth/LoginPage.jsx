@@ -2,11 +2,16 @@ import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { isApiAuthSource } from '../../services/config/dataSource';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
 
 function LoginPage() {
   const { user, signIn, isDemo } = useAuth();
-  const [form, setForm] = useState({ email: 'admin@demo.com', password: 'password' });
+  const [form, setForm] = useState(() => (
+    isApiAuthSource()
+      ? { email: '', password: '' }
+      : { email: 'admin@demo.com', password: 'password' }
+  ));
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

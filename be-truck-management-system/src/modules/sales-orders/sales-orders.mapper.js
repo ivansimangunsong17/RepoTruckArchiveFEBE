@@ -217,7 +217,7 @@ export function toSalesOrderDb(form, customer) {
 export function toContainerJobDb(container, order, actorName = 'Operational') {
   return {
     sales_order_id: order.id,
-    container_number: container.containerNumber,
+    container_number: String(container.containerNumber || '').trim().toUpperCase() || null,
     container_size: normalizeContainerSize(container.size || container.containerSize),
     container_type: container.type || 'Dry',
     container_notes: container.notes || null,

@@ -212,7 +212,10 @@ async function refreshOrderStatus(client, salesOrderId) {
   );
   const counts = Object.fromEntries(result.rows.map((row) => [row.status, row.total]));
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-  const nextStatus = total > 0 && counts.completed === total
+  const activeTotal = total - (counts.cancelled || 0);
+  const nextStatus = total > 0 && activeTotal === 0
+    ? 'cancelled'
+    : activeTotal > 0 && counts.completed === activeTotal
     ? 'completed'
     : counts.running || counts.completed
       ? 'running'

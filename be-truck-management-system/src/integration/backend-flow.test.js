@@ -33,6 +33,7 @@ if (!hasDatabase) {
     orderSoNumber: `SO-${runId}-MAIN`.toUpperCase(),
     cancelOrderId: '',
     cancelSoNumber: `SO-${runId}-CANCEL`.toUpperCase(),
+    cancelJobSoNumber: `SO-${runId}-CANCELJOB`.toUpperCase(),
     jobId: '',
     attachmentId: '',
   };
@@ -407,6 +408,29 @@ if (!hasDatabase) {
       assert.equal(statusLog.action, 'UPDATE_JOB_STATUS');
       assert.equal(statusLog.metadata.fromStatus, 'received');
       assert.equal(statusLog.metadata.toStatus, 'running');
+
+      const cancelJobOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: adminToken,
+        body: salesOrderPayload({ soNumber: created.cancelJobSoNumber }),
+      });
+      assert.equal(cancelJobOrder.status, 201);
+      const cancelJobId = cancelJobOrder.body.data.containers[0].id;
+
+      const cancelledJob = await api(`/api/container-jobs/${cancelJobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          status: 'cancelled',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(cancelledJob.status, 200);
+      assert.equal(cancelledJob.body.data.status, 'cancelled');
+
+      const cancelledOrder = await api(`/api/sales-orders/${cancelJobOrder.body.data.id}`, { token: adminToken });
+      assert.equal(cancelledOrder.status, 200);
+      assert.equal(cancelledOrder.body.data.status, 'cancelled');
     });
 
     await t.test('attachments: upload, list, delete, fileBase64 tidak masuk activity log metadata', async () => {

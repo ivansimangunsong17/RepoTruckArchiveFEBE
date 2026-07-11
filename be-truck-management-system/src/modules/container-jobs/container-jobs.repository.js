@@ -92,14 +92,17 @@ async function refreshOrderStatus(client, salesOrderId) {
     `
       select status, count(*)::int as total
       from container_jobs
-      where sales_order_id = $1 and status <> 'cancelled'
+      where sales_order_id = $1
       group by status
     `,
     [salesOrderId],
   );
   const counts = Object.fromEntries(result.rows.map((row) => [row.status, row.total]));
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-  const nextStatus = total > 0 && counts.completed === total
+  const activeTotal = total - (counts.cancelled || 0);
+  const nextStatus = total > 0 && activeTotal === 0
+    ? 'cancelled'
+    : activeTotal > 0 && counts.completed === activeTotal
     ? 'completed'
     : counts.running || counts.completed
       ? 'running'
@@ -264,12 +267,19 @@ export async function updateContainerJob(id, form) {
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
     const hasAssignment = Boolean(form.driver || form.driverId || form.plateNumber || form.vehicleId);
     const nextStatus = form.status || (hasAssignment ? 'running' : 'received');
+    const nextContainerNumber = String(form.containerNumber || existing.rows[0].container_number || '').trim().toUpperCase() || null;
     const runningAt = nextStatus === 'cancelled'
       ? existing.rows[0].running_at
       : ['running', 'completed'].includes(nextStatus)
         ? form.runningAt || new Date().toISOString()
         : null;
 
+    if (nextStatus === 'completed' && !nextContainerNumber) {
+      const error = new Error('Nomor container wajib diisi untuk menyelesaikan pekerjaan.');
+      error.statusCode = 400;
+      error.code = 'VALIDATION_ERROR';
+      throw error;
+    }
     if (nextStatus === 'completed') await ensureCompletedDocuments(client, id);
 
     await client.query(
@@ -295,7 +305,7 @@ export async function updateContainerJob(id, form) {
         where id = $17
       `,
       [
-        String(form.containerNumber || existing.rows[0].container_number || '').trim() || existing.rows[0].container_number,
+        nextContainerNumber,
         driver?.id || form.driverId || null,
         vehicle?.id || form.vehicleId || null,
         JSON.stringify(toAssignmentSnapshot(form, driver, vehicle)),

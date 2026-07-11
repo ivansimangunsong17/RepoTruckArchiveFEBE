@@ -77,7 +77,8 @@ function generateSpkNumber() {
 function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks }) {
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
   const fileInputRefs = useRef({});
-  const trucks = (masterTrucks?.length ? masterTrucks : fallbackTruckRows).map((truck) => normalizeTruck(truck, fallbackTruckRows));
+  const trucks = (Array.isArray(masterTrucks) ? masterTrucks : fallbackTruckRows)
+    .map((truck) => normalizeTruck(truck, fallbackTruckRows));
   const containerSize = normalizeSize(container.size || container.containerSize);
   const [form, setForm] = useState({
     containerNumber: container.containerNumber || '',
