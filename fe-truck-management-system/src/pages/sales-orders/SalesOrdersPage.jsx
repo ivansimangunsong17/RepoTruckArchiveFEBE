@@ -514,11 +514,16 @@ function SalesOrdersPage() {
               <button className="secondary-button" type="button" onClick={() => setListVersion((value) => value + 1)}>Muat Ulang</button>
             </div>
           ) : null}
-          {!loading && !error ? visibleOrders.map((order) => {
+          {!loading && !error ? visibleOrders.map((order, index) => {
             const shipmentLabel = formatShipmentLabel(order.shipment);
+            const rowNumber = (currentPage - 1) * PAGE_SIZE + index + 1;
             return (
               <article className="order-card" key={order.id}>
                 <div className="order-summary">
+                  <div className="order-row-number">
+                    <span>No</span>
+                    <strong>{rowNumber}</strong>
+                  </div>
                   <div className="order-primary">
                     <span>Nomor SO</span>
                     <strong>{order.soNumber}</strong>
@@ -531,10 +536,13 @@ function SalesOrdersPage() {
                     <span>Jenis Order</span>
                     <strong>{shipmentLabel}</strong>
                   </div>
-                  <div className="order-summary-actions">
-                    <span className={`order-invoice-status ${getBillingStatusTone(order, billingStatusOverrides[order.id] || '')}`}>
+                  <div className="order-billing-summary">
+                    <span>Status</span>
+                    <strong className={getBillingStatusTone(order, billingStatusOverrides[order.id] || '')}>
                       {getBillingStatusLabel(order, billingStatusOverrides[order.id] || '')}
-                    </span>
+                    </strong>
+                  </div>
+                  <div className="order-summary-actions">
                     <button className="secondary-button" type="button" onClick={() => openOrderDetail(order)}>
                       <Eye size={16} /> Detail
                     </button>
@@ -772,6 +780,9 @@ function SalesOrdersPage() {
           order={editingOrder}
           existingOrders={archive.orders}
           customers={archive.masters.customers}
+          depots={archive.masters.depots}
+          terminals={archive.masters.terminals}
+          destinations={archive.masters.destinations}
           onClose={() => { setFormOpen(false); setEditingOrder(null); }}
           onSubmit={saveOrder}
         />

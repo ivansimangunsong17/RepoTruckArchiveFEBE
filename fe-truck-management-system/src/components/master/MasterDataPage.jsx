@@ -145,6 +145,8 @@ function MasterDataPage({
   toolbarDescription,
   sortRows,
   beforeSave,
+  extraDetailContent,
+  extraFormContent,
 }) {
   const { confirmAction, notify } = useFeedback();
   const { isDatabaseMode, isMasterDatabaseMode, masters, upsertMaster, removeMaster } = useArchiveData();
@@ -327,7 +329,8 @@ function MasterDataPage({
 
   async function handleSubmit(event) {
     event.preventDefault();
-    const validationError = fields
+    const activeFields = fields.filter((field) => !field.showIf || field.showIf(form));
+    const validationError = activeFields
       .map((field) => field.validate?.(form, { editing: Boolean(editingId) }))
       .find(Boolean);
 
@@ -351,7 +354,7 @@ function MasterDataPage({
       return;
     }
 
-    const payload = fields.reduce((result, field) => {
+    const payload = activeFields.reduce((result, field) => {
       const rawValue = form[field.key];
       const value = field.normalize ? field.normalize(rawValue, form) : rawValue;
       if (field.persist === false) {
@@ -618,6 +621,7 @@ function MasterDataPage({
                   </div>
                 );
               })}
+              {extraDetailContent ? extraDetailContent(detailRow) : null}
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetailRow(null)}>Tutup</button>
@@ -657,14 +661,16 @@ function MasterDataPage({
                   <fieldset className="master-fieldset" key={section.name}>
                     <legend>{section.name}</legend>
                     <div className="master-form-grid">
-                      {section.fields.map((field) => (
+                      {section.fields.map((field) => {
+                        if (field.showIf && !field.showIf(form)) return null;
+                        return (
                         <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''}`}>
                           <span>{field.label}{field.required ? <em>*</em> : null}</span>
                           {field.type === 'select' ? (
                             <select
                               value={form[field.key]}
                               onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
-                              required={field.required}
+                              required={field.required || field.requiredIf?.(form)}
                             >
                               {field.options.map((option) => (
                                 <option key={option.value} value={option.value} disabled={option.disabled} style={option.style}>{option.label}</option>
@@ -734,16 +740,24 @@ function MasterDataPage({
                               value={form[field.key]}
                               onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
                               placeholder={field.placeholder}
-                              required={field.required && (!field.requiredOnCreate || !editingId)}
+                              required={(field.required || field.requiredIf?.(form)) && (!field.requiredOnCreate || !editingId)}
                               minLength={field.minLength}
                             />
                           )}
                           {field.hint ? <small>{field.hint}</small> : null}
                         </div>
-                      ))}
+                      );})}
                     </div>
                   </fieldset>
                 ))}
+                {extraFormContent ? extraFormContent({
+                  form,
+                  setForm,
+                  editingId,
+                  editingRow,
+                  notify,
+                  setFormError,
+                }) : null}
               </div>
               <div className="master-form-actions">
                 <button className="secondary-button" type="button" onClick={editingId ? closeForm : resetForm}>

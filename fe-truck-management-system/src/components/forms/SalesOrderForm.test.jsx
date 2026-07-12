@@ -11,18 +11,19 @@ const customers = [{
   phone: '021-123456',
   contract: 'Aktif',
 }];
+const locationMasters = {
+  depots: [{ id: 'depot-1', name: 'Jakarta', status: 'Aktif' }],
+  terminals: [{ id: 'terminal-1', name: 'Terminal 3 / NPCT1', status: 'Aktif' }],
+  destinations: [{ id: 'destination-1', name: 'Bandung', status: 'Aktif' }],
+};
 
 async function fillBaseFields(user, overrides = {}) {
   await user.selectOptions(screen.getByLabelText('Customer'), 'PT Armada Test');
   fireEvent.change(screen.getByLabelText('No. Sales Order'), {
     target: { value: overrides.soNumber || 'SO-2026-TEST' },
   });
-  fireEvent.change(screen.getByLabelText('Depo'), {
-    target: { value: overrides.origin || 'Jakarta' },
-  });
-  fireEvent.change(screen.getByLabelText('Lokasi Tujuan'), {
-    target: { value: overrides.destination || 'Bandung' },
-  });
+  await user.selectOptions(screen.getByLabelText('Depo'), overrides.origin || 'Jakarta');
+  await user.selectOptions(screen.getByLabelText('Lokasi Tujuan'), overrides.destination || 'Bandung');
 }
 
 async function fillFirstLineItem(user, overrides = {}) {
@@ -50,6 +51,7 @@ describe('SalesOrderForm', () => {
     render(
       <SalesOrderForm
         customers={[]}
+        {...locationMasters}
         existingOrders={[]}
         onClose={vi.fn()}
         onSubmit={vi.fn()}
@@ -66,6 +68,7 @@ describe('SalesOrderForm', () => {
     render(
       <SalesOrderForm
         customers={customers}
+        {...locationMasters}
         existingOrders={[{ id: 'so-1', soNumber: 'SO-2026-TEST', containers: [] }]}
         onClose={vi.fn()}
         onSubmit={onSubmit}
@@ -86,6 +89,7 @@ describe('SalesOrderForm', () => {
     render(
       <SalesOrderForm
         customers={customers}
+        {...locationMasters}
         existingOrders={[]}
         onClose={vi.fn()}
         onSubmit={onSubmit}
@@ -110,6 +114,7 @@ describe('SalesOrderForm', () => {
     render(
       <SalesOrderForm
         customers={customers}
+        {...locationMasters}
         existingOrders={[]}
         onClose={vi.fn()}
         onSubmit={onSubmit}
@@ -176,6 +181,7 @@ describe('SalesOrderForm', () => {
     render(
       <SalesOrderForm
         customers={customers}
+        {...locationMasters}
         existingOrders={[]}
         onClose={vi.fn()}
         onSubmit={vi.fn()}

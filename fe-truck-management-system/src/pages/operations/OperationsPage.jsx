@@ -187,10 +187,15 @@ function OperationsPage() {
   }, [page, totalPages]);
 
   async function updateOperational(form) {
-    const containerNumber = containerLabel(editing);
+    const containerNumber = form.containerNumber || containerLabel(editing);
     try {
-      await archive.updateJob(editing.id, form);
-      if (archive.isDatabaseMode) setListVersion((value) => value + 1);
+      const saved = await archive.updateJob(editing.id, form);
+      if (archive.isDatabaseMode) {
+        if (saved) {
+          setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
+        }
+        setListVersion((value) => value + 1);
+      }
       setEditing(null);
       notify({
         title: 'Proses Operational diperbarui',
@@ -294,13 +299,32 @@ function OperationsPage() {
           {!loading && !error ? jobs.map((job) => {
             const documents = documentState(job);
             const shipmentLabel = formatShipmentLabel(job.shipment || job.jobType);
+            const hasContainerNumber = Boolean(job.containerNumber);
+            const routeLabel = `${job.origin || '-'} ke ${job.destination || '-'}`;
+            const sizeTypeLabel = [job.size, job.type].filter(Boolean).join(' / ') || '-';
             return (
               <article className="operational-job-card" key={job.id}>
                 <div className="job-heading">
-                  <div><span>SO {job.soNumber || '-'}</span><h3>{shipmentLabel}</h3></div>
+                  <div>
+                    <span>Nomor Container</span>
+                    <h3 className={hasContainerNumber ? 'job-container-number' : 'job-container-number is-empty'}>
+                      {containerLabel(job)}
+                    </h3>
+                    <div className="job-heading-meta">
+                      <span>SO: {job.soNumber || '-'}</span>
+                      <span>{shipmentLabel}</span>
+                      <span>{sizeTypeLabel}</span>
+                    </div>
+                  </div>
                   <StatusBadge status={job.status} />
                 </div>
-                <div className="job-route"><ClipboardCheck size={17} /><span>Tujuan</span><strong>{job.destination || '-'}</strong></div>
+                <div className="job-route">
+                  <ClipboardCheck size={17} />
+                  <div>
+                    <span>Rute Pengiriman</span>
+                    <strong>{routeLabel}</strong>
+                  </div>
+                </div>
                 <div className="job-assignment">
                   <div className="job-assignment-item">
                     <span><UserRound size={14} /> Sopir</span>
@@ -312,7 +336,7 @@ function OperationsPage() {
                   </div>
                 </div>
                 <div className="job-document-progress">
-                  <span>Dokumen</span><div><i style={{ width: `${(documents.completed / documents.total) * 100}%` }} /></div><strong>{documents.completed}/{documents.total}</strong>
+                  <span>Dokumen Operational</span><div><i style={{ width: `${(documents.completed / documents.total) * 100}%` }} /></div><strong>{documents.completed}/{documents.total}</strong>
                 </div>
                 <div className="job-footer">
                   <span>Diperbarui {job.updatedBy || job.createdBy || '-'} - {formatDateTime(job.updatedAt || job.receivedAt)}</span>
@@ -357,7 +381,7 @@ function OperationsPage() {
               <button className="modal-close-button" type="button" aria-label="Tutup detail Container Job" onClick={() => setDetail(null)}><X size={19} /></button>
             </header>
             <div className="container-job-detail-body">
-              <section><h3>Penugasan</h3><div><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
+              <section><h3>Penugasan</h3><div><span>No. Container<strong>{detail.containerNumber || '-'}</strong></span><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
               <section><h3>RPUJ & SPK</h3><div><span>Status RPUJ<strong>{formatRpujStatus(detail.rpujStatus)}</strong></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
               {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>

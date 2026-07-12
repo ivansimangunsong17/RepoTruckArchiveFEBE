@@ -17,12 +17,22 @@ const LOCAL_MASTER_KEYS = {
   trucks: 'tms-master-trucks-v2',
   drivers: 'tms-master-drivers-v2',
   users: 'tms-master-users-v2',
+  'kir-heads': 'tms-master-kir-heads-v1',
+  'kir-chassis': 'tms-master-kir-chassis-v1',
+  depots: 'tms-master-depots-v1',
+  terminals: 'tms-master-terminals-v1',
+  destinations: 'tms-master-destinations-v1',
 };
 const fallbackMasters = {
   customers: fallbackCustomers,
   trucks: fallbackTruckUnits,
   drivers: fallbackDrivers,
   users: fallbackUsers,
+  'kir-heads': [],
+  'kir-chassis': [],
+  depots: [],
+  terminals: [],
+  destinations: [],
 };
 
 function readLocalOrders() {
@@ -40,6 +50,11 @@ function emptyApiMasters() {
     trucks: [],
     drivers: [],
     users: [],
+    'kir-heads': [],
+    'kir-chassis': [],
+    depots: [],
+    terminals: [],
+    destinations: [],
   };
 }
 
@@ -66,6 +81,11 @@ function readLocalMasters() {
     trucks: readLocalMaster('trucks'),
     drivers: readLocalMaster('drivers'),
     users: readLocalMaster('users'),
+    'kir-heads': readLocalMaster('kir-heads'),
+    'kir-chassis': readLocalMaster('kir-chassis'),
+    depots: readLocalMaster('depots'),
+    terminals: readLocalMaster('terminals'),
+    destinations: readLocalMaster('destinations'),
   };
 }
 
@@ -142,12 +162,22 @@ export function ArchiveDataProvider({ children }) {
           trucksResult,
           driversResult,
           usersResult,
+          kirHeadsResult,
+          kirChassisResult,
+          depotsResult,
+          terminalsResult,
+          destinationsResult,
           ordersResult,
         ] = await Promise.allSettled([
           masterDatabaseMode ? fetchMaster('customers') : Promise.resolve(readLocalMaster('customers')),
           masterDatabaseMode ? fetchMaster('trucks') : Promise.resolve(readLocalMaster('trucks')),
           masterDatabaseMode ? fetchMaster('drivers') : Promise.resolve(readLocalMaster('drivers')),
           masterDatabaseMode ? (canReadUsers ? fetchMaster('users') : Promise.resolve([])) : Promise.resolve(readLocalMaster('users')),
+          masterDatabaseMode ? fetchMaster('kir-heads') : Promise.resolve(readLocalMaster('kir-heads')),
+          masterDatabaseMode ? fetchMaster('kir-chassis') : Promise.resolve(readLocalMaster('kir-chassis')),
+          masterDatabaseMode ? fetchMaster('depots') : Promise.resolve(readLocalMaster('depots')),
+          masterDatabaseMode ? fetchMaster('terminals') : Promise.resolve(readLocalMaster('terminals')),
+          masterDatabaseMode ? fetchMaster('destinations') : Promise.resolve(readLocalMaster('destinations')),
           salesOrderDatabaseMode ? fetchSalesOrders() : Promise.resolve(readLocalOrders()),
         ]);
 
@@ -163,6 +193,11 @@ export function ArchiveDataProvider({ children }) {
           trucks: readSettledValue(trucksResult, [], 'Truck'),
           drivers: readSettledValue(driversResult, [], 'Driver'),
           users: readSettledValue(usersResult, [], 'User'),
+          'kir-heads': readSettledValue(kirHeadsResult, [], 'KIR Head'),
+          'kir-chassis': readSettledValue(kirChassisResult, [], 'KIR Chassis'),
+          depots: readSettledValue(depotsResult, [], 'Depo'),
+          terminals: readSettledValue(terminalsResult, [], 'Terminal'),
+          destinations: readSettledValue(destinationsResult, [], 'Lokasi tujuan'),
         });
         setOrders(readSettledValue(ordersResult, [], 'Sales order'));
         setError(fallbackErrors.length ? `Sebagian data archive gagal dimuat. ${fallbackErrors[0]}` : '');
@@ -186,10 +221,11 @@ export function ArchiveDataProvider({ children }) {
     if (masterDatabaseMode) {
       const saved = await saveMaster(resource, row, id);
       setMasters((current) => {
-        const exists = current[resource].some((item) => item.id === saved.id);
+        const currentRows = current[resource] || [];
+        const exists = currentRows.some((item) => item.id === saved.id);
         const nextRows = exists
-          ? current[resource].map((item) => item.id === saved.id ? saved : item)
-          : [saved, ...current[resource]];
+          ? currentRows.map((item) => item.id === saved.id ? saved : item)
+          : [saved, ...currentRows];
         return { ...current, [resource]: nextRows };
       });
       return saved;
@@ -197,12 +233,13 @@ export function ArchiveDataProvider({ children }) {
 
     const saved = { ...row, id: id || `${resource}-${Date.now()}` };
     setMasters((current) => {
-      const exists = current[resource].some((item) => item.id === saved.id);
+      const currentRows = current[resource] || [];
+      const exists = currentRows.some((item) => item.id === saved.id);
       const nextRows = id
         ? exists
-          ? current[resource].map((item) => item.id === id ? saved : item)
-          : [saved, ...current[resource]]
-        : [saved, ...current[resource]];
+          ? currentRows.map((item) => item.id === id ? saved : item)
+          : [saved, ...currentRows]
+        : [saved, ...currentRows];
       persistLocalMaster(resource, nextRows);
       return { ...current, [resource]: nextRows };
     });
@@ -214,13 +251,13 @@ export function ArchiveDataProvider({ children }) {
       await archiveMaster(resource, id);
       setMasters((current) => ({
         ...current,
-        [resource]: current[resource].filter((item) => item.id !== id),
+        [resource]: (current[resource] || []).filter((item) => item.id !== id),
       }));
       return;
     }
 
     setMasters((current) => {
-      const nextRows = current[resource].filter((item) => item.id !== id);
+      const nextRows = (current[resource] || []).filter((item) => item.id !== id);
       persistLocalMaster(resource, nextRows);
       return { ...current, [resource]: nextRows };
     });

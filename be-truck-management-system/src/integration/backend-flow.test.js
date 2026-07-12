@@ -36,6 +36,10 @@ if (!hasDatabase) {
     cancelJobSoNumber: `SO-${runId}-CANCELJOB`.toUpperCase(),
     jobId: '',
     attachmentId: '',
+    vehicleHeadId: '',
+    vehicleChassisId: '',
+    kirHeadDocumentId: '',
+    kirBuntutDocumentId: '',
   };
 
   const server = createApp();
@@ -64,6 +68,15 @@ if (!hasDatabase) {
       `,
       [`SO-${runId}%`, `%${runId}%`],
     );
+    const vehicleDocuments = await query(
+      `
+        select vd.relative_path
+        from vehicle_documents vd
+        join vehicles v on v.id = vd.vehicle_id
+        where v.unit_code like $1 or v.plate_number like $2
+      `,
+      [`%${runId}%`, `B-${String(runId).slice(-4)}%`],
+    );
 
     await query('delete from activity_logs where metadata::text like $1 or actor_name like $2', [`%${runId}%`, `%${runId}%`]);
     await query('delete from attachments where storage_path like $1 or entity_id in (select id from sales_orders where so_number like $2)', [`%${runId}%`, `SO-${runId}%`]);
@@ -74,6 +87,11 @@ if (!hasDatabase) {
     await Promise.all(attachments.rows.map((row) => (
       row.storage_path
         ? rm(`${process.env.UPLOAD_DIR}/${row.storage_path}`, { force: true }).catch(() => {})
+        : Promise.resolve()
+    )));
+    await Promise.all(vehicleDocuments.rows.map((row) => (
+      row.relative_path
+        ? rm(`${process.env.UPLOAD_DIR}/${row.relative_path}`, { force: true }).catch(() => {})
         : Promise.resolve()
     )));
   }
@@ -467,7 +485,7 @@ if (!hasDatabase) {
       });
       assert.equal(upload.status, 201);
       assert.equal(upload.body.data.entityId, created.jobId);
-      assert.match(upload.body.data.storagePath, /^sales-orders[\\/]+2026[\\/]+Juli[\\/]+2026-07-11[\\/]+SO-/);
+      assert.match(upload.body.data.storagePath, /^sales-orders[\\/]+2026[\\/]+Juli[\\/]+2026-07-(11|12)[\\/]+SO-/);
       assert.match(upload.body.data.storagePath, /[\\/]+03-container-jobs[\\/]+[^\\/]+[\\/]+99-other-documents[\\/]+/);
       created.attachmentId = upload.body.data.id;
 
@@ -492,6 +510,105 @@ if (!hasDatabase) {
       });
       assert.equal(deleted.status, 200);
       assert.equal(deleted.body.data.id, created.attachmentId);
+    });
+
+    await t.test('vehicle documents: create vehicles, upload KIR, list, download, safe path', async () => {
+      const head = await api('/api/master/trucks', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          unitCode: `HEAD-${runId}`,
+          plateNumber: `B-${String(runId).slice(-4)}-HD`,
+          unitKind: 'HEAD',
+          capacity: '20FT',
+          brand: 'Hino',
+          type: 'Tractor Head',
+          vin: `VIN-HEAD-${runId}`,
+          engineNumber: `ENG-HEAD-${runId}`,
+          status: 'Aktif',
+        },
+      });
+      assert.equal(head.status, 201);
+      assert.equal(head.body.data.unitKind, 'HEAD');
+      created.vehicleHeadId = head.body.data.id;
+
+      const chassis = await api('/api/master/trucks', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          unitCode: `CHS-${runId}`,
+          plateNumber: `B-${String(runId).slice(-4)}-CH`,
+          unitKind: 'CHASSIS',
+          chassisSize: 'COMBO',
+          capacity: 'COMBO',
+          brand: 'Local',
+          type: 'Chassis',
+          vin: `VIN-CHS-${runId}`,
+          engineNumber: `ENG-CHS-${runId}`,
+          status: 'Aktif',
+        },
+      });
+      assert.equal(chassis.status, 201);
+      assert.equal(chassis.body.data.unitKind, 'CHASSIS');
+      assert.equal(chassis.body.data.chassisSize, 'COMBO');
+      created.vehicleChassisId = chassis.body.data.id;
+
+      const pdfBase64 = Buffer.from('%PDF-1.4\n% Vehicle document test\n').toString('base64');
+      const kirHead = await api(`/api/vehicles/${created.vehicleHeadId}/documents`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          documentType: 'KIR_HEAD',
+          documentNumber: `KIR-H-${runId}`,
+          issuedDate: '2026-07-10',
+          expiredDate: '2026-08-10',
+          fileName: `kir-head-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: pdfBase64,
+          notes: `KIR Head ${runId}`,
+        },
+      });
+      assert.equal(kirHead.status, 201);
+      assert.equal(kirHead.body.data.documentType, 'KIR_HEAD');
+      assert.equal(kirHead.body.data.status, 'Akan Habis');
+      assert.match(kirHead.body.data.relativePath, /^master-data[\\/]+vehicles[\\/]+HEAD-/);
+      assert.match(kirHead.body.data.relativePath, /[\\/]+kir-head[\\/]+KIR_HEAD_/);
+      assert.equal(kirHead.body.data.relativePath.includes('..'), false);
+      created.kirHeadDocumentId = kirHead.body.data.id;
+
+      const kirBuntut = await api(`/api/vehicles/${created.vehicleChassisId}/documents`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          documentType: 'KIR_BUNTUT',
+          documentNumber: `KIR-B-${runId}`,
+          issuedDate: '2026-07-10',
+          expiredDate: '2026-07-19',
+          fileName: `kir-buntut-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: pdfBase64,
+          notes: `KIR Buntut ${runId}`,
+        },
+      });
+      assert.equal(kirBuntut.status, 201);
+      assert.equal(kirBuntut.body.data.documentType, 'KIR_BUNTUT');
+      assert.equal(kirBuntut.body.data.status, 'Segera Habis');
+      created.kirBuntutDocumentId = kirBuntut.body.data.id;
+
+      const list = await api(`/api/vehicles/${created.vehicleChassisId}/documents`, { token: adminToken });
+      assert.equal(list.status, 200);
+      assert.ok(list.body.data.some((document) => document.id === created.kirBuntutDocumentId));
+
+      const downloaded = await fetch(`${baseUrl}/api/vehicles/${created.vehicleHeadId}/documents/${created.kirHeadDocumentId}/download`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(downloaded.status, 200);
+      assert.equal(downloaded.headers.get('content-type'), 'application/pdf');
+
+      const createLog = await latestActivityForEntity('CREATE_VEHICLE_DOCUMENT', created.kirHeadDocumentId);
+      assert.equal(createLog.action, 'CREATE_VEHICLE_DOCUMENT');
+      assert.equal(JSON.stringify(createLog.metadata).includes('fileBase64'), false);
+      assert.equal(JSON.stringify(createLog.metadata).includes('%PDF'), false);
     });
 
     await t.test('reports: dashboard, sales-orders, operations, driver-performance', async () => {

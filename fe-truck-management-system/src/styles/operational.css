@@ -391,6 +391,19 @@
   font-size: .84rem;
 }
 
+.operational-job-card .job-container-number {
+  color: #111827;
+  font-size: .86rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.operational-job-card .job-container-number.is-empty {
+  color: #8a94a5;
+  font-style: italic;
+  font-weight: 750;
+}
+
 .operational-job-card .job-route {
   min-height: 38px;
   padding: 0 9px;
@@ -522,6 +535,139 @@
   white-space: nowrap;
 }
 
+/* Clear operational job card hierarchy */
+.operational-job-card {
+  grid-template-columns: minmax(230px, 1fr) minmax(260px, 1.1fr) minmax(210px, .95fr) minmax(150px, .62fr);
+  grid-template-areas:
+    "main route assignment action"
+    "main docs docs action";
+  gap: 10px 14px;
+  min-height: 118px;
+  padding: 14px;
+  border-color: #d9e0ea;
+  border-left-width: 4px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.operational-job-card .job-heading {
+  align-content: start;
+  align-self: stretch;
+  padding-right: 12px;
+  border-right: 1px solid #edf0f4;
+}
+
+.operational-job-card .job-heading > div > span {
+  color: #7a8391;
+  font-size: .58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.operational-job-card .job-container-number {
+  margin: 4px 0 8px;
+  color: #0f172a;
+  font-size: .96rem;
+  line-height: 1.2;
+}
+
+.job-heading-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.job-heading-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #334155;
+  background: #f8fafc;
+  font-size: .58rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.operational-job-card .job-route {
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.operational-job-card .job-route svg {
+  color: #64748b;
+}
+
+.operational-job-card .job-route div {
+  min-width: 0;
+}
+
+.operational-job-card .job-route span,
+.operational-job-card .job-assignment-item span,
+.operational-job-card .job-document-progress > span {
+  color: #64748b;
+  font-size: .58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.operational-job-card .job-route strong {
+  display: block;
+  margin-top: 3px;
+  color: #111827;
+  font-size: .74rem;
+  font-weight: 850;
+}
+
+.operational-job-card .job-assignment {
+  gap: 8px;
+}
+
+.operational-job-card .job-assignment-item {
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  min-height: 44px;
+  padding: 8px 10px;
+  background: #ffffff;
+}
+
+.operational-job-card .job-assignment-item strong {
+  font-size: .72rem;
+}
+
+.operational-job-card .job-document-progress {
+  grid-template-columns: max-content minmax(120px, 1fr) max-content;
+  align-self: end;
+  min-height: 28px;
+}
+
+.operational-job-card .job-document-progress > strong {
+  color: #334155;
+  font-size: .66rem;
+  font-weight: 900;
+}
+
+.operational-job-card .job-document-progress > div {
+  height: 6px;
+  background: #e2e8f0;
+}
+
+.operational-job-card .job-footer {
+  border-left-color: #e2e8f0;
+}
+
+.operational-job-card .job-footer > span {
+  display: block;
+  color: #64748b;
+  line-height: 1.35;
+  white-space: normal;
+}
+
 @media (max-width: 1100px) {
   .operational-job-card {
     grid-template-columns: minmax(150px, .9fr) minmax(180px, 1fr) minmax(170px, .95fr) 118px;
@@ -534,6 +680,11 @@
 }
 
 @media (max-width: 720px) {
+  .operational-job-card .job-heading {
+    padding-right: 0;
+    border-right: 0;
+  }
+
   .operational-job-card .job-assignment-item {
     min-height: 32px;
   }

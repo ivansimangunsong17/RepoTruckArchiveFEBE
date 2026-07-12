@@ -13,6 +13,7 @@ import { reportRoutes } from './modules/reports/reports.routes.js';
 import { salesOrderRoutes } from './modules/sales-orders/sales-orders.routes.js';
 import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { userRoutes } from './modules/users/users.routes.js';
+import { vehicleDocumentRoutes } from './modules/vehicle-documents/vehicle-documents.routes.js';
 import { sendSuccess, sendError } from './utils/apiResponse.js';
 
 const routes = [
@@ -47,6 +48,7 @@ const routes = [
   ...salesOrderRoutes,
   ...containerJobRoutes,
   ...masterRoutes,
+  ...vehicleDocumentRoutes,
   ...reportRoutes,
   ...settingsRoutes,
 ];

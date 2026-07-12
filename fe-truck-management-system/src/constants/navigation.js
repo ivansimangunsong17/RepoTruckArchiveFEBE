@@ -64,6 +64,11 @@ export const navigationGroups = [
       { to: '/clients', label: 'Data Customer', icon: UsersRound, roles: adminOnly },
       { to: '/drivers', label: 'Data Supir', icon: UserRound, roles: adminOnly },
       { to: '/trucks', label: 'Data Truck', icon: Truck, roles: adminOnly },
+      { to: '/kir-heads', label: 'Data KIR Head', icon: ClipboardCheck, roles: adminOnly },
+      { to: '/kir-chassis', label: 'Data KIR Chassis', icon: ClipboardCheck, roles: adminOnly },
+      { to: '/depots', label: 'Data Depo', icon: ClipboardCheck, roles: adminOnly },
+      { to: '/terminals', label: 'Data Terminal', icon: ClipboardCheck, roles: adminOnly },
+      { to: '/destinations', label: 'Data Lokasi Tujuan', icon: ClipboardCheck, roles: adminOnly },
     ],
   },
   {

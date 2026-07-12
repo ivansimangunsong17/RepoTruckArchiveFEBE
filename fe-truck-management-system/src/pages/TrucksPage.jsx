@@ -2,6 +2,36 @@ import MasterDataPage from '../components/master/MasterDataPage';
 import { buildOperationalJobs, getActiveOperationalJobs } from '../data/operationalDashboard';
 import { fallbackDrivers, fallbackTruckUnits } from '../data/truckData';
 import { useArchiveData } from '../hooks/useArchiveData';
+import { useAuth } from '../hooks/useAuth';
+import { useEffect, useState } from 'react';
+import { Download, Edit3, Trash2 } from 'lucide-react';
+import { validateArchiveFile } from '../utils/fileValidation';
+import {
+  createVehicleDocument,
+  createVehicleDocumentDownloadUrl,
+  deleteVehicleDocument,
+  fetchVehicleDocuments,
+  updateVehicleDocument,
+} from '../services/master-data/vehicleDocumentService';
+import { hasPermission } from '../constants/roles';
+
+const DOCUMENT_TYPES = [
+  { value: 'KIR_HEAD', label: 'KIR Head' },
+  { value: 'KIR_BUNTUT', label: 'KIR Buntut' },
+  { value: 'STNK', label: 'STNK' },
+  { value: 'PAJAK', label: 'Pajak' },
+  { value: 'ASURANSI', label: 'Asuransi' },
+  { value: 'OTHER', label: 'Lainnya' },
+];
+
+const EMPTY_DOCUMENT_FORM = {
+  documentType: 'KIR_HEAD',
+  documentNumber: '',
+  issuedDate: '',
+  expiredDate: '',
+  file: null,
+  notes: '',
+};
 
 function normalizeName(value) {
   return String(value || '').trim().toLowerCase();
@@ -65,10 +95,19 @@ function getLocalDriverOptions(activeJobs = [], trucks = []) {
 
 function createFields(driverOptions) {
   return [
+    { key: 'unitKind', section: 'Identitas Unit', label: 'Jenis Unit', type: 'select', defaultValue: 'TRUCK', options: [
+      { value: 'HEAD', label: 'Head Truck' },
+      { value: 'TRAILER', label: 'Buntut / Trailer' },
+      { value: 'CHASSIS', label: 'Chassis' },
+      { value: 'TRUCK', label: 'Truck' },
+    ] },
     { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL', required: true },
     { key: 'unitCode', section: 'Identitas Unit', label: 'Kode Unit', placeholder: 'TRK-001', required: true, hint: 'Kode internal harus unik.' },
     { key: 'capacity', section: 'Identitas Unit', label: 'Kapasitas Container', type: 'select', defaultValue: '20FT', options: [
       { value: '20FT', label: '20FT' }, { value: '40FT', label: '40FT' },
+    ] },
+    { key: 'chassisSize', section: 'Identitas Unit', label: 'Ukuran Chassis', type: 'select', defaultValue: '20FT', showIf: (form) => ['TRAILER', 'CHASSIS'].includes(form.unitKind), requiredIf: (form) => ['TRAILER', 'CHASSIS'].includes(form.unitKind), options: [
+      { value: '20FT', label: '20FT' }, { value: '40FT', label: '40FT' }, { value: 'COMBO', label: 'Combo' },
     ] },
     { key: 'status', section: 'Identitas Unit', label: 'Status Truck', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
       { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Maintenance', label: 'Maintenance' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
@@ -83,6 +122,204 @@ function createFields(driverOptions) {
     { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file' },
     { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file' },
   ];
+}
+
+function documentTypeLabel(value) {
+  return DOCUMENT_TYPES.find((item) => item.value === value)?.label || value || '-';
+}
+
+function statusClass(status) {
+  if (status === 'Expired') return 'border-red-200 bg-red-50 text-red-700';
+  if (status === 'Segera Habis') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (status === 'Akan Habis') return 'border-yellow-200 bg-yellow-50 text-yellow-700';
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+}
+
+function VehicleDocumentsPanel({ vehicle, editable = false }) {
+  const { user } = useAuth();
+  const canRead = hasPermission(user, 'vehicle_document.read');
+  const canCreate = hasPermission(user, 'vehicle_document.create');
+  const canUpdate = hasPermission(user, 'vehicle_document.update');
+  const canDelete = hasPermission(user, 'vehicle_document.delete');
+  const vehicleId = vehicle?.id || '';
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(EMPTY_DOCUMENT_FORM);
+
+  useEffect(() => {
+    if (!vehicleId || !canRead) return undefined;
+    let active = true;
+    setLoading(true);
+    setError('');
+    fetchVehicleDocuments(vehicleId)
+      .then((result) => {
+        if (active) setRows(Array.isArray(result) ? result : []);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message || 'Dokumen kendaraan gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canRead, vehicleId]);
+
+  function updateField(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function resetForm() {
+    setEditing(null);
+    setForm(EMPTY_DOCUMENT_FORM);
+  }
+
+  async function saveDocument(event) {
+    event.preventDefault();
+    if (!vehicleId) return;
+    if (!editing && !form.file) {
+      setError('Upload file dokumen wajib diisi.');
+      return;
+    }
+    setError('');
+    try {
+      const saved = editing
+        ? await updateVehicleDocument(vehicleId, editing.id, form)
+        : await createVehicleDocument(vehicleId, form);
+      setRows((current) => editing
+        ? current.map((row) => (row.id === saved.id ? saved : row))
+        : [saved, ...current]);
+      resetForm();
+    } catch (requestError) {
+      setError(requestError.message || 'Dokumen kendaraan gagal disimpan.');
+    }
+  }
+
+  async function removeDocument(row) {
+    if (!vehicleId) return;
+    if (!window.confirm(`Hapus dokumen ${documentTypeLabel(row.documentType)}?`)) return;
+    try {
+      await deleteVehicleDocument(vehicleId, row.id);
+      setRows((current) => current.filter((item) => item.id !== row.id));
+    } catch (requestError) {
+      setError(requestError.message || 'Dokumen kendaraan gagal dihapus.');
+    }
+  }
+
+  if (!canRead) return null;
+
+  return (
+    <div className="span-full rounded-lg border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="m-0 text-sm font-black text-slate-900">Dokumen Kendaraan</h3>
+          <p className="m-0 mt-1 text-xs text-slate-500">Pantau KIR Head, KIR Buntut, STNK, Pajak, Asuransi, dan arsip lainnya.</p>
+        </div>
+      </div>
+
+      {error ? <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{error}</div> : null}
+
+      {editable && vehicleId && (canCreate || (editing && canUpdate)) ? (
+        <form className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-2 xl:grid-cols-3" onSubmit={saveDocument}>
+          <label className="grid gap-1 text-xs font-bold text-slate-600">
+            Jenis Dokumen
+            <select className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900" value={form.documentType} onChange={(event) => updateField('documentType', event.target.value)}>
+              {DOCUMENT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs font-bold text-slate-600">
+            Nomor Dokumen
+            <input className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900" value={form.documentNumber} onChange={(event) => updateField('documentNumber', event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs font-bold text-slate-600">
+            Tanggal Terbit
+            <input className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900" type="date" value={form.issuedDate} onChange={(event) => updateField('issuedDate', event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs font-bold text-slate-600">
+            Tanggal Expired
+            <input className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900" type="date" value={form.expiredDate} onChange={(event) => updateField('expiredDate', event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs font-bold text-slate-600">
+            Upload File
+            <div className="flex items-center gap-2">
+              <input
+                id={`vehicle-document-file-${vehicleId}`}
+                className="hidden"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  const validationError = validateArchiveFile(file, { label: 'Dokumen kendaraan' });
+                  if (validationError) {
+                    setError(validationError);
+                    event.target.value = '';
+                    return;
+                  }
+                  setError('');
+                  updateField('file', file || null);
+                }}
+              />
+              <label className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700" htmlFor={`vehicle-document-file-${vehicleId}`}>Pilih File</label>
+              <span className="min-w-0 truncate text-sm font-semibold text-slate-600">{form.file?.name || 'Belum ada file'}</span>
+            </div>
+            <small className="text-xs font-medium text-slate-500">PDF, JPG, PNG - Maks. 5 MB</small>
+          </label>
+          <label className="grid gap-1 text-xs font-bold text-slate-600">
+            Catatan
+            <input className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900" value={form.notes} onChange={(event) => updateField('notes', event.target.value)} />
+          </label>
+          <div className="flex items-center gap-2 md:col-span-2 xl:col-span-3">
+            <button className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white" type="submit">{editing ? 'Simpan Perubahan' : 'Tambah Dokumen'}</button>
+            {editing ? <button className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700" type="button" onClick={resetForm}>Batal</button> : null}
+          </div>
+        </form>
+      ) : editable ? (
+        <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">Simpan data kendaraan terlebih dahulu sebelum upload dokumen.</p>
+      ) : null}
+
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="w-full min-w-[760px] border-collapse bg-white text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Jenis Dokumen</th>
+              <th className="px-3 py-2">Nomor Dokumen</th>
+              <th className="px-3 py-2">Tanggal Terbit</th>
+              <th className="px-3 py-2">Tanggal Expired</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">File</th>
+              <th className="px-3 py-2">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? <tr><td className="px-3 py-4 text-slate-500" colSpan="7">Memuat dokumen...</td></tr> : null}
+            {!loading && !rows.length ? <tr><td className="px-3 py-4 text-slate-500" colSpan="7">Belum ada dokumen kendaraan.</td></tr> : null}
+            {rows.map((row) => (
+              <tr className="border-t border-slate-200" key={row.id}>
+                <td className="px-3 py-2 font-bold text-slate-900">{documentTypeLabel(row.documentType)}</td>
+                <td className="px-3 py-2 text-slate-700">{row.documentNumber || '-'}</td>
+                <td className="px-3 py-2 text-slate-700">{row.issuedDate || '-'}</td>
+                <td className="px-3 py-2 text-slate-700">{row.expiredDate || '-'}</td>
+                <td className="px-3 py-2"><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-bold ${statusClass(row.status)}`}>{row.status}</span></td>
+                <td className="px-3 py-2">
+                  {row.relativePath && vehicleId ? <a className="font-bold text-slate-700 underline" href={createVehicleDocumentDownloadUrl(vehicleId, row.id)} target="_blank" rel="noreferrer">{row.fileNameOriginal || 'Download'}</a> : '-'}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex gap-2">
+                    {row.relativePath && vehicleId ? <a className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" href={createVehicleDocumentDownloadUrl(vehicleId, row.id)} target="_blank" rel="noreferrer" aria-label="Download"><Download size={14} /></a> : null}
+                    {editable && canUpdate ? <button className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" type="button" onClick={() => { setEditing(row); setForm({ documentType: row.documentType, documentNumber: row.documentNumber || '', issuedDate: row.issuedDate || '', expiredDate: row.expiredDate || '', file: null, notes: row.notes || '' }); }} aria-label="Edit dokumen"><Edit3 size={14} /></button> : null}
+                    {editable && canDelete ? <button className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-700" type="button" onClick={() => removeDocument(row)} aria-label="Hapus dokumen"><Trash2 size={14} /></button> : null}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function TruckNumber({ row }) {
@@ -178,6 +415,16 @@ function TruckStatus({ row, activeJobs }) {
   return <span className={`master-status-dot ${statusClass}`}><i />{status || '-'}</span>;
 }
 
+function unitKindLabel(value) {
+  const labels = {
+    HEAD: 'Head Truck',
+    TRAILER: 'Buntut / Trailer',
+    CHASSIS: 'Chassis',
+    TRUCK: 'Truck',
+  };
+  return labels[value] || value || 'Truck';
+}
+
 function TrucksPage() {
   const archive = useArchiveData();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
@@ -197,6 +444,7 @@ function TrucksPage() {
       columns={[
         { key: 'unitCode', label: 'No', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'unitKind', label: 'Jenis Unit', render: (value, row) => <span className="master-plain-cell strong">{unitKindLabel(value)}{['TRAILER', 'CHASSIS'].includes(value) && row.chassisSize ? ` / ${row.chassisSize}` : ''}</span> },
         { key: 'defaultDriver', label: 'Sopir', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'status', label: 'Kondisi', render: (_, row) => <TruckStatus row={row} activeJobs={activeJobs} /> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
@@ -214,6 +462,10 @@ function TrucksPage() {
       toolbarDescription="Cari lambung, plat, sopir, size, dan kondisi truck."
       sortRows={sortTrucksByUnit}
       beforeSave={prepareTruckSave}
+      extraDetailContent={(row) => <VehicleDocumentsPanel vehicle={row} />}
+      extraFormContent={({ editingRow }) => (
+        <VehicleDocumentsPanel vehicle={editingRow} editable />
+      )}
       stats={(data) => [
         { label: 'Total Truck', value: data.length, detail: 'Unit terdaftar' },
         { label: 'Standby', value: data.filter((item) => getTruckStatus(item, activeJobs) === 'Aktif').length, detail: 'Siap pakai' },

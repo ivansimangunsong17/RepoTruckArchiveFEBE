@@ -187,11 +187,49 @@ function createInitialForm(order) {
   };
 }
 
-function SalesOrderForm({ onClose, onSubmit, order, existingOrders = [], customers: providedCustomers }) {
+function normalizeMasterOptions(rows = []) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => !row.status || row.status === 'Aktif')
+    .map((row) => row.name || row.label || '')
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, 'id'));
+}
+
+function SelectWithCurrentValue({
+  name,
+  value,
+  onChange,
+  options,
+  placeholder,
+  required = false,
+}) {
+  const hasCurrentValue = value && !options.includes(value);
+  return (
+    <select name={name} value={value} onChange={onChange} required={required}>
+      <option value="">{placeholder}</option>
+      {hasCurrentValue ? <option value={value}>{value}</option> : null}
+      {options.map((option) => <option key={option} value={option}>{option}</option>)}
+    </select>
+  );
+}
+
+function SalesOrderForm({
+  onClose,
+  onSubmit,
+  order,
+  existingOrders = [],
+  customers: providedCustomers,
+  depots: providedDepots = [],
+  terminals: providedTerminals = [],
+  destinations: providedDestinations = [],
+}) {
   const customers = useMemo(() => (
     (Array.isArray(providedCustomers) ? providedCustomers : fallbackCustomers)
       .filter((customer) => customer.contract === 'Aktif')
   ), [providedCustomers]);
+  const depotOptions = useMemo(() => normalizeMasterOptions(providedDepots), [providedDepots]);
+  const terminalOptions = useMemo(() => normalizeMasterOptions(providedTerminals), [providedTerminals]);
+  const destinationOptions = useMemo(() => normalizeMasterOptions(providedDestinations), [providedDestinations]);
 
   const [form, setForm] = useState(() => createInitialForm(order));
   const [error, setError] = useState('');
@@ -495,33 +533,36 @@ function SalesOrderForm({ onClose, onSubmit, order, existingOrders = [], custome
 
               <label>
                 Depo
-                <input
+                <SelectWithCurrentValue
                   name="origin"
                   value={form.origin}
                   onChange={updateField}
-                  placeholder="Contoh: Depo Marunda"
+                  options={depotOptions}
+                  placeholder="Pilih Depo"
                   required
                 />
               </label>
 
               <label>
                 Lokasi Tujuan
-                <input
+                <SelectWithCurrentValue
                   name="destination"
                   value={form.destination}
                   onChange={updateField}
-                  placeholder="Contoh: Gudang Customer"
+                  options={destinationOptions}
+                  placeholder="Pilih Lokasi Tujuan"
                   required
                 />
               </label>
 
               <label>
                 Terminal
-                <input
+                <SelectWithCurrentValue
                   name="terminal"
                   value={form.terminal}
                   onChange={updateField}
-                  placeholder="Contoh: Terminal 3 / NPCT1"
+                  options={terminalOptions}
+                  placeholder="Pilih Terminal"
                 />
               </label>
 
