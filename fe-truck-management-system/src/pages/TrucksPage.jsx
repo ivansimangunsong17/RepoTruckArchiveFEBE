@@ -88,14 +88,18 @@ function getLocalDriverOptions(activeJobs = [], trucks = []) {
   }
 }
 
-function normalizeKirRows(rows) {
-  return Array.isArray(rows) ? rows.filter((row) => row?.kirNumber) : [];
+function normalizeChassisRows(rows) {
+  return Array.isArray(rows) ? rows.filter((row) => row?.chassisCode || row?.plateNumber || row?.kirNumber) : [];
 }
 
-function buildKirOptions(rows, currentValue = '') {
-  const options = normalizeKirRows(rows).map((row) => ({
-    value: row.kirNumber,
-    label: `${row.kirNumber} - ${(row.unitCode || row.chassisCode || row.plateNumber || '-')} - ${row.kirExpiryDate || 'Tanpa expiry'}`,
+function buildChassisOptions(rows, currentValue = '') {
+  const options = normalizeChassisRows(rows).map((row) => ({
+    value: row.chassisCode || row.kirNumber,
+    label: [
+      row.chassisCode || '-',
+      row.plateNumber || 'Tanpa plat',
+      row.capacity || '-',
+    ].join(' - '),
   }));
   const hasCurrentValue = currentValue && options.some((option) => option.value === currentValue);
   if (!hasCurrentValue && currentValue) {
@@ -104,7 +108,11 @@ function buildKirOptions(rows, currentValue = '') {
   return options;
 }
 
-function createFields(driverOptions, kirHeadRows = [], kirChassisRows = []) {
+function requiredFile(label, value) {
+  return value ? null : `${label} wajib diupload.`;
+}
+
+function createFields(driverOptions, chassisRows = []) {
   return [
     { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL', required: true },
     { key: 'unitCode', section: 'Identitas Unit', label: 'Kode Unit', placeholder: 'TRK-001', required: true, hint: 'Kode internal harus unik.' },
@@ -119,33 +127,38 @@ function createFields(driverOptions, kirHeadRows = [], kirChassisRows = []) {
     { key: 'vin', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Rangka (VIN)', placeholder: 'Masukkan nomor rangka kendaraan', required: true },
     { key: 'engineNumber', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Mesin', placeholder: 'Masukkan nomor mesin kendaraan', required: true },
     {
-      key: 'kirHeadNumber',
-      section: 'Dokumen Kendaraan',
-      label: 'KIR Head Aktif',
+      key: 'kirChassisNumber',
+      section: 'Data Chassis',
+      sectionClassName: 'accent-chassis',
+      label: 'Chassis',
       type: 'select',
       defaultValue: '',
+      full: true,
+      required: true,
       options: (form) => {
-        const options = buildKirOptions(kirHeadRows, form.kirHeadNumber || form.kirNumber);
-        return [{ value: '', label: options.length ? 'Pilih KIR Head aktif dari master' : 'Belum ada data master KIR Head' }, ...options];
+        const options = buildChassisOptions(chassisRows, form.kirChassisNumber);
+        return [{ value: '', label: options.length ? 'Wajib pilih chassis dari master' : 'Belum ada data master chassis' }, ...options];
       },
-      hint: 'Menentukan referensi KIR Head yang saat ini dipakai oleh unit truck ini.',
+      hint: 'Pilih chassis dari master data yang saat ini dipasangkan ke unit truck ini.',
     },
     {
-      key: 'kirChassisNumber',
+      key: 'kirNumber',
       section: 'Dokumen Kendaraan',
-      label: 'KIR Chassis Aktif',
-      type: 'select',
-      defaultValue: '',
-      options: (form) => {
-        const options = buildKirOptions(kirChassisRows, form.kirChassisNumber);
-        return [{ value: '', label: options.length ? 'Pilih KIR Chassis aktif dari master' : 'Belum ada data master KIR Chassis' }, ...options];
-      },
-      hint: 'Menentukan referensi KIR Chassis yang saat ini dipasangkan ke unit truck ini.',
+      sectionClassName: 'accent-documents',
+      label: 'Nomor KIR',
+      placeholder: 'Wajib isi nomor KIR',
+      className: 'span-third',
+      required: true,
     },
-    { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Contoh: STNK-2026-001', hint: 'Nomor registrasi STNK kendaraan.' },
-    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', hint: 'Tanggal masa berlaku STNK berakhir.' },
+    { key: 'kirExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal KIR OFF', type: 'date', className: 'span-third', required: true },
+    { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file', className: 'span-third', compactUpload: true, validate: (form) => requiredFile('Dokumen KIR', form.kirDocument) },
+    { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Wajib isi nomor STNK', className: 'span-third', required: true },
+    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', className: 'span-third', required: true },
+    { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file', className: 'span-third', compactUpload: true, validate: (form) => requiredFile('Dokumen STNK', form.stnkDocument) },
+    { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Wajib isi nomor STID', className: 'span-third', required: true },
+    { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'span-third', required: true },
+    { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'span-third', compactUpload: true, validate: (form) => requiredFile('Dokumen STID', form.stidDocument) },
     { key: 'defaultDriver', section: 'Assignment Default', label: 'Driver Tetap', type: 'select', defaultValue: '', options: [{ value: '', label: 'Belum di-assign' }, ...driverOptions], hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.' },
-    { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file' },
   ];
 }
 
@@ -347,7 +360,7 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
 
 function TruckNumber({ row }) {
   return (
-    <div className="truck-identity-cell">
+    <div className="truck-row-number-cell">
       <span>{String(row.unitCode || '-').replace(/^TRK-?/i, '')}</span>
     </div>
   );
@@ -364,10 +377,69 @@ function formatTruckDate(value) {
   });
 }
 
+function getDaysUntilLabel(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(parsed);
+  target.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.round((target.getTime() - today.getTime()) / 86400000);
+  if (diffDays > 0) return `Sisa ${diffDays} hari lagi`;
+  if (diffDays === 0) return 'Hari ini';
+  return `Lewat ${Math.abs(diffDays)} hari`;
+}
+
+function ExpiryDetail({ value }) {
+  return (
+    <div className="master-expiry-detail">
+      <strong>{formatTruckDate(value)}</strong>
+      <small>{getDaysUntilLabel(value)}</small>
+    </div>
+  );
+}
+
 function TruckStnkExpiry({ row }) {
   return (
     <span className="master-plain-cell strong">
       {formatTruckDate(row.stnkExpiryDate)}
+    </span>
+  );
+}
+
+function getChassisRow(rows, chassisValue) {
+  if (!chassisValue) return null;
+  const normalizedValue = String(chassisValue).trim().toLowerCase();
+  return (rows || []).find((row) => {
+    const candidates = [
+      row.id,
+      row.chassisCode,
+      row.kirNumber,
+      row.plateNumber,
+    ]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase());
+
+    return candidates.includes(normalizedValue);
+  }) || null;
+}
+
+function TruckKirExpiry({ row }) {
+  return (
+    <span className="master-plain-cell strong">
+      {formatTruckDate(row.kirExpiryDate)}
+    </span>
+  );
+}
+
+function TruckChassisExpiry({ row, chassisRows }) {
+  const chassis = getChassisRow(chassisRows, row.kirChassisNumber);
+  return (
+    <span className="master-plain-cell strong">
+      {formatTruckDate(chassis?.kirExpiryDate)}
     </span>
   );
 }
@@ -442,46 +514,52 @@ function TrucksPage() {
   const archive = useArchiveData();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
   const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
-  const kirHeadRows = archive.masters?.['kir-heads'] || [];
-  const kirChassisRows = archive.masters?.['kir-chassis'] || [];
+  const chassisRows = archive.masters?.['kir-chassis'] || [];
   const driverOptions = archive.masters?.drivers?.length
     ? getDriverOptions(archive.masters.drivers, activeJobs, truckRows)
     : getLocalDriverOptions(activeJobs, truckRows);
-  const fields = createFields(driverOptions, kirHeadRows, kirChassisRows);
+  const fields = createFields(driverOptions, chassisRows);
+  const detailFields = fields.map((field) => {
+    if (field.key === 'kirExpiryDate' || field.key === 'stnkExpiryDate' || field.key === 'stidExpiryDate') {
+      return {
+        ...field,
+        renderDetail: (value) => <ExpiryDetail value={value} />,
+      };
+    }
+    return field;
+  });
 
   return (
     <MasterDataPage
       eyebrow="Master Data"
       title="Master Truck"
       singular="Truck"
-      description="Kelola identitas unit truck, STNK, driver tetap, serta referensi KIR Head dan KIR Chassis aktif."
+      description="Kelola identitas unit truck, pasangan chassis, data KIR, STNK, dan driver tetap."
       fields={fields}
+      detailFields={detailFields}
       columns={[
         { key: 'unitCode', label: 'No', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'defaultDriver', label: 'Sopir', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'kirHeadNumber', label: 'KIR Head Aktif', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
-        { key: 'kirChassisNumber', label: 'KIR Chassis Aktif', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
-        { key: 'status', label: 'Kondisi', render: (_, row) => <TruckStatus row={row} activeJobs={activeJobs} /> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'stnkExpiryDate', label: 'Tanggal STNK OFF', render: (_, row) => <TruckStnkExpiry row={row} /> },
+        { key: 'kirExpiryDate', label: 'KIR OFF', render: (_, row) => <TruckKirExpiry row={row} /> },
+        { key: 'kirChassisNumber', label: 'CHASSIS OFF', render: (_, row) => <TruckChassisExpiry row={row} chassisRows={chassisRows} /> },
+        { key: 'stnkExpiryDate', label: 'STNK OFF', render: (_, row) => <TruckStnkExpiry row={row} /> },
+        { key: 'status', label: 'Kondisi', render: (_, row) => <TruckStatus row={row} activeJobs={activeJobs} /> },
       ]}
       initialRows={fallbackTruckUnits}
       resource="trucks"
       storageKey="tms-master-trucks-v2"
-      uniqueKeys={['plateNumber', 'unitCode', 'vin', 'engineNumber', 'kirHeadNumber', 'kirChassisNumber', 'stnkNumber']}
+      uniqueKeys={['plateNumber', 'unitCode', 'vin', 'engineNumber', 'kirNumber', 'kirChassisNumber', 'stnkNumber']}
       filters={[{ key: 'status', label: 'Semua Status Truck', options: ['Aktif', 'Maintenance', 'Tidak Aktif'] }]}
       pageClassName="driver-data-page truck-data-page"
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Truck"
-      toolbarDescription="Cari unit, plat, sopir, referensi KIR aktif, size, dan kondisi truck."
+      toolbarDescription="Cari unit, plat, sopir, chassis, nomor KIR, size, dan kondisi truck."
       sortRows={sortTrucksByUnit}
       beforeSave={prepareTruckSave}
       extraDetailContent={(row) => <VehicleDocumentsPanel vehicle={row} />}
-      extraFormContent={({ editingRow }) => (
-        <VehicleDocumentsPanel vehicle={editingRow} editable />
-      )}
       stats={(data) => [
         { label: 'Total Truck', value: data.length, detail: 'Unit terdaftar' },
         { label: 'Standby', value: data.filter((item) => getTruckStatus(item, activeJobs) === 'Aktif').length, detail: 'Siap pakai' },

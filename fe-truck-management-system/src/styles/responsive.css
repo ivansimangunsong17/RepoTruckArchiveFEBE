@@ -50,7 +50,10 @@
   .settings-backend-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .master-layout { grid-template-columns: 1fr; }
   .master-form { position: static; }
-  .master-form-grid { grid-template-columns: 1fr 1fr; }
+  .master-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .master-form-grid .master-field,
+  .master-form-grid .master-field.span-third,
+  .master-form-grid .master-field.span-two-thirds { grid-column: span 1; }
   .fuel-strip { grid-template-columns: 1fr 1fr; }
   .fuel-strip > div:nth-child(2) { border-right: 0; }
   .fuel-strip > div { border-bottom: 1px solid var(--border); }
@@ -104,6 +107,9 @@
   .page-actions > * { width: 100%; }
   .stats-grid.five { grid-template-columns: 1fr 1fr; }
   .admin-summary, .module-grid, .admin-flow-grid, .admin-attribute-grid, .master-stats, .master-form-grid { grid-template-columns: 1fr; }
+  .master-form-grid .master-field,
+  .master-form-grid .master-field.span-third,
+  .master-form-grid .master-field.span-two-thirds { grid-column: auto; }
   .trucking-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
   .trucking-tabs button { width: 100%; }
   .trucking-summary-grid.seven, .trucking-summary-grid.six, .trucking-summary-grid.five { grid-template-columns: 1fr; }

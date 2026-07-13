@@ -228,8 +228,12 @@ function MasterDataPage({
     () => fields.reduce((sections, field) => {
       const section = field.section || 'Informasi Utama';
       const existing = sections.find((item) => item.name === section);
-      if (existing) existing.fields.push(field);
-      else sections.push({ name: section, fields: [field] });
+      if (existing) {
+        existing.fields.push(field);
+        if (!existing.className && field.sectionClassName) existing.className = field.sectionClassName;
+      } else {
+        sections.push({ name: section, className: field.sectionClassName || '', fields: [field] });
+      }
       return sections;
     }, []),
     [fields],
@@ -636,7 +640,11 @@ function MasterDataPage({
                 return (
                   <div key={field.key} className={field.full ? 'span-full' : ''}>
                     <span>{field.label}</span>
-                    {field.type === 'file' ? <DocumentLink file={value} /> : <strong>{value || '-'}</strong>}
+                    {field.renderDetail
+                      ? field.renderDetail(value, detailRow)
+                      : field.type === 'file'
+                        ? <DocumentLink file={value} />
+                        : <strong>{value || '-'}</strong>}
                   </div>
                 );
               })}
@@ -677,14 +685,14 @@ function MasterDataPage({
               <div className="master-form-sections">
                 {formError ? <div className="alert error master-form-error">{formError}</div> : null}
                 {fieldSections.map((section) => (
-                  <fieldset className="master-fieldset" key={section.name}>
+                  <fieldset className={`master-fieldset ${section.className || ''}`.trim()} key={section.name}>
                     <legend>{section.name}</legend>
                     <div className="master-form-grid">
                       {section.fields.map((field) => {
                         if (field.showIf && !field.showIf(form)) return null;
                         const fieldOptions = resolveFieldOptions(field, form);
                         return (
-                        <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''}`}>
+                        <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''} ${field.className || ''}`.trim()}>
                           <span>{field.label}{field.required ? <em>*</em> : null}</span>
                           {field.type === 'select' ? (
                             <select
@@ -697,7 +705,7 @@ function MasterDataPage({
                               ))}
                             </select>
                           ) : field.type === 'file' ? (
-                            <div className="document-upload">
+                            <div className={`document-upload ${field.compactUpload ? 'compact' : ''}`.trim()}>
                               <input
                                 id={`${storageKey}-${field.key}`}
                                 type="file"

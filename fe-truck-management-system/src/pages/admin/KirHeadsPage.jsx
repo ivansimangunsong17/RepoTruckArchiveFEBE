@@ -19,8 +19,8 @@ function KirStatus({ value }) {
 }
 
 const fields = [
-  { key: 'unitCode', section: 'Identitas Head', label: 'Kode Head', placeholder: 'Contoh: HEAD-001', required: true },
-  { key: 'plateNumber', section: 'Identitas Head', label: 'Nomor Polisi Head', placeholder: 'Contoh: B 1234 XYZ', required: true },
+  { key: 'unitCode', section: 'Identitas Truck', label: 'Kode Truck', placeholder: 'Contoh: HEAD-001', required: true },
+  { key: 'plateNumber', section: 'Identitas Truck', label: 'Nomor Polisi Truck', placeholder: 'Contoh: B 1234 XYZ', required: true },
   { key: 'kirNumber', section: 'Dokumen KIR', label: 'Nomor Uji KIR', placeholder: 'Contoh: KIR-H-2026-001' },
   { key: 'kirExpiryDate', section: 'Dokumen KIR', label: 'Tanggal KIR OFF', type: 'date' },
   {
@@ -43,13 +43,13 @@ function KirHeadsPage() {
   return (
     <MasterDataPage
       eyebrow="Master Data"
-      title="Master KIR Head"
-      singular="KIR Head"
-      description="Kelola data uji KIR untuk head truck, nomor polisi, masa berlaku, dan dokumen pendukung."
+      title="Master KIR"
+      singular="KIR"
+      description="Kelola data uji KIR untuk unit truck, nomor polisi, masa berlaku, dan dokumen pendukung."
       fields={fields}
       columns={[
-        { key: 'unitCode', label: 'Kode Head', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'plateNumber', label: 'Plat Head', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'unitCode', label: 'Kode Truck', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'plateNumber', label: 'Plat Truck', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'kirNumber', label: 'No KIR', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'kirExpiryDate', label: 'Tanggal KIR OFF', render: (value) => <span className="master-plain-cell strong">{formatDate(value)}</span> },
         { key: 'status', label: 'Status', render: (value) => <KirStatus value={value} /> },
@@ -62,10 +62,10 @@ function KirHeadsPage() {
       pageClassName="driver-data-page truck-data-page"
       pageSize={20}
       showModeChip={false}
-      toolbarTitle="Daftar KIR Head"
-      toolbarDescription="Cari kode head, plat, nomor KIR, dan status dokumen."
+      toolbarTitle="Daftar KIR"
+      toolbarDescription="Cari kode truck, plat, nomor KIR, dan status dokumen."
       stats={(data) => [
-        { label: 'Total Head', value: data.length, detail: 'Data KIR terdaftar' },
+        { label: 'Total Truck', value: data.length, detail: 'Data KIR terdaftar' },
         { label: 'Aktif', value: data.filter((item) => item.status === 'Aktif').length, detail: 'Dokumen aman' },
         { label: 'Perlu Perpanjang', value: data.filter((item) => item.status === 'Perlu Perpanjang').length, detail: 'Perlu dicek' },
         { label: 'Tidak Aktif', value: data.filter((item) => item.status === 'Tidak Aktif').length, detail: 'Nonaktif' },
