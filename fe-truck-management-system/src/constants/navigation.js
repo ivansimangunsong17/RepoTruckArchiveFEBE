@@ -69,6 +69,7 @@ export const navigationGroups = [
       { to: '/depots', label: 'Data Depo', icon: ClipboardCheck, roles: adminOnly },
       { to: '/terminals', label: 'Data Terminal', icon: ClipboardCheck, roles: adminOnly },
       { to: '/destinations', label: 'Data Lokasi Tujuan', icon: ClipboardCheck, roles: adminOnly },
+      { to: '/stids', label: 'Data STID', icon: ClipboardCheck, roles: adminOnly },
     ],
   },
   {

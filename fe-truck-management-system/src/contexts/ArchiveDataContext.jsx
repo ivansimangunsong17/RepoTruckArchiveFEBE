@@ -22,6 +22,7 @@ const LOCAL_MASTER_KEYS = {
   depots: 'tms-master-depots-v1',
   terminals: 'tms-master-terminals-v1',
   destinations: 'tms-master-destinations-v1',
+  stids: 'tms-master-stids-v1',
 };
 const fallbackMasters = {
   customers: fallbackCustomers,
@@ -33,6 +34,7 @@ const fallbackMasters = {
   depots: [],
   terminals: [],
   destinations: [],
+  stids: [],
 };
 
 function readLocalOrders() {
@@ -55,6 +57,7 @@ function emptyApiMasters() {
     depots: [],
     terminals: [],
     destinations: [],
+    stids: [],
   };
 }
 
@@ -86,6 +89,7 @@ function readLocalMasters() {
     depots: readLocalMaster('depots'),
     terminals: readLocalMaster('terminals'),
     destinations: readLocalMaster('destinations'),
+    stids: readLocalMaster('stids'),
   };
 }
 
@@ -167,6 +171,7 @@ export function ArchiveDataProvider({ children }) {
           depotsResult,
           terminalsResult,
           destinationsResult,
+          stidsResult,
           ordersResult,
         ] = await Promise.allSettled([
           masterDatabaseMode ? fetchMaster('customers') : Promise.resolve(readLocalMaster('customers')),
@@ -178,6 +183,7 @@ export function ArchiveDataProvider({ children }) {
           masterDatabaseMode ? fetchMaster('depots') : Promise.resolve(readLocalMaster('depots')),
           masterDatabaseMode ? fetchMaster('terminals') : Promise.resolve(readLocalMaster('terminals')),
           masterDatabaseMode ? fetchMaster('destinations') : Promise.resolve(readLocalMaster('destinations')),
+          masterDatabaseMode ? fetchMaster('stids') : Promise.resolve(readLocalMaster('stids')),
           salesOrderDatabaseMode ? fetchSalesOrders() : Promise.resolve(readLocalOrders()),
         ]);
 
@@ -198,6 +204,7 @@ export function ArchiveDataProvider({ children }) {
           depots: readSettledValue(depotsResult, [], 'Depo'),
           terminals: readSettledValue(terminalsResult, [], 'Terminal'),
           destinations: readSettledValue(destinationsResult, [], 'Lokasi tujuan'),
+          stids: readSettledValue(stidsResult, [], 'STID'),
         });
         setOrders(readSettledValue(ordersResult, [], 'Sales order'));
         setError(fallbackErrors.length ? `Sebagian data archive gagal dimuat. ${fallbackErrors[0]}` : '');

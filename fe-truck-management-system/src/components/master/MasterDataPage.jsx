@@ -40,6 +40,14 @@ function createEmptyForm(fields) {
   return fields.reduce((form, field) => ({ ...form, [field.key]: field.defaultValue ?? '' }), {});
 }
 
+function resolveFieldOptions(field, form) {
+  if (typeof field.options === 'function') {
+    const options = field.options(form);
+    return Array.isArray(options) ? options : [];
+  }
+  return Array.isArray(field.options) ? field.options : [];
+}
+
 function createFileMetadata(file) {
   if (!file) return null;
   return {
@@ -48,6 +56,17 @@ function createFileMetadata(file) {
     type: file.type || 'Dokumen',
     lastModified: file.lastModified,
     rawFile: file,
+  };
+}
+
+function serializeFileMetadata(file) {
+  if (!file) return null;
+  return {
+    name: file.name || '',
+    size: file.size || 0,
+    type: file.type || 'Dokumen',
+    lastModified: file.lastModified || null,
+    path: file.path || '',
   };
 }
 
@@ -361,7 +380,7 @@ function MasterDataPage({
         return result;
       }
       if (field.type === 'file') {
-        result[field.key] = value instanceof File ? createFileMetadata(value) : value || null;
+        result[field.key] = serializeFileMetadata(value instanceof File ? createFileMetadata(value) : value);
       } else if (field.sensitive) {
         if (value) result[field.key] = '••••••••';
         else if (editingId) result[field.key] = safeRows.find((row) => row.id === editingId)?.[field.key] || null;
@@ -663,6 +682,7 @@ function MasterDataPage({
                     <div className="master-form-grid">
                       {section.fields.map((field) => {
                         if (field.showIf && !field.showIf(form)) return null;
+                        const fieldOptions = resolveFieldOptions(field, form);
                         return (
                         <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''}`}>
                           <span>{field.label}{field.required ? <em>*</em> : null}</span>
@@ -672,7 +692,7 @@ function MasterDataPage({
                               onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
                               required={field.required || field.requiredIf?.(form)}
                             >
-                              {field.options.map((option) => (
+                              {fieldOptions.map((option) => (
                                 <option key={option.value} value={option.value} disabled={option.disabled} style={option.style}>{option.label}</option>
                               ))}
                             </select>

@@ -13,6 +13,7 @@ const routeLabels = {
   operations: 'Container Job',
   clients: 'Master Client',
   trucks: 'Master Truck',
+  stids: 'Master STID',
   drivers: 'Master Driver',
   users: 'User Management',
   reports: 'Laporan',

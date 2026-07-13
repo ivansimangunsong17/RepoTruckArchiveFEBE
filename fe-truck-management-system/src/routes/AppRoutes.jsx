@@ -19,6 +19,7 @@ const DestinationsPage = lazy(() => import('../pages/admin/DestinationsPage'));
 const DriversPage = lazy(() => import('../pages/admin/DriversPage'));
 const KirChassisPage = lazy(() => import('../pages/admin/KirChassisPage'));
 const KirHeadsPage = lazy(() => import('../pages/admin/KirHeadsPage'));
+const StidsPage = lazy(() => import('../pages/admin/StidsPage'));
 const TerminalsPage = lazy(() => import('../pages/admin/TerminalsPage'));
 const UsersPage = lazy(() => import('../pages/admin/UsersPage'));
 const SettingsPage = lazy(() => import('../pages/admin/SettingsPage'));
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
         { path: 'depots', children: [guardedPage(adminRoles, <LazyPage><DepotsPage /></LazyPage>)] },
         { path: 'terminals', children: [guardedPage(adminRoles, <LazyPage><TerminalsPage /></LazyPage>)] },
         { path: 'destinations', children: [guardedPage(adminRoles, <LazyPage><DestinationsPage /></LazyPage>)] },
+        { path: 'stids', children: [guardedPage(adminRoles, <LazyPage><StidsPage /></LazyPage>)] },
         { path: 'users', children: [guardedPage(adminRoles, <LazyPage><UsersPage /></LazyPage>)] },
         { path: 'settings', children: [guardedPage(adminRoles, <LazyPage><SettingsPage /></LazyPage>)] },
         { path: 'activity-log', children: [guardedPage(adminRoles, <LazyPage><ActivityLogPage /></LazyPage>)] },

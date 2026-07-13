@@ -16,16 +16,11 @@ import {
 import { hasPermission } from '../constants/roles';
 
 const DOCUMENT_TYPES = [
-  { value: 'KIR_HEAD', label: 'KIR Head' },
-  { value: 'KIR_BUNTUT', label: 'KIR Buntut' },
   { value: 'STNK', label: 'STNK' },
-  { value: 'PAJAK', label: 'Pajak' },
-  { value: 'ASURANSI', label: 'Asuransi' },
-  { value: 'OTHER', label: 'Lainnya' },
 ];
 
 const EMPTY_DOCUMENT_FORM = {
-  documentType: 'KIR_HEAD',
+  documentType: 'STNK',
   documentNumber: '',
   issuedDate: '',
   expiredDate: '',
@@ -93,21 +88,28 @@ function getLocalDriverOptions(activeJobs = [], trucks = []) {
   }
 }
 
-function createFields(driverOptions) {
+function normalizeKirRows(rows) {
+  return Array.isArray(rows) ? rows.filter((row) => row?.kirNumber) : [];
+}
+
+function buildKirOptions(rows, currentValue = '') {
+  const options = normalizeKirRows(rows).map((row) => ({
+    value: row.kirNumber,
+    label: `${row.kirNumber} - ${(row.unitCode || row.chassisCode || row.plateNumber || '-')} - ${row.kirExpiryDate || 'Tanpa expiry'}`,
+  }));
+  const hasCurrentValue = currentValue && options.some((option) => option.value === currentValue);
+  if (!hasCurrentValue && currentValue) {
+    return [{ value: currentValue, label: `${currentValue} - Data lama` }, ...options];
+  }
+  return options;
+}
+
+function createFields(driverOptions, kirHeadRows = [], kirChassisRows = []) {
   return [
-    { key: 'unitKind', section: 'Identitas Unit', label: 'Jenis Unit', type: 'select', defaultValue: 'TRUCK', options: [
-      { value: 'HEAD', label: 'Head Truck' },
-      { value: 'TRAILER', label: 'Buntut / Trailer' },
-      { value: 'CHASSIS', label: 'Chassis' },
-      { value: 'TRUCK', label: 'Truck' },
-    ] },
     { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL', required: true },
     { key: 'unitCode', section: 'Identitas Unit', label: 'Kode Unit', placeholder: 'TRK-001', required: true, hint: 'Kode internal harus unik.' },
     { key: 'capacity', section: 'Identitas Unit', label: 'Kapasitas Container', type: 'select', defaultValue: '20FT', options: [
       { value: '20FT', label: '20FT' }, { value: '40FT', label: '40FT' },
-    ] },
-    { key: 'chassisSize', section: 'Identitas Unit', label: 'Ukuran Chassis', type: 'select', defaultValue: '20FT', showIf: (form) => ['TRAILER', 'CHASSIS'].includes(form.unitKind), requiredIf: (form) => ['TRAILER', 'CHASSIS'].includes(form.unitKind), options: [
-      { value: '20FT', label: '20FT' }, { value: '40FT', label: '40FT' }, { value: 'COMBO', label: 'Combo' },
     ] },
     { key: 'status', section: 'Identitas Unit', label: 'Status Truck', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
       { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Maintenance', label: 'Maintenance' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
@@ -116,11 +118,34 @@ function createFields(driverOptions) {
     { key: 'type', section: 'Spesifikasi Kendaraan', label: 'Tipe Truck', placeholder: 'Contoh: Ranger FG 235 JJ', required: true },
     { key: 'vin', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Rangka (VIN)', placeholder: 'Masukkan nomor rangka kendaraan', required: true },
     { key: 'engineNumber', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Mesin', placeholder: 'Masukkan nomor mesin kendaraan', required: true },
-    { key: 'kirNumber', section: 'Dokumen Kendaraan', label: 'Nomor Uji KIR', placeholder: 'Contoh: KIR-2026-001', hint: 'Nomor identitas hasil uji KIR kendaraan.' },
+    {
+      key: 'kirHeadNumber',
+      section: 'Dokumen Kendaraan',
+      label: 'KIR Head Aktif',
+      type: 'select',
+      defaultValue: '',
+      options: (form) => {
+        const options = buildKirOptions(kirHeadRows, form.kirHeadNumber || form.kirNumber);
+        return [{ value: '', label: options.length ? 'Pilih KIR Head aktif dari master' : 'Belum ada data master KIR Head' }, ...options];
+      },
+      hint: 'Menentukan referensi KIR Head yang saat ini dipakai oleh unit truck ini.',
+    },
+    {
+      key: 'kirChassisNumber',
+      section: 'Dokumen Kendaraan',
+      label: 'KIR Chassis Aktif',
+      type: 'select',
+      defaultValue: '',
+      options: (form) => {
+        const options = buildKirOptions(kirChassisRows, form.kirChassisNumber);
+        return [{ value: '', label: options.length ? 'Pilih KIR Chassis aktif dari master' : 'Belum ada data master KIR Chassis' }, ...options];
+      },
+      hint: 'Menentukan referensi KIR Chassis yang saat ini dipasangkan ke unit truck ini.',
+    },
     { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Contoh: STNK-2026-001', hint: 'Nomor registrasi STNK kendaraan.' },
+    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', hint: 'Tanggal masa berlaku STNK berakhir.' },
     { key: 'defaultDriver', section: 'Assignment Default', label: 'Driver Tetap', type: 'select', defaultValue: '', options: [{ value: '', label: 'Belum di-assign' }, ...driverOptions], hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.' },
     { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file' },
-    { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file' },
   ];
 }
 
@@ -155,7 +180,7 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
     setError('');
     fetchVehicleDocuments(vehicleId)
       .then((result) => {
-        if (active) setRows(Array.isArray(result) ? result : []);
+        if (active) setRows(Array.isArray(result) ? result.filter((row) => row.documentType === 'STNK') : []);
       })
       .catch((requestError) => {
         if (active) setError(requestError.message || 'Dokumen kendaraan gagal dimuat.');
@@ -216,7 +241,7 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="m-0 text-sm font-black text-slate-900">Dokumen Kendaraan</h3>
-          <p className="m-0 mt-1 text-xs text-slate-500">Pantau KIR Head, KIR Buntut, STNK, Pajak, Asuransi, dan arsip lainnya.</p>
+          <p className="m-0 mt-1 text-xs text-slate-500">Pantau dokumen STNK untuk unit truck ini.</p>
         </div>
       </div>
 
@@ -226,9 +251,7 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
         <form className="mb-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-2 xl:grid-cols-3" onSubmit={saveDocument}>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Jenis Dokumen
-            <select className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900" value={form.documentType} onChange={(event) => updateField('documentType', event.target.value)}>
-              {DOCUMENT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-            </select>
+            <input className="h-9 rounded-lg border border-slate-300 bg-slate-100 px-3 text-sm font-bold text-slate-900" value="STNK" readOnly />
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Nomor Dokumen
@@ -415,37 +438,30 @@ function TruckStatus({ row, activeJobs }) {
   return <span className={`master-status-dot ${statusClass}`}><i />{status || '-'}</span>;
 }
 
-function unitKindLabel(value) {
-  const labels = {
-    HEAD: 'Head Truck',
-    TRAILER: 'Buntut / Trailer',
-    CHASSIS: 'Chassis',
-    TRUCK: 'Truck',
-  };
-  return labels[value] || value || 'Truck';
-}
-
 function TrucksPage() {
   const archive = useArchiveData();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
   const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
+  const kirHeadRows = archive.masters?.['kir-heads'] || [];
+  const kirChassisRows = archive.masters?.['kir-chassis'] || [];
   const driverOptions = archive.masters?.drivers?.length
     ? getDriverOptions(archive.masters.drivers, activeJobs, truckRows)
     : getLocalDriverOptions(activeJobs, truckRows);
-  const fields = createFields(driverOptions);
+  const fields = createFields(driverOptions, kirHeadRows, kirChassisRows);
 
   return (
     <MasterDataPage
       eyebrow="Master Data"
       title="Master Truck"
       singular="Truck"
-      description="Kelola nomor polisi, kode unit, driver tetap, merk dan tipe, VIN, nomor mesin, serta status truck."
+      description="Kelola identitas unit truck, STNK, driver tetap, serta referensi KIR Head dan KIR Chassis aktif."
       fields={fields}
       columns={[
         { key: 'unitCode', label: 'No', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'unitKind', label: 'Jenis Unit', render: (value, row) => <span className="master-plain-cell strong">{unitKindLabel(value)}{['TRAILER', 'CHASSIS'].includes(value) && row.chassisSize ? ` / ${row.chassisSize}` : ''}</span> },
         { key: 'defaultDriver', label: 'Sopir', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'kirHeadNumber', label: 'KIR Head Aktif', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
+        { key: 'kirChassisNumber', label: 'KIR Chassis Aktif', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'status', label: 'Kondisi', render: (_, row) => <TruckStatus row={row} activeJobs={activeJobs} /> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'stnkExpiryDate', label: 'Tanggal STNK OFF', render: (_, row) => <TruckStnkExpiry row={row} /> },
@@ -453,13 +469,13 @@ function TrucksPage() {
       initialRows={fallbackTruckUnits}
       resource="trucks"
       storageKey="tms-master-trucks-v2"
-      uniqueKeys={['plateNumber', 'unitCode', 'vin', 'engineNumber', 'kirNumber', 'stnkNumber']}
+      uniqueKeys={['plateNumber', 'unitCode', 'vin', 'engineNumber', 'kirHeadNumber', 'kirChassisNumber', 'stnkNumber']}
       filters={[{ key: 'status', label: 'Semua Status Truck', options: ['Aktif', 'Maintenance', 'Tidak Aktif'] }]}
       pageClassName="driver-data-page truck-data-page"
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Truck"
-      toolbarDescription="Cari lambung, plat, sopir, size, dan kondisi truck."
+      toolbarDescription="Cari unit, plat, sopir, referensi KIR aktif, size, dan kondisi truck."
       sortRows={sortTrucksByUnit}
       beforeSave={prepareTruckSave}
       extraDetailContent={(row) => <VehicleDocumentsPanel vehicle={row} />}

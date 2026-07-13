@@ -122,6 +122,10 @@ const fields = [
   { key: 'status', section: 'Status Ketersediaan', label: 'Status Driver', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
     { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Cuti', label: 'Cuti' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
   ] },
+  { key: 'healthStatus', section: 'Status Ketersediaan', label: 'Status Kesehatan', type: 'select', defaultValue: 'Aman', options: [
+    { value: 'Aman', label: 'Aman' }, { value: 'Perlu Cek', label: 'Perlu Cek' }, { value: 'Tidak Fit', label: 'Tidak Fit' },
+  ] },
+  { key: 'notes', section: 'Status Ketersediaan', label: 'Catatan', type: 'textarea', placeholder: 'Catatan tambahan driver', full: true },
   { key: 'driverPhoto', section: 'Dokumen Driver', label: 'Foto Sopir', type: 'file', accept: '.jpg,.jpeg,.png', hint: 'Gunakan foto wajah sopir untuk identifikasi operational.' },
   { key: 'identityDocument', section: 'Dokumen Driver', label: 'KTP Driver', type: 'file' },
   { key: 'licenseDocument', section: 'Dokumen Driver', label: 'Dokumen SIM', type: 'file' },
