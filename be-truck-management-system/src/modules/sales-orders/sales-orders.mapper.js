@@ -1,3 +1,5 @@
+import { normalizeSalesOrderBillingStatus } from './sales-orders.billing-status.js';
+
 function normalizeContainerSize(size) {
   const normalized = String(size || '20FT').toUpperCase().replace(/\s/g, '');
   return normalized === '40FT' ? '40FT' : '20FT';
@@ -143,7 +145,7 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     jobType: row.job_type,
     jobDescription: row.job_description,
     invoiceNumber: row.invoice_number,
-    billingStatus: row.billing_status,
+    billingStatus: normalizeSalesOrderBillingStatus(row.billing_status),
     container: row.container_summary,
     lineItems,
     terminal: row.terminal,
@@ -191,7 +193,7 @@ export function toSalesOrderDb(form, customer) {
     job_type: form.jobType || 'Trucking Container',
     job_description: form.jobDescription || form.notes || null,
     invoice_number: form.invoiceNumber || null,
-    billing_status: form.billingStatus || (form.invoiceNumber ? 'invoice_issued' : 'pending_invoice'),
+    billing_status: normalizeSalesOrderBillingStatus(form.billingStatus),
     container_summary: form.container || null,
     line_items: JSON.stringify(lineItems),
     terminal: form.terminal || null,

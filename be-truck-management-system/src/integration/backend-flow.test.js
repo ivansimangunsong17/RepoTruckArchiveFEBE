@@ -313,6 +313,7 @@ if (!hasDatabase) {
       });
       assert.equal(createdOrder.status, 201);
       assert.equal(createdOrder.body.data.soNumber, created.orderSoNumber);
+      assert.equal(createdOrder.body.data.billingStatus, 'belum_invoice');
       assert.equal(createdOrder.body.data.containers.length, 1);
       created.orderId = createdOrder.body.data.id;
       created.jobId = createdOrder.body.data.containers[0].id;
@@ -332,6 +333,20 @@ if (!hasDatabase) {
       });
       assert.equal(updatedOrder.status, 200);
       assert.equal(updatedOrder.body.data.destination, 'Karawang');
+
+      const blockedBillingUpdate = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Karawang',
+          invoiceNumber: `INV-${runId}-EARLY`,
+          billingStatus: 'belum_dikirim',
+          updatedBy: 'Sprint2C Admin',
+        }),
+      });
+      assert.equal(blockedBillingUpdate.status, 400);
+      assert.equal(blockedBillingUpdate.body.error.code, 'VALIDATION_ERROR');
 
       const cancelCandidate = await api('/api/sales-orders', {
         method: 'POST',
@@ -427,6 +442,56 @@ if (!hasDatabase) {
       assert.equal(statusLog.metadata.fromStatus, 'received');
       assert.equal(statusLog.metadata.toStatus, 'running');
 
+      const requiredDocumentCategories = [
+        'spkDocument',
+        'loadingVoucherDocument',
+        'unloadingVoucherDocument',
+        'travelDocumentFile',
+        'weighingDocumentFile',
+      ];
+      for (const category of requiredDocumentCategories) {
+        const uploadRequiredDocument = await api('/api/attachments/upload', {
+          method: 'POST',
+          token: adminToken,
+          body: {
+            entityType: 'container_job',
+            entityId: created.jobId,
+            category,
+            fileName: `${category}-${runId}.pdf`,
+            mimeType: 'application/pdf',
+            fileBase64: Buffer.from(`%PDF-1.4\n% ${category} ${runId}\n`).toString('base64'),
+            uploadedByName: 'Sprint2C Operational',
+          },
+        });
+        assert.equal(uploadRequiredDocument.status, 201);
+      }
+
+      const completedJob = await api(`/api/container-jobs/${created.jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: `Driver ${runId}`,
+          plateNumber: plate20,
+          status: 'completed',
+          runningAt: '2026-07-11T08:00:00.000Z',
+          completedAt: '2026-07-11T15:00:00.000Z',
+          rpujStatus: 'approved',
+          spkNumber: `SPK-${runId}`,
+          loadingVoucher: `BM-${runId}`,
+          unloadingVoucher: `BB-${runId}`,
+          travelDocument: `SJ-${runId}`,
+          weighingDocument: `ST-${runId}`,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(completedJob.status, 200);
+      assert.equal(completedJob.body.data.status, 'completed');
+
+      const completedOrder = await api(`/api/sales-orders/${created.orderId}`, { token: adminToken });
+      assert.equal(completedOrder.status, 200);
+      assert.equal(completedOrder.body.data.status, 'completed');
+
       const cancelJobOrder = await api('/api/sales-orders', {
         method: 'POST',
         token: adminToken,
@@ -449,6 +514,43 @@ if (!hasDatabase) {
       const cancelledOrder = await api(`/api/sales-orders/${cancelJobOrder.body.data.id}`, { token: adminToken });
       assert.equal(cancelledOrder.status, 200);
       assert.equal(cancelledOrder.body.data.status, 'cancelled');
+    });
+
+    await t.test('sales order: billing status workflow bisa disimpan setelah operational selesai', async () => {
+      const updatedBilling = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Karawang',
+          status: 'completed',
+          invoiceNumber: `INV-${runId}-001`,
+          billingStatus: 'belum_dikirim',
+          updatedBy: 'Sprint2C Admin',
+          containers: [
+            {
+              id: created.jobId,
+              containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+              size: '20FT',
+              type: 'Dry',
+              status: 'completed',
+              driver: `Driver ${runId}`,
+              plateNumber: `B-${String(runId).slice(-4)}-20T`,
+              rpujStatus: 'approved',
+              spkNumber: `SPK-${runId}`,
+              loadingVoucher: `BM-${runId}`,
+              unloadingVoucher: `BB-${runId}`,
+              travelDocument: `SJ-${runId}`,
+              weighingDocument: `ST-${runId}`,
+              runningAt: '2026-07-11T08:00:00.000Z',
+              completedAt: '2026-07-11T15:00:00.000Z',
+            },
+          ],
+        }),
+      });
+      assert.equal(updatedBilling.status, 200);
+      assert.equal(updatedBilling.body.data.billingStatus, 'belum_dikirim');
+      assert.equal(updatedBilling.body.data.invoiceNumber, `INV-${runId}-001`);
     });
 
     await t.test('attachments: upload, list, delete, fileBase64 tidak masuk activity log metadata', async () => {
@@ -485,7 +587,7 @@ if (!hasDatabase) {
       });
       assert.equal(upload.status, 201);
       assert.equal(upload.body.data.entityId, created.jobId);
-      assert.match(upload.body.data.storagePath, /^sales-orders[\\/]+2026[\\/]+Juli[\\/]+2026-07-(11|12)[\\/]+SO-/);
+      assert.match(upload.body.data.storagePath, /^sales-orders[\\/]+2026[\\/]+Juli[\\/]+2026-07-\d{2}[\\/]+SO-/);
       assert.match(upload.body.data.storagePath, /[\\/]+03-container-jobs[\\/]+[^\\/]+[\\/]+99-other-documents[\\/]+/);
       created.attachmentId = upload.body.data.id;
 

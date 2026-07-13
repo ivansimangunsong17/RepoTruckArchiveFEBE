@@ -78,6 +78,7 @@ export const router = createBrowserRouter([
         { path: 'audit-trail', element: <Navigate to="/activity-log" replace /> },
         { path: 'reports', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
         { path: 'driver-performance', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
+        { path: 'unit-performance', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
       ],
     }],
   },

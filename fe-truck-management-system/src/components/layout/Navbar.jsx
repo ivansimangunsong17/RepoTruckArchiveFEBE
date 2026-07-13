@@ -17,6 +17,7 @@ const routeLabels = {
   users: 'User Management',
   reports: 'Laporan',
   'driver-performance': 'Performa Driver',
+  'unit-performance': 'Performa Unit',
   'activity-log': 'Activity Log',
   settings: 'Pengaturan Sistem',
 };

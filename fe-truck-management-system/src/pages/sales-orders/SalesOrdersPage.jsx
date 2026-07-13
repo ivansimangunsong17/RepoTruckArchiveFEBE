@@ -27,12 +27,20 @@ import FilterStatus from '../../components/common/FilterStatus';
 import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
 
 const PAGE_SIZE = 8;
-const LOCAL_BILLING_STATUS_KEY = 'tms-sales-order-billing-status-v1';
+const LOCAL_BILLING_STATUS_KEY = 'tms-sales-order-billing-status-v2';
+const BILLING_STATUS_OPTIONS = [
+  { value: 'belum_invoice', label: 'Belum Invoice' },
+  { value: 'belum_dikirim', label: 'Belum Dikirim' },
+  { value: 'belum_diterima', label: 'Belum Diterima' },
+  { value: 'belum_dikonfirmasi', label: 'Belum Dikonfirmasi' },
+  { value: 'menunggu_pembayaran', label: 'Menunggu Pembayaran' },
+  { value: 'lunas', label: 'Lunas' },
+];
 const STATUS_NAVIGATION = [
   { value: 'running', label: 'Sedang Jalan', tone: 'running' },
   { value: 'waiting_operational', label: 'Belum Jalan', tone: 'waiting' },
   { value: 'completed', label: 'Selesai', tone: 'completed' },
-  { value: 'completed_invoiced', label: 'Sudah Invoice', tone: 'completed' },
+  { value: 'completed_invoiced', label: 'Proses Billing', tone: 'completed' },
   { value: '', label: 'Semua', tone: 'all' },
 ];
 
@@ -97,8 +105,15 @@ function persistLocalBillingStatusOverrides(nextValue) {
 
 function normalizeBillingStatus(value, invoiceNumber = '') {
   const normalized = String(value || '').toLowerCase();
-  if (['pending_invoice', 'invoice_issued', 'waiting_payment', 'paid'].includes(normalized)) return normalized;
-  return isInvoiced({ invoiceNumber }) ? 'invoice_issued' : 'pending_invoice';
+  const legacyMap = {
+    pending_invoice: 'belum_invoice',
+    invoice_issued: 'belum_dikirim',
+    waiting_payment: 'menunggu_pembayaran',
+    paid: 'lunas',
+  };
+  if (BILLING_STATUS_OPTIONS.some((option) => option.value === normalized)) return normalized;
+  if (legacyMap[normalized]) return legacyMap[normalized];
+  return isInvoiced({ invoiceNumber }) ? 'belum_dikirim' : 'belum_invoice';
 }
 
 function getBillingStatusValue(order, overrideValue = '') {
@@ -107,20 +122,13 @@ function getBillingStatusValue(order, overrideValue = '') {
 
 function getBillingStatusLabel(order, overrideValue = '') {
   const status = getBillingStatusValue(order, overrideValue);
-  const labels = {
-    pending_invoice: 'Belum Invoice',
-    invoice_issued: 'Terbit Invoice',
-    waiting_payment: 'Menunggu Pembayaran',
-    paid: 'Lunas',
-  };
-  return labels[status] || 'Belum Invoice';
+  return BILLING_STATUS_OPTIONS.find((option) => option.value === status)?.label || 'Belum Invoice';
 }
 
 function getBillingStatusTone(order, overrideValue = '') {
   const status = getBillingStatusValue(order, overrideValue);
-  if (status === 'paid') return 'paid';
-  if (status === 'pending_invoice') return 'pending';
-  return 'invoiced';
+  if (status === 'lunas') return 'paid';
+  return 'pending';
 }
 
 function isWaitingStatus(value) {
@@ -204,7 +212,7 @@ function SalesOrdersPage() {
   const [billingStatusOverrides, setBillingStatusOverrides] = useState(() => readLocalBillingStatusOverrides());
   const [invoiceDraft, setInvoiceDraft] = useState('');
   const [invoiceEditOpen, setInvoiceEditOpen] = useState(false);
-  const [billingStatusDraft, setBillingStatusDraft] = useState('pending_invoice');
+  const [billingStatusDraft, setBillingStatusDraft] = useState('belum_invoice');
   const [formOpen, setFormOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const canManage = hasPermission(user, 'orders.create');
@@ -310,7 +318,7 @@ function SalesOrdersPage() {
       const nextOrder = {
         ...selectedOrder,
         invoiceNumber: nextValue,
-        billingStatus: billingStatusDraft === 'pending_invoice' ? 'invoice_issued' : billingStatusDraft,
+        billingStatus: billingStatusDraft === 'belum_invoice' ? 'belum_dikirim' : billingStatusDraft,
       };
       if (archive.isDatabaseMode) {
         const savedOrder = await archive.upsertOrder(nextOrder, selectedOrder);
@@ -341,11 +349,20 @@ function SalesOrdersPage() {
     if (!canEditCommercial || !selectedOrder) return;
 
     const nextBillingStatus = normalizeBillingStatus(nextValue, getOrderInvoiceNumber(selectedOrder));
-    if (nextBillingStatus === 'pending_invoice' && getOrderInvoiceNumber(selectedOrder)) {
+    if (selectedOrder.status !== 'completed') {
       notify({
         type: 'error',
-        title: 'Status billing belum dipilih',
-        message: 'Pilih status billing setelah invoice tersedia.',
+        title: 'Status belum bisa diubah',
+        message: 'Status billing hanya dapat diisi setelah order selesai dari operational.',
+      });
+      return;
+    }
+
+    if (nextBillingStatus !== 'belum_invoice' && !getOrderInvoiceNumber(selectedOrder)) {
+      notify({
+        type: 'error',
+        title: 'Invoice belum tersedia',
+        message: 'Isi nomor invoice dulu sebelum memilih status lanjutan.',
       });
       return;
     }
@@ -663,24 +680,27 @@ function SalesOrdersPage() {
                               setBillingStatusOverrides((current) => ({ ...current, [selectedOrder.id]: nextValue }));
                               await saveBillingStatusDraft(nextValue);
                             }}
-                            disabled={!getOrderInvoiceNumber(selectedOrder)}
                           >
-                            <option value="pending_invoice">Belum Invoice</option>
-                            <option value="invoice_issued">Terbit Invoice</option>
-                            <option value="waiting_payment">Menunggu Pembayaran</option>
-                            <option value="paid">Lunas</option>
+                            {BILLING_STATUS_OPTIONS.map((option) => (
+                              <option
+                                key={option.value}
+                                value={option.value}
+                                disabled={option.value !== 'belum_invoice' && !getOrderInvoiceNumber(selectedOrder)}
+                              >
+                                {option.label}
+                              </option>
+                            ))}
                           </select>
                         </label>
                         <button
                           type="button"
                           className="secondary-button invoice-edit-button"
                           onClick={saveBillingStatusDraft}
-                          disabled={!getOrderInvoiceNumber(selectedOrder)}
                         >
                           Simpan Status
                         </button>
                         {!getOrderInvoiceNumber(selectedOrder) ? (
-                          <small className="order-billing-note">Isi invoice dulu untuk ubah status billing.</small>
+                          <small className="order-billing-note">Status selain Belum Invoice membutuhkan nomor invoice.</small>
                         ) : null}
                       </div>
                     ) : null}

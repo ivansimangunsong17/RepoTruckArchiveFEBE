@@ -5,6 +5,10 @@ import {
   findSalesOrdersPage,
   updateSalesOrder,
 } from './sales-orders.repository.js';
+import {
+  billingStatusRequiresInvoice,
+  normalizeSalesOrderBillingStatus,
+} from './sales-orders.billing-status.js';
 
 const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
@@ -204,11 +208,12 @@ function normalizeSalesOrderPayload(payload) {
     }).join(' + ') || null,
     cargoType: uniqueContainerTypes.length === 1 ? uniqueContainerTypes[0] : payload.cargoType || null,
     containers,
+    billingStatus: normalizeSalesOrderBillingStatus(payload.billingStatus),
     referenceDocuments: normalizeReferenceDocuments(payload.referenceDocuments),
   };
 }
 
-function validateSalesOrderPayload(payload) {
+function validateSalesOrderPayload(payload, currentOrder = null) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload Sales Order harus berupa object.');
     error.statusCode = 400;
@@ -253,6 +258,22 @@ function validateSalesOrderPayload(payload) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
+
+  const operationalStatus = currentOrder?.status || payload.status || 'waiting_operational';
+
+  if (payload.billingStatus && payload.billingStatus !== 'belum_invoice' && operationalStatus !== 'completed') {
+    const error = new Error('Status billing hanya dapat diubah setelah order selesai dari operational.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  if (billingStatusRequiresInvoice(payload.billingStatus) && !String(payload.invoiceNumber || '').trim()) {
+    const error = new Error('Nomor invoice wajib diisi sebelum melanjutkan status billing ini.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
 }
 
 export function listSalesOrders(query) {
@@ -276,9 +297,10 @@ export async function getSalesOrder(id) {
   return order;
 }
 
-export function saveSalesOrder(payload, id) {
+export async function saveSalesOrder(payload, id) {
   const normalizedPayload = normalizeSalesOrderPayload(payload);
-  validateSalesOrderPayload(normalizedPayload);
+  const currentOrder = id ? await findSalesOrderById(id) : null;
+  validateSalesOrderPayload(normalizedPayload, currentOrder);
   return id ? updateSalesOrder(id, normalizedPayload) : createSalesOrder(normalizedPayload);
 }
 

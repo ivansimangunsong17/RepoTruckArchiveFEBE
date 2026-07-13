@@ -40,6 +40,16 @@ function todayKey() {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
+function monthRange(monthValue) {
+  if (!monthValue || monthValue === 'all') return { from: '', to: '' };
+  const [year, month] = String(monthValue).split('-').map(Number);
+  if (!year || !month) return { from: '', to: '' };
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  const normalize = (date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  return { from: normalize(start), to: normalize(end) };
+}
+
 function buildContainerPlaceholders(quantity = 0) {
   return Array.from({ length: Math.max(0, Number(quantity || 0)) }, (_, index) => ({ id: `container-${index}` }));
 }
@@ -70,6 +80,46 @@ function normalizeOperationRow(row = {}) {
   };
 }
 
+function mergeUnitPerformanceRows(weeklyRows = [], monthlyRows = []) {
+  const units = new Map();
+
+  const ensureUnit = (row) => {
+    const unitKey = row.plateNumber || row.vehicleId || row.plate || 'Unit belum diassign';
+    if (!units.has(unitKey)) {
+      units.set(unitKey, {
+        unit: row.plateNumber || row.plate || 'Unit belum diassign',
+        driver: row.driver || '-',
+        weeklyTrips: 0,
+        monthlyTrips: 0,
+        totalTrips: 0,
+      });
+    }
+    const unit = units.get(unitKey);
+    if (row.driver && row.driver !== '-') unit.driver = row.driver;
+    return unit;
+  };
+
+  weeklyRows.forEach((row) => {
+    const unit = ensureUnit(row);
+    unit.weeklyTrips += 1;
+  });
+
+  monthlyRows.forEach((row) => {
+    const unit = ensureUnit(row);
+    unit.monthlyTrips += 1;
+  });
+
+  units.forEach((unit) => {
+    unit.totalTrips = Math.max(unit.weeklyTrips, unit.monthlyTrips);
+  });
+
+  return Array.from(units.values()).sort((left, right) => {
+    if (right.monthlyTrips !== left.monthlyTrips) return right.monthlyTrips - left.monthlyTrips;
+    if (right.weeklyTrips !== left.weeklyTrips) return right.weeklyTrips - left.weeklyTrips;
+    return left.unit.localeCompare(right.unit);
+  });
+}
+
 function containerLabel(job) {
   return job?.containerNumber || 'Container belum diisi';
 }
@@ -85,7 +135,13 @@ function getContainerCount(order = {}) {
 
 function ReportsPage() {
   const location = useLocation();
-  const [activeReport, setActiveReport] = useState(location.pathname === '/driver-performance' ? 'driver-performance' : 'sales');
+  const [activeReport, setActiveReport] = useState(
+    location.pathname === '/driver-performance'
+      ? 'driver-performance'
+      : location.pathname === '/unit-performance'
+        ? 'unit-performance'
+        : 'sales',
+  );
   const [query, setQuery] = useState('');
   const [customer, setCustomer] = useState('all');
   const [status, setStatus] = useState('all');
@@ -105,13 +161,16 @@ function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [driverPerformanceRows, setDriverPerformanceRows] = useState([]);
+  const [unitPerformanceRows, setUnitPerformanceRows] = useState([]);
   const [performanceMonthOptions, setPerformanceMonthOptions] = useState([]);
   const { notify } = useFeedback();
   const { user } = useAuth();
   const canViewCommercial = hasPermission(user, 'commercial.read');
   const canExportReport = hasPermission(user, 'reports.export');
   const isDriverPerformanceRoute = location.pathname === '/driver-performance';
+  const isUnitPerformanceRoute = location.pathname === '/unit-performance';
   const isDriverPerformanceView = activeReport === 'driver-performance';
+  const isUnitPerformanceView = activeReport === 'unit-performance';
 
   const customers = useMemo(() => [...new Set(rows.map((row) => row.customer).filter(Boolean))], [rows]);
 
@@ -120,8 +179,12 @@ function ReportsPage() {
       setActiveReport('driver-performance');
       return;
     }
-    setActiveReport((value) => (value === 'driver-performance' ? 'sales' : value));
-  }, [isDriverPerformanceRoute]);
+    if (isUnitPerformanceRoute) {
+      setActiveReport('unit-performance');
+      return;
+    }
+    setActiveReport((value) => (value === 'driver-performance' || value === 'unit-performance' ? 'sales' : value));
+  }, [isDriverPerformanceRoute, isUnitPerformanceRoute]);
 
   useEffect(() => {
     setPage(1);
@@ -132,7 +195,7 @@ function ReportsPage() {
   }, [activeReport]);
 
   useEffect(() => {
-    if (isDriverPerformanceView) return undefined;
+    if (isDriverPerformanceView || isUnitPerformanceView) return undefined;
     let active = true;
     const params = {
       page: 1,
@@ -179,7 +242,7 @@ function ReportsPage() {
     return () => {
       active = false;
     };
-  }, [activeReport, customer, dateFrom, dateTo, isDriverPerformanceView, query, status]);
+  }, [activeReport, customer, dateFrom, dateTo, isDriverPerformanceView, isUnitPerformanceView, query, status]);
 
   useEffect(() => {
     if (!isDriverPerformanceView) return undefined;
@@ -211,6 +274,63 @@ function ReportsPage() {
     };
   }, [isDriverPerformanceView, performanceMonth, performanceWeekFrom, performanceWeekTo]);
 
+  useEffect(() => {
+    if (!isUnitPerformanceView) return undefined;
+    let active = true;
+    setLoading(true);
+    setError('');
+
+    const weeklyParams = {
+      page: 1,
+      pageSize: REPORT_PAGE_SIZE,
+      status: 'completed',
+      dateFrom: performanceWeekFrom,
+      dateTo: performanceWeekTo,
+    };
+    const monthlyRange = monthRange(performanceMonth);
+    const monthlyParams = {
+      page: 1,
+      pageSize: REPORT_PAGE_SIZE,
+      status: 'completed',
+      dateFrom: monthlyRange.from,
+      dateTo: monthlyRange.to,
+    };
+
+    Promise.all([
+      fetchOperationReport(weeklyParams),
+      fetchOperationReport(monthlyRange.from && monthlyRange.to ? monthlyParams : weeklyParams),
+    ])
+      .then(([weeklyResult, monthlyResult]) => {
+        if (!active) return;
+        const weeklyRows = Array.isArray(weeklyResult?.rows) ? weeklyResult.rows.map(normalizeOperationRow) : [];
+        const monthlyRows = Array.isArray(monthlyResult?.rows) ? monthlyResult.rows.map(normalizeOperationRow) : [];
+        setUnitPerformanceRows(mergeUnitPerformanceRows(weeklyRows, monthlyRows));
+        if (!performanceMonthOptions.length) {
+          const monthValues = new Set(
+            [...weeklyRows, ...monthlyRows]
+              .map((row) => String(row.completedAt || row.updatedAt || row.receivedAt || '').slice(0, 7))
+              .filter(Boolean),
+          );
+          setPerformanceMonthOptions(Array.from(monthValues)
+            .sort()
+            .reverse()
+            .map((value) => ({ value, label: value })));
+        }
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setUnitPerformanceRows([]);
+        setError(requestError.message || 'Resume unit gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isUnitPerformanceView, performanceMonth, performanceWeekFrom, performanceWeekTo, performanceMonthOptions.length]);
+
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const paginatedRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -226,6 +346,9 @@ function ReportsPage() {
   const totalWeeklyTrips = driverPerformanceRows.reduce((total, driver) => total + Number(driver.weeklyTrips || 0), 0);
   const totalMonthlyTrips = driverPerformanceRows.reduce((total, driver) => total + Number(driver.monthlyTrips || 0), 0);
   const topDriver = driverPerformanceRows[0] || null;
+  const totalUnitWeeklyTrips = unitPerformanceRows.reduce((total, unit) => total + Number(unit.weeklyTrips || 0), 0);
+  const totalUnitMonthlyTrips = unitPerformanceRows.reduce((total, unit) => total + Number(unit.monthlyTrips || 0), 0);
+  const topUnit = unitPerformanceRows[0] || null;
   const activePerformanceMonthLabel = performanceMonth === 'all'
     ? 'Semua bulan'
     : performanceMonthOptions.find((item) => item.value === performanceMonth)?.label || performanceMonth;
@@ -275,17 +398,17 @@ function ReportsPage() {
   return (
     <div className="page">
       <PageHeader
-        eyebrow={isDriverPerformanceRoute ? 'Driver Performance' : 'Management Report'}
-        title={isDriverPerformanceRoute ? 'Performa Driver' : 'Laporan'}
-        description={isDriverPerformanceRoute ? 'Tinjau produktivitas driver berdasarkan trip selesai dari backend API.' : 'Tinjau ringkasan Sales Order dan pekerjaan Operational dari backend API.'}
+        eyebrow={isDriverPerformanceRoute ? 'Driver Performance' : isUnitPerformanceRoute ? 'Unit Performance' : 'Management Report'}
+        title={isDriverPerformanceRoute ? 'Performa Driver' : isUnitPerformanceRoute ? 'Performa Unit' : 'Laporan'}
+        description={isDriverPerformanceRoute ? 'Tinjau produktivitas driver berdasarkan trip selesai dari backend API.' : isUnitPerformanceRoute ? 'Tinjau produktivitas unit/truck berdasarkan trip selesai dari backend API.' : 'Tinjau ringkasan Sales Order dan pekerjaan Operational dari backend API.'}
         actions={canExportReport ? (
-          <button className="primary-button" type="button" onClick={handleExport} disabled={loading || isDriverPerformanceView}>
+          <button className="primary-button" type="button" onClick={handleExport} disabled={loading || isDriverPerformanceView || isUnitPerformanceView}>
             <Download size={17} /> Export Laporan
           </button>
         ) : null}
       />
 
-      {!isDriverPerformanceRoute ? (
+      {!isDriverPerformanceRoute && !isUnitPerformanceRoute ? (
         <div className="report-tabs" role="tablist" aria-label="Jenis laporan">
           <button className={activeReport === 'sales' ? 'active' : ''} type="button" role="tab" aria-selected={activeReport === 'sales'} onClick={() => setActiveReport('sales')}>Sales Report</button>
           <button className={activeReport === 'operational' ? 'active' : ''} type="button" role="tab" aria-selected={activeReport === 'operational'} onClick={() => setActiveReport('operational')}>Operational Report</button>
@@ -359,21 +482,88 @@ function ReportsPage() {
         </section>
       ) : null}
 
-      {!isDriverPerformanceView && activeReport === 'sales' ? (
+      {isUnitPerformanceView ? (
+        <section className="panel report-panel driver-performance-panel">
+          <div className="panel-header compact">
+            <div>
+              <h2>Resume Performa Unit</h2>
+              <p>Ringkasan trip selesai per unit/truck berdasarkan bulan dan rentang tanggal.</p>
+            </div>
+          </div>
+          <div className="driver-performance-toolbar">
+            <div className="driver-performance-controls">
+              <label className="report-date-field">
+                <span>Bulan</span>
+                <select value={performanceMonth} onChange={(event) => setPerformanceMonth(event.target.value)}>
+                  <option value="all">Semua Bulan</option>
+                  {performanceMonthOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+              </label>
+              <label className="report-date-field">
+                <span>Minggu Dari</span>
+                <input type="date" value={performanceWeekFrom} onChange={(event) => setPerformanceWeekFrom(event.target.value)} />
+              </label>
+              <label className="report-date-field">
+                <span>Minggu Sampai</span>
+                <input type="date" value={performanceWeekTo} onChange={(event) => setPerformanceWeekTo(event.target.value)} />
+              </label>
+            </div>
+            <div className="driver-performance-actions">
+              <div className="driver-performance-period">
+                <span>Periode aktif</span>
+                <strong>{activePerformanceMonthLabel}</strong>
+                <small>{performanceWeekFrom || '-'} sampai {performanceWeekTo || '-'}</small>
+              </div>
+              <button type="button" className="secondary-button" onClick={resetPerformanceFilters}>Reset Filter</button>
+            </div>
+          </div>
+          <div className="stats-grid compact-dashboard-stats">
+            <StatCard title="Unit Tercatat" value={String(unitPerformanceRows.length)} detail="Berdasarkan trip selesai" icon={Truck} />
+            <StatCard title="Trip Mingguan" value={String(totalUnitWeeklyTrips)} detail="Sesuai rentang tanggal" icon={BarChart3} />
+            <StatCard title="Trip Bulanan" value={String(totalUnitMonthlyTrips)} detail="Sesuai bulan terpilih" icon={CheckCircle2} />
+            <StatCard title="Unit Teratas" value={topUnit?.unit || '-'} detail={`${topUnit?.monthlyTrips || 0} trip bulan ini`} icon={BarChart3} />
+          </div>
+          {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat resume unit...</p></div> : null}
+          {error ? <div className="archive-inline-state is-error"><h3>Resume unit gagal dimuat</h3><p>{error}</p></div> : null}
+          {!loading && !error && unitPerformanceRows.length ? (
+            <div className="table-wrap">
+              <table className="data-table report-table responsive-data-table">
+                <thead><tr><th>Unit</th><th>Driver Terakhir</th><th>Trip Mingguan</th><th>Trip Bulanan</th><th>Total Trip</th></tr></thead>
+                <tbody>
+                  {unitPerformanceRows.slice(0, 8).map((unit) => (
+                    <tr key={unit.unit}>
+                      <td data-label="Unit"><strong>{unit.unit}</strong></td>
+                      <td data-label="Driver Terakhir">{unit.driver}</td>
+                      <td data-label="Trip Mingguan">{unit.weeklyTrips}</td>
+                      <td data-label="Trip Bulanan">{unit.monthlyTrips}</td>
+                      <td data-label="Total Trip">{unit.totalTrips}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {!loading && !error && !unitPerformanceRows.length ? (
+            <div className="role-empty-state"><Truck size={28} /><h3>Resume unit belum tersedia</h3><p>Belum ada trip selesai yang bisa dirangkum per unit.</p></div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {!isDriverPerformanceView && !isUnitPerformanceView && activeReport === 'sales' ? (
         <div className="stats-grid compact-dashboard-stats">
           <StatCard title="Total Sales Order" value={String(summary.orders || rows.length)} detail="Sesuai filter aktif" icon={BarChart3} />
           <StatCard title="Total Container" value={String(totalContainers)} detail="Seluruh order" icon={Truck} />
           <StatCard title="Order Selesai" value={String(rows.filter((row) => row.status === 'completed').length)} detail="Sudah ditutup" icon={CheckCircle2} />
           {canViewCommercial ? <StatCard title="Nilai Pekerjaan" value={formatCurrency(totalValue)} detail="Sesuai hasil filter" icon={BarChart3} /> : <StatCard title="Akses Komersial" value="Tertutup" detail="Nilai hanya untuk Admin/Sales" icon={BarChart3} />}
         </div>
-      ) : !isDriverPerformanceView && activeReport === 'archive' ? (
+      ) : !isDriverPerformanceView && !isUnitPerformanceView && activeReport === 'archive' ? (
         <div className="stats-grid compact-dashboard-stats">
           <StatCard title="Perjalanan Selesai" value={String(rows.length)} detail="Sudah masuk archive" icon={CheckCircle2} />
           <StatCard title="20FT" value={String(rows.filter((row) => String(row.size).toUpperCase() === '20FT').length)} detail="Container selesai" icon={Truck} />
           <StatCard title="40FT" value={String(rows.filter((row) => String(row.size).toUpperCase() === '40FT').length)} detail="Container selesai" icon={Truck} />
           <StatCard title="Customer" value={String(new Set(rows.map((row) => row.customer)).size)} detail="Customer terlayani" icon={BarChart3} />
         </div>
-      ) : !isDriverPerformanceView ? (
+      ) : !isDriverPerformanceView && !isUnitPerformanceView ? (
         <div className="stats-grid compact-dashboard-stats">
           <StatCard title="Total Container Job" value={String(summary.jobs || rows.length)} detail="Sesuai filter aktif" icon={Truck} />
           <StatCard title="Menunggu" value={String(summary.received || rows.filter((row) => row.status === 'received').length)} detail="Belum diproses" icon={BarChart3} />
@@ -382,7 +572,7 @@ function ReportsPage() {
         </div>
       ) : null}
 
-      {isDriverPerformanceView ? null : (
+      {isDriverPerformanceView || isUnitPerformanceView ? null : (
         <section className="panel report-panel">
           <div className="panel-header">
             <div>
