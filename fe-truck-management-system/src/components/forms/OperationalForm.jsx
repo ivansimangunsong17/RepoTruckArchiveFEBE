@@ -4,9 +4,10 @@ import { fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
 import { validateArchiveFile } from '../../utils/fileValidation';
+import { parseOtherCost, serializeOtherCost } from '../../utils/otherCost';
 
 const documentFields = [
-  ['spkDocument', 'Lampiran RPUJ'],
+  ['spkDocument', 'Lampiran Biaya Lainnya'],
   ['eirDocument', 'Lampiran EIR'],
   ['loadingVoucherDocument', 'No. Bon Muat / Bon Bongkar'],
   ['unloadingVoucherDocument', 'No. TILA / Delivery Card'],
@@ -81,10 +82,13 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const trucks = (Array.isArray(masterTrucks) ? masterTrucks : fallbackTruckRows)
     .map((truck) => normalizeTruck(truck, fallbackTruckRows));
   const containerSize = normalizeSize(container.size || container.containerSize);
+  const initialOtherCost = parseOtherCost(container.rpujNotes);
   const [form, setForm] = useState({
     containerNumber: container.containerNumber || '',
     rpujStatus: container.rpujStatus || 'pending',
     rpujNotes: container.rpujNotes || '',
+    otherCostAmount: initialOtherCost.amount ? String(initialOtherCost.amount) : '',
+    otherCostNotes: initialOtherCost.notes || '',
     spkNumber: container.spkNumber || '',
     spkGeneratedAt: container.spkGeneratedAt || container.spk_generated_at || '',
     spkFilePath: container.spkFilePath || container.spk_file_path || '',
@@ -271,7 +275,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
   function handleSubmit(event) {
     event.preventDefault();
-    const submitForm = { ...form };
+    const otherCostAmount = Number(form.otherCostAmount || 0);
+    if (otherCostAmount < 0) {
+      setError('Nominal biaya lainnya tidak boleh negatif.');
+      return;
+    }
+    const submitForm = {
+      ...form,
+      rpujStatus: otherCostAmount || form.otherCostNotes ? 'submitted' : 'pending',
+      rpujNotes: serializeOtherCost({
+        amount: otherCostAmount,
+        notes: form.otherCostNotes,
+      }),
+    };
     if (submitForm.plateNumber && submitForm.driver && submitForm.status === 'received') {
       submitForm.status = 'running';
       submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
@@ -293,7 +309,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         !submitForm.runningAt && 'waktu mulai',
         !submitForm.completedAt && 'waktu selesai',
         !submitForm.spkNumber && 'nomor SPK',
-        !submitForm.spkDocument && 'lampiran RPUJ',
         !submitForm.loadingVoucher && 'No. Bon Muat / Bon Bongkar',
         !submitForm.loadingVoucherDocument && 'dokumen No. Bon Muat / Bon Bongkar',
         !submitForm.unloadingVoucher && 'No. TILA / Delivery Card',
@@ -345,33 +360,44 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           </div>
 
           <div className="form-section">
-            <h3>RPUJ & SPK</h3>
+            <h3>Biaya Lainnya & SPK</h3>
             <div className="mb-4">
               <UjRecommendationCard job={container} destinations={masterDestinations} />
             </div>
             <div className="operational-rpuj-spk-grid">
               <div className="operational-document-card operational-rpuj-card">
-                <span>RPUJ</span>
+                <span>Biaya Lainnya</span>
                 <label className="operational-inline-label">
-                  Status RPUJ
-                  <select name="rpujStatus" value={form.rpujStatus} onChange={updateField}>
-                    <option value="pending">Belum Diproses</option>
-                    <option value="submitted">Diajukan</option>
-                    <option value="approved">Disetujui</option>
-                    <option value="paid">Cair</option>
-                    <option value="rejected">Ditolak</option>
-                  </select>
+                  Nominal Biaya
+                  <input
+                    name="otherCostAmount"
+                    type="number"
+                    min="0"
+                    step="1000"
+                    value={form.otherCostAmount}
+                    onChange={updateField}
+                    placeholder="Contoh: 150000"
+                  />
+                </label>
+                <label className="operational-inline-label">
+                  Catatan Biaya
+                  <input
+                    name="otherCostNotes"
+                    value={form.otherCostNotes}
+                    onChange={updateField}
+                    placeholder="Contoh: tol, parkir, bongkar"
+                  />
                 </label>
                 <AttachmentUploadField
                   id="operational-spk-document"
-                  label="Lampiran RPUJ"
+                  label="Lampiran Biaya Lainnya"
                   value={form.spkDocument}
                   title={form.spkDocument?.name ? 'Ubah File' : 'Pilih File'}
                   helper="PDF, JPG, PNG - Maks. 5 MB"
                   accept={OPERATIONAL_FILE_ACCEPT}
                   compact
                   validationOptions={{
-                    label: 'Lampiran RPUJ',
+                    label: 'Lampiran Biaya Lainnya',
                   }}
                   onSelect={(file, validationError) => {
                     if (validationError) return setError(validationError);

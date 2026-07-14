@@ -24,6 +24,7 @@ const SettingsPage = lazy(() => import('../pages/admin/SettingsPage'));
 const ActivityLogPage = lazy(() => import('../pages/system/ActivityLogPage'));
 const ProfilePage = lazy(() => import('../pages/system/ProfilePage'));
 const ReportsPage = lazy(() => import('../pages/reports/ReportsPage'));
+const TruckUtilizationPage = lazy(() => import('../pages/reports/TruckUtilizationPage'));
 
 function LazyPage({ children }) {
   const location = useLocation();
@@ -75,8 +76,9 @@ export const router = createBrowserRouter([
         { path: 'activity-log', children: [guardedPage(adminRoles, <LazyPage><ActivityLogPage /></LazyPage>)] },
         { path: 'audit-trail', element: <Navigate to="/activity-log" replace /> },
         { path: 'reports', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
+        { path: 'truck-utilization', children: [guardedPage(observerRoles, <LazyPage><TruckUtilizationPage /></LazyPage>)] },
         { path: 'driver-performance', element: <Navigate to="/reports" replace /> },
-        { path: 'unit-performance', element: <Navigate to="/reports" replace /> },
+        { path: 'unit-performance', element: <Navigate to="/truck-utilization" replace /> },
       ],
     }],
   },

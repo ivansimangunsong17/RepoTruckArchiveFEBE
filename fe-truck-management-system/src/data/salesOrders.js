@@ -121,7 +121,7 @@ function createTodayOrder(specs, index) {
         rpujStatus: 'approved',
         spkNumber: `SPK-2607-${containerSequence}`,
         spkDocument: { name: `SPK-2607-${containerSequence}.pdf`, size: 210000 },
-        rpujNotes: 'RPUJ disetujui.',
+        rpujNotes: 'Biaya lainnya disetujui.',
         loadingVoucher: `BM-2607-${containerSequence}`,
         loadingVoucherDocument: { name: `BM-2607-${containerSequence}.jpg`, size: 310000 },
         unloadingVoucher: null,

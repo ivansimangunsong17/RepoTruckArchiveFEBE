@@ -16,9 +16,8 @@ function DepotsPage() {
       columns={[
         { key: 'name', label: 'Nama Depo', render: (value) => <TextCell value={value} strong /> },
         { key: 'code', label: 'Kode', render: (value) => <TextCell value={value} /> },
-        { key: 'address', label: 'Alamat / Area', render: (value) => <TextCell value={value} /> },
       ]}
-      toolbarDescription="Cari nama depo, kode, area, dan status."
+      toolbarDescription="Cari nama depo, kode, dan status."
     />
   );
 }

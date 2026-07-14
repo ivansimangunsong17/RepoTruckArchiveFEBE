@@ -19,9 +19,11 @@ import { useFeedback } from '../../hooks/useFeedback';
 import { hasPermission } from '../../constants/roles';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { formatDateTime } from '../../utils/formatDate';
+import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
 import UjRecommendationCard from '../../components/operations/UjRecommendationCard';
+import { parseOtherCost } from '../../utils/otherCost';
 import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
@@ -41,17 +43,6 @@ function formatShipmentLabel(value) {
   return shipmentMap[String(value || '').toLowerCase()] || value || '-';
 }
 
-function formatRpujStatus(value) {
-  const statusMap = {
-    pending: 'Belum Diproses',
-    submitted: 'Diajukan',
-    approved: 'Disetujui',
-    paid: 'Cair',
-    rejected: 'Ditolak',
-  };
-  return statusMap[String(value || '').toLowerCase()] || value || '-';
-}
-
 function sortOperationalJobs(rows) {
   return [...rows].sort((left, right) => {
     const statusDiff = getStatusOrder(left.status) - getStatusOrder(right.status);
@@ -62,7 +53,6 @@ function sortOperationalJobs(rows) {
 
 function documentState(job) {
   const required = [
-    job.spkDocument,
     job.loadingVoucherDocument,
     job.unloadingVoucherDocument,
     job.travelDocumentFile,
@@ -73,6 +63,15 @@ function documentState(job) {
 
 function containerLabel(job) {
   return job?.containerNumber || 'Container belum diisi';
+}
+
+function otherCostValue(job) {
+  const otherCost = parseOtherCost(job?.rpujNotes);
+  return {
+    amount: otherCost.amount,
+    notes: otherCost.notes || '-',
+    amountLabel: otherCost.amount ? formatCurrency(otherCost.amount) : '-',
+  };
 }
 
 function flattenDemoJobs(orders) {
@@ -113,6 +112,7 @@ function OperationsPage() {
   const [detail, setDetail] = useState(null);
   const canEdit = hasPermission(user, 'operations.update');
   const canViewDocuments = hasPermission(user, 'documents.operational.read');
+  const detailOtherCost = otherCostValue(detail);
 
   useEffect(() => {
     if (!detail) return undefined;
@@ -385,7 +385,7 @@ function OperationsPage() {
             </header>
             <div className="container-job-detail-body">
               <section><h3>Penugasan</h3><div><span>No. Container<strong>{detail.containerNumber || '-'}</strong></span><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
-              <section><h3>RPUJ & SPK</h3><div><span>Status RPUJ<strong>{formatRpujStatus(detail.rpujStatus)}</strong></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
+              <section><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
               <section><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
@@ -416,7 +416,7 @@ function OperationsPage() {
 
 function documentFieldsForDetail(job) {
   return [
-    ['Lampiran RPUJ', job.spkDocument],
+    ['Lampiran Biaya Lainnya', job.spkDocument],
     ['Lampiran EIR', job.eirDocument],
     ['Bon Muat', job.loadingVoucherDocument],
     ['Bon Bongkar', job.unloadingVoucherDocument],

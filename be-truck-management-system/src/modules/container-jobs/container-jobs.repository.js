@@ -138,7 +138,6 @@ async function ensureCompletedDocuments(client, jobId) {
     [
       jobId,
       [
-        'spkDocument',
         'loadingVoucherDocument',
         'unloadingVoucherDocument',
         'travelDocumentFile',
@@ -148,7 +147,6 @@ async function ensureCompletedDocuments(client, jobId) {
   );
   const categories = new Set(result.rows.map((row) => row.category));
   const missing = [
-    !categories.has('spkDocument') && 'dokumen SPK',
     !categories.has('loadingVoucherDocument') && 'bon muat',
     !categories.has('unloadingVoucherDocument') && 'bon bongkar',
     !categories.has('travelDocumentFile') && 'dokumen surat jalan',

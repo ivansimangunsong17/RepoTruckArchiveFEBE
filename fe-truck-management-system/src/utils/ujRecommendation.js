@@ -29,10 +29,13 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
   const uj40ft = readNumber(destination?.uj40ft, destination?.uj_40ft);
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
+  const currentContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
 
   return {
     destination,
     destinationName: job.destination || destination?.name || '',
+    currentSize: currentSize || '',
+    currentContainerUj,
     uj20ft,
     uj40ft,
     qty20ft,
@@ -43,4 +46,3 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
     hasConfiguredTariff: Boolean(destination && (uj20ft || uj40ft)),
   };
 }
-

@@ -73,6 +73,7 @@ export const navigationGroups = [
     label: 'Monitoring',
     items: [
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
+      { to: '/truck-utilization', label: 'Truck Utilisasi', icon: Truck, roles: reportRoles },
     ],
   },
   {

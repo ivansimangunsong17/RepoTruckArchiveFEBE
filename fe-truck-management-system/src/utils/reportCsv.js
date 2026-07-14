@@ -1,3 +1,5 @@
+import { parseOtherCost } from './otherCost';
+
 const STATUS_LABELS = {
   waiting_operational: 'Belum Jalan',
   received: 'Belum Jalan',
@@ -212,7 +214,7 @@ export function getOperationalReportHeaders() {
     'Tujuan',
     'Driver',
     'Truck',
-    'Status RPUJ',
+    'Biaya Lainnya',
     'No SPK',
     'Bon Muat',
     'Bon Bongkar',
@@ -227,6 +229,7 @@ export function getOperationalReportHeaders() {
 }
 
 export function mapOperationalReportRow(job, index) {
+  const otherCost = parseOtherCost(job.rpujNotes);
   return [
     index + 1,
     job.soNumber,
@@ -239,7 +242,7 @@ export function mapOperationalReportRow(job, index) {
     job.destination,
     job.driver || 'Belum ditentukan',
     job.plateNumber || 'Belum ditentukan',
-    formatCsvStatus(job.rpujStatus),
+    formatCsvNumber(otherCost.amount),
     job.spkNumber,
     job.loadingVoucher,
     job.unloadingVoucher,
