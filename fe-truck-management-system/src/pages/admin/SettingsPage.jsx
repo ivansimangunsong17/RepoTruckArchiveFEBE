@@ -147,8 +147,8 @@ function SettingsPage() {
       notify({
         title: 'Kebutuhan sistem berhasil disimpan',
         message: databaseMode
-          ? 'Konfigurasi tersimpan di system_settings dan siap dipetakan ke API Node.js/PostgreSQL.'
-          : 'Konfigurasi UI tersimpan lokal dan siap dipetakan ke API Node.js/PostgreSQL.',
+          ? 'Konfigurasi tersimpan di backend Node.js/PostgreSQL.'
+          : 'Konfigurasi tersimpan untuk mode demo frontend.',
       });
     } catch (requestError) {
       setError(requestError.message || 'Pengaturan gagal disimpan.');
@@ -235,7 +235,7 @@ function SettingsPage() {
         </section>
 
         <section className="panel settings-card settings-wide">
-          <div className="settings-title"><GitBranch size={19} /><div><h2>Target Migrasi Backend</h2><p>Catatan kesiapan pengganti Supabase untuk API Node.js dan PostgreSQL.</p></div></div>
+          <div className="settings-title"><GitBranch size={19} /><div><h2>Konfigurasi Backend</h2><p>Catatan integrasi aplikasi dengan API Node.js dan database PostgreSQL.</p></div></div>
           <div className="settings-backend-grid">
             <label>Frontend<input value={settings.frontendHost} onChange={(event) => update('frontendHost', event.target.value)} /></label>
             <label>Backend<input value={settings.backendHost} onChange={(event) => update('backendHost', event.target.value)} /></label>
@@ -267,7 +267,7 @@ function SettingsPage() {
         </section>
 
         <div className="settings-actions">
-          <span><KeyRound size={16} /> {databaseMode ? 'Konfigurasi tersimpan di Supabase sementara.' : 'UI ini masih menyimpan konfigurasi lokal sampai API backend tersedia.'}</span>
+          <span><KeyRound size={16} /> {databaseMode ? 'Konfigurasi tersimpan di backend Node.js/PostgreSQL.' : 'Konfigurasi tersimpan di mode demo frontend.'}</span>
           <button className="primary-button" type="submit" disabled={loading || saving}>
             <Save size={17} /> {saving ? 'Menyimpan...' : 'Simpan Kebutuhan Sistem'}
           </button>

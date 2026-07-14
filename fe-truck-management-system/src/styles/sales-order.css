@@ -1,7 +1,51 @@
 /* Sales order list, detail, forms, and container records */
 
 .orders-list { border-top: 1px solid var(--border); }
+.sales-order-group {
+  border-bottom: 1px solid var(--border);
+  background: white;
+}
+.sales-order-group:last-child { border-bottom: 0; }
+.sales-order-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 18px;
+  border-bottom: 1px solid #e7edf5;
+  background: #f8fafc;
+}
+.sales-order-group-header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+.sales-order-group-header span {
+  color: #8a94a5;
+  font-size: .58rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+.sales-order-group-header strong {
+  overflow: hidden;
+  color: #172033;
+  font-size: .78rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sales-order-group-header small {
+  flex: none;
+  min-width: 48px;
+  color: #64748b;
+  font-size: .62rem;
+  font-weight: 850;
+  text-align: right;
+}
 .order-card { border-bottom: 1px solid var(--border); }
+.sales-order-group .order-card:last-child { border-bottom: 0; }
 .order-summary {
   display: grid;
   grid-template-columns: 42px minmax(160px, 1.05fr) minmax(220px, 1.45fr) minmax(140px, .85fr) minmax(130px, .72fr) 108px;

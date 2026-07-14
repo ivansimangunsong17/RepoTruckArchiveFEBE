@@ -558,8 +558,8 @@ function MasterDataPage({
             <table className="data-table master-table responsive-data-table">
               <thead>
                 <tr>
-                  {columns.map((column) => <th key={column.key}>{column.label}</th>)}
-                  <th>Aksi</th>
+                  {columns.map((column) => <th key={column.key} className={column.headerClassName || ''}>{column.label}</th>)}
+                  <th className="!w-32 !text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -572,7 +572,7 @@ function MasterDataPage({
                 {!listLoading && !listError ? paginatedRows.map((row, rowIndex) => (
                   <tr key={row.id}>
                     {columns.map((column, columnIndex) => (
-                      <td key={column.key} data-label={column.label}>
+                      <td key={column.key} data-label={column.label} className={column.cellClassName || ''}>
                         {column.render
                           ? column.render(row[column.key], row, {
                             rowNumber: (page - 1) * pageSize + rowIndex + 1,
@@ -582,8 +582,8 @@ function MasterDataPage({
                           : row[column.key] || '-'}
                       </td>
                     ))}
-                    <td data-label="Aksi">
-                      <div className="table-actions">
+                    <td data-label="Aksi" className="!w-32">
+                      <div className="table-actions justify-center">
                         <button type="button" onClick={() => setDetailRow(row)} aria-label={`Lihat ${singular}`}>
                           <Eye size={15} />
                         </button>
@@ -603,16 +603,18 @@ function MasterDataPage({
               </tbody>
             </table>
           </div>
-          <FilterStatus
-            total={safeRows.length}
-            filtered={totalItems}
-            active={hasActiveFilters}
-            label="data"
-            onReset={() => {
-              setQuery('');
-              setActiveFilters({});
-            }}
-          />
+          {hasActiveFilters ? (
+            <FilterStatus
+              total={safeRows.length}
+              filtered={totalItems}
+              active={hasActiveFilters}
+              label="data"
+              onReset={() => {
+                setQuery('');
+                setActiveFilters({});
+              }}
+            />
+          ) : null}
           <div className="master-pagination">
             <span>
               Menampilkan {totalItems ? (page - 1) * pageSize + 1 : 0}–

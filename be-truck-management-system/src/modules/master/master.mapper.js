@@ -189,13 +189,14 @@ export const resourceConfig = {
   },
   depots: {
     table: 'depots',
-    searchable: ['name', 'code', 'address', 'operational_status', 'notes'],
+    searchable: ['name', 'company_name', 'code', 'address', 'operational_status', 'notes'],
     filters: { status: 'operational_status' },
     archivedColumn: 'archived_at',
     orderColumn: 'created_at',
     toApi: (row) => ({
       id: row.id,
       name: row.name,
+      companyName: row.company_name || '',
       code: row.code || '',
       address: row.address || '',
       status: row.operational_status || 'Aktif',
@@ -203,6 +204,7 @@ export const resourceConfig = {
     }),
     toDb: (row) => ({
       name: row.name,
+      company_name: row.companyName || row.company_name || null,
       code: row.code || null,
       address: row.address || null,
       operational_status: row.status || 'Aktif',

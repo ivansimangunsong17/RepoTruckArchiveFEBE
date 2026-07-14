@@ -13,7 +13,14 @@ export async function listSalesOrdersController(request, response) {
 }
 
 export async function createSalesOrderController(request, response) {
-  const saved = await saveSalesOrder(request.body);
+  if (request.user?.role !== 'sales') {
+    const error = new Error('Input Sales Order hanya dapat dilakukan oleh user Sales.');
+    error.statusCode = 403;
+    error.code = 'SALES_ORDER_CREATE_SALES_ONLY';
+    throw error;
+  }
+
+  const saved = await saveSalesOrder(request.body, null, request.user);
   await safeRecordActivityLog(request, {
     action: 'CREATE_SALES_ORDER',
     module: 'sales_orders',
@@ -39,7 +46,7 @@ export async function getSalesOrderController(request, response) {
 
 export async function updateSalesOrderController(request, response) {
   const before = await getSalesOrder(request.params.id);
-  const saved = await saveSalesOrder(request.body, request.params.id);
+  const saved = await saveSalesOrder(request.body, request.params.id, request.user);
   await safeRecordActivityLog(request, {
     action: 'UPDATE_SALES_ORDER',
     module: 'sales_orders',
@@ -64,7 +71,7 @@ export async function updateSalesOrderController(request, response) {
 
 export async function cancelSalesOrderController(request, response) {
   const before = await getSalesOrder(request.params.id);
-  const cancelled = await removeSalesOrder(request.params.id);
+  const cancelled = await removeSalesOrder(request.params.id, request.user);
   await safeRecordActivityLog(request, {
     action: 'CANCEL_SALES_ORDER',
     module: 'sales_orders',

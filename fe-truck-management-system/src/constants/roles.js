@@ -27,6 +27,8 @@ export const ROLE_PERMISSIONS = {
     'vehicle_document.update',
     'vehicle_document.delete',
     'users.manage',
+    'orders.update',
+    'orders.cancel',
     'orders.read',
     'operations.read',
     'documents.operational.read',

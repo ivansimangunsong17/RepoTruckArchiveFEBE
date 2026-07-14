@@ -555,6 +555,66 @@
   min-width: 780px;
 }
 
+.depot-data-page .table-wrap {
+  overflow-x: auto;
+}
+
+.depot-data-page .master-table {
+  width: 100%;
+  min-width: 720px;
+  table-layout: fixed;
+}
+
+.depot-data-page .master-table th,
+.depot-data-page .master-table td {
+  height: 32px;
+  padding: 4px 10px;
+}
+
+.depot-data-page .master-table th:nth-child(1),
+.depot-data-page .master-table td:nth-child(1) {
+  width: 80px;
+}
+
+.depot-data-page .master-table th:nth-child(2),
+.depot-data-page .master-table td:nth-child(2) {
+  width: auto;
+}
+
+.depot-data-page .master-table th:nth-child(3),
+.depot-data-page .master-table td:nth-child(3) {
+  width: 150px;
+}
+
+.depot-data-page .master-table th:nth-child(4),
+.depot-data-page .master-table td:nth-child(4) {
+  width: 140px;
+}
+
+.depot-data-page .master-table th:nth-child(5),
+.depot-data-page .master-table td:nth-child(5) {
+  width: 130px;
+}
+
+.depot-data-page .master-table th:nth-child(2),
+.depot-data-page .master-table td:nth-child(2),
+.depot-data-page .master-table th:nth-child(3),
+.depot-data-page .master-table td:nth-child(3),
+.depot-data-page .master-table th:nth-child(4),
+.depot-data-page .master-table td:nth-child(4) {
+  text-align: left;
+}
+
+.depot-data-page .master-table th:nth-child(2),
+.depot-data-page .master-table td:nth-child(2) {
+  padding-left: 22px;
+}
+
+.depot-data-page .master-pagination {
+  min-height: 38px;
+  padding: 7px 14px;
+}
+
 .customer-data-page .master-table th:nth-child(2),
 .customer-data-page .master-table th:nth-child(3),
 .customer-data-page .master-table th:nth-child(4),

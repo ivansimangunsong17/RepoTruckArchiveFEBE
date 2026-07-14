@@ -33,7 +33,9 @@ const salesOrderColumnCandidates = [
   'destination',
   'status',
   'sales_name',
+  'created_by_user_id',
   'created_by_name',
+  'updated_by_user_id',
   'updated_by_name',
   'created_at',
   'updated_at',
@@ -99,7 +101,13 @@ function isTruthyFilter(value) {
   return value === true || value === 'true' || value === '1';
 }
 
-function buildOrderWhere({ query: keyword = '', status = '', invoiced = false } = {}) {
+function buildOrderWhere({
+  query: keyword = '',
+  status = '',
+  invoiced = false,
+  ownerUserId = '',
+  ownerName = '',
+} = {}, { hasOwnerUserIdColumn = true } = {}) {
   const clauses = [];
   const params = [];
   const cleanKeyword = keyword.trim();
@@ -118,6 +126,17 @@ function buildOrderWhere({ query: keyword = '', status = '', invoiced = false } 
 
   if (isTruthyFilter(invoiced)) {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
+  }
+
+  if (ownerUserId && hasOwnerUserIdColumn) {
+    params.push(ownerUserId);
+    const ownerUserIdParam = params.length;
+    params.push(ownerName || '');
+    const ownerNameParam = params.length;
+    clauses.push(`(created_by_user_id = $${ownerUserIdParam} or (created_by_user_id is null and created_by_name = $${ownerNameParam}))`);
+  } else if (ownerName) {
+    params.push(ownerName);
+    clauses.push(`created_by_name = $${params.length}`);
   }
 
   return {
@@ -229,8 +248,14 @@ async function refreshOrderStatus(client, salesOrderId) {
 
 export async function findSalesOrdersPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
-  const { whereSql, params } = buildOrderWhere(options);
-  const { whereSql: summaryWhereSql, params: summaryParams } = buildOrderWhere({ query: options.query });
+  const columnSet = await getSalesOrderColumnSet();
+  const ownerColumnOptions = { hasOwnerUserIdColumn: columnSet.has('created_by_user_id') };
+  const { whereSql, params } = buildOrderWhere(options, ownerColumnOptions);
+  const { whereSql: summaryWhereSql, params: summaryParams } = buildOrderWhere({
+    query: options.query,
+    ownerUserId: options.ownerUserId,
+    ownerName: options.ownerName,
+  }, ownerColumnOptions);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
   const orderColumns = await getSalesOrderColumns();

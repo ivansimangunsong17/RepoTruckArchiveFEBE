@@ -58,13 +58,13 @@ if (!hasDatabase) {
         select storage_path
         from attachments
         where entity_id in (
-          select id from sales_orders where so_number like $1
+          select id from sales_orders where so_number ilike $1
           union
           select cj.id from container_jobs cj
           join sales_orders so on so.id = cj.sales_order_id
-          where so.so_number like $1
+          where so.so_number ilike $1
         )
-        or storage_path like $2
+        or storage_path ilike $2
       `,
       [`SO-${runId}%`, `%${runId}%`],
     );
@@ -78,9 +78,9 @@ if (!hasDatabase) {
       [`%${runId}%`, `B-${String(runId).slice(-4)}%`],
     );
 
-    await query('delete from activity_logs where metadata::text like $1 or actor_name like $2', [`%${runId}%`, `%${runId}%`]);
-    await query('delete from attachments where storage_path like $1 or entity_id in (select id from sales_orders where so_number like $2)', [`%${runId}%`, `SO-${runId}%`]);
-    await query('delete from sales_orders where so_number like $1', [`SO-${runId}%`]);
+    await query('delete from activity_logs where metadata::text ilike $1 or actor_name ilike $2 or target ilike $2', [`%${runId}%`, `%${runId}%`]);
+    await query('delete from attachments where storage_path ilike $1 or entity_id in (select id from sales_orders where so_number ilike $2)', [`%${runId}%`, `SO-${runId}%`]);
+    await query('delete from sales_orders where so_number ilike $1', [`SO-${runId}%`]);
     await query('delete from vehicles where plate_number like $1', [`B-${String(runId).slice(-4)}%`]);
     await query('delete from users where email like $1', [`${runId}.%@example.test`]);
 
@@ -224,6 +224,7 @@ if (!hasDatabase) {
     await seedUsers();
     let adminToken = '';
     let salesToken = '';
+    let legacyToken = '';
     let observerToken = '';
 
     await t.test('auth: login sukses, login gagal, me valid, me tanpa token ditolak', async () => {
@@ -249,6 +250,7 @@ if (!hasDatabase) {
 
       const legacyLogin = await login(users.legacy.email);
       assert.equal(legacyLogin.status, 200);
+      legacyToken = legacyLogin.body.data.token;
       const legacyAfter = await query('select password_hash from users where email = $1', [users.legacy.email]);
       assert.match(legacyAfter.rows[0].password_hash, /^\$2[aby]\$/);
 
@@ -306,9 +308,17 @@ if (!hasDatabase) {
     });
 
     await t.test('sales order: list, create, update, cancel', async () => {
-      const createdOrder = await api('/api/sales-orders', {
+      const blockedAdminCreate = await api('/api/sales-orders', {
         method: 'POST',
         token: adminToken,
+        body: salesOrderPayload({ soNumber: `SO-${runId}-ADMIN-CREATE`.toUpperCase() }),
+      });
+      assert.equal(blockedAdminCreate.status, 403);
+      assert.equal(blockedAdminCreate.body.error.code, 'SALES_ORDER_CREATE_SALES_ONLY');
+
+      const createdOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
         body: salesOrderPayload(),
       });
       assert.equal(createdOrder.status, 201);
@@ -321,6 +331,22 @@ if (!hasDatabase) {
       const list = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
       assert.equal(list.status, 200);
       assert.ok(list.body.data.rows.some((row) => row.id === created.orderId));
+
+      const salesScopedList = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: salesToken });
+      assert.equal(salesScopedList.status, 200);
+      assert.equal(salesScopedList.body.data.rows.some((row) => row.id === created.orderId), true);
+
+      const blockedSalesUpdate = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: legacyToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Bekasi',
+          updatedBy: 'Sprint2C Legacy',
+        }),
+      });
+      assert.equal(blockedSalesUpdate.status, 403);
+      assert.equal(blockedSalesUpdate.body.error.code, 'SALES_ORDER_OWNER_FORBIDDEN');
 
       const updatedOrder = await api(`/api/sales-orders/${created.orderId}`, {
         method: 'PATCH',
@@ -350,7 +376,7 @@ if (!hasDatabase) {
 
       const cancelCandidate = await api('/api/sales-orders', {
         method: 'POST',
-        token: adminToken,
+        token: salesToken,
         body: salesOrderPayload({ soNumber: created.cancelSoNumber }),
       });
       assert.equal(cancelCandidate.status, 201);
@@ -494,7 +520,7 @@ if (!hasDatabase) {
 
       const cancelJobOrder = await api('/api/sales-orders', {
         method: 'POST',
-        token: adminToken,
+        token: salesToken,
         body: salesOrderPayload({ soNumber: created.cancelJobSoNumber }),
       });
       assert.equal(cancelJobOrder.status, 201);

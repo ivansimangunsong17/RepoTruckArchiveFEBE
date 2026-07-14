@@ -133,7 +133,7 @@ describe('MasterDataPage database mode', () => {
     })));
   });
 
-  it('meminta halaman master dari Supabase dengan page size yang benar', async () => {
+  it('meminta halaman master dari backend API dengan page size yang benar', async () => {
     renderPage();
 
     await waitFor(() => expect(fetchMasterPage).toHaveBeenCalledWith('customers', {

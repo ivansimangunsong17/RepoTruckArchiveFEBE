@@ -213,6 +213,46 @@ function normalizeSalesOrderPayload(payload) {
   };
 }
 
+function getActorName(actor) {
+  return actor?.name || actor?.email || 'System';
+}
+
+function canSalesAccessOrder(actor, order) {
+  if (actor?.role !== 'sales') return true;
+  if (!order) return false;
+  if (order.createdByUserId) return order.createdByUserId === actor.sub;
+  return String(order.createdBy || '').trim() === getActorName(actor);
+}
+
+function ensureCanAccessSalesOrder(actor, order) {
+  if (canSalesAccessOrder(actor, order)) return;
+  const error = new Error('Sales Order ini bukan milik akun sales Anda.');
+  error.statusCode = 403;
+  error.code = 'SALES_ORDER_OWNER_FORBIDDEN';
+  throw error;
+}
+
+function applyActorToPayload(payload, actor, currentOrder = null) {
+  const actorName = getActorName(actor);
+  if (currentOrder) {
+    return {
+      ...payload,
+      createdBy: currentOrder.createdBy || actorName,
+      createdByUserId: currentOrder.createdByUserId || null,
+      updatedBy: actorName,
+      updatedByUserId: actor?.sub || null,
+    };
+  }
+
+  return {
+    ...payload,
+    createdBy: actorName,
+    createdByUserId: actor?.sub || null,
+    updatedBy: actorName,
+    updatedByUserId: actor?.sub || null,
+  };
+}
+
 function validateSalesOrderPayload(payload, currentOrder = null) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload Sales Order harus berupa object.');
@@ -297,13 +337,29 @@ export async function getSalesOrder(id) {
   return order;
 }
 
-export async function saveSalesOrder(payload, id) {
+export async function saveSalesOrder(payload, id, actor) {
   const normalizedPayload = normalizeSalesOrderPayload(payload);
   const currentOrder = id ? await findSalesOrderById(id) : null;
-  validateSalesOrderPayload(normalizedPayload, currentOrder);
-  return id ? updateSalesOrder(id, normalizedPayload) : createSalesOrder(normalizedPayload);
+  if (id && !currentOrder) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  if (id) ensureCanAccessSalesOrder(actor, currentOrder);
+  const payloadWithActor = applyActorToPayload(normalizedPayload, actor, currentOrder);
+  validateSalesOrderPayload(payloadWithActor, currentOrder);
+  return id ? updateSalesOrder(id, payloadWithActor) : createSalesOrder(payloadWithActor);
 }
 
-export function removeSalesOrder(id) {
+export async function removeSalesOrder(id, actor) {
+  const order = await findSalesOrderById(id);
+  if (!order) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  ensureCanAccessSalesOrder(actor, order);
   return cancelSalesOrder(id);
 }

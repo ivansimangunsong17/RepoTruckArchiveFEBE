@@ -82,6 +82,20 @@ function hasProcessedContainer(order) {
   return getOrderContainers(order).some((container) => !['received', 'waiting_operational'].includes(container.status || 'received'));
 }
 
+function userDisplayName(user) {
+  return String(user?.fullName || user?.name || user?.email || '').trim();
+}
+
+function isSalesOrderOwner(user, order) {
+  if (!user || !order) return false;
+  if (order.createdByUserId) return order.createdByUserId === user.id;
+  return String(order.createdBy || '').trim() === userDisplayName(user);
+}
+
+function getSalesGroupName(order) {
+  return String(order?.salesName || order?.createdBy || 'Tanpa Nama Sales').trim() || 'Tanpa Nama Sales';
+}
+
 function isInvoiced(order) {
   return Boolean(String(order?.invoiceNumber || '').trim());
 }
@@ -209,16 +223,28 @@ function SalesOrdersPage() {
   const [error, setError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [invoiceOverrides, setInvoiceOverrides] = useState({});
-  const [billingStatusOverrides, setBillingStatusOverrides] = useState(() => readLocalBillingStatusOverrides());
+  const [billingStatusOverrides, setBillingStatusOverrides] = useState(() => (
+    archive.isDatabaseMode ? {} : readLocalBillingStatusOverrides()
+  ));
   const [invoiceDraft, setInvoiceDraft] = useState('');
   const [invoiceEditOpen, setInvoiceEditOpen] = useState(false);
   const [billingStatusDraft, setBillingStatusDraft] = useState('belum_invoice');
   const [formOpen, setFormOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
-  const canManage = hasPermission(user, 'orders.create');
+  const canCreateOrder = user?.role === USER_ROLES.SALES && hasPermission(user, 'orders.create');
+  const canUpdateOrder = hasPermission(user, 'orders.update');
   const canCancel = hasPermission(user, 'orders.cancel');
   const canViewCommercial = hasPermission(user, 'commercial.read');
-  const canEditCommercial = user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SALES;
+  const canModifyOrder = (order) => {
+    if (!order || !canUpdateOrder) return false;
+    if (user?.role === USER_ROLES.ADMIN) return true;
+    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order);
+    return false;
+  };
+  const canEditCommercialOrder = (order) => canViewCommercial && canModifyOrder(order);
+  const canEditSelectedCommercial = canEditCommercialOrder(selectedOrder);
+  const canModifySelectedOrder = canModifyOrder(selectedOrder);
+  const canCancelSelectedOrder = canCancel && user?.role === USER_ROLES.ADMIN;
 
   useEffect(() => {
     if (user?.role === USER_ROLES.OBSERVER) {
@@ -248,15 +274,19 @@ function SalesOrdersPage() {
     return invoiceOverrides[order.id] ?? order.invoiceNumber ?? '';
   }, [invoiceOverrides]);
 
-  useEffect(() => {
-    if (!selectedOrder || !canEditCommercial) setInvoiceEditOpen(false);
-    setInvoiceDraft(getOrderInvoiceNumber(selectedOrder));
-    setBillingStatusDraft(getBillingStatusValue(selectedOrder, billingStatusOverrides[selectedOrder?.id] || ''));
-  }, [selectedOrder, getOrderInvoiceNumber, billingStatusOverrides, canEditCommercial]);
+  const getBillingStatusOverride = useCallback((order) => (
+    archive.isDatabaseMode ? '' : billingStatusOverrides[order?.id] || ''
+  ), [archive.isDatabaseMode, billingStatusOverrides]);
 
   useEffect(() => {
-    persistLocalBillingStatusOverrides(billingStatusOverrides);
-  }, [billingStatusOverrides]);
+    if (!selectedOrder || !canEditSelectedCommercial) setInvoiceEditOpen(false);
+    setInvoiceDraft(getOrderInvoiceNumber(selectedOrder));
+    setBillingStatusDraft(getBillingStatusValue(selectedOrder, getBillingStatusOverride(selectedOrder)));
+  }, [selectedOrder, getOrderInvoiceNumber, getBillingStatusOverride, canEditSelectedCommercial]);
+
+  useEffect(() => {
+    if (!archive.isDatabaseMode) persistLocalBillingStatusOverrides(billingStatusOverrides);
+  }, [archive.isDatabaseMode, billingStatusOverrides]);
 
   const localOrders = archive.orders;
   const queryMatchedLocalOrders = useMemo(() => localOrders.filter((order) =>
@@ -275,6 +305,20 @@ function SalesOrdersPage() {
   const visibleOrders = archive.isDatabaseMode
     ? databaseOrders
     : filteredDemoOrders.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const groupedVisibleOrders = useMemo(() => {
+    const groups = new Map();
+    visibleOrders.forEach((order, index) => {
+      const salesName = getSalesGroupName(order);
+      if (!groups.has(salesName)) {
+        groups.set(salesName, { salesName, orders: [] });
+      }
+      groups.get(salesName).orders.push({
+        order,
+        rowNumber: (currentPage - 1) * PAGE_SIZE + index + 1,
+      });
+    });
+    return [...groups.values()];
+  }, [currentPage, visibleOrders]);
   const selectedOrderContainers = getOrderContainers(selectedOrder);
   const selectedOrderLineItems = getOrderLineItems(selectedOrder);
   const statusCounts = archive.isDatabaseMode
@@ -298,11 +342,11 @@ function SalesOrdersPage() {
   function openOrderDetail(order) {
     setSelectedOrder(order);
     setInvoiceDraft(getOrderInvoiceNumber(order));
-    setBillingStatusDraft(getBillingStatusValue(order, billingStatusOverrides[order.id] || ''));
+    setBillingStatusDraft(getBillingStatusValue(order, getBillingStatusOverride(order)));
   }
 
   async function saveInvoiceDraft() {
-    if (!canEditCommercial || !selectedOrder) return;
+    if (!canEditSelectedCommercial || !selectedOrder) return;
 
       const nextValue = invoiceDraft.trim();
     if (!nextValue) {
@@ -346,7 +390,7 @@ function SalesOrdersPage() {
   const invoiceActionLabel = getOrderInvoiceNumber(selectedOrder) ? 'Edit' : 'Simpan';
 
   async function saveBillingStatusDraft(nextValue = billingStatusDraft) {
-    if (!canEditCommercial || !selectedOrder) return;
+    if (!canEditSelectedCommercial || !selectedOrder) return;
 
     const nextBillingStatus = normalizeBillingStatus(nextValue, getOrderInvoiceNumber(selectedOrder));
     if (selectedOrder.status !== 'completed') {
@@ -367,15 +411,16 @@ function SalesOrdersPage() {
       return;
     }
 
-    setBillingStatusOverrides((current) => ({ ...current, [selectedOrder.id]: nextBillingStatus }));
-    setSelectedOrder((current) => (current ? { ...current, billingStatus: nextBillingStatus } : current));
+    if (!archive.isDatabaseMode) {
+      setBillingStatusOverrides((current) => ({ ...current, [selectedOrder.id]: nextBillingStatus }));
+      setSelectedOrder((current) => (current ? { ...current, billingStatus: nextBillingStatus } : current));
+    }
 
     try {
       const nextOrder = { ...selectedOrder, billingStatus: nextBillingStatus };
       if (archive.isDatabaseMode) {
         const savedOrder = await archive.upsertOrder(nextOrder, selectedOrder);
         setSelectedOrder(savedOrder);
-        setBillingStatusOverrides((current) => ({ ...current, [savedOrder.id]: nextBillingStatus }));
         setListVersion((value) => value + 1);
       } else {
         setSelectedOrder(nextOrder);
@@ -396,7 +441,7 @@ function SalesOrdersPage() {
   }
 
   function openInvoiceEditModal() {
-    if (!canEditCommercial) return;
+    if (!canEditSelectedCommercial) return;
     if (!selectedOrder) return;
     setInvoiceDraft(getOrderInvoiceNumber(selectedOrder));
     setInvoiceEditOpen(true);
@@ -486,7 +531,7 @@ function SalesOrdersPage() {
         eyebrow="Sales"
         title="Daftar Sales Order"
         description="Lihat dan kelola order customer dari proses awal, invoice, sampai pembayaran lunas."
-        actions={canManage ? <button className="primary-button" onClick={() => { setEditingOrder(null); setFormOpen(true); }}><Plus size={18} /> Input Sales Order</button> : null}
+        actions={canCreateOrder ? <button className="primary-button" onClick={() => { setEditingOrder(null); setFormOpen(true); }}><Plus size={18} /> Input Sales Order</button> : null}
       />
 
       <section className="panel">
@@ -531,51 +576,61 @@ function SalesOrdersPage() {
               <button className="secondary-button" type="button" onClick={() => setListVersion((value) => value + 1)}>Muat Ulang</button>
             </div>
           ) : null}
-          {!loading && !error ? visibleOrders.map((order, index) => {
-            const shipmentLabel = formatShipmentLabel(order.shipment);
-            const rowNumber = (currentPage - 1) * PAGE_SIZE + index + 1;
-            return (
-              <article className="order-card" key={order.id}>
-                <div className="order-summary">
-                  <div className="order-row-number">
-                    <span>No</span>
-                    <strong>{rowNumber}</strong>
-                  </div>
-                  <div className="order-primary">
-                    <span>Nomor SO</span>
-                    <strong>{order.soNumber}</strong>
-                  </div>
-                  <div>
-                    <span>Customer</span>
-                    <strong>{order.customer}</strong>
-                  </div>
-                  <div>
-                    <span>Jenis Order</span>
-                    <strong>{shipmentLabel}</strong>
-                  </div>
-                  <div className="order-billing-summary">
-                    <span>Status</span>
-                    <strong className={getBillingStatusTone(order, billingStatusOverrides[order.id] || '')}>
-                      {getBillingStatusLabel(order, billingStatusOverrides[order.id] || '')}
-                    </strong>
-                  </div>
-                  <div className="order-summary-actions">
-                    <button className="secondary-button" type="button" onClick={() => openOrderDetail(order)}>
-                      <Eye size={16} /> Detail
-                    </button>
-                  </div>
+          {!loading && !error ? groupedVisibleOrders.map((group) => (
+            <section className="sales-order-group" key={group.salesName}>
+              <header className="sales-order-group-header">
+                <div>
+                  <span>Sales</span>
+                  <strong>{group.salesName}</strong>
                 </div>
-              </article>
-            );
-          }) : null}
+                <small>{group.orders.length} SO</small>
+              </header>
+              {group.orders.map(({ order, rowNumber }) => {
+                const shipmentLabel = formatShipmentLabel(order.shipment);
+                return (
+                  <article className="order-card" key={order.id}>
+                    <div className="order-summary">
+                      <div className="order-row-number">
+                        <span>No</span>
+                        <strong>{rowNumber}</strong>
+                      </div>
+                      <div className="order-primary">
+                        <span>Nomor SO</span>
+                        <strong>{order.soNumber}</strong>
+                      </div>
+                      <div>
+                        <span>Customer</span>
+                        <strong>{order.customer}</strong>
+                      </div>
+                      <div>
+                        <span>Jenis Order</span>
+                        <strong>{shipmentLabel}</strong>
+                      </div>
+                      <div className="order-billing-summary">
+                        <span>Status</span>
+                        <strong className={getBillingStatusTone(order, getBillingStatusOverride(order))}>
+                          {getBillingStatusLabel(order, getBillingStatusOverride(order))}
+                        </strong>
+                      </div>
+                      <div className="order-summary-actions">
+                        <button className="secondary-button" type="button" onClick={() => openOrderDetail(order)}>
+                          <Eye size={16} /> Detail
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          )) : null}
 
           {!loading && !error && !totalItems ? (
             <div className="archive-empty-wrapper">
               <EmptyState
                 title="Belum ada Sales Order"
-                description={canManage ? 'Buat Sales Order pertama untuk mulai mengelola order customer.' : 'Sales Order akan tampil setelah dibuat oleh tim Sales.'}
+                description={canCreateOrder ? 'Buat Sales Order pertama untuk mulai mengelola order customer.' : 'Sales Order akan tampil setelah dibuat oleh tim Sales.'}
               />
-              {canManage ? <button className="primary-button" type="button" onClick={() => setFormOpen(true)}><Plus size={16} /> Buat Sales Order</button> : null}
+              {canCreateOrder ? <button className="primary-button" type="button" onClick={() => setFormOpen(true)}><Plus size={16} /> Buat Sales Order</button> : null}
             </div>
           ) : null}
         </div>
@@ -639,7 +694,7 @@ function SalesOrdersPage() {
                   <div className="order-invoice-card">
                     <div className="order-invoice-card-head">
                       <span>Billing</span>
-                      {canEditCommercial && getOrderInvoiceNumber(selectedOrder) ? (
+                      {canEditSelectedCommercial && getOrderInvoiceNumber(selectedOrder) ? (
                         <button type="button" className="secondary-button invoice-edit-button" onClick={openInvoiceEditModal}>
                           <Edit3 size={15} /> Edit
                         </button>
@@ -649,7 +704,7 @@ function SalesOrdersPage() {
                       <div className="order-invoice-card-value">
                         <strong>{getOrderInvoiceNumber(selectedOrder)}</strong>
                       </div>
-                    ) : canEditCommercial ? (
+                    ) : canEditSelectedCommercial ? (
                       <div className="order-invoice-card-body">
                         <input
                           value={invoiceDraft}
@@ -666,9 +721,9 @@ function SalesOrdersPage() {
                       </div>
                     )}
                     <div className="order-invoice-card-value">
-                      <strong>{getBillingStatusLabel(selectedOrder, billingStatusOverrides[selectedOrder.id] || '')}</strong>
+                      <strong>{getBillingStatusLabel(selectedOrder, getBillingStatusOverride(selectedOrder))}</strong>
                     </div>
-                    {canEditCommercial ? (
+                    {canEditSelectedCommercial ? (
                       <div className="order-billing-controls">
                         <label className="order-billing-select">
                           Status Billing
@@ -721,14 +776,14 @@ function SalesOrdersPage() {
                 </div>
               ) : null}
 
-              {canManage ? (
+              {canModifySelectedOrder ? (
                 <div className="order-management-actions">
                   {selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'completed' ? (
                     <button className="secondary-button" type="button" onClick={() => { setEditingOrder(selectedOrder); setFormOpen(true); setSelectedOrder(null); }}>
                       <Edit3 size={16} /> Edit Sales Order
                     </button>
                   ) : null}
-                  {canCancel && selectedOrder.status !== 'completed' && selectedOrder.status !== 'cancelled' ? (
+                  {canCancelSelectedOrder && selectedOrder.status !== 'completed' && selectedOrder.status !== 'cancelled' ? (
                     <button className="danger-button" type="button" disabled={hasProcessedContainer(selectedOrder)} onClick={() => cancelOrder(selectedOrder)}>
                       <Ban size={16} /> Batalkan Order
                     </button>
@@ -766,7 +821,7 @@ function SalesOrdersPage() {
         </div>
       ) : null}
 
-      {canEditCommercial && invoiceEditOpen ? (
+      {canEditSelectedCommercial && invoiceEditOpen ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setInvoiceEditOpen(false)}>
           <section className="invoice-confirm-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <header>

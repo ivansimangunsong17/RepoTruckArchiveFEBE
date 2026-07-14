@@ -28,6 +28,7 @@ export function LocationMasterPage({
   fields,
   columns,
   toolbarDescription,
+  pageClassName,
 }) {
   return (
     <MasterDataPage
@@ -38,14 +39,20 @@ export function LocationMasterPage({
       fields={[...fields, statusField, { key: 'notes', section: 'Catatan', label: 'Catatan', type: 'textarea', placeholder: 'Catatan tambahan', full: true }]}
       columns={[
         ...columns,
-        { key: 'status', label: 'Status', render: (value) => <StatusCell value={value} /> },
+        {
+          key: 'status',
+          label: 'Status',
+          headerClassName: '!w-36 !text-center',
+          cellClassName: '!w-36 !text-center',
+          render: (value) => <StatusCell value={value} />,
+        },
       ]}
       initialRows={emptyRows}
       resource={resource}
       storageKey={storageKey}
       uniqueKeys={['name', 'code']}
       filters={[{ key: 'status', label: 'Semua Status', options: ['Aktif', 'Tidak Aktif'] }]}
-      pageClassName="driver-data-page truck-data-page"
+      pageClassName={pageClassName || 'driver-data-page truck-data-page'}
       pageSize={20}
       showModeChip={false}
       toolbarTitle={`Daftar ${singular}`}
