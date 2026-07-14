@@ -1,5 +1,6 @@
 import {
   archiveMasterController,
+  calculateDestinationUjController,
   createMasterController,
   getMasterController,
   listMasterController,
@@ -31,6 +32,12 @@ export const masterRoutes = [
     path: '/api/master/:resource/:id',
     permission: 'master_data.read',
     handler: getMasterController,
+  },
+  {
+    method: 'GET',
+    path: '/api/master/destinations/:id/calculate-uj',
+    permission: 'master_data.read',
+    handler: calculateDestinationUjController,
   },
   {
     method: 'PATCH',

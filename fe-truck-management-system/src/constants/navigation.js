@@ -26,7 +26,6 @@ const operationalRoles = [
   USER_ROLES.OBSERVER,
 ];
 const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
-const managementRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 
 export const navigationGroups = [
   {
@@ -74,8 +73,6 @@ export const navigationGroups = [
     label: 'Monitoring',
     items: [
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
-      { to: '/driver-performance', label: 'Performa Driver', icon: Truck, roles: managementRoles },
-      { to: '/unit-performance', label: 'Performa Unit', icon: Truck, roles: managementRoles },
     ],
   },
   {

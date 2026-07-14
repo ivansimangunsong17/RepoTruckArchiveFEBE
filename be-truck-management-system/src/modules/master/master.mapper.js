@@ -1,5 +1,11 @@
 const fileView = (file) => file || null;
 
+function toNullableNumber(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 export const resourceConfig = {
   customers: {
     table: 'customers',
@@ -227,7 +233,7 @@ export const resourceConfig = {
   },
   destinations: {
     table: 'destination_locations',
-    searchable: ['name', 'area', 'address', 'operational_status', 'notes'],
+    searchable: ['name', 'area', 'address', 'operational_status', 'notes', 'uj_notes'],
     filters: { status: 'operational_status' },
     archivedColumn: 'archived_at',
     orderColumn: 'created_at',
@@ -238,6 +244,9 @@ export const resourceConfig = {
       address: row.address || '',
       status: row.operational_status || 'Aktif',
       notes: row.notes || '',
+      uj20ft: row.uj_20ft == null ? null : Number(row.uj_20ft),
+      uj40ft: row.uj_40ft == null ? null : Number(row.uj_40ft),
+      ujNotes: row.uj_notes || '',
     }),
     toDb: (row) => ({
       name: row.name,
@@ -245,6 +254,9 @@ export const resourceConfig = {
       address: row.address || null,
       operational_status: row.status || 'Aktif',
       notes: row.notes || null,
+      uj_20ft: toNullableNumber(row.uj20ft ?? row.uj_20ft),
+      uj_40ft: toNullableNumber(row.uj40ft ?? row.uj_40ft),
+      uj_notes: row.ujNotes || row.uj_notes || null,
     }),
   },
   stids: {

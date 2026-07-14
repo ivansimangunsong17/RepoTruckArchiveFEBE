@@ -9,7 +9,19 @@ const joinedJobColumns = `
   cj.status, cj.received_at, cj.running_at, cj.completed_at, cj.created_by_name,
   cj.updated_by_name, cj.created_at, cj.updated_at,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
-  so.origin, so.destination, so.trip_date, so.created_by_name as order_created_by_name
+  so.origin, so.destination, so.trip_date, so.created_by_name as order_created_by_name,
+  (
+    select count(*)::int
+    from container_jobs order_cj
+    where order_cj.sales_order_id = cj.sales_order_id
+      and upper(replace(order_cj.container_size, ' ', '')) = '20FT'
+  ) as order_qty_20ft,
+  (
+    select count(*)::int
+    from container_jobs order_cj
+    where order_cj.sales_order_id = cj.sales_order_id
+      and upper(replace(order_cj.container_size, ' ', '')) = '40FT'
+  ) as order_qty_40ft
 `;
 
 const attachmentColumns = `

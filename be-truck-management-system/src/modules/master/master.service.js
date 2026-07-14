@@ -51,3 +51,30 @@ export async function saveMasterRow(resource, payload, id) {
 export function removeMasterRow(resource, id) {
   return archiveMasterRow(resource, id);
 }
+
+function parseQuantity(value) {
+  const quantity = Number(value || 0);
+  return Number.isFinite(quantity) && quantity > 0 ? quantity : 0;
+}
+
+export async function calculateDestinationUj(id, query = {}) {
+  const destination = await getMasterRow('destinations', id);
+  const qty20ft = parseQuantity(query.qty20 ?? query.qty20ft ?? query.qty20FT);
+  const qty40ft = parseQuantity(query.qty40 ?? query.qty40ft ?? query.qty40FT);
+  const uj20ft = Number(destination.uj20ft || 0);
+  const uj40ft = Number(destination.uj40ft || 0);
+  const totalUj20ft = qty20ft * uj20ft;
+  const totalUj40ft = qty40ft * uj40ft;
+
+  return {
+    destinationId: destination.id,
+    destinationName: destination.name,
+    uj20ft,
+    uj40ft,
+    qty20ft,
+    qty40ft,
+    totalUj20ft,
+    totalUj40ft,
+    totalRecommendedUj: totalUj20ft + totalUj40ft,
+  };
+}

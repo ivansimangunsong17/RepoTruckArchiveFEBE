@@ -1,12 +1,24 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
+  calculateDestinationUj,
   getMasterRow,
   listMasterRows,
   listMasterRowsPage,
   removeMasterRow,
   saveMasterRow,
 } from './master.service.js';
+
+function isDestinationResource(resource) {
+  return resource === 'destinations';
+}
+
+function destinationUjChanged(before, after) {
+  if (!before || !after) return false;
+  return Number(before.uj20ft || 0) !== Number(after.uj20ft || 0)
+    || Number(before.uj40ft || 0) !== Number(after.uj40ft || 0)
+    || String(before.ujNotes || '') !== String(after.ujNotes || '');
+}
 
 export async function listMasterController(request, response) {
   const rows = await listMasterRows(request.params.resource);
@@ -33,12 +45,20 @@ export async function createMasterController(request, response) {
       entityId: saved.id,
       afterData: saved,
     });
+  } else if (isDestinationResource(request.params.resource)) {
+    await safeRecordActivityLog(request, {
+      action: 'CREATE_DESTINATION',
+      module: 'master_data',
+      entityType: 'destination',
+      entityId: saved.id,
+      afterData: saved,
+    });
   }
   sendSuccess(response, saved, 'Data master berhasil disimpan.', 201);
 }
 
 export async function updateMasterController(request, response) {
-  const before = request.params.resource === 'trucks'
+  const before = request.params.resource === 'trucks' || isDestinationResource(request.params.resource)
     ? await getMasterRow(request.params.resource, request.params.id)
     : null;
   const saved = await saveMasterRow(request.params.resource, request.body, request.params.id);
@@ -51,12 +71,21 @@ export async function updateMasterController(request, response) {
       beforeData: before,
       afterData: saved,
     });
+  } else if (isDestinationResource(request.params.resource)) {
+    await safeRecordActivityLog(request, {
+      action: destinationUjChanged(before, saved) ? 'UPDATE_DESTINATION_UJ' : 'UPDATE_DESTINATION',
+      module: 'master_data',
+      entityType: 'destination',
+      entityId: saved.id,
+      beforeData: before,
+      afterData: saved,
+    });
   }
   sendSuccess(response, saved, 'Data master berhasil diperbarui.');
 }
 
 export async function archiveMasterController(request, response) {
-  const before = request.params.resource === 'trucks'
+  const before = request.params.resource === 'trucks' || isDestinationResource(request.params.resource)
     ? await getMasterRow(request.params.resource, request.params.id)
     : null;
   await removeMasterRow(request.params.resource, request.params.id);
@@ -69,6 +98,20 @@ export async function archiveMasterController(request, response) {
       beforeData: before,
       afterData: null,
     });
+  } else if (isDestinationResource(request.params.resource)) {
+    await safeRecordActivityLog(request, {
+      action: 'DELETE_DESTINATION',
+      module: 'master_data',
+      entityType: 'destination',
+      entityId: request.params.id,
+      beforeData: before,
+      afterData: null,
+    });
   }
   sendSuccess(response, { id: request.params.id }, 'Data master berhasil diarsipkan.');
+}
+
+export async function calculateDestinationUjController(request, response) {
+  const result = await calculateDestinationUj(request.params.id, request.query);
+  sendSuccess(response, result);
 }

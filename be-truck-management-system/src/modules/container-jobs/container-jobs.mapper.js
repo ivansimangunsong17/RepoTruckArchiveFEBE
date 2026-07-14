@@ -34,6 +34,8 @@ export function mapContainerJob(row, attachments = []) {
     origin: row.origin,
     destination: row.destination,
     tripDate: row.trip_date,
+    qty20ft: Number(row.order_qty_20ft || 0),
+    qty40ft: Number(row.order_qty_40ft || 0),
     containerNumber: row.container_number,
     size: row.container_size,
     type: row.container_type,

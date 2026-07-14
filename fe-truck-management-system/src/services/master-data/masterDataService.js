@@ -97,3 +97,11 @@ export function resetMasterUserPassword(row) {
   if (!row?.id) throw new Error('ID user wajib tersedia untuk reset password.');
   return httpClient.post(`/users/${row.id}/reset-password`, {});
 }
+
+export function calculateDestinationUj(destinationId, { qty20 = 0, qty40 = 0 } = {}) {
+  const params = new URLSearchParams({
+    qty20: String(qty20),
+    qty40: String(qty40),
+  });
+  return httpClient.get(`/master/destinations/${destinationId}/calculate-uj?${params.toString()}`);
+}

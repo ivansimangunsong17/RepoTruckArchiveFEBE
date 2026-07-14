@@ -266,6 +266,89 @@ export async function getSalesOrderReport(options = {}) {
   };
 }
 
+function parseRevenuePeriod(options = {}) {
+  const now = new Date();
+  const year = Number(options.year || now.getFullYear());
+  const month = Number(options.month || now.getMonth() + 1);
+
+  if (!Number.isInteger(year) || year < 2000 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12) {
+    const error = new Error('Bulan dan tahun laporan revenue tidak valid.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const dateFrom = `${year}-${String(month).padStart(2, '0')}-01`;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const dateToExclusive = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+  return { year, month, dateFrom, dateToExclusive };
+}
+
+function formatContainerSummary(row = {}) {
+  const parts = [];
+  const qty20 = Number(row.qty_20ft || 0);
+  const qty40 = Number(row.qty_40ft || 0);
+  if (qty20) parts.push(`${qty20} x 20FT`);
+  if (qty40) parts.push(`${qty40} x 40FT`);
+  return parts.join(', ') || `${Number(row.total_containers || 0)} container`;
+}
+
+export async function getMonthlyRevenueReport(options = {}) {
+  const period = parseRevenuePeriod(options);
+  const result = await query(
+    `
+      with completed_orders as (
+        select
+          so.id,
+          so.so_number,
+          so.customer_name,
+          so.destination,
+          so.total_amount,
+          coalesce(max(cj.completed_at)::date, so.trip_date) as completed_date,
+          count(cj.id)::int as total_containers,
+          count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '20FT')::int as qty_20ft,
+          count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '40FT')::int as qty_40ft
+        from sales_orders so
+        join container_jobs cj on cj.sales_order_id = so.id
+        where so.status = 'completed'
+          and cj.status = 'completed'
+        group by so.id
+      )
+      select *
+      from completed_orders
+      where completed_date >= $1::date
+        and completed_date < $2::date
+      order by completed_date desc, so_number desc
+    `,
+    [period.dateFrom, period.dateToExclusive],
+  );
+
+  const rows = result.rows.map((row) => ({
+    id: row.id,
+    completedDate: row.completed_date,
+    soNumber: row.so_number,
+    customer: row.customer_name,
+    destination: row.destination,
+    container: formatContainerSummary(row),
+    totalContainers: Number(row.total_containers || 0),
+    revenue: Number(row.total_amount || 0),
+  }));
+
+  return {
+    period: {
+      month: period.month,
+      year: period.year,
+    },
+    rows,
+    summary: {
+      totalRevenue: rows.reduce((total, row) => total + row.revenue, 0),
+      totalOrders: rows.length,
+      totalContainers: rows.reduce((total, row) => total + row.totalContainers, 0),
+    },
+  };
+}
+
 export async function getOperationReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const dateFilter = buildDateWhere('so.trip_date', options);

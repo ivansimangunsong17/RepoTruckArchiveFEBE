@@ -770,6 +770,9 @@ function MasterDataPage({
                               placeholder={field.placeholder}
                               required={(field.required || field.requiredIf?.(form)) && (!field.requiredOnCreate || !editingId)}
                               minLength={field.minLength}
+                              min={field.min}
+                              step={field.step}
+                              inputMode={field.inputMode}
                             />
                           )}
                           {field.hint ? <small>{field.hint}</small> : null}

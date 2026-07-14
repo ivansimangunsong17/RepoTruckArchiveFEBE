@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
+import UjRecommendationCard from '../operations/UjRecommendationCard';
 import { validateArchiveFile } from '../../utils/fileValidation';
 
 const documentFields = [
@@ -74,7 +75,7 @@ function generateSpkNumber() {
   return `SPK-${yearMonth}-${suffix}`;
 }
 
-function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks }) {
+function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDestinations }) {
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
   const fileInputRefs = useRef({});
   const trucks = (Array.isArray(masterTrucks) ? masterTrucks : fallbackTruckRows)
@@ -345,6 +346,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
           <div className="form-section">
             <h3>RPUJ & SPK</h3>
+            <div className="mb-4">
+              <UjRecommendationCard job={container} destinations={masterDestinations} />
+            </div>
             <div className="operational-rpuj-spk-grid">
               <div className="operational-document-card operational-rpuj-card">
                 <span>RPUJ</span>
