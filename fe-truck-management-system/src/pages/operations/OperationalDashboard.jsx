@@ -219,9 +219,9 @@ function OperationalDashboard() {
                   <small>Dokumen perjalanan</small>
                 </div>
                 <div>
-                  <span>Surat Timbang</span>
-                  <strong>{selectedExistingJob.weighingDocument || 'Belum tersedia'}</strong>
-                  <small>Dokumen timbang</small>
+                  <span>TILA / Delivery Card / Gatepass / SP2</span>
+                  <strong>{selectedExistingJob.tilaGatepassDocument || selectedExistingJob.unloadingVoucher || selectedExistingJob.weighingDocument || 'Belum tersedia'}</strong>
+                  <small>Dokumen operasional</small>
                 </div>
                 <div>
                   <span>Catatan</span>

@@ -3,6 +3,8 @@ import { Plus, Trash2, X } from 'lucide-react';
 import { fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
+import { calculateUjRecommendation } from '../../utils/ujRecommendation';
+import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
 import { parseOtherCost, serializeOtherCost } from '../../utils/otherCost';
 
@@ -10,16 +12,14 @@ const documentFields = [
   ['spkDocument', 'Lampiran Biaya Lainnya'],
   ['eirDocument', 'Lampiran EIR'],
   ['loadingVoucherDocument', 'No. Bon Muat / Bon Bongkar'],
-  ['unloadingVoucherDocument', 'No. TILA / Delivery Card'],
+  ['tilaGatepassDocumentFile', 'No. TILA / Delivery Card / Gatepass / SP2'],
   ['travelDocumentFile', 'No. Surat Jalan'],
-  ['weighingDocumentFile', 'No. Gatepass / SP2'],
 ];
 
 const operationalDocumentFields = [
   { valueField: 'loadingVoucher', fileField: 'loadingVoucherDocument', label: 'No. Bon Muat / Bon Bongkar' },
-  { valueField: 'unloadingVoucher', fileField: 'unloadingVoucherDocument', label: 'No. TILA / Delivery Card' },
+  { valueField: 'tilaGatepassDocument', fileField: 'tilaGatepassDocumentFile', label: 'No. TILA / Delivery Card / Gatepass / SP2' },
   { valueField: 'travelDocument', fileField: 'travelDocumentFile', label: 'No. Surat Jalan' },
-  { valueField: 'weighingDocument', fileField: 'weighingDocumentFile', label: 'No. Gatepass / SP2' },
 ];
 
 const OPERATIONAL_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
@@ -60,7 +60,7 @@ function normalizeTruck(truck, fallbackRows = []) {
 
 function isTruckCompatibleWithContainer(truck, containerSize) {
   const truckCapacity = getTruckCapacity(truck);
-  return !containerSize || !truckCapacity || truckCapacity === containerSize;
+  return !containerSize || !truckCapacity || truckCapacity === 'COMBO' || truckCapacity === containerSize;
 }
 
 function nowForDateTimeInput() {
@@ -74,6 +74,17 @@ function generateSpkNumber() {
   const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
   const suffix = String(now.getTime()).slice(-4);
   return `SPK-${yearMonth}-${suffix}`;
+}
+
+function spkValue(value) {
+  const normalized = String(value ?? '').trim();
+  return normalized || '-';
+}
+
+function formatTruckUnitCode(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  return normalized.replace(/^TRK-?/i, '').replace(/^0+(\d)/, '$1') || normalized;
 }
 
 function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDestinations }) {
@@ -97,21 +108,23 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     eirDocument: container.eirDocument || null,
     loadingVoucher: container.loadingVoucher || '',
     loadingVoucherDocument: container.loadingVoucherDocument || null,
-    unloadingVoucher: container.unloadingVoucher || '',
-    unloadingVoucherDocument: container.unloadingVoucherDocument || null,
+    tilaGatepassDocument: container.tilaGatepassDocument || container.unloadingVoucher || container.weighingDocument || '',
+    tilaGatepassDocumentFile: container.tilaGatepassDocumentFile || container.unloadingVoucherDocument || container.weighingDocumentFile || null,
     driver: container.driver || '',
     chassis: container.chassis || '',
     plateNumber: container.plateNumber || '',
     travelDocument: container.travelDocument || '',
     travelDocumentFile: container.travelDocumentFile || null,
-    weighingDocument: container.weighingDocument || '',
-    weighingDocumentFile: container.weighingDocumentFile || null,
     otherDocuments: container.otherDocuments || [],
     status: container.status || 'received',
     runningAt: container.runningAt?.slice(0, 16) || '',
     completedAt: container.completedAt?.slice(0, 16) || '',
   });
   const [error, setError] = useState('');
+  const ujRecommendation = calculateUjRecommendation(container, masterDestinations);
+  const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
+  const otherCostAmountValue = Number(form.otherCostAmount || 0);
+  const totalJourneyCost = ujAmount + otherCostAmountValue;
 
   useEffect(() => {
     function closeOnEscape(event) {
@@ -207,22 +220,26 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   }
 
   function buildSpkPreviewContent() {
+    const selectedTruck = trucks.find((truck) => truck.plateNumber === form.plateNumber || truck.plateNumber === container.plateNumber);
+    const truckCode = formatTruckUnitCode(selectedTruck?.unitCode || container.unitCode || container.truckCode);
+    const plateNumber = form.plateNumber || container.plateNumber || '';
+    const truckPlate = truckCode && plateNumber ? `${truckCode} - ${plateNumber}` : truckCode || plateNumber || '-';
+    const rpujLabel = ujAmount > 0 ? formatCurrency(ujAmount) : '-';
+
     return [
       'SURAT PERINTAH KERJA',
       `No. SPK: ${form.spkNumber || '-'}`,
-      `Sales Order: ${container.soNumber || '-'}`,
-      `Customer: ${container.customer || '-'}`,
-      `No. DO: ${container.doNumber || '-'}`,
-      `Jenis Order: ${container.shipment || container.jobType || '-'}`,
-      `Nama Jasa: ${container.serviceName || '-'}`,
-      `Truck / Plat: ${form.chassis || container.chassis || form.plateNumber || container.plateNumber || '-'}`,
-      `Driver: ${form.driver || container.driver || '-'}`,
-      `No HP Driver: ${container.driverPhone || container.driverPhoneNumber || '-'}`,
-      `Origin: ${container.origin || '-'}`,
-      `Destination: ${container.destination || '-'}`,
-      `Container: ${container.containerNumber || '-'}`,
-      `Size: ${container.size || '-'}`,
-      `Tanggal Jalan: ${container.tripDate || '-'}`,
+      `Customer: ${spkValue(container.customer)}`,
+      `Jenis Order: ${spkValue(container.shipment || container.jobType)}`,
+      `Truck / Plat: ${truckPlate}`,
+      `Driver: ${spkValue(form.driver || container.driver)}`,
+      `Nama Kapal : ${spkValue(container.vesselName || container.shipName || container.namaKapal)}`,
+      `Terminal : ${spkValue(container.terminal)}`,
+      `Depo : ${spkValue(container.origin)}`,
+      `Destination: ${spkValue(container.destination)}`,
+      `Container Size: ${spkValue(container.size || container.containerSize)}`,
+      `Tanggal Jalan: ${spkValue(container.tripDate)}`,
+      `RPUJ ${rpujLabel}`,
     ].join('\n');
   }
 
@@ -302,27 +319,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       return;
     }
     if (submitForm.status === 'completed') {
-      const missing = [
-        !submitForm.driver && 'driver',
-        !submitForm.plateNumber && 'truck',
-        !submitForm.containerNumber && 'nomor container',
-        !submitForm.runningAt && 'waktu mulai',
-        !submitForm.completedAt && 'waktu selesai',
-        !submitForm.spkNumber && 'nomor SPK',
-        !submitForm.loadingVoucher && 'No. Bon Muat / Bon Bongkar',
-        !submitForm.loadingVoucherDocument && 'dokumen No. Bon Muat / Bon Bongkar',
-        !submitForm.unloadingVoucher && 'No. TILA / Delivery Card',
-        !submitForm.unloadingVoucherDocument && 'dokumen No. TILA / Delivery Card',
-        !submitForm.travelDocument && 'No. Surat Jalan',
-        !submitForm.travelDocumentFile && 'dokumen surat jalan',
-        !submitForm.weighingDocument && 'No. Gatepass / SP2',
-        !submitForm.weighingDocumentFile && 'dokumen No. Gatepass / SP2',
-      ].filter(Boolean);
-      if (missing.length) {
-        setError(`Pekerjaan belum dapat diselesaikan. Lengkapi: ${missing.join(', ')}.`);
-        return;
-      }
-      if (new Date(submitForm.completedAt) < new Date(submitForm.runningAt)) {
+      if (submitForm.completedAt && submitForm.runningAt && new Date(submitForm.completedAt) < new Date(submitForm.runningAt)) {
         setError('Waktu selesai tidak boleh lebih awal dari waktu mulai.');
         return;
       }
@@ -388,6 +385,25 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     placeholder="Contoh: tol, parkir, bongkar"
                   />
                 </label>
+                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Subtotal Perjalanan</span>
+                      <small className="block text-[11px] text-slate-400">UJ + biaya lainnya</small>
+                    </div>
+                    <strong className="text-base font-semibold text-slate-900">{formatCurrency(totalJourneyCost)}</strong>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
+                      <span className="text-slate-400">UJ</span>
+                      <strong className="font-semibold text-slate-800">{formatCurrency(ujAmount)}</strong>
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
+                      <span className="text-slate-400">Lainnya</span>
+                      <strong className="font-semibold text-slate-800">{formatCurrency(otherCostAmountValue)}</strong>
+                    </span>
+                  </div>
+                </div>
                 <AttachmentUploadField
                   id="operational-spk-document"
                   label="Lampiran Biaya Lainnya"
@@ -466,7 +482,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           </div>
 
           <div className="form-section">
-            <h3>Dokumen Operational</h3>
+            <h3>Dokumen Operasional</h3>
             <div className="order-form-grid">
               {operationalDocumentFields.map((field) => (
                 <div className="operational-document-card" key={field.valueField}>

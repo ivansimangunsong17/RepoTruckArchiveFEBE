@@ -57,7 +57,11 @@ function AdminDashboard() {
   const existingJobs = activeJobs;
   const assignedActiveJobs = activeJobs.filter(isAssigned);
   const prospectJobs = visibleFutureJobs;
-  const incompleteDocs = jobs.filter((job) => !job.travelDocument || !job.weighingDocument || !job.spkNumber);
+  const incompleteDocs = jobs.filter((job) => (
+    !job.travelDocument
+    || !(job.tilaGatepassDocument || job.unloadingVoucher || job.weighingDocument)
+    || !job.spkNumber
+  ));
   const completionRate = jobs.length ? Math.round((completedJobs.length / jobs.length) * 100) : 0;
   const assignmentRate = jobs.length ? Math.round((assignedJobs.length / jobs.length) * 100) : 0;
 
@@ -268,7 +272,7 @@ function AdminDashboard() {
               <article className="ops-prospect-detail-row">
                 <div><span>Status</span><strong><StatusBadge status={selectedExistingJob.status} /></strong><small>Status container</small></div>
                 <div><span>Surat Jalan</span><strong>{selectedExistingJob.travelDocument || 'Belum tersedia'}</strong><small>Dokumen perjalanan</small></div>
-                <div><span>Surat Timbang</span><strong>{selectedExistingJob.weighingDocument || 'Belum tersedia'}</strong><small>Dokumen timbang</small></div>
+                <div><span>TILA / Delivery Card / Gatepass / SP2</span><strong>{selectedExistingJob.tilaGatepassDocument || selectedExistingJob.unloadingVoucher || selectedExistingJob.weighingDocument || 'Belum tersedia'}</strong><small>Dokumen operasional</small></div>
                 <div><span>Catatan</span><strong>{selectedExistingJob.notes || 'Tidak ada catatan'}</strong><small>{selectedExistingJob.updatedBy ? `Update: ${selectedExistingJob.updatedBy}` : 'Belum ada update'}</small></div>
               </article>
             </div>

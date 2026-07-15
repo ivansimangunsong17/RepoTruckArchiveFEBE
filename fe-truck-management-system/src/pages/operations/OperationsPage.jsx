@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   Eye,
   FileText,
+  X,
   Search,
   Truck,
   UserRound,
-  X,
 } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -16,7 +17,7 @@ import EmptyState from '../../components/common/EmptyState';
 import OperationalForm from '../../components/forms/OperationalForm';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
-import { hasPermission } from '../../constants/roles';
+import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -54,9 +55,8 @@ function sortOperationalJobs(rows) {
 function documentState(job) {
   const required = [
     job.loadingVoucherDocument,
-    job.unloadingVoucherDocument,
+    job.tilaGatepassDocumentFile || job.unloadingVoucherDocument || job.weighingDocumentFile,
     job.travelDocumentFile,
-    job.weighingDocumentFile,
   ];
   return { completed: required.filter(Boolean).length, total: required.length || 1 };
 }
@@ -95,11 +95,31 @@ function flattenDemoJobs(orders) {
   })));
 }
 
+function flattenPendingCancelJobs(orders) {
+  return orders.filter(Boolean).flatMap((order) => (order.containers || []).filter((container) => container.cancelRequestStatus === 'submitted').map((container) => ({
+    ...container,
+    orderId: order.id,
+    soNumber: order.soNumber,
+    doNumber: order.doNumber,
+    customer: order.customer,
+    shipment: order.shipment,
+    jobType: order.jobType,
+    origin: order.origin,
+    destination: order.destination,
+    tripDate: order.tripDate || order.plannedDate || order.soDate || order.receivedAt,
+    salesName: order.salesName || order.createdBy,
+    createdBy: order.createdBy,
+    updatedBy: container.updatedBy || order.updatedBy,
+    updatedAt: container.updatedAt || order.updatedAt,
+  })));
+}
+
 function OperationsPage() {
   const { user } = useAuth();
   const { notify, confirmAction } = useFeedback();
   const archive = useArchiveData();
   const [databaseJobs, setDatabaseJobs] = useState([]);
+  const [pendingDatabaseJobs, setPendingDatabaseJobs] = useState([]);
   const [serverTotal, setServerTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState({ received: 0, running: 0, completed: 0, cancelled: 0 });
   const [query, setQuery] = useState('');
@@ -111,6 +131,7 @@ function OperationsPage() {
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
   const canEdit = hasPermission(user, 'operations.update');
+  const canReviewCancel = canEdit || user?.role === USER_ROLES.ADMIN;
   const canViewDocuments = hasPermission(user, 'documents.operational.read');
   const detailOtherCost = otherCostValue(detail);
 
@@ -150,6 +171,10 @@ function OperationsPage() {
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoJobs.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
+  const pendingCancelJobs = useMemo(() => (
+    (archive.isDatabaseMode ? pendingDatabaseJobs : flattenPendingCancelJobs(archive.orders || []))
+      .filter((job) => job && job.cancelRequestStatus === 'submitted')
+  ), [archive.isDatabaseMode, archive.orders, pendingDatabaseJobs]);
 
   useEffect(() => {
     setPage(1);
@@ -184,6 +209,27 @@ function OperationsPage() {
       window.clearTimeout(timer);
     };
   }, [archive.isDatabaseMode, listVersion, page, query, status]);
+
+  useEffect(() => {
+    if (!archive.isDatabaseMode) return undefined;
+
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await fetchContainerJobsPage({ page: 1, pageSize: 100, requestStatus: 'submitted' });
+        if (!active) return;
+        setPendingDatabaseJobs(result.rows || []);
+      } catch {
+        if (!active) return;
+        setPendingDatabaseJobs([]);
+      }
+    }, 200);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [archive.isDatabaseMode, listVersion]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -251,9 +297,77 @@ function OperationsPage() {
     }
   }
 
+  async function approveJobCancellation(job) {
+    const confirmed = await confirmAction({
+      title: 'Setujui pembatalan?',
+      message: `${job.containerNumber || 'Container ini'} akan dibatalkan dan keluar dari antrean operational.`,
+      confirmLabel: 'Setujui',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+
+    try {
+      await archive.reviewJobCancellation(job.id, { approved: true, cancelReviewNote: '' });
+      if (archive.isDatabaseMode) setListVersion((value) => value + 1);
+      notify({ title: 'Pembatalan disetujui', message: `${job.containerNumber || 'Container'} dibatalkan oleh Ops.` });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Approval gagal', message: requestError.message });
+    }
+  }
+
+  async function rejectJobCancellation(job) {
+    const confirmed = await confirmAction({
+      title: 'Tolak pembatalan?',
+      message: `${job.containerNumber || 'Container ini'} tetap berjalan dan request akan ditandai ditolak.`,
+      confirmLabel: 'Tolak',
+      tone: 'warning',
+    });
+    if (!confirmed) return;
+
+    try {
+      await archive.reviewJobCancellation(job.id, { approved: false, cancelReviewNote: '' });
+      notify({ title: 'Pembatalan ditolak', message: `${job.containerNumber || 'Container'} tetap aktif.` });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Penolakan gagal', message: requestError.message });
+    }
+  }
+
   return (
     <div className="page">
       <PageHeader eyebrow="Operational" title="Container Job" description="Kelola assignment, dokumen operasional, status, dan timeline setiap container." />
+
+      {canReviewCancel && pendingCancelJobs.length ? (
+        <section className="panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1rem' }}>Permintaan Pembatalan Container</h3>
+              <small style={{ color: 'var(--text-muted, #64748b)' }}>{pendingCancelJobs.length} menunggu approval</small>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {pendingCancelJobs.slice(0, 5).map((job) => (
+              <div key={job.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', padding: '12px 14px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong>{job.containerNumber || '-'}</strong>
+                    <StatusBadge status={job.cancelRequestStatus} />
+                  </div>
+                  <div style={{ marginTop: 4, color: '#334155', fontSize: '.9rem' }}>{job.soNumber || '-'} - {job.customer || '-'}</div>
+                  <div style={{ marginTop: 3, color: '#64748b', fontSize: '.82rem' }}>{job.cancelRequestNote || 'Tidak ada catatan'}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  <button className="secondary-button" type="button" onClick={() => rejectJobCancellation(job)}>
+                    <X size={16} /> Tolak
+                  </button>
+                  <button className="danger-button" type="button" onClick={() => approveJobCancellation(job)}>
+                    <CheckCircle2 size={16} /> Setujui
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div className="quick-stats operational-stats">
         <div><span>Belum Jalan</span><strong>{counts.received}</strong><small>Menunggu truck dan driver</small></div>
@@ -419,9 +533,9 @@ function documentFieldsForDetail(job) {
     ['Lampiran Biaya Lainnya', job.spkDocument],
     ['Lampiran EIR', job.eirDocument],
     ['Bon Muat', job.loadingVoucherDocument],
-    ['Bon Bongkar', job.unloadingVoucherDocument],
+    ['TILA / Delivery Card / Gatepass / SP2', job.tilaGatepassDocumentFile || job.unloadingVoucherDocument || job.weighingDocumentFile],
     ['Surat Jalan', job.travelDocumentFile],
-    ['Surat Timbang', job.weighingDocumentFile],
+    ...(job.tilaGatepassLegacyDocumentFiles || []).map((document) => [document.name || 'Legacy TILA / Gatepass', document.file]),
     ...(job.otherDocuments || []).map((document) => [document.name || 'Other Document', document.file]),
   ];
 }

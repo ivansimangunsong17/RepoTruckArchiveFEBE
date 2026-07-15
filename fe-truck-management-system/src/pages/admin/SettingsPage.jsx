@@ -49,9 +49,8 @@ const defaultSettings = {
     salesOrder: true,
     spk: true,
     loadingVoucher: true,
-    unloadingVoucher: true,
+    tilaGatepassDocument: true,
     travelDocument: true,
-    weighingDocument: true,
     driverLicense: true,
     vehicleRegistration: true,
   },
@@ -69,17 +68,16 @@ const documentOptions = [
   ['salesOrder', 'Sales Order / DO'],
   ['spk', 'SPK'],
   ['loadingVoucher', 'Bon Muat'],
-  ['unloadingVoucher', 'Bon Bongkar'],
+  ['tilaGatepassDocument', 'TILA / Delivery Card / Gatepass / SP2'],
   ['travelDocument', 'Surat Jalan'],
-  ['weighingDocument', 'Surat Timbang'],
   ['driverLicense', 'SIM Supir'],
   ['vehicleRegistration', 'STNK / KIR'],
 ];
 
 const roleMatrix = [
   ['Admin', 'Semua modul, user, settings, audit log'],
-  ['Sales', 'Sales Order dan arsip order'],
-  ['Operational', 'Operational Job dan dokumen perjalanan'],
+  ['Sales', 'Sales Order milik sendiri, cancel order, dan arsip order'],
+  ['Operational', 'Operational Job, cancel container job, dan dokumen perjalanan'],
   ['Observer', 'Dashboard, laporan, dan monitoring'],
 ];
 

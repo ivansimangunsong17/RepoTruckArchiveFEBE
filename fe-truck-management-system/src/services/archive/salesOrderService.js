@@ -345,3 +345,11 @@ export function saveSalesOrder(form, user, existing) {
 export function cancelSalesOrder(id) {
   return httpClient.patch(`/sales-orders/${id}/cancel`, {});
 }
+
+export function requestSalesOrderCancellation(id, payload = {}) {
+  return httpClient.patch(`/sales-orders/${id}/cancel-request`, payload);
+}
+
+export function reviewSalesOrderCancellation(id, payload = {}) {
+  return httpClient.patch(`/sales-orders/${id}/cancel-review`, payload);
+}

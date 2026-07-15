@@ -48,6 +48,10 @@ function resolveFieldOptions(field, form) {
   return Array.isArray(field.options) ? field.options : [];
 }
 
+function resolveFieldDisabled(field, form) {
+  return typeof field.disabled === 'function' ? Boolean(field.disabled(form)) : Boolean(field.disabled);
+}
+
 function createFileMetadata(file) {
   if (!file) return null;
   return {
@@ -474,6 +478,16 @@ function MasterDataPage({
     setFormOpen(true);
   }
 
+  function updateFormField(field, value) {
+    setForm((current) => {
+      if (typeof field.onChange === 'function') {
+        const nextForm = field.onChange(value, current);
+        if (nextForm && typeof nextForm === 'object') return nextForm;
+      }
+      return { ...current, [field.key]: value };
+    });
+  }
+
   async function handleDelete(id) {
     const approved = await confirmAction({
       title: `Arsipkan ${singular}?`,
@@ -693,14 +707,16 @@ function MasterDataPage({
                       {section.fields.map((field) => {
                         if (field.showIf && !field.showIf(form)) return null;
                         const fieldOptions = resolveFieldOptions(field, form);
+                        const fieldDisabled = resolveFieldDisabled(field, form);
                         return (
                         <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''} ${field.className || ''}`.trim()}>
                           <span>{field.label}{field.required ? <em>*</em> : null}</span>
                           {field.type === 'select' ? (
                             <select
                               value={form[field.key]}
-                              onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
+                              onChange={(event) => updateFormField(field, event.target.value)}
                               required={field.required || field.requiredIf?.(form)}
+                              disabled={fieldDisabled}
                             >
                               {fieldOptions.map((option) => (
                                 <option key={option.value} value={option.value} disabled={option.disabled} style={option.style}>{option.label}</option>
@@ -759,18 +775,20 @@ function MasterDataPage({
                           ) : field.type === 'textarea' ? (
                             <textarea
                               value={form[field.key]}
-                              onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
+                              onChange={(event) => updateFormField(field, event.target.value)}
                               placeholder={field.placeholder}
                               required={field.required}
+                              disabled={fieldDisabled}
                               rows="3"
                             />
                           ) : (
                             <input
                               type={field.type || 'text'}
                               value={form[field.key]}
-                              onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
+                              onChange={(event) => updateFormField(field, event.target.value)}
                               placeholder={field.placeholder}
                               required={(field.required || field.requiredIf?.(form)) && (!field.requiredOnCreate || !editingId)}
+                              disabled={fieldDisabled}
                               minLength={field.minLength}
                               min={field.min}
                               step={field.step}

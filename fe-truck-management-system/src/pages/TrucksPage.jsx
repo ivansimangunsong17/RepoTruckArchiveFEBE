@@ -108,17 +108,14 @@ function buildChassisOptions(rows, currentValue = '') {
   return options;
 }
 
-function requiredFile(label, value) {
-  return value ? null : `${label} wajib diupload.`;
+function getChassisCapacity(rows, chassisValue) {
+  return getChassisRow(rows, chassisValue)?.capacity || '';
 }
 
 function createFields(driverOptions, chassisRows = []) {
   return [
     { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL', required: true },
     { key: 'unitCode', section: 'Identitas Unit', label: 'Kode Unit', placeholder: 'TRK-001', required: true, hint: 'Kode internal harus unik.' },
-    { key: 'capacity', section: 'Identitas Unit', label: 'Kapasitas Container', type: 'select', defaultValue: '20FT', options: [
-      { value: '20FT', label: '20FT' }, { value: '40FT', label: '40FT' },
-    ] },
     { key: 'status', section: 'Identitas Unit', label: 'Status Truck', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
       { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Maintenance', label: 'Maintenance' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
     ] },
@@ -139,6 +136,14 @@ function createFields(driverOptions, chassisRows = []) {
         const options = buildChassisOptions(chassisRows, form.kirChassisNumber);
         return [{ value: '', label: options.length ? 'Wajib pilih chassis dari master' : 'Belum ada data master chassis' }, ...options];
       },
+      onChange: (value, form) => {
+        const capacity = getChassisCapacity(chassisRows, value);
+        return {
+          ...form,
+          kirChassisNumber: value,
+          capacity: capacity || form.capacity,
+        };
+      },
       hint: 'Pilih chassis dari master data yang saat ini dipasangkan ke unit truck ini.',
     },
     {
@@ -146,18 +151,17 @@ function createFields(driverOptions, chassisRows = []) {
       section: 'Dokumen Kendaraan',
       sectionClassName: 'accent-documents',
       label: 'Nomor KIR',
-      placeholder: 'Wajib isi nomor KIR',
+      placeholder: 'Opsional, bisa dilengkapi nanti',
       className: 'span-third',
-      required: true,
     },
-    { key: 'kirExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal KIR OFF', type: 'date', className: 'span-third', required: true },
-    { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file', className: 'span-third', compactUpload: true, validate: (form) => requiredFile('Dokumen KIR', form.kirDocument) },
-    { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Wajib isi nomor STNK', className: 'span-third', required: true },
-    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', className: 'span-third', required: true },
-    { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file', className: 'span-third', compactUpload: true, validate: (form) => requiredFile('Dokumen STNK', form.stnkDocument) },
-    { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Wajib isi nomor STID', className: 'span-third', required: true },
-    { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'span-third', required: true },
-    { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'span-third', compactUpload: true, validate: (form) => requiredFile('Dokumen STID', form.stidDocument) },
+    { key: 'kirExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal KIR OFF', type: 'date', className: 'span-third' },
+    { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file', className: 'span-third', compactUpload: true },
+    { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'span-third' },
+    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', className: 'span-third' },
+    { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file', className: 'span-third', compactUpload: true },
+    { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'span-third' },
+    { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'span-third' },
+    { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'span-third', compactUpload: true },
     { key: 'defaultDriver', section: 'Assignment Default', label: 'Driver Tetap', type: 'select', defaultValue: '', options: [{ value: '', label: 'Belum di-assign' }, ...driverOptions], hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.' },
   ];
 }
@@ -435,13 +439,20 @@ function TruckKirExpiry({ row }) {
   );
 }
 
-function TruckChassisExpiry({ row, chassisRows }) {
-  const chassis = getChassisRow(chassisRows, row.kirChassisNumber);
+function TruckStidExpiry({ row }) {
   return (
     <span className="master-plain-cell strong">
-      {formatTruckDate(chassis?.kirExpiryDate)}
+      {formatTruckDate(row.stidExpiryDate)}
     </span>
   );
+}
+
+function TruckChassisSize({ row, chassisRows }) {
+  const chassis = getChassisRow(chassisRows, row.kirChassisNumber);
+  if (!chassis) return <span className="master-plain-cell strong">-</span>;
+  const chassisCode = chassis.chassisCode || row.kirChassisNumber || '-';
+  const capacity = chassis.capacity || '-';
+  return <span className="master-plain-cell strong">{chassisCode} - {capacity}</span>;
 }
 
 function getUnitSequence(unitCode) {
@@ -464,23 +475,25 @@ function findDriverAssignedTrucks(rows, driverName, currentTruckId) {
     truck.id !== currentTruckId && normalizeName(truck.defaultDriver) === selectedDriver);
 }
 
-async function prepareTruckSave({ payload, editingId, rows, confirmAction }) {
-  const assignedTrucks = findDriverAssignedTrucks(rows, payload.defaultDriver, editingId);
-  if (!assignedTrucks.length) return { payload };
+async function prepareTruckSave({ payload, editingId, rows, confirmAction, chassisRows = [] }) {
+  const chassisCapacity = getChassisCapacity(chassisRows, payload.kirChassisNumber);
+  const normalizedPayload = chassisCapacity ? { ...payload, capacity: chassisCapacity } : payload;
+  const assignedTrucks = findDriverAssignedTrucks(rows, normalizedPayload.defaultDriver, editingId);
+  if (!assignedTrucks.length) return { payload: normalizedPayload };
 
   const truckList = assignedTrucks
     .map((truck) => `${truck.unitCode || '-'} (${truck.plateNumber || '-'})`)
     .join(', ');
   const approved = await confirmAction({
     title: 'Pindahkan sopir ke truck ini?',
-    message: `${payload.defaultDriver} saat ini masih terhubung ke ${truckList}. Jika dilanjutkan, sopir akan dilepas dari truck sebelumnya dan dipasang ke truck ini.`,
+    message: `${normalizedPayload.defaultDriver} saat ini masih terhubung ke ${truckList}. Jika dilanjutkan, sopir akan dilepas dari truck sebelumnya dan dipasang ke truck ini.`,
     confirmLabel: 'Pindahkan Sopir',
   });
 
   if (!approved) return null;
 
   return {
-    payload,
+    payload: normalizedPayload,
     relatedRows: assignedTrucks.map((truck) => ({
       id: truck.id,
       row: { ...truck, defaultDriver: '' },
@@ -541,9 +554,9 @@ function TrucksPage() {
         { key: 'unitCode', label: 'No', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'defaultDriver', label: 'Sopir', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'capacity', label: 'Chassis / Size', render: (_, row) => <TruckChassisSize row={row} chassisRows={chassisRows} /> },
         { key: 'kirExpiryDate', label: 'KIR OFF', render: (_, row) => <TruckKirExpiry row={row} /> },
-        { key: 'kirChassisNumber', label: 'CHASSIS OFF', render: (_, row) => <TruckChassisExpiry row={row} chassisRows={chassisRows} /> },
+        { key: 'stidExpiryDate', label: 'STID OFF', render: (_, row) => <TruckStidExpiry row={row} /> },
         { key: 'stnkExpiryDate', label: 'STNK OFF', render: (_, row) => <TruckStnkExpiry row={row} /> },
         { key: 'status', label: 'Kondisi', render: (_, row) => <TruckStatus row={row} activeJobs={activeJobs} /> },
       ]}
@@ -558,7 +571,7 @@ function TrucksPage() {
       toolbarTitle="Daftar Truck"
       toolbarDescription="Cari unit, plat, sopir, chassis, nomor KIR, size, dan kondisi truck."
       sortRows={sortTrucksByUnit}
-      beforeSave={prepareTruckSave}
+      beforeSave={(args) => prepareTruckSave({ ...args, chassisRows })}
       extraDetailContent={(row) => <VehicleDocumentsPanel vehicle={row} />}
       stats={(data) => [
         { label: 'Total Truck', value: data.length, detail: 'Unit terdaftar' },

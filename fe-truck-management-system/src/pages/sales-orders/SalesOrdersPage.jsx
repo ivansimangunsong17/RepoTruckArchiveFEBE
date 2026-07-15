@@ -10,6 +10,7 @@ import {
   PackageCheck,
   Plus,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
@@ -76,10 +77,6 @@ function getOrderLineItems(order) {
     }];
   }
   return [];
-}
-
-function hasProcessedContainer(order) {
-  return getOrderContainers(order).some((container) => !['received', 'waiting_operational'].includes(container.status || 'received'));
 }
 
 function userDisplayName(user) {
@@ -149,6 +146,11 @@ function isWaitingStatus(value) {
   return ['received', 'waiting_operational'].includes(value || 'waiting_operational');
 }
 
+function canCancelOrderBeforeOperational(order) {
+  if (!order || ['completed', 'cancelled'].includes(order.status)) return false;
+  return getOrderContainers(order).every((container) => isWaitingStatus(container.status));
+}
+
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '') {
   if (!selectedStatus) return true;
   if (selectedStatus === 'waiting_operational') return isWaitingStatus(order.status);
@@ -163,7 +165,8 @@ function getServerFilter(selectedStatus) {
   return { status: selectedStatus, invoiced: false };
 }
 
-function ContainerDetail({ container }) {
+function ContainerDetail({ container, onRequestCancel, canRequestCancel }) {
+  const allowRequestCancel = canRequestCancel && container.status === 'received' && container.cancelRequestStatus !== 'submitted';
   return (
     <div className="container-detail">
       <div className="container-detail-head">
@@ -180,6 +183,25 @@ function ContainerDetail({ container }) {
         <div className={container.runningAt ? 'done' : ''}><span /><p>Sedang Jalan<strong>{formatDateTime(container.runningAt)}</strong></p></div>
         <div className={container.completedAt ? 'done' : ''}><span /><p>Selesai<strong>{formatDateTime(container.completedAt)}</strong></p></div>
       </div>
+      {container.cancelRequestStatus === 'submitted' ? (
+        <div className="sales-order-cancelled-note">
+          <Clock3 size={16} />
+          <span>Permintaan batal container ini menunggu approval Ops.</span>
+        </div>
+      ) : null}
+      {container.cancelRequestStatus === 'rejected' ? (
+        <div className="sales-order-cancelled-note">
+          <X size={16} />
+          <span>Permintaan batal container ini ditolak Ops.</span>
+        </div>
+      ) : null}
+      {allowRequestCancel ? (
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="danger-button" type="button" onClick={() => onRequestCancel(container)}>
+            <Ban size={16} /> Ajukan Batal
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -233,8 +255,8 @@ function SalesOrdersPage() {
   const [editingOrder, setEditingOrder] = useState(null);
   const canCreateOrder = user?.role === USER_ROLES.SALES && hasPermission(user, 'orders.create');
   const canUpdateOrder = hasPermission(user, 'orders.update');
-  const canCancel = hasPermission(user, 'orders.cancel');
   const canViewCommercial = hasPermission(user, 'commercial.read');
+  const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder));
   const canModifyOrder = (order) => {
     if (!order || !canUpdateOrder) return false;
     if (user?.role === USER_ROLES.ADMIN) return true;
@@ -244,7 +266,9 @@ function SalesOrdersPage() {
   const canEditCommercialOrder = (order) => canViewCommercial && canModifyOrder(order);
   const canEditSelectedCommercial = canEditCommercialOrder(selectedOrder);
   const canModifySelectedOrder = canModifyOrder(selectedOrder);
-  const canCancelSelectedOrder = canCancel && user?.role === USER_ROLES.ADMIN;
+  const canCancelSelectedOrder = canModifySelectedOrder
+    && hasPermission(user, 'orders.cancel')
+    && canCancelOrderBeforeOperational(selectedOrder);
 
   useEffect(() => {
     if (user?.role === USER_ROLES.OBSERVER) {
@@ -289,15 +313,16 @@ function SalesOrdersPage() {
   }, [archive.isDatabaseMode, billingStatusOverrides]);
 
   const localOrders = archive.orders;
-  const queryMatchedLocalOrders = useMemo(() => localOrders.filter((order) =>
+  const activeLocalOrders = useMemo(() => localOrders.filter((order) => order.status !== 'cancelled'), [localOrders]);
+  const queryMatchedLocalOrders = useMemo(() => activeLocalOrders.filter((order) =>
     !query || [order.soNumber, order.doNumber, order.customer].some((value) =>
       value?.toLowerCase().includes(query.toLowerCase())),
-  ), [localOrders, query]);
-  const filteredDemoOrders = useMemo(() => localOrders.filter((order) =>
+  ), [activeLocalOrders, query]);
+  const filteredDemoOrders = useMemo(() => activeLocalOrders.filter((order) =>
     (!query || [order.soNumber, order.doNumber, order.customer].some((value) =>
       value?.toLowerCase().includes(query.toLowerCase()))) &&
     matchesOrderStatus(order, status, invoiceOverrides[order.id] ?? order.invoiceNumber),
-  ), [localOrders, query, status, invoiceOverrides]);
+  ), [activeLocalOrders, query, status, invoiceOverrides]);
 
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -328,7 +353,7 @@ function SalesOrdersPage() {
       completed: summary.completedOrders || 0,
       completed_invoiced: summary.invoicedOrders || 0,
       cancelled: summary.cancelledOrders || 0,
-      all: summary.orders || 0,
+      all: Math.max(0, (summary.orders || 0) - (summary.cancelledOrders || 0)),
     }
     : {
       waiting_operational: queryMatchedLocalOrders.filter((order) => isWaitingStatus(order.status)).length,
@@ -499,29 +524,51 @@ function SalesOrdersPage() {
     }
   }
 
-  async function cancelOrder(order) {
-    if (hasProcessedContainer(order)) {
-      notify({
-        type: 'error',
-        title: 'Sales Order tidak bisa dibatalkan',
-        message: 'Sudah ada container yang diproses Operational. Lakukan koreksi melalui Activity Log atau prosedur internal.',
-      });
-      return;
-    }
-
+  async function requestCancelContainer(container) {
     const approved = await confirmAction({
-      title: `Batalkan ${order.soNumber}?`,
-      message: 'Status order akan berubah menjadi Batal dan tidak akan masuk ke antrean Operational.',
-      confirmLabel: 'Batalkan Order',
+      title: `Ajukan batal container?`,
+      message: `${container.containerNumber || 'Container ini'} akan masuk approval Ops.`,
+      confirmLabel: 'Ajukan Batal',
     });
     if (!approved) return;
 
     try {
-      await archive.cancelOrder(order.id);
+      const saved = await archive.requestJobCancellation(container.id, { cancelRequestNote: '' });
       if (archive.isDatabaseMode) setListVersion((value) => value + 1);
-      notify({ title: 'Sales Order dibatalkan', message: `${order.soNumber} tidak lagi aktif.` });
+      setSelectedOrder((current) => {
+        if (!current || current.id !== selectedOrder?.id) return current;
+        const containers = getOrderContainers(current).map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
+        return { ...current, containers };
+      });
+      notify({ title: 'Permintaan pembatalan diajukan', message: `${container.containerNumber || 'Container'} menunggu approval Ops.` });
     } catch (requestError) {
-      notify({ type: 'error', title: 'Pembatalan gagal', message: requestError.message });
+      notify({ type: 'error', title: 'Permintaan pembatalan gagal', message: requestError.message });
+    }
+  }
+
+  async function cancelSelectedSalesOrder() {
+    if (!selectedOrder || !canCancelSelectedOrder) return;
+    const approved = await confirmAction({
+      title: 'Hapus Sales Order?',
+      message: `${selectedOrder.soNumber} akan dibatalkan karena belum ada container yang diproses Operational.`,
+      confirmLabel: 'Hapus Sales Order',
+    });
+    if (!approved) return;
+
+    try {
+      await archive.cancelOrder(selectedOrder.id);
+      if (archive.isDatabaseMode) setListVersion((value) => value + 1);
+      setSelectedOrder(null);
+      notify({
+        title: 'Sales Order dihapus',
+        message: `${selectedOrder.soNumber} berhasil dibatalkan dari daftar aktif.`,
+      });
+    } catch (requestError) {
+      notify({
+        type: 'error',
+        title: 'Sales Order gagal dihapus',
+        message: requestError.message,
+      });
     }
   }
 
@@ -769,13 +816,6 @@ function SalesOrdersPage() {
                 ))}
               </div>
 
-              {selectedOrder.status === 'cancelled' ? (
-                <div className="sales-order-cancelled-note">
-                  <Ban size={16} />
-                  <span>Sales Order ini sudah batal dan tidak masuk antrean Operational.</span>
-                </div>
-              ) : null}
-
               {canModifySelectedOrder ? (
                 <div className="order-management-actions">
                   {selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'completed' ? (
@@ -783,9 +823,9 @@ function SalesOrdersPage() {
                       <Edit3 size={16} /> Edit Sales Order
                     </button>
                   ) : null}
-                  {canCancelSelectedOrder && selectedOrder.status !== 'completed' && selectedOrder.status !== 'cancelled' ? (
-                    <button className="danger-button" type="button" disabled={hasProcessedContainer(selectedOrder)} onClick={() => cancelOrder(selectedOrder)}>
-                      <Ban size={16} /> Batalkan Order
+                  {canCancelSelectedOrder ? (
+                    <button className="danger-button" type="button" onClick={cancelSelectedSalesOrder}>
+                      <Trash2 size={16} /> Hapus Sales Order
                     </button>
                   ) : null}
                 </div>
@@ -793,7 +833,9 @@ function SalesOrdersPage() {
 
               <div className="container-grid">
                 {selectedOrderContainers.length ? (
-                  selectedOrderContainers.map((container) => <ContainerDetail key={container.id} container={container} />)
+                  selectedOrderContainers.map((container) => (
+                    <ContainerDetail key={container.id} container={container} canRequestCancel={canRequestCancelContainer} onRequestCancel={requestCancelContainer} />
+                  ))
                 ) : (
                   <div className="archive-inline-state">
                     <p>Detail container belum tersedia untuk Sales Order ini.</p>

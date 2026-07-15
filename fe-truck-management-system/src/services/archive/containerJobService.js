@@ -5,9 +5,8 @@ const documentFields = [
   ['spkDocument', 'spkDocument'],
   ['eirDocument', 'eirDocument'],
   ['loadingVoucherDocument', 'loadingVoucherDocument'],
-  ['unloadingVoucherDocument', 'unloadingVoucherDocument'],
+  ['tilaGatepassDocumentFile', 'tilaGatepassDocumentFile'],
   ['travelDocumentFile', 'travelDocumentFile'],
-  ['weighingDocumentFile', 'weighingDocumentFile'],
 ];
 
 export function fetchContainerJobsPage({
@@ -15,6 +14,7 @@ export function fetchContainerJobsPage({
   pageSize = 8,
   query = '',
   status = '',
+  requestStatus = '',
 } = {}) {
   const params = new URLSearchParams({
     page: String(page),
@@ -22,6 +22,7 @@ export function fetchContainerJobsPage({
     query,
   });
   if (status) params.set('status', status);
+  if (requestStatus) params.set('requestStatus', requestStatus);
   return httpClient.get(`/container-jobs?${params.toString()}`);
 }
 
@@ -84,4 +85,12 @@ export function generateContainerJobSpk(id, form = {}) {
 
 export function cancelContainerJob(id, updatedBy = 'Operational') {
   return updateContainerJob(id, { status: 'cancelled', updatedBy });
+}
+
+export function requestContainerJobCancellation(id, payload = {}) {
+  return httpClient.patch(`/container-jobs/${id}/cancel-request`, payload);
+}
+
+export function reviewContainerJobCancellation(id, payload = {}) {
+  return httpClient.patch(`/container-jobs/${id}/cancel-review`, payload);
 }

@@ -18,11 +18,14 @@ function destinationText(job) {
 }
 
 function normalizeTruck(truck) {
+  const chassisSize = normalizeSize(truck.chassisSize || truck.chassis_size);
   return {
     id: truck.id || truck.plateNumber,
     plateNumber: truck.plateNumber,
     unitCode: truck.unitCode,
-    capacity: normalizeSize(truck.capacity || truck.containerSize || truck.size || truck.defaultSize || '20FT'),
+    capacity: chassisSize || normalizeSize(truck.capacity || truck.containerSize || truck.size || truck.defaultSize || '20FT'),
+    chassisCode: truck.chassisCode || truck.chassis_code || truck.kirChassisNumber || truck.kir_chassis_number || '',
+    chassisSize,
     driver: truck.defaultDriver || truck.default_driver_name || truck.defaultDriverName || truck.lastDriver || '-',
   };
 }
@@ -39,14 +42,19 @@ function getTruckSortKey(unitCode) {
   return Number.isFinite(numeric) ? numeric : Number.MAX_SAFE_INTEGER;
 }
 
+function chassisSizeLabel(truck) {
+  if (!truck?.chassisCode) return '-';
+  return `${truck.chassisCode} - ${truck.chassisSize || truck.capacity || '-'}`;
+}
+
 function documentSummary(job) {
   if (!job) return ['-'];
   const documents = [
     job.spkNumber && `SPK ${job.spkNumber}`,
     job.travelDocument && `Surat Jalan ${job.travelDocument}`,
-    job.weighingDocument && `Surat Timbang ${job.weighingDocument}`,
     job.loadingVoucher && `Bon Muat ${job.loadingVoucher}`,
-    job.unloadingVoucher && `Bon Bongkar ${job.unloadingVoucher}`,
+    (job.tilaGatepassDocument || job.unloadingVoucher || job.weighingDocument)
+      && `TILA/Gatepass ${job.tilaGatepassDocument || job.unloadingVoucher || job.weighingDocument}`,
   ].filter(Boolean);
   return documents.length ? documents : ['Belum ada dokumen tercatat'];
 }
@@ -213,14 +221,15 @@ function TodayTruckDashboard() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-[11px]">
             <colgroup>
-              <col className="w-[7%]" />
-              <col className="w-[18%]" />
+              <col className="w-[6%]" />
               <col className="w-[16%]" />
               <col className="w-[15%]" />
               <col className="w-[14%]" />
+              <col className="w-[12%]" />
+              <col className="w-[13%]" />
+              <col className="w-[15%]" />
+              <col className="w-[8%]" />
               <col className="w-[7%]" />
-              <col className="w-[22%]" />
-              <col className="w-[11%]" />
             </colgroup>
             <thead className="bg-slate-100">
               <tr>
@@ -229,7 +238,7 @@ function TodayTruckDashboard() {
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Nama Sopir</th>
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">No Container</th>
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Jenis Order</th>
-                <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Size</th>
+                <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Chassis / Size</th>
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Tujuan</th>
                 <th className="px-2.5 py-1 text-center text-[10px] font-black uppercase text-slate-500">Status</th>
                 <th className="px-2.5 py-1 text-center text-[10px] font-black uppercase text-slate-500">Detail</th>
@@ -250,7 +259,7 @@ function TodayTruckDashboard() {
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Nama Sopir" title={row.job?.driver || row.truck.driver || '-'}>{row.job?.driver || row.truck.driver || '-'}</td>
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="No Container" title={row.job?.containerNumber || '-'}>{row.job?.containerNumber || '-'}</td>
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Jenis Order" title={formatShipment(row.job?.shipment)}>{formatShipment(row.job?.shipment)}</td>
-                  <td className="truncate px-2.5 py-0.5 font-bold text-slate-700" data-label="Size">{row.job ? normalizeSize(row.job.size) : '-'}</td>
+                  <td className="truncate px-2.5 py-0.5 font-bold text-slate-700" data-label="Chassis / Size" title={chassisSizeLabel(row.truck)}>{chassisSizeLabel(row.truck)}</td>
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Tujuan" title={destinationText(row.job)}>{destinationText(row.job)}</td>
                   <td className="px-2.5 py-0.5 text-center" data-label="Status">
                     <span
@@ -302,7 +311,7 @@ function TodayTruckDashboard() {
                 <div><span>Sales/PIC</span><strong>{selectedRow.job?.salesName || selectedRow.job?.createdBy || '-'}</strong></div>
                 <div><span>No Container</span><strong>{selectedRow.job?.containerNumber || '-'}</strong></div>
                 <div><span>Jenis Orderan</span><strong>{formatShipment(selectedRow.job?.shipment)}</strong></div>
-                <div><span>Size</span><strong>{selectedRow.job ? normalizeSize(selectedRow.job.size) : '-'}</strong></div>
+                <div><span>Chassis / Size</span><strong>{chassisSizeLabel(selectedRow.truck)}</strong></div>
                 <div><span>Tujuan</span><strong>{destinationText(selectedRow.job)}</strong></div>
                 <div><span>Tanggal Jalan</span><strong>{selectedRow.job ? formatShortDate(selectedRow.job.tripDate) : '-'}</strong></div>
               </div>

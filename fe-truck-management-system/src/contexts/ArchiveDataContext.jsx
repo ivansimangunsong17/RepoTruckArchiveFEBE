@@ -3,8 +3,18 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { initialSalesOrders } from '../data/salesOrders';
 import { fallbackCustomers, fallbackUsers } from '../data/masterData';
 import { fallbackDrivers, fallbackTruckUnits } from '../data/truckData';
-import { updateContainerJob } from '../services/archive/containerJobService';
-import { cancelSalesOrder, fetchSalesOrders, saveSalesOrder } from '../services/archive/salesOrderService';
+import {
+  requestContainerJobCancellation,
+  reviewContainerJobCancellation,
+  updateContainerJob,
+} from '../services/archive/containerJobService';
+import {
+  cancelSalesOrder,
+  fetchSalesOrders,
+  requestSalesOrderCancellation,
+  reviewSalesOrderCancellation,
+  saveSalesOrder,
+} from '../services/archive/salesOrderService';
 import { hasPermission } from '../constants/roles';
 import { isApiDataSource } from '../services/config/dataSource';
 import { archiveMaster, fetchMaster, saveMaster } from '../services/master-data/masterDataService';
@@ -99,6 +109,15 @@ function normalizeLocalContainers(containers, receivedAt) {
     id: container.id || `ctr-${Date.now()}-${index}`,
     status: container.status || 'received',
     rpujStatus: container.rpujStatus || 'pending',
+    cancelRequestStatus: container.cancelRequestStatus || 'none',
+    cancelRequestNote: container.cancelRequestNote || '',
+    cancelRequestedByName: container.cancelRequestedByName || '',
+    cancelRequestedByRole: container.cancelRequestedByRole || '',
+    cancelRequestedAt: container.cancelRequestedAt || null,
+    cancelReviewedByName: container.cancelReviewedByName || '',
+    cancelReviewedAt: container.cancelReviewedAt || null,
+    cancelReviewNote: container.cancelReviewNote || '',
+    cancelledAt: container.cancelledAt || null,
     receivedAt: container.receivedAt || receivedAt,
     runningAt: container.runningAt || null,
     completedAt: container.completedAt || null,
@@ -107,12 +126,25 @@ function normalizeLocalContainers(containers, receivedAt) {
   }));
 }
 
+function findLocalContainerLocation(ordersList, containerId) {
+  for (const order of ordersList || []) {
+    const index = Array.isArray(order?.containers) ? order.containers.findIndex((container) => container.id === containerId) : -1;
+    if (index >= 0) return { order, index };
+  }
+  return null;
+}
+
 function deriveOrderStatus(containers) {
   const activeContainers = containers.filter((container) => container.status !== 'cancelled');
   const allCancelled = containers.length > 0 && activeContainers.length === 0;
   const allCompleted = activeContainers.length > 0 && activeContainers.every((container) => container.status === 'completed');
   const hasProgress = activeContainers.some((container) => ['running', 'completed'].includes(container.status));
   return allCancelled ? 'cancelled' : allCompleted ? 'completed' : hasProgress ? 'running' : 'waiting_operational';
+}
+
+function hasProcessedContainers(order) {
+  return Array.isArray(order?.containers)
+    && order.containers.some((container) => !['received', 'waiting_operational'].includes(container.status || 'received'));
 }
 
 function normalizeAssignedJobForm(form) {
@@ -321,6 +353,13 @@ export function ArchiveDataProvider({ children }) {
       return;
     }
 
+    const existing = orders.find((order) => order.id === id);
+    if (hasProcessedContainers(existing)) {
+      const error = new Error('Sales Order tidak bisa dihapus karena sudah ada container yang diproses Operational.');
+      error.statusCode = 409;
+      throw error;
+    }
+
     setOrders((current) => {
       const nextOrders = current.map((order) => order.id === id ? {
         ...order,
@@ -331,7 +370,107 @@ export function ArchiveDataProvider({ children }) {
       persistLocalOrders(nextOrders);
       return nextOrders;
     });
-  }, [salesOrderDatabaseMode, user]);
+  }, [orders, salesOrderDatabaseMode, user]);
+
+  const requestOrderCancellation = useCallback(async (id, payload = {}) => {
+    const requestedByName = user?.fullName || user?.name || 'Sales';
+    const requestedByRole = user?.role || 'sales';
+
+    if (salesOrderDatabaseMode) {
+      const saved = await requestSalesOrderCancellation(id, {
+        cancelRequestNote: payload.cancelRequestNote || '',
+        cancelRequestedByName: requestedByName,
+        cancelRequestedByRole: requestedByRole,
+      });
+      setOrders((current) => current.map((order) => (order.id === id ? { ...order, ...saved } : order)));
+      return saved;
+    }
+
+    const now = new Date().toISOString();
+    const existing = orders.find((order) => order.id === id);
+    if (['completed', 'cancelled'].includes(existing?.status)) {
+      const error = new Error('Sales Order yang sudah selesai atau dibatalkan tidak bisa diajukan batal.');
+      error.statusCode = 409;
+      throw error;
+    }
+    setOrders((current) => {
+      const nextOrders = current.map((order) => (order.id === id ? {
+        ...order,
+        cancelRequestStatus: 'submitted',
+        cancelRequestNote: payload.cancelRequestNote || '',
+        cancelRequestedByName: requestedByName,
+        cancelRequestedByRole: requestedByRole,
+        cancelRequestedAt: now,
+        cancelReviewedByName: '',
+        cancelReviewedAt: null,
+        cancelReviewNote: '',
+        updatedBy: requestedByName,
+        updatedAt: now,
+      } : order));
+      persistLocalOrders(nextOrders);
+      return nextOrders;
+    });
+
+    return {
+      id,
+      cancelRequestStatus: 'submitted',
+      cancelRequestNote: payload.cancelRequestNote || '',
+      cancelRequestedByName: requestedByName,
+      cancelRequestedByRole: requestedByRole,
+      cancelRequestedAt: now,
+      cancelReviewedByName: '',
+      cancelReviewedAt: null,
+      cancelReviewNote: '',
+      updatedBy: requestedByName,
+      updatedAt: now,
+    };
+  }, [orders, salesOrderDatabaseMode, user]);
+
+  const reviewOrderCancellation = useCallback(async (id, payload = {}) => {
+    const reviewedByName = user?.fullName || user?.name || 'Operational';
+    if (salesOrderDatabaseMode) {
+      const saved = await reviewSalesOrderCancellation(id, {
+        approved: Boolean(payload.approved),
+        cancelReviewNote: payload.cancelReviewNote || '',
+        cancelReviewedByName: reviewedByName,
+      });
+      setOrders((current) => current.map((order) => (order.id === id ? { ...order, ...saved } : order)));
+      return saved;
+    }
+
+    const now = new Date().toISOString();
+    const existingOrder = orders.find((order) => order.id === id);
+    if (payload.approved && hasProcessedContainers(existingOrder)) {
+      const error = new Error('Sales Order tidak bisa dibatalkan karena sudah ada container yang diproses Operational.');
+      error.statusCode = 409;
+      throw error;
+    }
+    let nextSaved = null;
+    setOrders((current) => {
+      const existing = current.find((order) => order.id === id);
+
+      const nextOrder = {
+        ...(existing || {}),
+        cancelRequestStatus: payload.approved ? 'approved' : 'rejected',
+        cancelReviewedByName: reviewedByName,
+        cancelReviewedAt: now,
+        cancelReviewNote: payload.cancelReviewNote || '',
+        updatedBy: reviewedByName,
+        updatedAt: now,
+      };
+      if (payload.approved) {
+        nextOrder.status = 'cancelled';
+        nextOrder.cancelledAt = now;
+      }
+
+      const nextOrders = current.map((order) => (order.id === id ? nextOrder : order));
+      persistLocalOrders(nextOrders);
+      nextSaved = nextOrder;
+      return nextOrders;
+    });
+
+    return nextSaved;
+  }, [orders, salesOrderDatabaseMode, user]);
 
   const updateJob = useCallback(async (id, form) => {
     if (salesOrderDatabaseMode) {
@@ -378,10 +517,156 @@ export function ArchiveDataProvider({ children }) {
     });
   }, [masters, salesOrderDatabaseMode, user]);
 
+  const requestJobCancellation = useCallback(async (id, payload = {}) => {
+    const requestedByName = user?.fullName || user?.name || 'Sales';
+    const requestedByRole = user?.role || 'sales';
+
+    if (salesOrderDatabaseMode) {
+      const saved = await requestContainerJobCancellation(id, {
+        cancelRequestNote: payload.cancelRequestNote || '',
+        cancelRequestedByName: requestedByName,
+        cancelRequestedByRole: requestedByRole,
+      });
+      setOrders((current) => current.map((order) => {
+        if (!Array.isArray(order.containers)) return order;
+        const containers = order.containers.map((container) => (container.id === saved.id ? saved : container));
+        return {
+          ...order,
+          containers,
+          status: deriveOrderStatus(containers),
+          updatedBy: requestedByName,
+          updatedAt: new Date().toISOString(),
+        };
+      }));
+      return saved;
+    }
+
+    const now = new Date().toISOString();
+    setOrders((current) => {
+      const location = findLocalContainerLocation(current, id);
+      if (!location) return current;
+      const { order } = location;
+      const container = order.containers[location.index];
+      if (!container || container.status !== 'received') {
+        const error = new Error('Container Job hanya bisa diajukan batal sebelum diproses Operational.');
+        error.statusCode = 409;
+        throw error;
+      }
+      const nextContainer = {
+        ...container,
+        cancelRequestStatus: 'submitted',
+        cancelRequestNote: payload.cancelRequestNote || '',
+        cancelRequestedByName: requestedByName,
+        cancelRequestedByRole: requestedByRole,
+        cancelRequestedAt: now,
+        cancelReviewedByName: '',
+        cancelReviewedAt: null,
+        cancelReviewNote: '',
+        updatedBy: requestedByName,
+        updatedAt: now,
+      };
+      const nextOrders = current.map((item) => {
+        if (item.id !== order.id) return item;
+        const containers = item.containers.map((entry) => (entry.id === id ? nextContainer : entry));
+        return {
+          ...item,
+          containers,
+          status: deriveOrderStatus(containers),
+          updatedBy: requestedByName,
+          updatedAt: now,
+        };
+      });
+      persistLocalOrders(nextOrders);
+      return nextOrders;
+    });
+
+    return {
+      id,
+      cancelRequestStatus: 'submitted',
+      cancelRequestNote: payload.cancelRequestNote || '',
+      cancelRequestedByName: requestedByName,
+      cancelRequestedByRole: requestedByRole,
+      cancelRequestedAt: now,
+      cancelReviewedByName: '',
+      cancelReviewedAt: null,
+      cancelReviewNote: '',
+      updatedBy: requestedByName,
+      updatedAt: now,
+    };
+  }, [salesOrderDatabaseMode, user]);
+
+  const reviewJobCancellation = useCallback(async (id, payload = {}) => {
+    const reviewedByName = user?.fullName || user?.name || 'Operational';
+
+    if (salesOrderDatabaseMode) {
+      const saved = await reviewContainerJobCancellation(id, {
+        approved: Boolean(payload.approved),
+        cancelRequestNote: payload.cancelRequestNote || '',
+        cancelReviewNote: payload.cancelReviewNote || '',
+        cancelReviewedByName: reviewedByName,
+      });
+      setOrders((current) => current.map((order) => {
+        if (!Array.isArray(order.containers)) return order;
+        const containers = order.containers.map((container) => (container.id === saved.id ? saved : container));
+        return {
+          ...order,
+          containers,
+          status: deriveOrderStatus(containers),
+          updatedBy: reviewedByName,
+          updatedAt: new Date().toISOString(),
+        };
+      }));
+      return saved;
+    }
+
+    const now = new Date().toISOString();
+    let nextSaved = null;
+    setOrders((current) => {
+      const location = findLocalContainerLocation(current, id);
+      if (!location) return current;
+      const { order } = location;
+      const container = order.containers[location.index];
+      if (!container || container.cancelRequestStatus !== 'submitted') {
+        const error = new Error('Belum ada permintaan pembatalan yang menunggu approval.');
+        error.statusCode = 409;
+        throw error;
+      }
+      const nextContainer = {
+        ...container,
+        cancelRequestStatus: payload.approved ? 'approved' : 'rejected',
+        cancelReviewedByName: reviewedByName,
+        cancelReviewedAt: now,
+        cancelReviewNote: payload.cancelReviewNote || '',
+        updatedBy: reviewedByName,
+        updatedAt: now,
+      };
+      if (payload.approved) {
+        nextContainer.status = 'cancelled';
+        nextContainer.cancelledAt = now;
+      }
+      const nextOrders = current.map((item) => {
+        if (item.id !== order.id) return item;
+        const containers = item.containers.map((entry) => (entry.id === id ? nextContainer : entry));
+        return {
+          ...item,
+          containers,
+          status: deriveOrderStatus(containers),
+          updatedBy: reviewedByName,
+          updatedAt: now,
+        };
+      });
+      persistLocalOrders(nextOrders);
+      nextSaved = nextContainer;
+      return nextOrders;
+    });
+
+    return nextSaved;
+  }, [salesOrderDatabaseMode, user]);
+
   const value = useMemo(() => ({
     isDatabaseMode: salesOrderDatabaseMode, isMasterDatabaseMode: masterDatabaseMode, masters, orders, loading, error, refresh,
-    upsertMaster, removeMaster, upsertOrder, cancelOrder, updateJob,
-  }), [cancelOrder, error, loading, masterDatabaseMode, masters, orders, refresh, removeMaster, salesOrderDatabaseMode, updateJob, upsertMaster, upsertOrder]);
+    upsertMaster, removeMaster, upsertOrder, cancelOrder, requestOrderCancellation, reviewOrderCancellation, requestJobCancellation, reviewJobCancellation, updateJob,
+  }), [cancelOrder, error, loading, masterDatabaseMode, masters, orders, refresh, removeMaster, requestJobCancellation, requestOrderCancellation, reviewJobCancellation, reviewOrderCancellation, salesOrderDatabaseMode, updateJob, upsertMaster, upsertOrder]);
 
   return <ArchiveDataContext.Provider value={value}>{children}</ArchiveDataContext.Provider>;
 }

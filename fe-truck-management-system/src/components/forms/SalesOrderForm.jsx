@@ -484,7 +484,7 @@ function SalesOrderForm({
                   name="soNumber"
                   value={form.soNumber}
                   onChange={updateField}
-                  placeholder="SO-2026-001"
+                  placeholder="NO SO DI AMBIL DARI ACCURATE"
                   required
                 />
               </label>
