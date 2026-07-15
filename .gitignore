@@ -1,8 +1,10 @@
 node_modules/
+.npm-cache/
 dist/
 coverage/
 uploads/
 .env
+.env.production
 .env.local
 .env.*.local
 *.log
