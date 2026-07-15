@@ -304,7 +304,12 @@ export async function getMonthlyRevenueReport(options = {}) {
   const period = parseRevenuePeriod(options);
   const result = await query(
     `
-      with completed_jobs as (
+      with order_job_totals as (
+        select sales_order_id, count(*)::int as total_jobs
+        from container_jobs
+        group by sales_order_id
+      ),
+      completed_jobs as (
         select
           cj.id as job_id,
           so.id,
@@ -317,9 +322,10 @@ export async function getMonthlyRevenueReport(options = {}) {
           cj.completed_at::date as completed_date,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
           nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
-          count(*) over (partition by so.id)::int as total_containers
+          greatest(1, coalesce(nullif(so.quantity, 0), ojt.total_jobs, 1))::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
+        left join order_job_totals ojt on ojt.sales_order_id = so.id
         where so.status <> 'cancelled'
           and cj.status = 'completed'
       )
