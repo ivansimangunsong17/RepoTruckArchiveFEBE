@@ -142,6 +142,17 @@ function getBillingStatusTone(order, overrideValue = '') {
   return 'pending';
 }
 
+function getBillingSelectStyle(order, overrideValue = '') {
+  const status = getBillingStatusValue(order, overrideValue);
+  if (status === 'lunas') {
+    return { borderColor: '#5eead4', backgroundColor: '#f0fdfa', color: '#0f766e' };
+  }
+  if (status === 'belum_invoice') {
+    return { borderColor: '#fecaca', backgroundColor: '#fff7f7', color: '#991b1b' };
+  }
+  return { borderColor: '#fcd34d', backgroundColor: '#fffbeb', color: '#92400e' };
+}
+
 function isWaitingStatus(value) {
   return ['received', 'waiting_operational'].includes(value || 'waiting_operational');
 }
@@ -740,7 +751,12 @@ function SalesOrdersPage() {
                 {selectedOrder.status === 'completed' ? (
                   <div className="order-invoice-card">
                     <div className="order-invoice-card-head">
-                      <span>Billing</span>
+                      <div>
+                        <span>Billing</span>
+                        <strong className={`order-invoice-status ${getBillingStatusTone(selectedOrder, getBillingStatusOverride(selectedOrder))}`}>
+                          {getBillingStatusLabel(selectedOrder, getBillingStatusOverride(selectedOrder))}
+                        </strong>
+                      </div>
                       {canEditSelectedCommercial && getOrderInvoiceNumber(selectedOrder) ? (
                         <button type="button" className="secondary-button invoice-edit-button" onClick={openInvoiceEditModal}>
                           <Edit3 size={15} /> Edit
@@ -748,7 +764,8 @@ function SalesOrdersPage() {
                       ) : null}
                     </div>
                     {getOrderInvoiceNumber(selectedOrder) ? (
-                      <div className="order-invoice-card-value">
+                      <div className="order-invoice-card-value order-invoice-card-primary">
+                        <span>No. Invoice</span>
                         <strong>{getOrderInvoiceNumber(selectedOrder)}</strong>
                       </div>
                     ) : canEditSelectedCommercial ? (
@@ -763,19 +780,18 @@ function SalesOrdersPage() {
                         </button>
                       </div>
                     ) : (
-                      <div className="order-invoice-card-value">
+                      <div className="order-invoice-card-value order-invoice-card-primary">
+                        <span>No. Invoice</span>
                         <strong>Belum terinvoice</strong>
                       </div>
                     )}
-                    <div className="order-invoice-card-value">
-                      <strong>{getBillingStatusLabel(selectedOrder, getBillingStatusOverride(selectedOrder))}</strong>
-                    </div>
                     {canEditSelectedCommercial ? (
                       <div className="order-billing-controls">
                         <label className="order-billing-select">
                           Status Billing
                           <select
                             value={billingStatusDraft}
+                            style={getBillingSelectStyle(selectedOrder, billingStatusDraft)}
                             onChange={async (event) => {
                               const nextValue = event.target.value;
                               setBillingStatusDraft(nextValue);

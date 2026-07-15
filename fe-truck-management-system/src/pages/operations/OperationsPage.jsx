@@ -459,7 +459,7 @@ function OperationsPage() {
                   <span>Diperbarui {job.updatedBy || job.createdBy || '-'} - {formatDateTime(job.updatedAt || job.receivedAt)}</span>
                   <div>
                     <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={15} /> Detail</button>
-                    {canEdit && !['completed', 'cancelled'].includes(job.status) ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>Update Proses</button> : null}
+                    {canEdit && job.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>Update Proses</button> : null}
                   </div>
                 </div>
               </article>
@@ -508,7 +508,7 @@ function OperationsPage() {
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetail(null)}>Tutup</button>
               {canEdit && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => cancelOperational(detail)}>Batalkan Job</button> : null}
-              {canEdit && !['completed', 'cancelled'].includes(detail.status) ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
+              {canEdit && detail.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
           </section>
         </div>

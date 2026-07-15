@@ -22,6 +22,30 @@ const operationalDocumentFields = [
   { valueField: 'travelDocument', fileField: 'travelDocumentFile', label: 'No. Surat Jalan' },
 ];
 
+const statusOptions = [
+  {
+    value: 'received',
+    label: 'Belum Jalan',
+    description: 'Pekerjaan belum mulai diproses.',
+    tone: 'border-slate-300 bg-slate-100 text-slate-600',
+    selectStyle: { borderColor: '#cbd5e1', backgroundColor: '#f8fafc', color: '#334155' },
+  },
+  {
+    value: 'running',
+    label: 'Sedang Jalan',
+    description: 'Truck/container sedang dalam proses.',
+    tone: 'border-amber-300 bg-amber-50 text-amber-700',
+    selectStyle: { borderColor: '#f59e0b', backgroundColor: '#fffbeb', color: '#92400e' },
+  },
+  {
+    value: 'completed',
+    label: 'Selesai',
+    description: 'Pekerjaan selesai, data masih bisa diedit.',
+    tone: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+    selectStyle: { borderColor: '#10b981', backgroundColor: '#ecfdf5', color: '#047857' },
+  },
+];
+
 const OPERATIONAL_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
 
 function getMasterData(storageKey, fallback) {
@@ -144,8 +168,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     setForm((current) => ({ ...current, [name]: value }));
   }
 
-  function updateStatus(event) {
-    const status = event.target.value;
+  function updateStatusValue(status) {
     const now = nowForDateTimeInput();
     setForm((current) => ({
       ...current,
@@ -154,6 +177,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       completedAt: status === 'completed' ? (current.completedAt || now) : '',
     }));
   }
+
+  function updateStatus(event) {
+    updateStatusValue(event.target.value);
+  }
+
+  const activeStatusOption = statusOptions.find((option) => option.value === form.status) || statusOptions[0];
 
   function updateTruck(event) {
     const plateNumber = event.target.value;
@@ -573,7 +602,16 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           <div className="form-section">
             <h3>Status & Timeline</h3>
             <div className="order-form-grid">
-              <label>Status Pekerjaan<select name="status" value={form.status} onChange={updateStatus}><option value="received">Belum Jalan</option><option value="running">Sedang Jalan</option><option value="completed">Selesai</option></select></label>
+              <label>
+                Status Pekerjaan
+                <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle}>
+                  {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <span className={`mt-1 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${activeStatusOption.tone}`}>
+                  {activeStatusOption.label}
+                </span>
+                <small className="text-[11px] font-semibold leading-snug text-slate-500">{activeStatusOption.description}</small>
+              </label>
               <label>Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} /></label>
               <label>Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} /></label>
             </div>
