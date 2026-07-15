@@ -4,7 +4,8 @@ import { mapArchiveTrip } from './archive.mapper.js';
 const archiveColumns = `
   cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.container_type,
   cj.spk_number, cj.loading_voucher_number, cj.unloading_voucher_number,
-  cj.travel_document_number, cj.weighing_document_number, cj.assignment_snapshot,
+  cj.travel_document_number, cj.weighing_document_number, cj.tila_gatepass_document_number,
+  cj.assignment_snapshot,
   cj.status, cj.received_at, cj.running_at, cj.completed_at, cj.updated_by_name,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.origin,
   so.destination, so.trip_date

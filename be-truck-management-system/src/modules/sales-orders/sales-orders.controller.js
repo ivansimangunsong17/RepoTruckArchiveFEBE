@@ -4,7 +4,9 @@ import {
   getSalesOrder,
   listSalesOrders,
   removeSalesOrder,
+  requestSalesOrderCancellation,
   saveSalesOrder,
+  reviewSalesOrderCancellation,
 } from './sales-orders.service.js';
 
 export async function listSalesOrdersController(request, response) {
@@ -81,4 +83,32 @@ export async function cancelSalesOrderController(request, response) {
     afterData: { ...cancelled, status: 'cancelled' },
   });
   sendSuccess(response, cancelled, 'Sales Order berhasil dibatalkan.');
+}
+
+export async function requestCancelSalesOrderController(request, response) {
+  const before = await getSalesOrder(request.params.id);
+  const saved = await requestSalesOrderCancellation(request.params.id, request.user, request.body);
+  await safeRecordActivityLog(request, {
+    action: 'REQUEST_CANCEL_SALES_ORDER',
+    module: 'sales_orders',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    beforeData: before,
+    afterData: saved,
+  });
+  sendSuccess(response, saved, 'Permintaan pembatalan Sales Order berhasil diajukan.');
+}
+
+export async function reviewCancelSalesOrderController(request, response) {
+  const before = await getSalesOrder(request.params.id);
+  const saved = await reviewSalesOrderCancellation(request.params.id, request.user, request.body);
+  await safeRecordActivityLog(request, {
+    action: request.body?.approved ? 'APPROVE_CANCEL_SALES_ORDER' : 'REJECT_CANCEL_SALES_ORDER',
+    module: 'sales_orders',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    beforeData: before,
+    afterData: saved,
+  });
+  sendSuccess(response, saved, request.body?.approved ? 'Pembatalan Sales Order disetujui.' : 'Pembatalan Sales Order ditolak.');
 }

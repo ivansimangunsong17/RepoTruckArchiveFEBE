@@ -49,16 +49,25 @@ export async function getDashboardReport() {
         (select count(*)::int from vehicles where archived_at is null) as vehicles
     `),
     query(`
-      select id, unit_code, plate_number, container_size, default_driver_name, operational_status
-      from vehicles
-      where archived_at is null
-      order by unit_code asc, plate_number asc
+      select v.id, v.unit_code, v.plate_number, v.container_size, v.default_driver_name,
+             v.operational_status, v.kir_chassis_number,
+             kc.chassis_code, kc.container_size as chassis_size
+      from vehicles v
+      left join kir_chassis kc on lower(trim(v.kir_chassis_number)) in (
+        lower(kc.id::text),
+        lower(kc.chassis_code),
+        lower(coalesce(kc.kir_number, '')),
+        lower(coalesce(kc.plate_number, ''))
+      )
+      where v.archived_at is null
+      order by v.unit_code asc, v.plate_number asc
     `),
     query(`
       select cj.id, cj.container_number, cj.container_size, cj.container_type, cj.status,
              cj.rpuj_status, cj.spk_number, cj.loading_voucher_number,
              cj.unloading_voucher_number, cj.travel_document_number,
-             cj.weighing_document_number, cj.received_at, cj.running_at,
+             cj.weighing_document_number, cj.tila_gatepass_document_number,
+             cj.received_at, cj.running_at,
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
              so.id as sales_order_id, so.so_number, so.customer_name,
              so.shipment_type, so.origin, so.destination, so.trip_date,
@@ -74,7 +83,8 @@ export async function getDashboardReport() {
       select cj.id, cj.container_number, cj.container_size, cj.container_type, cj.status,
              cj.rpuj_status, cj.spk_number, cj.loading_voucher_number,
              cj.unloading_voucher_number, cj.travel_document_number,
-             cj.weighing_document_number, cj.received_at, cj.running_at,
+             cj.weighing_document_number, cj.tila_gatepass_document_number,
+             cj.received_at, cj.running_at,
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
              so.id as sales_order_id, so.so_number, so.customer_name,
              so.shipment_type, so.origin, so.destination, so.trip_date,
@@ -114,6 +124,9 @@ export async function getDashboardReport() {
       unitCode: row.unit_code,
       plateNumber: row.plate_number,
       capacity: row.container_size || '20FT',
+      kirChassisNumber: row.kir_chassis_number || '',
+      chassisCode: row.chassis_code || '',
+      chassisSize: row.chassis_size || '',
       defaultDriver: row.default_driver_name || '',
       status: row.operational_status || 'Aktif',
     })),
@@ -133,6 +146,7 @@ export async function getDashboardReport() {
       rpujStatus: row.rpuj_status,
       spkNumber: row.spk_number,
       loadingVoucher: row.loading_voucher_number,
+      tilaGatepassDocument: row.tila_gatepass_document_number || row.unloading_voucher_number || row.weighing_document_number,
       unloadingVoucher: row.unloading_voucher_number,
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,
@@ -161,6 +175,7 @@ export async function getDashboardReport() {
       rpujStatus: row.rpuj_status,
       spkNumber: row.spk_number,
       loadingVoucher: row.loading_voucher_number,
+      tilaGatepassDocument: row.tila_gatepass_document_number || row.unloading_voucher_number || row.weighing_document_number,
       unloadingVoucher: row.unloading_voucher_number,
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,
@@ -285,54 +300,51 @@ function parseRevenuePeriod(options = {}) {
   return { year, month, dateFrom, dateToExclusive };
 }
 
-function formatContainerSummary(row = {}) {
-  const parts = [];
-  const qty20 = Number(row.qty_20ft || 0);
-  const qty40 = Number(row.qty_40ft || 0);
-  if (qty20) parts.push(`${qty20} x 20FT`);
-  if (qty40) parts.push(`${qty40} x 40FT`);
-  return parts.join(', ') || `${Number(row.total_containers || 0)} container`;
-}
-
 export async function getMonthlyRevenueReport(options = {}) {
   const period = parseRevenuePeriod(options);
   const result = await query(
     `
-      with completed_orders as (
+      with completed_jobs as (
         select
+          cj.id as job_id,
           so.id,
           so.so_number,
           so.customer_name,
           so.destination,
           so.total_amount,
-          coalesce(max(cj.completed_at)::date, so.trip_date) as completed_date,
-          count(cj.id)::int as total_containers,
-          count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '20FT')::int as qty_20ft,
-          count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '40FT')::int as qty_40ft
+          cj.container_number,
+          cj.container_size,
+          cj.completed_at::date as completed_date,
+          nullif(cj.assignment_snapshot->>'driver', '') as driver,
+          nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
+          count(*) over (partition by so.id)::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
-        where so.status = 'completed'
+        where so.status <> 'cancelled'
           and cj.status = 'completed'
-        group by so.id
       )
       select *
-      from completed_orders
+      from completed_jobs
       where completed_date >= $1::date
         and completed_date < $2::date
-      order by completed_date desc, so_number desc
+      order by completed_date desc, plate_number asc nulls last, so_number asc, job_id asc
     `,
     [period.dateFrom, period.dateToExclusive],
   );
 
   const rows = result.rows.map((row) => ({
     id: row.id,
+    jobId: row.job_id,
     completedDate: row.completed_date,
     soNumber: row.so_number,
     customer: row.customer_name,
     destination: row.destination,
-    container: formatContainerSummary(row),
+    container: row.container_number || row.container_size || '-',
+    size: row.container_size,
+    driver: row.driver || '',
+    plateNumber: row.plate_number || '',
     totalContainers: Number(row.total_containers || 0),
-    revenue: Number(row.total_amount || 0),
+    revenue: Number(row.total_amount || 0) / Math.max(1, Number(row.total_containers || 0)),
   }));
 
   return {
@@ -343,15 +355,20 @@ export async function getMonthlyRevenueReport(options = {}) {
     rows,
     summary: {
       totalRevenue: rows.reduce((total, row) => total + row.revenue, 0),
-      totalOrders: rows.length,
-      totalContainers: rows.reduce((total, row) => total + row.totalContainers, 0),
+      totalOrders: new Set(rows.map((row) => row.id)).size,
+      totalContainers: rows.length,
+      totalTrucks: new Set(rows.map((row) => row.plateNumber).filter(Boolean)).size,
+      totalTrips: rows.length,
     },
   };
 }
 
 export async function getOperationReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
-  const dateFilter = buildDateWhere('so.trip_date', options);
+  const dateColumn = options.status === 'completed'
+    ? 'coalesce(cj.completed_at, so.trip_date)::date'
+    : 'so.trip_date';
+  const dateFilter = buildDateWhere(dateColumn, options);
   const clauses = [...dateFilter.clauses];
   const params = [...dateFilter.params];
 
@@ -381,7 +398,8 @@ export async function getOperationReport(options = {}) {
         select cj.id, cj.container_number, cj.container_size, cj.container_type,
                cj.status, cj.rpuj_status, cj.spk_number, cj.loading_voucher_number,
                cj.unloading_voucher_number, cj.travel_document_number,
-               cj.weighing_document_number, cj.received_at, cj.running_at,
+               cj.weighing_document_number, cj.tila_gatepass_document_number,
+               cj.received_at, cj.running_at,
                cj.completed_at, cj.updated_at, cj.assignment_snapshot,
                so.so_number, so.do_number, so.customer_name, so.trip_date,
                so.origin, so.destination
@@ -432,6 +450,7 @@ export async function getOperationReport(options = {}) {
       rpujStatus: row.rpuj_status,
       spkNumber: row.spk_number,
       loadingVoucher: row.loading_voucher_number,
+      tilaGatepassDocument: row.tila_gatepass_document_number || row.unloading_voucher_number || row.weighing_document_number,
       unloadingVoucher: row.unloading_voucher_number,
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,

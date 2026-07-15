@@ -3,6 +3,8 @@ import {
   createSalesOrder,
   findSalesOrderById,
   findSalesOrdersPage,
+  requestSalesOrderCancellation as requestSalesOrderCancellationRepository,
+  reviewSalesOrderCancellation as reviewSalesOrderCancellationRepository,
   updateSalesOrder,
 } from './sales-orders.repository.js';
 import {
@@ -362,4 +364,35 @@ export async function removeSalesOrder(id, actor) {
   }
   ensureCanAccessSalesOrder(actor, order);
   return cancelSalesOrder(id);
+}
+
+export async function requestSalesOrderCancellation(id, actor, payload = {}) {
+  const order = await findSalesOrderById(id);
+  if (!order) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  ensureCanAccessSalesOrder(actor, order);
+  return requestSalesOrderCancellationRepository(id, {
+    cancelRequestNote: payload.cancelRequestNote || '',
+    cancelRequestedByName: getActorName(actor),
+    cancelRequestedByRole: actor?.role || 'sales',
+  });
+}
+
+export async function reviewSalesOrderCancellation(id, actor, payload = {}) {
+  if (!actor || !['operational', 'admin'].includes(actor.role)) {
+    const error = new Error('Approval pembatalan hanya dapat dilakukan oleh Operational atau Admin.');
+    error.statusCode = 403;
+    error.code = 'SALES_ORDER_CANCEL_REVIEW_FORBIDDEN';
+    throw error;
+  }
+
+  return reviewSalesOrderCancellationRepository(id, {
+    approved: Boolean(payload.approved),
+    cancelReviewNote: payload.cancelReviewNote || '',
+    cancelReviewedByName: getActorName(actor),
+  });
 }

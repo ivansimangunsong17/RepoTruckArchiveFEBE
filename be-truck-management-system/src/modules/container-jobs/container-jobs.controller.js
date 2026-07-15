@@ -1,6 +1,13 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
-import { createContainerJobSpk, getContainerJob, listContainerJobs, saveContainerJob } from './container-jobs.service.js';
+import {
+  createContainerJobSpk,
+  getContainerJob,
+  listContainerJobs,
+  requestContainerJobCancellation,
+  reviewContainerJobCancellation,
+  saveContainerJob,
+} from './container-jobs.service.js';
 
 export async function listContainerJobsController(request, response) {
   const result = await listContainerJobs(request.query);
@@ -54,4 +61,32 @@ export async function generateContainerJobSpkController(request, response) {
     metadata: { changedField: 'spkNumber' },
   });
   sendSuccess(response, saved, 'SPK berhasil digenerate.');
+}
+
+export async function requestCancelContainerJobController(request, response) {
+  const before = await getContainerJob(request.params.id);
+  const saved = await requestContainerJobCancellation(request.params.id, request.user, request.body);
+  await safeRecordActivityLog(request, {
+    action: 'REQUEST_CANCEL_CONTAINER_JOB',
+    module: 'container_jobs',
+    entityType: 'container_job',
+    entityId: request.params.id,
+    beforeData: before,
+    afterData: saved,
+  });
+  sendSuccess(response, saved, 'Permintaan pembatalan Container Job berhasil diajukan.');
+}
+
+export async function reviewCancelContainerJobController(request, response) {
+  const before = await getContainerJob(request.params.id);
+  const saved = await reviewContainerJobCancellation(request.params.id, request.user, request.body);
+  await safeRecordActivityLog(request, {
+    action: request.body?.approved ? 'APPROVE_CANCEL_CONTAINER_JOB' : 'REJECT_CANCEL_CONTAINER_JOB',
+    module: 'container_jobs',
+    entityType: 'container_job',
+    entityId: request.params.id,
+    beforeData: before,
+    afterData: saved,
+  });
+  sendSuccess(response, saved, request.body?.approved ? 'Pembatalan Container Job disetujui.' : 'Pembatalan Container Job ditolak.');
 }

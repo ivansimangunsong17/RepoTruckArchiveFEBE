@@ -2,6 +2,8 @@ import {
   generateContainerJobSpkController,
   getContainerJobController,
   listContainerJobsController,
+  requestCancelContainerJobController,
+  reviewCancelContainerJobController,
   updateContainerJobController,
 } from './container-jobs.controller.js';
 
@@ -41,6 +43,18 @@ export const containerJobRoutes = [
     path: '/api/container-jobs/:id/status',
     permission: 'container_job.update_status',
     handler: updateContainerJobController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/cancel-request',
+    permission: 'sales_order.update',
+    handler: requestCancelContainerJobController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/cancel-review',
+    permission: 'container_job.update_status',
+    handler: reviewCancelContainerJobController,
   },
   {
     method: 'PUT',

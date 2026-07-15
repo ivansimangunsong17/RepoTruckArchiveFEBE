@@ -36,6 +36,7 @@ const categoryFolders = {
   container_job: ['03-container-jobs'],
   spkDocument: ['03-container-jobs', 'spk'],
   loadingVoucherDocument: ['03-container-jobs', 'bon-muat'],
+  tilaGatepassDocumentFile: ['03-container-jobs', 'tila-delivery-card-gatepass-sp2'],
   unloadingVoucherDocument: ['03-container-jobs', 'bon-bongkar'],
   travelDocumentFile: ['03-container-jobs', 'surat-jalan'],
   weighingDocumentFile: ['03-container-jobs', 'surat-timbang'],

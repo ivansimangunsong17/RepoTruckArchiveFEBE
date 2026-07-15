@@ -40,6 +40,14 @@ const salesOrderColumnCandidates = [
   'created_at',
   'updated_at',
   'cancelled_at',
+  'cancel_request_status',
+  'cancel_request_note',
+  'cancel_requested_by_name',
+  'cancel_requested_by_role',
+  'cancel_requested_at',
+  'cancel_reviewed_by_name',
+  'cancel_reviewed_at',
+  'cancel_review_note',
   'notes',
   'reference_documents',
 ];
@@ -81,7 +89,8 @@ async function filterSalesOrderPayload(payload, executor = query) {
 const jobColumns = `
   id, sales_order_id, container_number, container_size, container_type, container_notes,
   rpuj_status, rpuj_notes, spk_number, loading_voucher_number, unloading_voucher_number,
-  travel_document_number, weighing_document_number, driver_id, vehicle_id, assignment_snapshot,
+  travel_document_number, weighing_document_number, tila_gatepass_document_number,
+  tila_gatepass_migration_note, driver_id, vehicle_id, assignment_snapshot,
   status, received_at, running_at, completed_at, created_by_name, updated_by_name,
   created_at, updated_at
 `;
@@ -107,6 +116,7 @@ function buildOrderWhere({
   invoiced = false,
   ownerUserId = '',
   ownerName = '',
+  excludeCancelled = false,
 } = {}, { hasOwnerUserIdColumn = true } = {}) {
   const clauses = [];
   const params = [];
@@ -122,6 +132,8 @@ function buildOrderWhere({
   } else if (status) {
     params.push(status);
     clauses.push(`status = $${params.length}`);
+  } else if (excludeCancelled) {
+    clauses.push("status <> 'cancelled'");
   }
 
   if (isTruthyFilter(invoiced)) {
@@ -246,11 +258,63 @@ async function refreshOrderStatus(client, salesOrderId) {
   );
 }
 
+async function ensureSalesOrderCanBeCancelled(client, id) {
+  const jobs = await client.query('select status from container_jobs where sales_order_id = $1', [id]);
+  if (jobs.rows.some((job) => job.status !== 'received')) {
+    const error = new Error('Sales Order tidak bisa dibatalkan karena sudah ada container yang diproses Operational.');
+    error.statusCode = 409;
+    error.code = 'SALES_ORDER_LOCKED';
+    throw error;
+  }
+}
+
+async function updateSalesOrderCancellation(client, id, patch = {}) {
+  const result = await client.query(
+    `
+      update sales_orders
+      set cancel_request_status = $1,
+          cancel_request_note = $2,
+          cancel_requested_by_name = $3,
+          cancel_requested_by_role = $4,
+          cancel_requested_at = $5,
+          cancel_reviewed_by_name = $6,
+          cancel_reviewed_at = $7,
+          cancel_review_note = $8,
+          updated_at = now()
+      where id = $9
+      returning id, status, cancelled_at, cancel_request_status, cancel_request_note,
+        cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at,
+        cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note
+    `,
+    [
+      patch.cancelRequestStatus || 'none',
+      patch.cancelRequestNote || null,
+      patch.cancelRequestedByName || null,
+      patch.cancelRequestedByRole || null,
+      patch.cancelRequestedAt || null,
+      patch.cancelReviewedByName || null,
+      patch.cancelReviewedAt || null,
+      patch.cancelReviewNote || null,
+      id,
+    ],
+  );
+  if (!result.rows[0]) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  return result.rows[0];
+}
+
 export async function findSalesOrdersPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const columnSet = await getSalesOrderColumnSet();
   const ownerColumnOptions = { hasOwnerUserIdColumn: columnSet.has('created_by_user_id') };
-  const { whereSql, params } = buildOrderWhere(options, ownerColumnOptions);
+  const { whereSql, params } = buildOrderWhere({
+    ...options,
+    excludeCancelled: !options.status,
+  }, ownerColumnOptions);
   const { whereSql: summaryWhereSql, params: summaryParams } = buildOrderWhere({
     query: options.query,
     ownerUserId: options.ownerUserId,
@@ -483,13 +547,7 @@ export async function updateSalesOrder(id, form) {
 
 export async function cancelSalesOrder(id) {
   return withTransaction(async (client) => {
-    const jobs = await client.query('select status from container_jobs where sales_order_id = $1', [id]);
-    if (jobs.rows.some((job) => job.status !== 'received')) {
-      const error = new Error('Sales Order tidak bisa dibatalkan karena sudah ada container yang diproses Operational.');
-      error.statusCode = 409;
-      error.code = 'SALES_ORDER_LOCKED';
-      throw error;
-    }
+    await ensureSalesOrderCanBeCancelled(client, id);
 
     const result = await client.query(
       `
@@ -509,5 +567,100 @@ export async function cancelSalesOrder(id) {
       throw error;
     }
     return result.rows[0];
+  });
+}
+
+export async function requestSalesOrderCancellation(id, patch = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query('select id, status from sales_orders where id = $1', [id]);
+    if (!existing.rows[0]) {
+      const error = new Error('Sales Order tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_NOT_FOUND';
+      throw error;
+    }
+    if (['completed', 'cancelled'].includes(existing.rows[0].status)) {
+      const error = new Error('Sales Order yang sudah selesai atau dibatalkan tidak bisa diajukan batal.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_CANCEL_REQUEST_LOCKED';
+      throw error;
+    }
+
+    return updateSalesOrderCancellation(client, id, {
+      cancelRequestStatus: 'submitted',
+      cancelRequestNote: patch.cancelRequestNote || null,
+      cancelRequestedByName: patch.cancelRequestedByName || null,
+      cancelRequestedByRole: patch.cancelRequestedByRole || null,
+      cancelRequestedAt: new Date().toISOString(),
+      cancelReviewedByName: null,
+      cancelReviewedAt: null,
+      cancelReviewNote: null,
+    });
+  });
+}
+
+export async function reviewSalesOrderCancellation(id, patch = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      'select id, status, cancel_request_status, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at from sales_orders where id = $1',
+      [id],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Sales Order tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_NOT_FOUND';
+      throw error;
+    }
+    if (existing.rows[0].cancel_request_status !== 'submitted') {
+      const error = new Error('Belum ada permintaan pembatalan yang menunggu approval.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_CANCEL_REQUEST_MISSING';
+      throw error;
+    }
+
+    if (patch.approved) {
+      await ensureSalesOrderCanBeCancelled(client, id);
+      const result = await client.query(
+        `
+          update sales_orders
+          set status = 'cancelled',
+              cancelled_at = now(),
+              cancel_request_status = 'approved',
+              cancel_request_note = coalesce($1, cancel_request_note),
+              cancel_requested_by_name = coalesce($2, cancel_requested_by_name),
+              cancel_requested_by_role = coalesce($3, cancel_requested_by_role),
+              cancel_requested_at = coalesce($4, cancel_requested_at),
+              cancel_reviewed_by_name = $5,
+              cancel_reviewed_at = now(),
+              cancel_review_note = $6,
+              updated_at = now()
+          where id = $7
+          returning id, status, cancelled_at, cancel_request_status, cancel_request_note,
+            cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at,
+            cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note
+        `,
+        [
+          patch.cancelRequestNote || null,
+          existing.rows[0].cancel_requested_by_name || null,
+          existing.rows[0].cancel_requested_by_role || null,
+          existing.rows[0].cancel_requested_at || null,
+          patch.cancelReviewedByName || null,
+          patch.cancelReviewNote || null,
+          id,
+        ],
+      );
+      return result.rows[0];
+    }
+
+    return updateSalesOrderCancellation(client, id, {
+      cancelRequestStatus: 'rejected',
+      cancelRequestNote: patch.cancelRequestNote || null,
+      cancelRequestedByName: existing.rows[0].cancel_requested_by_name || null,
+      cancelRequestedByRole: existing.rows[0].cancel_requested_by_role || null,
+      cancelRequestedAt: existing.rows[0].cancel_requested_at || null,
+      cancelReviewedByName: patch.cancelReviewedByName || null,
+      cancelReviewedAt: new Date().toISOString(),
+      cancelReviewNote: patch.cancelReviewNote || null,
+    });
   });
 }

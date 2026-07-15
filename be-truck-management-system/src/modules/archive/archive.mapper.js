@@ -18,6 +18,7 @@ export function mapArchiveTrip(row) {
     chassis: assignment.vehicleDetail || null,
     spkNumber: row.spk_number,
     loadingVoucher: row.loading_voucher_number,
+    tilaGatepassDocument: row.tila_gatepass_document_number || row.unloading_voucher_number || row.weighing_document_number,
     unloadingVoucher: row.unloading_voucher_number,
     travelDocument: row.travel_document_number,
     weighingDocument: row.weighing_document_number,

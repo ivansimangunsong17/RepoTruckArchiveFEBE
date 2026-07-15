@@ -3,6 +3,8 @@ import {
   createSalesOrderController,
   getSalesOrderController,
   listSalesOrdersController,
+  requestCancelSalesOrderController,
+  reviewCancelSalesOrderController,
   updateSalesOrderController,
 } from './sales-orders.controller.js';
 
@@ -42,6 +44,18 @@ export const salesOrderRoutes = [
     path: '/api/sales-orders/:id/cancel',
     permission: 'sales_order.cancel',
     handler: cancelSalesOrderController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/sales-orders/:id/cancel-request',
+    permission: 'sales_order.update',
+    handler: requestCancelSalesOrderController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/sales-orders/:id/cancel-review',
+    permission: 'sales_order.cancel_review',
+    handler: reviewCancelSalesOrderController,
   },
   {
     method: 'DELETE',

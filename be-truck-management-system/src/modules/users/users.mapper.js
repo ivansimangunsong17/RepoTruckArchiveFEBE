@@ -4,6 +4,7 @@ export const ROLE_PERMISSIONS = {
     'sales_order.create',
     'sales_order.update',
     'sales_order.cancel',
+    'sales_order.cancel_review',
     'container_job.read',
     'container_job.assign',
     'container_job.update',
@@ -34,8 +35,8 @@ export const ROLE_PERMISSIONS = {
     'activity_log.read',
     'report.read',
   ],
-  sales: ['sales_order.read', 'sales_order.create', 'sales_order.update', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'document.upload'],
-  operational: ['sales_order.read', 'container_job.read', 'container_job.assign', 'container_job.update', 'container_job.update_status', 'container_job.complete', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'vehicle_document.create', 'vehicle_document.update', 'document.read', 'document.upload'],
+  sales: ['sales_order.read', 'sales_order.create', 'sales_order.update', 'sales_order.cancel', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'document.upload'],
+  operational: ['sales_order.read', 'sales_order.cancel_review', 'container_job.read', 'container_job.assign', 'container_job.update', 'container_job.update_status', 'container_job.complete', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'vehicle_document.create', 'vehicle_document.update', 'document.read', 'document.upload'],
   pengamat: ['sales_order.read', 'container_job.read', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'report.read', 'activity_log.read'],
 };
 

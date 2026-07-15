@@ -5,11 +5,15 @@ const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.container_type,
   cj.container_notes, cj.rpuj_status, cj.rpuj_notes, cj.spk_number, cj.eir_number,
   cj.loading_voucher_number, cj.unloading_voucher_number, cj.travel_document_number,
-  cj.weighing_document_number, cj.driver_id, cj.vehicle_id, cj.assignment_snapshot,
-  cj.status, cj.received_at, cj.running_at, cj.completed_at, cj.created_by_name,
-  cj.updated_by_name, cj.created_at, cj.updated_at,
+  cj.weighing_document_number, cj.tila_gatepass_document_number, cj.tila_gatepass_migration_note,
+  cj.driver_id, cj.vehicle_id, cj.assignment_snapshot,
+  cj.status, cj.received_at, cj.running_at, cj.completed_at, cj.cancelled_at, cj.created_by_name,
+  cj.updated_by_name, cj.created_at, cj.updated_at, cj.cancel_request_status, cj.cancel_request_note,
+  cj.cancel_requested_by_name, cj.cancel_requested_by_role, cj.cancel_requested_at,
+  cj.cancel_reviewed_by_name, cj.cancel_reviewed_at, cj.cancel_review_note,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
-  so.origin, so.destination, so.trip_date, so.created_by_name as order_created_by_name,
+  so.terminal, so.service_name, so.origin, so.destination, so.trip_date,
+  so.created_by_name as order_created_by_name,
   (
     select count(*)::int
     from container_jobs order_cj
@@ -35,7 +39,7 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
-function buildJobWhere({ query: keyword = '', status = '' } = {}) {
+function buildJobWhere({ query: keyword = '', status = '', requestStatus = '' } = {}) {
   const clauses = ["so.status <> 'cancelled'"];
   const params = [];
   const cleanKeyword = keyword.trim();
@@ -54,6 +58,11 @@ function buildJobWhere({ query: keyword = '', status = '' } = {}) {
   if (status) {
     params.push(status);
     clauses.push(`cj.status = $${params.length}`);
+  }
+
+  if (requestStatus) {
+    params.push(requestStatus);
+    clauses.push(`cj.cancel_request_status = $${params.length}`);
   }
 
   return {
@@ -84,6 +93,7 @@ async function findVehicle(client, form) {
 
 function normalizeContainerSize(value) {
   const normalized = String(value || '').toUpperCase().replace(/\s/g, '');
+  if (normalized === 'COMBO') return 'COMBO';
   return normalized === '40FT' ? '40FT' : '20FT';
 }
 
@@ -91,7 +101,7 @@ function assertVehicleMatchesContainer(vehicle, containerSize) {
   if (!vehicle) return;
   const vehicleSize = normalizeContainerSize(vehicle.container_size);
   const jobSize = normalizeContainerSize(containerSize);
-  if (vehicleSize !== jobSize) {
+  if (vehicleSize !== 'COMBO' && vehicleSize !== jobSize) {
     const error = new Error(`Truck ${vehicle.plate_number} kapasitas ${vehicleSize} tidak sesuai untuk container ${jobSize}.`);
     error.statusCode = 400;
     error.code = 'VEHICLE_SIZE_MISMATCH';
@@ -126,41 +136,6 @@ async function refreshOrderStatus(client, salesOrderId) {
   );
 }
 
-async function ensureCompletedDocuments(client, jobId) {
-  const result = await client.query(
-    `
-      select category
-      from attachments
-      where entity_type = 'container_job'
-        and entity_id = $1
-        and category = any($2::text[])
-    `,
-    [
-      jobId,
-      [
-        'loadingVoucherDocument',
-        'unloadingVoucherDocument',
-        'travelDocumentFile',
-        'weighingDocumentFile',
-      ],
-    ],
-  );
-  const categories = new Set(result.rows.map((row) => row.category));
-  const missing = [
-    !categories.has('loadingVoucherDocument') && 'bon muat',
-    !categories.has('unloadingVoucherDocument') && 'bon bongkar',
-    !categories.has('travelDocumentFile') && 'dokumen surat jalan',
-    !categories.has('weighingDocumentFile') && 'dokumen surat timbang',
-  ].filter(Boolean);
-
-  if (missing.length) {
-    const error = new Error(`Pekerjaan belum dapat diselesaikan. Lengkapi: ${missing.join(', ')}.`);
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-}
-
 export async function findContainerJobsPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildJobWhere(options);
@@ -174,7 +149,7 @@ export async function findContainerJobsPage(options = {}) {
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         ${whereSql}
-        order by
+    order by
           case cj.status
             when 'received' then 1
             when 'running' then 2
@@ -182,6 +157,7 @@ export async function findContainerJobsPage(options = {}) {
             when 'cancelled' then 4
             else 4
           end,
+          coalesce(cj.cancel_requested_at, cj.updated_at) desc,
           so.trip_date asc,
           cj.created_at asc
         limit $${limitIndex} offset $${offsetIndex}
@@ -264,7 +240,7 @@ export async function findContainerJobById(id) {
 
 export async function updateContainerJob(id, form) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, sales_order_id, container_number, container_size, running_at from container_jobs where id = $1', [id]);
+    const existing = await client.query('select id, sales_order_id, container_number, container_size, running_at, cancelled_at from container_jobs where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Container Job tidak ditemukan.');
       error.statusCode = 404;
@@ -283,14 +259,9 @@ export async function updateContainerJob(id, form) {
       : ['running', 'completed'].includes(nextStatus)
         ? form.runningAt || new Date().toISOString()
         : null;
-
-    if (nextStatus === 'completed' && !nextContainerNumber) {
-      const error = new Error('Nomor container wajib diisi untuk menyelesaikan pekerjaan.');
-      error.statusCode = 400;
-      error.code = 'VALIDATION_ERROR';
-      throw error;
-    }
-    if (nextStatus === 'completed') await ensureCompletedDocuments(client, id);
+    const cancelledAt = nextStatus === 'cancelled'
+      ? form.cancelledAt || existing.rows[0].cancelled_at || new Date().toISOString()
+      : null;
 
     await client.query(
       `
@@ -304,12 +275,12 @@ export async function updateContainerJob(id, form) {
             spk_number = $7,
             eir_number = $8,
             loading_voucher_number = $9,
-            unloading_voucher_number = $10,
-            travel_document_number = $11,
-            weighing_document_number = $12,
-            status = $13,
-            running_at = $14,
-            completed_at = $15,
+            travel_document_number = $10,
+            tila_gatepass_document_number = $11,
+            status = $12,
+            running_at = $13,
+            completed_at = $14,
+            cancelled_at = $15,
             updated_by_name = $16,
             updated_at = now()
         where id = $17
@@ -324,12 +295,12 @@ export async function updateContainerJob(id, form) {
         form.spkNumber || null,
         form.eirNumber || null,
         form.loadingVoucher || null,
-        form.unloadingVoucher || null,
         form.travelDocument || null,
-        form.weighingDocument || null,
+        form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null,
         nextStatus,
         runningAt,
         nextStatus === 'completed' ? form.completedAt || new Date().toISOString() : null,
+        cancelledAt,
         form.updatedBy || 'Operational',
         id,
       ],
@@ -355,6 +326,173 @@ export async function updateContainerJob(id, form) {
       [id],
     );
     return mapContainerJob(updated.rows[0], attachmentResult.rows);
+  });
+}
+
+async function ensureCanRequestCancellation(client, id) {
+  const result = await client.query(
+    'select id, status, cancel_request_status from container_jobs where id = $1',
+    [id],
+  );
+  const job = result.rows[0];
+  if (!job) {
+    const error = new Error('Container Job tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'CONTAINER_JOB_NOT_FOUND';
+    throw error;
+  }
+  if (job.status !== 'received') {
+    const error = new Error('Container Job hanya bisa diajukan batal sebelum diproses Operational.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_LOCKED';
+    throw error;
+  }
+  if (job.cancel_request_status === 'submitted') {
+    const error = new Error('Container Job sudah memiliki permintaan pembatalan yang menunggu approval.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_CANCEL_REQUEST_EXISTS';
+    throw error;
+  }
+  return job;
+}
+
+export async function requestContainerJobCancellation(id, form = {}) {
+  return withTransaction(async (client) => {
+    await ensureCanRequestCancellation(client, id);
+    const result = await client.query(
+      `
+        update container_jobs
+        set cancel_request_status = 'submitted',
+            cancel_request_note = $1,
+            cancel_requested_by_name = $2,
+            cancel_requested_by_role = $3,
+            cancel_requested_at = now(),
+            cancel_reviewed_by_name = null,
+            cancel_reviewed_at = null,
+            cancel_review_note = null,
+            updated_by_name = $4,
+            updated_at = now()
+        where id = $5
+        returning ${joinedJobColumns}
+      `,
+      [
+        form.cancelRequestNote || null,
+        form.cancelRequestedByName || null,
+        form.cancelRequestedByRole || null,
+        form.cancelRequestedByName || null,
+        id,
+      ],
+    );
+    const attachmentResult = await client.query(
+      `
+        select ${attachmentColumns}
+        from attachments
+        where entity_type = 'container_job' and entity_id = $1
+        order by created_at asc
+      `,
+      [id],
+    );
+    return mapContainerJob(result.rows[0], attachmentResult.rows);
+  });
+}
+
+export async function reviewContainerJobCancellation(id, form = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      'select id, sales_order_id, status, cancel_request_status, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at from container_jobs where id = $1',
+      [id],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Container Job tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_NOT_FOUND';
+      throw error;
+    }
+    if (existing.rows[0].cancel_request_status !== 'submitted') {
+      const error = new Error('Belum ada permintaan pembatalan yang menunggu approval.');
+      error.statusCode = 409;
+      error.code = 'CONTAINER_JOB_CANCEL_REQUEST_MISSING';
+      throw error;
+    }
+
+    if (form.approved) {
+      const result = await client.query(
+        `
+          update container_jobs
+          set status = 'cancelled',
+              cancelled_at = now(),
+              cancel_request_status = 'approved',
+              cancel_request_note = coalesce($1, cancel_request_note),
+              cancel_requested_by_name = coalesce($2, cancel_requested_by_name),
+              cancel_requested_by_role = coalesce($3, cancel_requested_by_role),
+              cancel_requested_at = coalesce($4, cancel_requested_at),
+              cancel_reviewed_by_name = $5,
+              cancel_reviewed_at = now(),
+              cancel_review_note = $6,
+              updated_by_name = $5,
+              updated_at = now()
+          where id = $7
+          returning ${joinedJobColumns}
+        `,
+        [
+          form.cancelRequestNote || null,
+          existing.rows[0].cancel_requested_by_name || null,
+          existing.rows[0].cancel_requested_by_role || null,
+          existing.rows[0].cancel_requested_at || null,
+          form.cancelReviewedByName || null,
+          form.cancelReviewNote || null,
+          id,
+        ],
+      );
+      await refreshOrderStatus(client, existing.rows[0].sales_order_id);
+      const attachmentResult = await client.query(
+        `
+          select ${attachmentColumns}
+          from attachments
+          where entity_type = 'container_job' and entity_id = $1
+          order by created_at asc
+        `,
+        [id],
+      );
+      return mapContainerJob(result.rows[0], attachmentResult.rows);
+    }
+
+    const result = await client.query(
+      `
+        update container_jobs
+        set cancel_request_status = 'rejected',
+            cancel_request_note = coalesce($1, cancel_request_note),
+            cancel_requested_by_name = coalesce($2, cancel_requested_by_name),
+            cancel_requested_by_role = coalesce($3, cancel_requested_by_role),
+            cancel_requested_at = coalesce($4, cancel_requested_at),
+            cancel_reviewed_by_name = $5,
+            cancel_reviewed_at = now(),
+            cancel_review_note = $6,
+            updated_by_name = $5,
+            updated_at = now()
+        where id = $7
+        returning ${joinedJobColumns}
+      `,
+      [
+        form.cancelRequestNote || null,
+        existing.rows[0].cancel_requested_by_name || null,
+        existing.rows[0].cancel_requested_by_role || null,
+        existing.rows[0].cancel_requested_at || null,
+        form.cancelReviewedByName || null,
+        form.cancelReviewNote || null,
+        id,
+      ],
+    );
+    const attachmentResult = await client.query(
+      `
+        select ${attachmentColumns}
+        from attachments
+        where entity_type = 'container_job' and entity_id = $1
+        order by created_at asc
+      `,
+      [id],
+    );
+    return mapContainerJob(result.rows[0], attachmentResult.rows);
   });
 }
 

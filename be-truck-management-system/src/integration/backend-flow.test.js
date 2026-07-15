@@ -471,9 +471,8 @@ if (!hasDatabase) {
       const requiredDocumentCategories = [
         'spkDocument',
         'loadingVoucherDocument',
-        'unloadingVoucherDocument',
+        'tilaGatepassDocumentFile',
         'travelDocumentFile',
-        'weighingDocumentFile',
       ];
       for (const category of requiredDocumentCategories) {
         const uploadRequiredDocument = await api('/api/attachments/upload', {
@@ -505,9 +504,8 @@ if (!hasDatabase) {
           rpujStatus: 'approved',
           spkNumber: `SPK-${runId}`,
           loadingVoucher: `BM-${runId}`,
-          unloadingVoucher: `BB-${runId}`,
+          tilaGatepassDocument: `TILA-GP-${runId}`,
           travelDocument: `SJ-${runId}`,
-          weighingDocument: `ST-${runId}`,
           updatedBy: 'Sprint2C Operational',
         },
       });
@@ -517,6 +515,17 @@ if (!hasDatabase) {
       const completedOrder = await api(`/api/sales-orders/${created.orderId}`, { token: adminToken });
       assert.equal(completedOrder.status, 200);
       assert.equal(completedOrder.body.data.status, 'completed');
+
+      const completedOperationsReport = await api(
+        `/api/reports/operations?status=completed&dateFrom=2026-07-01&dateTo=2026-07-31&query=${encodeURIComponent(created.orderSoNumber)}`,
+        { token: observerToken },
+      );
+      assert.equal(completedOperationsReport.status, 200);
+      assert.ok(Array.isArray(completedOperationsReport.body.data.rows));
+      assert.equal(
+        completedOperationsReport.body.data.rows.some((row) => row.id === created.jobId),
+        true,
+      );
 
       const cancelJobOrder = await api('/api/sales-orders', {
         method: 'POST',
@@ -565,9 +574,8 @@ if (!hasDatabase) {
               rpujStatus: 'approved',
               spkNumber: `SPK-${runId}`,
               loadingVoucher: `BM-${runId}`,
-              unloadingVoucher: `BB-${runId}`,
+              tilaGatepassDocument: `TILA-GP-${runId}`,
               travelDocument: `SJ-${runId}`,
-              weighingDocument: `ST-${runId}`,
               runningAt: '2026-07-11T08:00:00.000Z',
               completedAt: '2026-07-11T15:00:00.000Z',
             },

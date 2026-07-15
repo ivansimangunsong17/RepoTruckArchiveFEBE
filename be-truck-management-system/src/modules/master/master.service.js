@@ -38,6 +38,44 @@ export async function getMasterRow(resource, id) {
   return row;
 }
 
+function normalizeLookupValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isSameChassis(chassis, value) {
+  const normalizedValue = normalizeLookupValue(value);
+  if (!normalizedValue) return false;
+  return [
+    chassis.id,
+    chassis.chassisCode,
+    chassis.kirNumber,
+    chassis.plateNumber,
+  ].some((candidate) => normalizeLookupValue(candidate) === normalizedValue);
+}
+
+async function normalizeTruckPayload(payload) {
+  if (!payload.kirChassisNumber) return payload;
+
+  const chassisRows = await listMasterRows('kir-chassis');
+  const chassis = chassisRows.find((row) => isSameChassis(row, payload.kirChassisNumber));
+  if (!chassis) {
+    const error = new Error('Chassis yang dipilih tidak ditemukan di master chassis.');
+    error.statusCode = 400;
+    error.code = 'CHASSIS_NOT_FOUND';
+    throw error;
+  }
+
+  return {
+    ...payload,
+    capacity: chassis.capacity || payload.capacity || '20FT',
+  };
+}
+
+async function normalizePayloadForResource(resource, payload) {
+  if (resource === 'trucks') return normalizeTruckPayload(payload);
+  return payload;
+}
+
 export async function saveMasterRow(resource, payload, id) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload master data harus berupa object.');
@@ -45,7 +83,8 @@ export async function saveMasterRow(resource, payload, id) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
-  return upsertMasterRow(resource, payload, id);
+  const normalizedPayload = await normalizePayloadForResource(resource, payload);
+  return upsertMasterRow(resource, normalizedPayload, id);
 }
 
 export function removeMasterRow(resource, id) {
