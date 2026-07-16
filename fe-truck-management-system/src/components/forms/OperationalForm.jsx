@@ -7,6 +7,7 @@ import { calculateUjRecommendation } from '../../utils/ujRecommendation';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
 import { parseOtherCost, serializeOtherCost } from '../../utils/otherCost';
+import { formatDate } from '../../utils/formatDate';
 
 const documentFields = [
   ['spkDocument', 'Lampiran Biaya Lainnya'],
@@ -105,10 +106,136 @@ function spkValue(value) {
   return normalized || '-';
 }
 
+function spkDateValue(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return spkValue(value);
+  return formatDate(value);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function formatTruckUnitCode(value) {
   const normalized = String(value || '').trim();
   if (!normalized) return '';
   return normalized.replace(/^TRK-?/i, '').replace(/^0+(\d)/, '$1') || normalized;
+}
+
+function normalizePdfText(value) {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapePdfText(value) {
+  return normalizePdfText(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function wrapPdfText(value, maxLength) {
+  const words = normalizePdfText(value).split(' ').filter(Boolean);
+  const lines = [];
+
+  words.forEach((word) => {
+    if (word.length > maxLength) {
+      let rest = word;
+      while (rest.length > maxLength) {
+        lines.push(rest.slice(0, maxLength));
+        rest = rest.slice(maxLength);
+      }
+      if (rest) lines.push(rest);
+      return;
+    }
+
+    const current = lines[lines.length - 1] || '';
+    if (!current || `${current} ${word}`.length > maxLength) {
+      lines.push(word);
+    } else {
+      lines[lines.length - 1] = `${current} ${word}`;
+    }
+  });
+
+  return lines.length ? lines : ['-'];
+}
+
+function buildPdfFile(contentStream) {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+    `<< /Length ${contentStream.length} >>\nstream\n${contentStream}\nendstream`,
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [];
+
+  objects.forEach((object, index) => {
+    offsets[index + 1] = pdf.length;
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let index = 1; index <= objects.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+  return new Blob([pdf], { type: 'application/pdf' });
+}
+
+function createSpkPdfBlob(rows) {
+  const pageWidth = 595.28;
+  const marginX = 50;
+  const tableX = marginX;
+  const tableWidth = pageWidth - (marginX * 2);
+  const labelWidth = 165;
+  const valueWidth = tableWidth - labelWidth;
+  const rowLineHeight = 14;
+  const commands = [
+    '0.8 w',
+    'BT /F2 17 Tf 0 0 0 rg 174 790 Td (SURAT PERINTAH KERJA) Tj ET',
+    '1.2 w 50 770 m 545.28 770 l S',
+  ];
+
+  let rowTopY = 740;
+
+  rows.forEach((row) => {
+    const labelLines = wrapPdfText(row.label, 22);
+    const valueLines = wrapPdfText(row.value, 48);
+    const rowHeight = Math.max(labelLines.length, valueLines.length) * rowLineHeight + 14;
+    const rowBottomY = rowTopY - rowHeight;
+
+    commands.push(`q 0.97 0.98 0.99 rg ${tableX} ${rowBottomY} ${labelWidth} ${rowHeight} re f Q`);
+    commands.push(`0.78 0.82 0.87 RG ${tableX} ${rowBottomY} ${labelWidth} ${rowHeight} re S`);
+    commands.push(`0.78 0.82 0.87 RG ${tableX + labelWidth} ${rowBottomY} ${valueWidth} ${rowHeight} re S`);
+
+    labelLines.forEach((line, index) => {
+      commands.push(`BT /F2 10 Tf 0 0 0 rg ${tableX + 12} ${rowTopY - 21 - (index * rowLineHeight)} Td (${escapePdfText(line)}) Tj ET`);
+    });
+    valueLines.forEach((line, index) => {
+      commands.push(`BT /F1 10 Tf 0 0 0 rg ${tableX + labelWidth + 12} ${rowTopY - 21 - (index * rowLineHeight)} Td (${escapePdfText(line)}) Tj ET`);
+    });
+
+    rowTopY = rowBottomY;
+  });
+
+  commands.push(`BT /F1 8 Tf 0.35 0.35 0.35 rg 50 ${Math.max(rowTopY - 28, 60)} Td (Dokumen digenerate dari sistem operasional.) Tj ET`);
+
+  return buildPdfFile(commands.join('\n'));
 }
 
 function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDestinations }) {
@@ -248,7 +375,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     }
   }
 
-  function buildSpkPreviewContent() {
+  function buildSpkRows() {
     const selectedTruck = trucks.find((truck) => truck.plateNumber === form.plateNumber || truck.plateNumber === container.plateNumber);
     const truckCode = formatTruckUnitCode(selectedTruck?.unitCode || container.unitCode || container.truckCode);
     const plateNumber = form.plateNumber || container.plateNumber || '';
@@ -256,40 +383,95 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const rpujLabel = ujAmount > 0 ? formatCurrency(ujAmount) : '-';
 
     return [
-      'SURAT PERINTAH KERJA',
-      `No. SPK: ${form.spkNumber || '-'}`,
-      `Customer: ${spkValue(container.customer)}`,
-      `Jenis Order: ${spkValue(container.shipment || container.jobType)}`,
-      `Truck / Plat: ${truckPlate}`,
-      `Driver: ${spkValue(form.driver || container.driver)}`,
-      `Nama Kapal : ${spkValue(container.vesselName || container.shipName || container.namaKapal)}`,
-      `Terminal : ${spkValue(container.terminal)}`,
-      `Depo : ${spkValue(container.origin)}`,
-      `Destination: ${spkValue(container.destination)}`,
-      `Container Size: ${spkValue(container.size || container.containerSize)}`,
-      `Tanggal Jalan: ${spkValue(container.tripDate)}`,
-      `RPUJ ${rpujLabel}`,
-    ].join('\n');
+      { label: 'No. SPK', value: form.spkNumber || '-' },
+      { label: 'Customer', value: spkValue(container.customer) },
+      { label: 'Jenis Order', value: spkValue(container.shipment || container.jobType) },
+      { label: 'Truck / Plat', value: truckPlate },
+      { label: 'Driver', value: spkValue(form.driver || container.driver) },
+      { label: 'Nama Kapal', value: spkValue(container.vesselName || container.shipName || container.namaKapal), textSeparator: ' :' },
+      { label: 'Terminal', value: spkValue(container.terminal), textSeparator: ' :' },
+      { label: 'Depo', value: spkValue(container.origin), textSeparator: ' :' },
+      { label: 'Destination', value: spkValue(container.destination) },
+      { label: 'Container Size', value: spkValue(container.size || container.containerSize) },
+      { label: 'Tanggal Jalan', value: spkDateValue(container.tripDate) },
+      { label: 'RPUJ', value: rpujLabel, textSeparator: '' },
+    ];
   }
 
   function previewSpk() {
     const previewWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=760');
     if (!previewWindow) return;
-    const content = buildSpkPreviewContent().replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\n', '<br/>');
+    const rowsHtml = buildSpkRows()
+      .map((row) => `
+        <tr>
+          <th>${escapeHtml(row.label)}</th>
+          <td>${escapeHtml(row.value)}</td>
+        </tr>
+      `)
+      .join('');
     previewWindow.document.write(`
+      <!doctype html>
       <html>
         <head>
           <title>Preview SPK ${form.spkNumber || ''}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #1f2937; }
-            h1 { margin: 0 0 12px; font-size: 20px; }
-            .sheet { padding: 20px; border: 1px solid #d8dde4; border-radius: 12px; background: #fff; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 32px;
+              background: #f3f4f6;
+              color: #111827;
+              font-family: Arial, sans-serif;
+            }
+            .sheet {
+              width: 760px;
+              max-width: 100%;
+              margin: 0 auto;
+              padding: 36px 42px;
+              border: 1px solid #d1d5db;
+              background: #ffffff;
+            }
+            h1 {
+              margin: 0 0 28px;
+              padding-bottom: 14px;
+              border-bottom: 2px solid #111827;
+              font-size: 22px;
+              font-weight: 700;
+              letter-spacing: 0;
+              text-align: center;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 14px;
+            }
+            th,
+            td {
+              padding: 10px 12px;
+              border: 1px solid #d1d5db;
+              vertical-align: top;
+              text-align: left;
+            }
+            th {
+              width: 210px;
+              background: #f9fafb;
+              font-weight: 700;
+            }
+            td {
+              font-weight: 600;
+            }
+            @media print {
+              body { padding: 0; background: #ffffff; }
+              .sheet { width: 100%; border: 0; padding: 24px; }
+            }
           </style>
         </head>
         <body>
           <div class="sheet">
-            <h1>SPK Preview</h1>
-            <div>${content}</div>
+            <h1>SURAT PERINTAH KERJA</h1>
+            <table>
+              <tbody>${rowsHtml}</tbody>
+            </table>
           </div>
         </body>
       </html>
@@ -298,11 +480,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   }
 
   function downloadSpk() {
-    const blob = new Blob([buildSpkPreviewContent()], { type: 'text/plain;charset=utf-8' });
+    const blob = createSpkPdfBlob(buildSpkRows());
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${form.spkNumber || 'SPK'}.txt`;
+    link.download = `${form.spkNumber || 'SPK'}.pdf`;
     document.body.appendChild(link);
     link.click();
     link.remove();

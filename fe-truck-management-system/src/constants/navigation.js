@@ -1,10 +1,12 @@
 import {
   BarChart3,
   CalendarDays,
+  CheckCircle2,
   ClipboardCheck,
   ClipboardList,
   FileClock,
   LayoutDashboard,
+  ReceiptText,
   Settings,
   ShieldCheck,
   Truck,
@@ -14,6 +16,12 @@ import {
 import { USER_ROLES } from './roles';
 
 const adminOnly = [USER_ROLES.ADMIN];
+const nonFinanceRoles = [
+  USER_ROLES.ADMIN,
+  USER_ROLES.SALES,
+  USER_ROLES.OPERATIONAL,
+  USER_ROLES.OBSERVER,
+];
 const orderRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.SALES,
@@ -26,13 +34,14 @@ const operationalRoles = [
   USER_ROLES.OBSERVER,
 ];
 const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
+const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
 
 export const navigationGroups = [
   {
     label: 'Overview',
     items: [
-      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/weekly-orders', label: 'Order Mingguan', icon: CalendarDays },
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: nonFinanceRoles },
+      { to: '/weekly-orders', label: 'Order Mingguan', icon: CalendarDays, roles: nonFinanceRoles },
     ],
   },
   {
@@ -73,6 +82,9 @@ export const navigationGroups = [
     label: 'Monitoring',
     items: [
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
+      { to: '/finance/order-verification', label: 'Verifikasi Order', icon: CheckCircle2, roles: financeRoles },
+      { to: '/finance/rpuj-approval', label: 'Approval RPUJ', icon: ReceiptText, roles: financeRoles },
+      { to: '/finance/invoices', label: 'Input Invoice', icon: ClipboardList, roles: financeRoles },
     ],
   },
   {

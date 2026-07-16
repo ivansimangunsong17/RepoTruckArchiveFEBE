@@ -39,6 +39,7 @@ function normalizeLineItem(item = {}) {
     qty: item.qty == null ? 1 : Number(item.qty),
     price: item.price == null ? 0 : Number(item.price),
     total: item.total == null ? Number(item.qty || 1) * Number(item.price || 0) : Number(item.total),
+    notes: item.serviceName === 'Jasa Lainnya' ? (item.notes || '') : '',
   };
 }
 
@@ -73,6 +74,7 @@ function fallbackLineItems(row) {
       qty: quantity,
       price,
       total,
+      notes: '',
     },
   ];
 }
@@ -165,6 +167,7 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     customerAddress: row.customer_address,
     shipment: row.shipment_type,
     jobType: row.job_type,
+    vesselName: row.vessel_name || '',
     jobDescription: row.job_description,
     invoiceNumber: row.invoice_number,
     billingStatus: normalizeSalesOrderBillingStatus(row.billing_status),
@@ -224,6 +227,7 @@ export function toSalesOrderDb(form, customer) {
     customer_address: customer?.address || form.customerAddress || null,
     shipment_type: form.shipment || 'import',
     job_type: form.jobType || 'Trucking Container',
+    vessel_name: form.vesselName || form.shipName || form.namaKapal || null,
     job_description: form.jobDescription || form.notes || null,
     invoice_number: form.invoiceNumber || null,
     billing_status: normalizeSalesOrderBillingStatus(form.billingStatus),

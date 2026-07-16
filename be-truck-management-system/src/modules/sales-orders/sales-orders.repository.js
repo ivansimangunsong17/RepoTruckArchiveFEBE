@@ -15,6 +15,7 @@ const salesOrderColumnCandidates = [
   'customer_address',
   'shipment_type',
   'job_type',
+  'vessel_name',
   'job_description',
   'invoice_number',
   'billing_status',

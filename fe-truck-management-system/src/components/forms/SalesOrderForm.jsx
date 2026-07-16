@@ -10,6 +10,8 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
+  'Jasa Handling',
+  'Jasa Lainnya',
 ];
 
 const CONTAINER_TYPE_OPTIONS = ['Dry', 'Reefer', 'Special'];
@@ -48,6 +50,10 @@ function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
 }
 
+function isOtherService(serviceName) {
+  return serviceName === 'Jasa Lainnya';
+}
+
 function createLineItemDraft(item = {}) {
   return {
     id: item.id || `line-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -55,6 +61,7 @@ function createLineItemDraft(item = {}) {
     containerType: item.containerType || '',
     qty: item.qty == null ? '1' : String(item.qty),
     price: item.price == null ? '0' : String(item.price),
+    notes: item.notes || '',
   };
 }
 
@@ -105,7 +112,8 @@ function normalizeLineItems(order) {
 
 function formatLineItemLabel(item) {
   const typeLabel = item.containerType ? ` - ${item.containerType}` : '';
-  return `${item.serviceName}${typeLabel} x${item.qty}`;
+  const notesLabel = isOtherService(item.serviceName) && item.notes ? ` (${item.notes})` : '';
+  return `${item.serviceName}${typeLabel}${notesLabel} x${item.qty}`;
 }
 
 function calculateLineItemTotal(item) {
@@ -169,6 +177,7 @@ function createInitialForm(order) {
     customerAddress: order?.customerAddress || '',
     shipment: order?.shipment || 'import',
     jobType: order?.jobType || 'Trucking Container',
+    vesselName: order?.vesselName || order?.shipName || order?.namaKapal || '',
     invoiceNumber: order?.invoiceNumber || '',
     origin: order?.origin || '',
     destination: order?.destination || '',
@@ -288,6 +297,7 @@ function SalesOrderForm({
               [field]: value,
               ...(field === 'serviceName' && !isContainerService(value) ? { containerType: '' } : {}),
               ...(field === 'serviceName' && isContainerService(value) ? { containerType: item.containerType || 'Dry' } : {}),
+              ...(field === 'serviceName' && !isOtherService(value) ? { notes: '' } : {}),
             }
           : item,
       ),
@@ -382,6 +392,8 @@ function SalesOrderForm({
     if (invalidLineItem) return setError('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.');
     const requiresContainerType = lineItems.find((item) => isContainerService(item.serviceName) && !item.containerType);
     if (requiresContainerType) return setError('Pilih jenis container untuk rincian D20 atau D40.');
+    const requiresOtherNotes = lineItems.find((item) => isOtherService(item.serviceName) && !item.notes.trim());
+    if (requiresOtherNotes) return setError('Isi catatan untuk rincian Jasa Lainnya.');
 
     setError('');
     const normalizedLineItems = lineItems.map((item) => ({
@@ -389,6 +401,7 @@ function SalesOrderForm({
       qty: Number(item.qty || 0),
       price: Number(item.price || 0),
       total: calculateLineItemTotal(item),
+      notes: isOtherService(item.serviceName) ? item.notes.trim() : '',
     }));
     const price = normalizedLineItems.length === 1 ? Number(normalizedLineItems[0].price || 0) : 0;
     const serviceSummary = summarizeLineItems(normalizedLineItems);
@@ -402,6 +415,7 @@ function SalesOrderForm({
       invoiceNumber: form.invoiceNumber.trim(),
       container: containerSummary,
       terminal: form.terminal.trim(),
+      vesselName: form.vesselName.trim(),
       serviceName: serviceSummary,
       lineItems: normalizedLineItems,
       container20Qty,
@@ -532,6 +546,16 @@ function SalesOrderForm({
               </label>
 
               <label>
+                Nama Kapal
+                <input
+                  name="vesselName"
+                  value={form.vesselName}
+                  onChange={updateField}
+                  placeholder="MV ..."
+                />
+              </label>
+
+              <label>
                 Depo
                 <SelectWithCurrentValue
                   name="origin"
@@ -602,6 +626,7 @@ function SalesOrderForm({
               {lineItems.map((item, index) => {
                 const itemTotal = calculateLineItemTotal(item);
                 const showContainerType = isContainerService(item.serviceName);
+                const showNotes = isOtherService(item.serviceName);
                 return (
                   <div className="line-item-card" key={item.id}>
                     <div className="line-item-row">
@@ -666,6 +691,17 @@ function SalesOrderForm({
                         <Trash2 size={16} />
                       </button>
                     </div>
+                    {showNotes ? (
+                      <label className="line-item-note-field">
+                        Catatan Jasa Lainnya
+                        <input
+                          aria-label="Catatan Jasa Lainnya"
+                          value={item.notes}
+                          onChange={(event) => updateLineItem(index, 'notes', event.target.value)}
+                          placeholder="Contoh: biaya admin, LOLO, seal, atau catatan lain"
+                        />
+                      </label>
+                    ) : null}
                   </div>
                 );
               })}

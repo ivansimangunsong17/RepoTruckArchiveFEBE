@@ -15,7 +15,7 @@ import {
   reviewSalesOrderCancellation,
   saveSalesOrder,
 } from '../services/archive/salesOrderService';
-import { hasPermission } from '../constants/roles';
+import { USER_ROLES, hasPermission } from '../constants/roles';
 import { isApiDataSource } from '../services/config/dataSource';
 import { archiveMaster, fetchMaster, saveMaster } from '../services/master-data/masterDataService';
 import { useAuth } from './AuthContext';
@@ -162,6 +162,7 @@ export function ArchiveDataProvider({ children }) {
   const masterDatabaseMode = isApiDataSource();
   const salesOrderDatabaseMode = isApiDataSource();
   const apiDataMode = masterDatabaseMode || salesOrderDatabaseMode;
+  const archiveDisabled = apiDataMode && user?.role === USER_ROLES.FINANCE;
   const canReadUsers = hasPermission(user, 'users.manage');
   const [masters, setMasters] = useState(() => readLocalMasters());
   const [orders, setOrders] = useState(() => readLocalOrders());
@@ -176,6 +177,13 @@ export function ArchiveDataProvider({ children }) {
     }
 
     if (apiDataMode && !user) {
+      setMasters(emptyApiMasters());
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
+
+    if (archiveDisabled) {
       setMasters(emptyApiMasters());
       setOrders([]);
       setLoading(false);
@@ -238,7 +246,7 @@ export function ArchiveDataProvider({ children }) {
       setOrders(readLocalOrders());
       setLoading(false);
     }
-  }, [apiDataMode, authLoading, canReadUsers, masterDatabaseMode, salesOrderDatabaseMode, user]);
+  }, [apiDataMode, archiveDisabled, authLoading, canReadUsers, masterDatabaseMode, salesOrderDatabaseMode, user]);
 
   useEffect(() => { refresh(); }, [refresh]);
 

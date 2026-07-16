@@ -49,6 +49,7 @@ export function mapContainerJob(row, attachments = []) {
     customer: row.customer_name,
     shipment: row.shipment_type,
     jobType: row.job_type,
+    vesselName: row.vessel_name || '',
     terminal: row.terminal,
     serviceName: row.service_name,
     origin: row.origin,

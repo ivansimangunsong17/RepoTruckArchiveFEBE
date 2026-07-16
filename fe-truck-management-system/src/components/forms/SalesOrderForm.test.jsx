@@ -108,6 +108,47 @@ describe('SalesOrderForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('mengirim catatan untuk rincian Jasa Lainnya', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await fillBaseFields(user, { soNumber: 'SO-OTHER-001' });
+    await fillFirstLineItem(user, {
+      serviceName: 'Jasa Lainnya',
+      quantity: '1',
+      price: '25000',
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    expect(screen.getByText('Isi catatan untuk rincian Jasa Lainnya.')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('Catatan Jasa Lainnya'), 'Biaya seal');
+    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      serviceName: 'Jasa Lainnya',
+      lineItems: [
+        expect.objectContaining({
+          serviceName: 'Jasa Lainnya',
+          notes: 'Biaya seal',
+          qty: 1,
+          price: 25000,
+        }),
+      ],
+    }));
+  });
+
   it('mengirim payload rincian campuran saat form valid', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

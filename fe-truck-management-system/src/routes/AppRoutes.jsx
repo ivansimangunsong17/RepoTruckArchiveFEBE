@@ -24,6 +24,11 @@ const SettingsPage = lazy(() => import('../pages/admin/SettingsPage'));
 const ActivityLogPage = lazy(() => import('../pages/system/ActivityLogPage'));
 const ProfilePage = lazy(() => import('../pages/system/ProfilePage'));
 const ReportsPage = lazy(() => import('../pages/reports/ReportsPage'));
+const FinanceOrderVerificationPage = lazy(() => import('../pages/finance/FinanceOrderVerificationPage'));
+const FinanceRpujApprovalPage = lazy(() => import('../pages/finance/FinanceRpujApprovalPage'));
+const FinanceInvoiceNumberPage = lazy(() => import('../pages/finance/FinanceInvoiceNumberPage'));
+const FinanceCompletedTripsPage = lazy(() => import('../pages/finance/FinanceCompletedTripsPage'));
+const FinanceBillingReadinessPage = lazy(() => import('../pages/finance/FinanceBillingReadinessPage'));
 
 function LazyPage({ children }) {
   const location = useLocation();
@@ -35,11 +40,12 @@ function LazyPage({ children }) {
   );
 }
 
-const allRoles = Object.values(USER_ROLES);
-const orderRoles = allRoles;
+const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
+const orderRoles = nonFinanceRoles;
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
 const adminRoles = [USER_ROLES.ADMIN];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
+const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
 
 function guardedPage(roles, element) {
   return {
@@ -58,7 +64,7 @@ export const router = createBrowserRouter([
       children: [
         { index: true, element: <Navigate to="/dashboard" replace /> },
         { path: 'dashboard', element: <LazyPage><Dashboard /></LazyPage> },
-        { path: 'weekly-orders', element: <LazyPage><WeeklyOrdersPage /></LazyPage> },
+        { path: 'weekly-orders', children: [guardedPage(nonFinanceRoles, <LazyPage><WeeklyOrdersPage /></LazyPage>)] },
         { path: 'profile', element: <LazyPage><ProfilePage /></LazyPage> },
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },
@@ -75,6 +81,12 @@ export const router = createBrowserRouter([
         { path: 'activity-log', children: [guardedPage(adminRoles, <LazyPage><ActivityLogPage /></LazyPage>)] },
         { path: 'audit-trail', element: <Navigate to="/activity-log" replace /> },
         { path: 'reports', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
+        { path: 'finance', element: <Navigate to="/finance/order-verification" replace /> },
+        { path: 'finance/order-verification', children: [guardedPage(financeRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },
+        { path: 'finance/rpuj-approval', children: [guardedPage(financeRoles, <LazyPage><FinanceRpujApprovalPage /></LazyPage>)] },
+        { path: 'finance/invoices', children: [guardedPage(financeRoles, <LazyPage><FinanceInvoiceNumberPage /></LazyPage>)] },
+        { path: 'finance/completed-trips', children: [guardedPage(financeRoles, <LazyPage><FinanceCompletedTripsPage /></LazyPage>)] },
+        { path: 'finance/billing-readiness', children: [guardedPage(financeRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
         { path: 'truck-utilization', element: <Navigate to="/reports?tab=utilization" replace /> },
         { path: 'driver-performance', element: <Navigate to="/reports" replace /> },
         { path: 'unit-performance', element: <Navigate to="/reports?tab=utilization" replace /> },

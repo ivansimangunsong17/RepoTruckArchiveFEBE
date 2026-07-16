@@ -71,6 +71,7 @@ create table if not exists sales_orders (
   customer_address text,
   shipment_type text not null,
   job_type text not null default 'Trucking Container',
+  vessel_name text,
   job_description text,
   invoice_number text,
   billing_status text not null default 'pending_invoice',

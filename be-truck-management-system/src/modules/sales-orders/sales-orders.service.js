@@ -17,10 +17,16 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
+  'Jasa Handling',
+  'Jasa Lainnya',
 ];
 
 function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
+}
+
+function isOtherService(serviceName) {
+  return serviceName === 'Jasa Lainnya';
 }
 
 function normalizeLineItem(item = {}) {
@@ -34,6 +40,7 @@ function normalizeLineItem(item = {}) {
     qty,
     price,
     total: Number(item.total || qty * price),
+    notes: isOtherService(serviceName) ? (item.notes || '') : '',
   };
 }
 
@@ -206,7 +213,8 @@ function normalizeSalesOrderPayload(payload) {
     unit: payload.unit || 'Container',
     container: payload.container || lineItems.map((item) => {
       const typeLabel = item.containerType ? ` - ${item.containerType}` : '';
-      return `${item.serviceName}${typeLabel} x${item.qty}`;
+      const notesLabel = isOtherService(item.serviceName) && item.notes ? ` (${item.notes})` : '';
+      return `${item.serviceName}${typeLabel}${notesLabel} x${item.qty}`;
     }).join(' + ') || null,
     cargoType: uniqueContainerTypes.length === 1 ? uniqueContainerTypes[0] : payload.cargoType || null,
     containers,
@@ -284,6 +292,14 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
     const invalidLineItem = payload.lineItems.find((item) => !item.serviceName || Number(item.qty || 0) < 1 || Number(item.price || 0) < 0);
     if (invalidLineItem) {
       const error = new Error('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.');
+      error.statusCode = 400;
+      error.code = 'VALIDATION_ERROR';
+      throw error;
+    }
+
+    const missingOtherServiceNotes = payload.lineItems.find((item) => item.serviceName === 'Jasa Lainnya' && !String(item.notes || '').trim());
+    if (missingOtherServiceNotes) {
+      const error = new Error('Isi catatan untuk rincian Jasa Lainnya.');
       error.statusCode = 400;
       error.code = 'VALIDATION_ERROR';
       throw error;

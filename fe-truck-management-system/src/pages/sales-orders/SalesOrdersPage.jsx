@@ -230,6 +230,9 @@ function LineItemDetail({ item, index }) {
         <div><span>Price</span><strong>{formatCurrency(item.price || 0)}</strong></div>
         <div><span>Total</span><strong>{formatCurrency(item.total || 0)}</strong></div>
       </div>
+      {item.serviceName === 'Jasa Lainnya' && item.notes ? (
+        <p className="line-item-detail-notes">{item.notes}</p>
+      ) : null}
     </div>
   );
 }
@@ -739,6 +742,7 @@ function SalesOrdersPage() {
                 </div>
                 <div>
                   <span>Informasi Order</span><strong>{formatShipmentLabel(selectedOrder.shipment)}</strong>
+                  <small>Nama Kapal: {selectedOrder.vesselName || '-'}</small>
                   <small>Tanggal SO: {selectedOrder.soDate || '-'}</small>
                   <small>No. Invoice: {getOrderInvoiceNumber(selectedOrder) || '-'}</small>
                   <small>{selectedOrder.jobDescription || selectedOrder.notes || '-'}</small>

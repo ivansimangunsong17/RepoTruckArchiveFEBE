@@ -24,6 +24,7 @@ if (!hasDatabase) {
   const users = {
     admin: { name: `Sprint2C Admin ${runId}`, email: `${runId}.admin@example.test`, role: 'admin' },
     sales: { name: `Sprint2C Sales ${runId}`, email: `${runId}.sales@example.test`, role: 'sales' },
+    finance: { name: `Sprint2C Finance ${runId}`, email: `${runId}.finance@example.test`, role: 'finance' },
     observer: { name: `Sprint2C Observer ${runId}`, email: `${runId}.observer@example.test`, role: 'pengamat' },
     legacy: { name: `Sprint2C Legacy ${runId}`, email: `${runId}.legacy@example.test`, role: 'sales' },
     locked: { name: `Sprint2C Locked ${runId}`, email: `${runId}.locked@example.test`, role: 'sales' },
@@ -224,6 +225,7 @@ if (!hasDatabase) {
     await seedUsers();
     let adminToken = '';
     let salesToken = '';
+    let financeToken = '';
     let legacyToken = '';
     let observerToken = '';
 
@@ -280,10 +282,13 @@ if (!hasDatabase) {
 
     await t.test('permission: role tanpa permission ditolak dan role dengan permission diterima', async () => {
       const salesLogin = await login(users.sales.email);
+      const financeLogin = await login(users.finance.email);
       const observerLogin = await login(users.observer.email);
       assert.equal(salesLogin.status, 200);
+      assert.equal(financeLogin.status, 200);
       assert.equal(observerLogin.status, 200);
       salesToken = salesLogin.body.data.token;
+      financeToken = financeLogin.body.data.token;
       observerToken = observerLogin.body.data.token;
 
       const allowed = await api('/api/sales-orders?pageSize=1', { token: salesToken });
@@ -305,6 +310,10 @@ if (!hasDatabase) {
       });
       assert.equal(forbidden.status, 403);
       assert.equal(forbidden.body.error.code, 'FORBIDDEN');
+
+      const financeSalesOrderList = await api('/api/sales-orders?pageSize=1', { token: financeToken });
+      assert.equal(financeSalesOrderList.status, 403);
+      assert.equal(financeSalesOrderList.body.error.code, 'FORBIDDEN');
     });
 
     await t.test('sales order: list, create, update, cancel', async () => {
@@ -585,6 +594,36 @@ if (!hasDatabase) {
       assert.equal(updatedBilling.status, 200);
       assert.equal(updatedBilling.body.data.billingStatus, 'belum_dikirim');
       assert.equal(updatedBilling.body.data.invoiceNumber, `INV-${runId}-001`);
+    });
+
+    await t.test('finance: dashboard dan perjalanan selesai read-only', async () => {
+      const dashboard = await api(`/api/finance/dashboard?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(dashboard.status, 200);
+      assert.equal(typeof dashboard.body.data.totalCompletedTrips, 'number');
+      assert.ok(dashboard.body.data.totalCompletedTrips >= 1);
+
+      const completedTrips = await api(`/api/finance/completed-trips?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(completedTrips.status, 200);
+      assert.ok(Array.isArray(completedTrips.body.data.rows));
+      assert.equal(completedTrips.body.data.rows.some((row) => row.id === created.jobId), true);
+      assert.equal(completedTrips.body.data.rows.every((row) => row.completedAt), true);
+
+      const detail = await api(`/api/finance/completed-trips/${created.jobId}`, { token: financeToken });
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.data.id, created.jobId);
+      assert.ok(Array.isArray(detail.body.data.attachments));
+
+      const blockedUpdate = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          invoiceNumber: `INV-${runId}-FINANCE-BLOCKED`,
+          billingStatus: 'lunas',
+        }),
+      });
+      assert.equal(blockedUpdate.status, 403);
+      assert.equal(blockedUpdate.body.error.code, 'FORBIDDEN');
     });
 
     await t.test('attachments: upload, list, delete, fileBase64 tidak masuk activity log metadata', async () => {

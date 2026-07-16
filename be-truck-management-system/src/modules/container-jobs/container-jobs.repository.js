@@ -12,6 +12,7 @@ const joinedJobColumns = `
   cj.cancel_requested_by_name, cj.cancel_requested_by_role, cj.cancel_requested_at,
   cj.cancel_reviewed_by_name, cj.cancel_reviewed_at, cj.cancel_review_note,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
+  to_jsonb(so)->>'vessel_name' as vessel_name,
   so.terminal, so.service_name, so.origin, so.destination, so.trip_date,
   so.created_by_name as order_created_by_name,
   (

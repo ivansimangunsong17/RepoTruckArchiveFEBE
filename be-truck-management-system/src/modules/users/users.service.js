@@ -7,7 +7,7 @@ import {
   updateUserStatus,
 } from './users.repository.js';
 
-const allowedRoles = ['admin', 'sales', 'operational', 'pengamat'];
+const allowedRoles = ['admin', 'sales', 'operational', 'pengamat', 'finance'];
 const allowedStatuses = ['Aktif', 'Nonaktif'];
 
 function ensureObject(payload, label = 'Payload user') {

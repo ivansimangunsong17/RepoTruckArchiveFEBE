@@ -3,6 +3,7 @@ export const USER_ROLES = Object.freeze({
   SALES: 'sales',
   OPERATIONAL: 'operational',
   OBSERVER: 'observer',
+  FINANCE: 'finance',
 });
 
 export const ALL_ROLES = Object.values(USER_ROLES);
@@ -13,6 +14,7 @@ export const ROLE_LABELS = {
   operational: 'Operational',
   observer: 'Management',
   audit: 'Management',
+  finance: 'Finance',
 };
 
 export const ROLE_PERMISSIONS = {
@@ -35,6 +37,15 @@ export const ROLE_PERMISSIONS = {
     'commercial.read',
     'reports.read',
     'reports.export',
+    'finance.read',
+    'finance.order_verification.read',
+    'finance.order_verification.update',
+    'finance.rpuj_approval.read',
+    'finance.rpuj_approval.approve',
+    'finance.rpuj_approval.reject',
+    'finance.transfer_proof.upload',
+    'finance.invoice.read',
+    'finance.invoice.update_number',
   ],
   sales: [
     'orders.create',
@@ -64,6 +75,18 @@ export const ROLE_PERMISSIONS = {
     'reports.read',
     'reports.export',
   ],
+  finance: [
+    'finance.read',
+    'finance.order_verification.read',
+    'finance.order_verification.update',
+    'finance.rpuj_approval.read',
+    'finance.rpuj_approval.approve',
+    'finance.rpuj_approval.reject',
+    'finance.transfer_proof.upload',
+    'finance.invoice.read',
+    'finance.invoice.update_number',
+    'documents.operational.read',
+  ],
 };
 
 const BACKEND_PERMISSION_ALIASES = {
@@ -82,6 +105,15 @@ const BACKEND_PERMISSION_ALIASES = {
   'documents.operational.read': ['document.read'],
   'reports.read': ['report.read'],
   'reports.export': ['report.read'],
+  'finance.read': ['finance.read'],
+  'finance.order_verification.read': ['finance.order_verification.read', 'finance.read'],
+  'finance.order_verification.update': ['finance.order_verification.update'],
+  'finance.rpuj_approval.read': ['finance.rpuj_approval.read', 'finance.read'],
+  'finance.rpuj_approval.approve': ['finance.rpuj_approval.approve'],
+  'finance.rpuj_approval.reject': ['finance.rpuj_approval.reject'],
+  'finance.transfer_proof.upload': ['finance.transfer_proof.upload'],
+  'finance.invoice.read': ['finance.invoice.read', 'finance.read'],
+  'finance.invoice.update_number': ['finance.invoice.update_number'],
 };
 
 function hasBackendPermission(user, permission) {

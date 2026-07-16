@@ -6,10 +6,16 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
+  'Jasa Handling',
+  'Jasa Lainnya',
 ];
 
 function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
+}
+
+function isOtherService(serviceName) {
+  return serviceName === 'Jasa Lainnya';
 }
 
 function normalizeLineItem(item = {}) {
@@ -23,6 +29,7 @@ function normalizeLineItem(item = {}) {
     qty,
     price,
     total: Number(item.total || qty * price),
+    notes: isOtherService(serviceName) ? (item.notes || '') : '',
   };
 }
 
@@ -292,6 +299,7 @@ function prepareSalesOrderPayload(form, user, existing) {
     ...payload,
     shipment: payload.shipment || 'import',
     jobType: payload.jobType || 'Trucking Container',
+    vesselName: String(payload.vesselName || payload.shipName || payload.namaKapal || '').trim(),
     lineItems,
     serviceName: summaryName,
     price,
@@ -300,7 +308,8 @@ function prepareSalesOrderPayload(form, user, existing) {
     unit: payload.unit || 'Container',
     container: payload.container || lineItems.map((item) => {
       const typeLabel = item.containerType ? ` - ${item.containerType}` : '';
-      return `${item.serviceName}${typeLabel} x${item.qty}`;
+      const notesLabel = isOtherService(item.serviceName) && item.notes ? ` (${item.notes})` : '';
+      return `${item.serviceName}${typeLabel}${notesLabel} x${item.qty}`;
     }).join(' + ') || null,
     cargoType: uniqueContainerTypes.length === 1 ? uniqueContainerTypes[0] : payload.cargoType || null,
     containers,

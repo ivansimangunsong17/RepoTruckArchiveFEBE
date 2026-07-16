@@ -31,6 +31,7 @@ function Sidebar({ open, collapsed, onClose }) {
                 <NavLink
                   key={to}
                   to={to}
+                  end={to === '/finance'}
                   onClick={onClose}
                   className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
                 >
