@@ -44,6 +44,33 @@ export async function updateContainerJobController(request, response) {
         salesOrderId: saved.orderId,
       },
     });
+    if (saved.status === 'cancelled') {
+      await safeRecordActivityLog(request, {
+        action: 'CANCEL_CONTAINER_JOB',
+        module: 'container_jobs',
+        entityType: 'container_job',
+        entityId: saved.id,
+        beforeData: {
+          status: before.status,
+          cancelReason: before.cancelReason || null,
+          cancelSource: before.cancelSource || null,
+        },
+        afterData: {
+          status: saved.status,
+          cancelledAt: saved.cancelledAt,
+          cancelledByName: saved.cancelledByName,
+          cancelReason: saved.cancelReason,
+          cancelSource: saved.cancelSource,
+        },
+        metadata: {
+          salesOrderId: saved.orderId,
+          soNumber: saved.soNumber,
+          containerNumber: saved.containerNumber,
+          reason: saved.cancelReason,
+          source: saved.cancelSource,
+        },
+      });
+    }
   }
   if (before.rpujStatus !== 'submitted' && saved.rpujStatus === 'submitted') {
     await safeRecordActivityLog(request, {
@@ -111,5 +138,32 @@ export async function reviewCancelContainerJobController(request, response) {
     beforeData: before,
     afterData: saved,
   });
+  if (request.body?.approved) {
+    await safeRecordActivityLog(request, {
+      action: 'CANCEL_CONTAINER_JOB',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: saved.id,
+      beforeData: {
+        status: before.status,
+        cancelRequestStatus: before.cancelRequestStatus,
+        cancelRequestNote: before.cancelRequestNote || null,
+      },
+      afterData: {
+        status: saved.status,
+        cancelledAt: saved.cancelledAt,
+        cancelledByName: saved.cancelledByName,
+        cancelReason: saved.cancelReason,
+        cancelSource: saved.cancelSource,
+      },
+      metadata: {
+        salesOrderId: saved.orderId,
+        soNumber: saved.soNumber,
+        containerNumber: saved.containerNumber,
+        reason: saved.cancelReason,
+        source: saved.cancelSource,
+      },
+    });
+  }
   sendSuccess(response, saved, request.body?.approved ? 'Pembatalan Container Job disetujui.' : 'Pembatalan Container Job ditolak.');
 }

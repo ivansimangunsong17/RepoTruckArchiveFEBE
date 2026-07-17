@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
+  Ban,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -29,6 +31,12 @@ import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } f
 
 const PAGE_SIZE = 8;
 const STATUS_ORDER = { received: 0, running: 1, completed: 2, cancelled: 3 };
+const CANCEL_SOURCE_OPTIONS = [
+  { value: 'customer', label: 'Customer' },
+  { value: 'sales', label: 'Sales' },
+  { value: 'operational', label: 'Operational' },
+  { value: 'other', label: 'Lainnya' },
+];
 const rpujStageOptions = [
   { value: 'queue', label: 'Antri Pengajuan', description: 'Belum diajukan atau perlu diajukan ulang' },
   { value: 'submitted', label: 'Sudah Diajukan', description: 'Menunggu approval atau transfer Finance' },
@@ -152,10 +160,14 @@ function OperationsPage() {
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelForm, setCancelForm] = useState({ cancelSource: 'customer', cancelReason: '' });
+  const [cancelSaving, setCancelSaving] = useState(false);
   const canEdit = hasPermission(user, 'operations.update');
   const canReviewCancel = canEdit || user?.role === USER_ROLES.ADMIN;
   const canViewDocuments = hasPermission(user, 'documents.operational.read');
   const detailOtherCost = otherCostValue(detail);
+  const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
 
   useEffect(() => {
     if (!detail) return undefined;
@@ -171,6 +183,21 @@ function OperationsPage() {
       window.removeEventListener('keydown', closeDetailOnEscape);
     };
   }, [detail]);
+
+  useEffect(() => {
+    if (!cancelTarget) return undefined;
+
+    function closeCancelOnEscape(event) {
+      if (event.key === 'Escape' && !cancelSaving) setCancelTarget(null);
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeCancelOnEscape);
+    return () => {
+      document.body.style.overflow = detail ? 'hidden' : '';
+      window.removeEventListener('keydown', closeCancelOnEscape);
+    };
+  }, [cancelSaving, cancelTarget, detail]);
 
   const demoJobs = useMemo(() => flattenDemoJobs(archive.orders), [archive.orders]);
   const filteredDemoJobs = useMemo(() => sortOperationalJobs(demoJobs.filter((job) => {
@@ -301,29 +328,46 @@ function OperationsPage() {
     return saved;
   }
 
-  async function cancelOperational(job) {
-    const confirmed = await confirmAction({
-      title: 'Batalkan Container Job?',
-      message: `${containerLabel(job)} akan ditandai batal dan tidak masuk pekerjaan aktif.`,
-      confirmLabel: 'Batalkan Job',
-      tone: 'danger',
+  function openCancelOperational(job) {
+    setCancelTarget(job);
+    setCancelForm({
+      cancelSource: job.cancelSource || 'customer',
+      cancelReason: job.cancelReason || job.cancelRequestNote || '',
     });
-    if (!confirmed) return;
+  }
 
+  async function cancelOperational(event) {
+    event.preventDefault();
+    if (!cancelTarget || !cancelReasonValid || cancelSaving) return;
+
+    const actorName = user?.fullName || user?.name || 'Operational';
+    const payload = {
+      status: 'cancelled',
+      cancelSource: cancelForm.cancelSource,
+      cancelReason: cancelForm.cancelReason.trim(),
+      cancelRequestNote: cancelForm.cancelReason.trim(),
+      cancelledByName: actorName,
+      cancelledAt: new Date().toISOString(),
+      updatedBy: actorName,
+    };
+    setCancelSaving(true);
     try {
       if (archive.isDatabaseMode) {
-        await cancelContainerJob(job.id, user?.fullName || user?.name || 'Operational');
+        await cancelContainerJob(cancelTarget.id, payload);
         setListVersion((value) => value + 1);
       } else {
-        await archive.updateJob(job.id, { status: 'cancelled' });
+        await archive.updateJob(cancelTarget.id, payload);
       }
       setDetail(null);
+      setCancelTarget(null);
       notify({
         title: 'Container Job dibatalkan',
-        message: `${containerLabel(job)} berhasil ditandai batal.`,
+        message: `${containerLabel(cancelTarget)} berhasil ditandai batal.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Container Job gagal dibatalkan', message: requestError.message });
+    } finally {
+      setCancelSaving(false);
     }
   }
 
@@ -337,7 +381,7 @@ function OperationsPage() {
     if (!confirmed) return;
 
     try {
-      await archive.reviewJobCancellation(job.id, { approved: true, cancelReviewNote: '' });
+      await archive.reviewJobCancellation(job.id, { approved: true, cancelReviewNote: '', cancelSource: job.cancelSource || 'sales' });
       if (archive.isDatabaseMode) setListVersion((value) => value + 1);
       notify({ title: 'Pembatalan disetujui', message: `${job.containerNumber || 'Container'} dibatalkan oleh Ops.` });
     } catch (requestError) {
@@ -554,13 +598,69 @@ function OperationsPage() {
               <section><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
+              {detail.status === 'cancelled' || detail.cancelReason || detail.cancelRequestStatus === 'approved' ? (
+                <section className="container-cancel-summary">
+                  <h3>Pembatalan</h3>
+                  <div>
+                    <span>Sumber<strong>{CANCEL_SOURCE_OPTIONS.find((option) => option.value === detail.cancelSource)?.label || detail.cancelSource || '-'}</strong></span>
+                    <span>Alasan<strong>{detail.cancelReason || detail.cancelRequestNote || '-'}</strong></span>
+                    <span>Dibatalkan oleh<strong>{detail.cancelledByName || detail.cancelReviewedByName || detail.updatedBy || '-'}</strong></span>
+                    <span>Waktu batal<strong>{formatDateTime(detail.cancelledAt || detail.cancelReviewedAt)}</strong></span>
+                  </div>
+                </section>
+              ) : null}
               <section><h3>Riwayat Perubahan</h3><div><span>Dibuat oleh<strong>{detail.createdBy || '-'}</strong></span><span>Diperbarui oleh<strong>{detail.updatedBy || '-'}</strong></span><span>Waktu pembaruan<strong>{formatDateTime(detail.updatedAt)}</strong></span></div></section>
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetail(null)}>Tutup</button>
-              {canEdit && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => cancelOperational(detail)}>Batalkan Job</button> : null}
+              {canEdit && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
               {canEdit && detail.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
+          </section>
+        </div>
+      ) : null}
+
+      {cancelTarget ? (
+        <div className="master-modal-backdrop" role="presentation" onMouseDown={() => !cancelSaving && setCancelTarget(null)}>
+          <section className="container-cancel-modal" role="dialog" aria-modal="true" aria-labelledby="container-cancel-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <span><AlertTriangle size={18} /></span>
+              <div>
+                <h2 id="container-cancel-title">Batalkan Container Job</h2>
+                <p>{containerLabel(cancelTarget)} - {cancelTarget.soNumber || '-'} - {cancelTarget.customer || '-'}</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup pembatalan" disabled={cancelSaving} onClick={() => setCancelTarget(null)}><X size={18} /></button>
+            </header>
+            <form onSubmit={cancelOperational}>
+              <label>
+                Sumber Pembatalan
+                <select
+                  value={cancelForm.cancelSource}
+                  onChange={(event) => setCancelForm((current) => ({ ...current, cancelSource: event.target.value }))}
+                >
+                  {CANCEL_SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label>
+                Alasan Pembatalan
+                <textarea
+                  rows={4}
+                  value={cancelForm.cancelReason}
+                  onChange={(event) => setCancelForm((current) => ({ ...current, cancelReason: event.target.value }))}
+                  placeholder="Contoh: Customer hanya menjalankan 2 dari 3 container"
+                />
+              </label>
+              <div className="container-cancel-warning">
+                <AlertTriangle size={16} />
+                <span>Container yang sudah dibatalkan keluar dari pekerjaan aktif dan akan tercatat di audit log.</span>
+              </div>
+              <footer>
+                <button className="secondary-button" type="button" disabled={cancelSaving} onClick={() => setCancelTarget(null)}>Batal</button>
+                <button className="danger-button" type="submit" disabled={!cancelReasonValid || cancelSaving}>
+                  <Ban size={16} /> {cancelSaving ? 'Membatalkan...' : 'Batalkan Job'}
+                </button>
+              </footer>
+            </form>
           </section>
         </div>
       ) : null}

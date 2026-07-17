@@ -157,6 +157,8 @@ if (!hasDatabase) {
       jobType: 'Trucking Container',
       origin: 'Tanjung Priok',
       destination: 'Cikarang',
+      paymentType: 'tempo',
+      paymentTermDays: 14,
       salesName: 'Sprint2C Sales',
       createdBy: 'Sprint2C Sales',
       lineItems: [
@@ -334,6 +336,9 @@ if (!hasDatabase) {
       assert.equal(createdOrder.body.data.soNumber, null);
       assert.equal(createdOrder.body.data.financeVerificationStatus, 'pending_so');
       assert.equal(createdOrder.body.data.billingStatus, 'belum_invoice');
+      assert.equal(createdOrder.body.data.paymentType, 'tempo');
+      assert.equal(createdOrder.body.data.paymentTermDays, 14);
+      assert.equal(createdOrder.body.data.paymentTerms, 'Tempo 14 hari');
       assert.equal(createdOrder.body.data.containers.length, 1);
       created.orderId = createdOrder.body.data.id;
       created.jobId = createdOrder.body.data.containers[0].id;
@@ -345,6 +350,7 @@ if (!hasDatabase) {
       const financeQueue = await api(`/api/finance/order-verifications?query=${encodeURIComponent(runId)}`, { token: financeToken });
       assert.equal(financeQueue.status, 200);
       assert.equal(financeQueue.body.data.rows.some((row) => row.id === created.orderId && row.verificationStatus === 'pending_so'), true);
+      assert.equal(financeQueue.body.data.rows.find((row) => row.id === created.orderId)?.paymentTerms, 'Tempo 14 hari');
 
       const financeVerified = await api(`/api/finance/order-verifications/${created.orderId}/so-number`, {
         method: 'PATCH',
@@ -646,6 +652,19 @@ if (!hasDatabase) {
         true,
       );
 
+      const cannotCancelCompletedJob = await api(`/api/container-jobs/${created.jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          status: 'cancelled',
+          cancelReason: 'Customer membatalkan setelah selesai',
+          cancelSource: 'customer',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(cannotCancelCompletedJob.status, 409);
+      assert.equal(cannotCancelCompletedJob.body.error.code, 'CONTAINER_JOB_COMPLETED_CANNOT_CANCEL');
+
       const cancelJobOrder = await api('/api/sales-orders', {
         method: 'POST',
         token: salesToken,
@@ -666,15 +685,70 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           status: 'cancelled',
+          cancelReason: 'Customer hanya menjalankan sebagian container',
+          cancelSource: 'customer',
           updatedBy: 'Sprint2C Operational',
         },
       });
       assert.equal(cancelledJob.status, 200);
       assert.equal(cancelledJob.body.data.status, 'cancelled');
+      assert.equal(cancelledJob.body.data.cancelReason, 'Customer hanya menjalankan sebagian container');
+      assert.equal(cancelledJob.body.data.cancelSource, 'customer');
+      assert.equal(cancelledJob.body.data.cancelledByName, 'Sprint2C Operational');
 
       const cancelledOrder = await api(`/api/sales-orders/${cancelJobOrder.body.data.id}`, { token: adminToken });
       assert.equal(cancelledOrder.status, 200);
       assert.equal(cancelledOrder.body.data.status, 'cancelled');
+
+      const cancelContainerLog = await latestActivityForEntity('CANCEL_CONTAINER_JOB', cancelJobId);
+      assert.equal(cancelContainerLog.action, 'CANCEL_CONTAINER_JOB');
+      assert.equal(cancelContainerLog.metadata.reason, 'Customer hanya menjalankan sebagian container');
+      assert.equal(cancelContainerLog.metadata.source, 'customer');
+
+      const requestedCancelSoNumber = `SO-${runId}-CANCEL-REQUEST`.toUpperCase();
+      const cancelRequestOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: requestedCancelSoNumber }),
+      });
+      assert.equal(cancelRequestOrder.status, 201);
+      const requestedCancelJobId = cancelRequestOrder.body.data.containers[0].id;
+      const requestedCancelReason = 'Customer hanya menjalankan 2 dari 3 container';
+
+      const requestedCancel = await api(`/api/container-jobs/${requestedCancelJobId}/cancel-request`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { cancelRequestNote: requestedCancelReason },
+      });
+      assert.equal(requestedCancel.status, 200);
+      assert.equal(requestedCancel.body.data.cancelRequestStatus, 'submitted');
+      assert.equal(requestedCancel.body.data.cancelRequestNote, requestedCancelReason);
+
+      const approvedCancel = await api(`/api/container-jobs/${requestedCancelJobId}/cancel-review`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { approved: true, cancelSource: 'customer' },
+      });
+      assert.equal(approvedCancel.status, 200);
+      assert.equal(approvedCancel.body.data.status, 'cancelled');
+      assert.equal(approvedCancel.body.data.cancelReason, requestedCancelReason);
+      assert.equal(approvedCancel.body.data.cancelSource, 'customer');
+      assert.equal(approvedCancel.body.data.cancelledByName, users.admin.name);
+
+      const approvedCancelLog = await latestActivityForEntity('CANCEL_CONTAINER_JOB', requestedCancelJobId);
+      assert.equal(approvedCancelLog.action, 'CANCEL_CONTAINER_JOB');
+      assert.equal(approvedCancelLog.metadata.reason, requestedCancelReason);
+      assert.equal(approvedCancelLog.metadata.source, 'customer');
+
+      const cancelRequestOrderDetail = await api(`/api/sales-orders/${cancelRequestOrder.body.data.id}`, { token: adminToken });
+      assert.equal(cancelRequestOrderDetail.status, 200);
+      assert.equal(cancelRequestOrderDetail.body.data.containers[0].status, 'cancelled');
+      assert.equal(cancelRequestOrderDetail.body.data.containers[0].cancelReason, requestedCancelReason);
+      assert.equal(cancelRequestOrderDetail.body.data.containers[0].cancelSource, 'customer');
+
+      const cancelRequestOrderList = await api(`/api/sales-orders?status=cancelled&query=${encodeURIComponent(requestedCancelSoNumber)}`, { token: adminToken });
+      assert.equal(cancelRequestOrderList.status, 200);
+      assert.equal(cancelRequestOrderList.body.data.summary.cancelledContainers, 1);
     });
 
     await t.test('sales order: billing status workflow bisa disimpan setelah operational selesai', async () => {
@@ -769,6 +843,12 @@ if (!hasDatabase) {
       assert.ok(Array.isArray(completedTrips.body.data.rows));
       assert.equal(completedTrips.body.data.rows.some((row) => row.id === created.jobId), true);
       assert.equal(completedTrips.body.data.rows.every((row) => row.completedAt), true);
+      const recapRow = completedTrips.body.data.rows.find((row) => row.id === created.jobId);
+      assert.ok(['LENGKAP', 'SIAP_DITAGIHKAN'].includes(recapRow.documentStatus));
+      assert.equal(recapRow.documents.hasSpk, true);
+      assert.equal(recapRow.documents.hasLoadingVoucher, true);
+      assert.equal(recapRow.documents.hasTilaGatepass, true);
+      assert.equal(recapRow.documents.hasTravelDocument, true);
 
       const detail = await api(`/api/finance/completed-trips/${created.jobId}`, { token: financeToken });
       assert.equal(detail.status, 200);
@@ -968,6 +1048,17 @@ if (!hasDatabase) {
       assert.ok(Array.isArray(salesReport.body.data.rows));
       assert.equal(typeof salesReport.body.data.total, 'number');
       assert.ok(salesReport.body.data.summary);
+      assert.ok(salesReport.body.data.summary.cancelledContainers >= 1);
+      assert.equal(
+        salesReport.body.data.rows.some((row) => row.cancelledContainers >= 1),
+        true,
+      );
+
+      const monthlyRevenue = await api('/api/reports/monthly-revenue?year=2026&month=7', { token: observerToken });
+      assert.equal(monthlyRevenue.status, 200);
+      const mainRevenueRow = monthlyRevenue.body.data.rows.find((row) => row.jobId === created.jobId);
+      assert.ok(mainRevenueRow);
+      assert.equal(mainRevenueRow.totalContainers, 1);
 
       const operationsReport = await api(`/api/reports/operations?query=${encodeURIComponent(runId)}`, { token: observerToken });
       assert.equal(operationsReport.status, 200);

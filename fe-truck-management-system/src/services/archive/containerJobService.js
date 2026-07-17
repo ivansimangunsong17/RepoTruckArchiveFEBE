@@ -85,8 +85,12 @@ export function generateContainerJobSpk(id, form = {}) {
   return httpClient.post(`/container-jobs/${id}/spk`, form);
 }
 
-export function cancelContainerJob(id, updatedBy = 'Operational') {
-  return updateContainerJob(id, { status: 'cancelled', updatedBy });
+export function cancelContainerJob(id, payloadOrUpdatedBy = 'Operational') {
+  const payload = typeof payloadOrUpdatedBy === 'object'
+    ? { status: 'cancelled', ...payloadOrUpdatedBy }
+    : { status: 'cancelled', updatedBy: payloadOrUpdatedBy };
+
+  return updateContainerJob(id, payload);
 }
 
 export function requestContainerJobCancellation(id, payload = {}) {

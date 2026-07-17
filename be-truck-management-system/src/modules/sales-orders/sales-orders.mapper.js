@@ -5,6 +5,15 @@ function normalizeContainerSize(size) {
   return normalized === '40FT' ? '40FT' : '20FT';
 }
 
+function normalizePaymentType(value) {
+  return String(value || '').trim().toLowerCase() === 'tempo' ? 'tempo' : 'cash';
+}
+
+function normalizePaymentTermDays(paymentType, value) {
+  const days = Math.max(0, Number(value || 0));
+  return paymentType === 'tempo' ? Math.max(1, days || 30) : 0;
+}
+
 function mapAttachmentFile(attachment) {
   return attachment
     ? {
@@ -146,6 +155,18 @@ export function mapContainerJob(row, attachments = []) {
     receivedAt: row.received_at,
     runningAt: row.running_at,
     completedAt: row.completed_at,
+    cancelledAt: row.cancelled_at,
+    cancelledByName: row.cancelled_by_name || '',
+    cancelReason: row.cancel_reason || row.cancel_request_note || '',
+    cancelSource: row.cancel_source || '',
+    cancelRequestStatus: row.cancel_request_status || 'none',
+    cancelRequestNote: row.cancel_request_note || '',
+    cancelRequestedByName: row.cancel_requested_by_name || '',
+    cancelRequestedByRole: row.cancel_requested_by_role || '',
+    cancelRequestedAt: row.cancel_requested_at,
+    cancelReviewedByName: row.cancel_reviewed_by_name || '',
+    cancelReviewedAt: row.cancel_reviewed_at,
+    cancelReviewNote: row.cancel_review_note || '',
     createdBy: row.created_by_name,
     updatedBy: row.updated_by_name,
     updatedAt: row.updated_at,
@@ -184,6 +205,11 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     invoiceIssuedAt: row.invoice_issued_at,
     invoiceInputBy: row.invoice_input_by_name || '',
     billingStatus: normalizeSalesOrderBillingStatus(row.billing_status),
+    paymentType: normalizePaymentType(row.payment_type),
+    paymentTermDays: normalizePaymentTermDays(normalizePaymentType(row.payment_type), row.payment_term_days),
+    paymentTerms: normalizePaymentType(row.payment_type) === 'tempo'
+      ? `Tempo ${normalizePaymentTermDays('tempo', row.payment_term_days)} hari`
+      : 'Cash',
     container: row.container_summary,
     lineItems,
     terminal: row.terminal,
@@ -226,6 +252,7 @@ export function toSalesOrderDb(form, customer) {
   const price = Number(form.price || 0);
   const totalAmount = Number(form.totalAmount || price * quantity || 0);
   const lineItems = Array.isArray(form.lineItems) ? form.lineItems.map(normalizeLineItem) : [];
+  const paymentType = normalizePaymentType(form.paymentType);
 
   return {
     so_number: String(form.soNumber || '').trim() || null,
@@ -247,6 +274,8 @@ export function toSalesOrderDb(form, customer) {
     job_description: form.jobDescription || form.notes || null,
     invoice_number: form.invoiceNumber || null,
     billing_status: normalizeSalesOrderBillingStatus(form.billingStatus),
+    payment_type: paymentType,
+    payment_term_days: normalizePaymentTermDays(paymentType, form.paymentTermDays),
     container_summary: form.container || null,
     line_items: JSON.stringify(lineItems),
     terminal: form.terminal || null,

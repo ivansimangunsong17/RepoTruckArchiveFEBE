@@ -179,6 +179,8 @@ function createInitialForm(order) {
     jobType: order?.jobType || 'Trucking Container',
     vesselName: order?.vesselName || order?.shipName || order?.namaKapal || '',
     invoiceNumber: order?.invoiceNumber || '',
+    paymentType: order?.paymentType || 'cash',
+    paymentTermDays: order?.paymentTermDays == null ? '30' : String(order.paymentTermDays || 30),
     origin: order?.origin || '',
     destination: order?.destination || '',
     terminal: order?.terminal || '',
@@ -284,6 +286,8 @@ function SalesOrderForm({
     setForm((current) => ({
       ...current,
       [name]: value,
+      ...(name === 'paymentType' && value === 'cash' ? { paymentTermDays: '0' } : {}),
+      ...(name === 'paymentType' && value === 'tempo' && Number(current.paymentTermDays || 0) < 1 ? { paymentTermDays: '30' } : {}),
     }));
   }
 
@@ -393,6 +397,9 @@ function SalesOrderForm({
     if (requiresContainerType) return setError('Pilih jenis container untuk rincian D20 atau D40.');
     const requiresOtherNotes = lineItems.find((item) => isOtherService(item.serviceName) && !item.notes.trim());
     if (requiresOtherNotes) return setError('Isi catatan untuk rincian Jasa Lainnya.');
+    if (form.paymentType === 'tempo' && Number(form.paymentTermDays || 0) < 1) {
+      return setError('Termin pembayaran wajib diisi minimal 1 hari untuk pembayaran Tempo.');
+    }
 
     setError('');
     const normalizedLineItems = lineItems.map((item) => ({
@@ -412,6 +419,8 @@ function SalesOrderForm({
       origin: form.origin.trim(),
       destination: form.destination.trim(),
       invoiceNumber: form.invoiceNumber.trim(),
+      paymentType: form.paymentType === 'tempo' ? 'tempo' : 'cash',
+      paymentTermDays: form.paymentType === 'tempo' ? Number(form.paymentTermDays || 0) : 0,
       container: containerSummary,
       terminal: form.terminal.trim(),
       vesselName: form.vesselName.trim(),
@@ -543,6 +552,28 @@ function SalesOrderForm({
                   <option value="domestik outward">Domestik Outward</option>
                 </select>
               </label>
+
+              <label>
+                Jenis Pembayaran
+                <select name="paymentType" value={form.paymentType} onChange={updateField}>
+                  <option value="cash">Cash</option>
+                  <option value="tempo">Tempo</option>
+                </select>
+              </label>
+
+              {form.paymentType === 'tempo' ? (
+                <label>
+                  Termin Pembayaran (Hari)
+                  <input
+                    name="paymentTermDays"
+                    type="number"
+                    min="1"
+                    value={form.paymentTermDays}
+                    onChange={updateField}
+                    placeholder="30"
+                  />
+                </label>
+              ) : null}
 
               <label>
                 Nama Kapal

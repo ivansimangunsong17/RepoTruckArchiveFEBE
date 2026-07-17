@@ -48,7 +48,7 @@
 .sales-order-group .order-card:last-child { border-bottom: 0; }
 .order-summary {
   display: grid;
-  grid-template-columns: 42px minmax(160px, 1.05fr) minmax(220px, 1.45fr) minmax(140px, .85fr) minmax(130px, .72fr) 108px;
+  grid-template-columns: 42px minmax(150px, 1.02fr) minmax(200px, 1.35fr) minmax(120px, .74fr) minmax(112px, .62fr) minmax(130px, .72fr) 108px;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -116,6 +116,24 @@
 .order-billing-summary strong.pending {
   color: #991b1b;
 }
+.order-container-summary strong {
+  color: #172033;
+  font-size: .74rem;
+  font-weight: 900;
+}
+.order-container-summary small {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  color: #991b1b;
+  background: #fff7f7;
+  font-size: .56rem;
+  font-weight: 850;
+}
 .order-invoice-status {
   display: inline-flex;
   align-items: center;
@@ -165,6 +183,44 @@
 .order-meta strong { display: block; overflow: hidden; color: #263044; font-size: .67rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .order-meta > div:last-child { grid-column: span 2; }
 .container-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; }
+.order-container-progress-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+.order-container-progress-panel > div {
+  display: grid;
+  gap: 3px;
+  min-height: 72px;
+  padding: 11px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+}
+.order-container-progress-panel span {
+  color: #7d899b;
+  font-size: .58rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+.order-container-progress-panel strong {
+  color: #172033;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.order-container-progress-panel small {
+  overflow: hidden;
+  color: #64748b;
+  font-size: .58rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.order-container-progress-panel .has-cancelled {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+.order-container-progress-panel .has-cancelled strong { color: #991b1b; }
 .container-detail { display: grid; grid-template-columns: minmax(170px, 1.05fr) minmax(230px, 1.4fr) minmax(300px, 1.55fr); align-items: center; gap: 12px; position: relative; overflow: hidden; min-height: 68px; padding: 10px 12px; border: 1px solid #e2e4e8; border-left: 3px solid var(--primary); border-radius: 8px; background: white; }
 .container-detail:hover { border-color: #d6b8ba; background: #fffafa; }
 .container-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; margin: 0; }
@@ -437,6 +493,62 @@
 .operational-eir-card {
   align-content: start;
 }
+.operational-rpuj-card {
+  gap: 12px;
+  padding: 14px;
+}
+.operational-rpuj-card-head {
+  display: grid;
+  gap: 3px;
+}
+.operational-rpuj-card-head span {
+  color: #202124;
+  font-size: .72rem;
+  font-weight: 850;
+}
+.operational-rpuj-card-head small {
+  color: #7c8798;
+  font-size: .58rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.operational-cost-fields {
+  display: grid;
+  grid-template-columns: minmax(170px, .45fr) minmax(240px, .55fr);
+  gap: 10px;
+  align-items: end;
+}
+.operational-cost-summary {
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid #e5e9ef;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+.operational-cost-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.operational-cost-summary-head strong {
+  flex: none;
+  font-size: 1rem;
+  font-weight: 850;
+}
+.operational-cost-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.operational-rpuj-footer {
+  display: grid;
+  grid-template-columns: minmax(230px, .7fr) minmax(170px, .3fr);
+  gap: 12px;
+  align-items: start;
+  padding-top: 2px;
+}
 .operational-eir-card {
   border-color: #f2c46d;
   background: linear-gradient(180deg, #fffdf7 0%, #fff8e8 100%);
@@ -448,8 +560,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 9px;
+  min-width: 0;
 }
 .operational-rpuj-actions small {
+  flex: 1 1 210px;
   color: #718096;
   font-size: .58rem;
   font-weight: 650;
@@ -466,6 +580,16 @@
   background: #eef3f8;
   cursor: not-allowed;
   opacity: 1;
+}
+@media (max-width: 760px) {
+  .operational-cost-fields,
+  .operational-rpuj-footer {
+    grid-template-columns: 1fr;
+  }
+  .operational-cost-summary-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 .operational-eir-card > span {
   color: #8a5b00;

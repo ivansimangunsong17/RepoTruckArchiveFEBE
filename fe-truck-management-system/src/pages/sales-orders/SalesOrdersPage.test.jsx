@@ -48,7 +48,15 @@ describe('SalesOrdersPage billing status flow', () => {
         status: 'completed',
         invoiceNumber: 'INV-001',
         billingStatus: 'menunggu_pembayaran',
+        paymentType: 'tempo',
+        paymentTermDays: 14,
         salesName: 'Sales A',
+        quantity: 3,
+        containers: [
+          { id: 'job-1', size: '20FT', type: 'Dry', status: 'completed', completedAt: '2026-07-11T10:00:00.000Z' },
+          { id: 'job-2', size: '20FT', type: 'Dry', status: 'completed', completedAt: '2026-07-11T11:00:00.000Z' },
+          { id: 'job-3', size: '20FT', type: 'Dry', status: 'cancelled', cancelReason: 'Customer hanya menjalankan sebagian container' },
+        ],
       }],
       total: 1,
       summary: {
@@ -58,6 +66,9 @@ describe('SalesOrdersPage billing status flow', () => {
         completedOrders: 1,
         invoicedOrders: 1,
         cancelledOrders: 0,
+        activeContainers: 2,
+        completedContainers: 2,
+        cancelledContainers: 1,
       },
     });
     updateSalesOrderInvoiceDeliveryStatus.mockResolvedValue({
@@ -76,7 +87,9 @@ describe('SalesOrdersPage billing status flow', () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage />);
 
+    expect(await screen.findByText('2/3 Aktif')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    expect(await screen.findByText('Pembayaran: Tempo 14 hari')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Simpan Status' }));
 
     await waitFor(() => expect(updateSalesOrderInvoiceDeliveryStatus).toHaveBeenCalledWith(

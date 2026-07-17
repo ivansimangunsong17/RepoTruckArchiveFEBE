@@ -156,6 +156,9 @@ export function getSalesReportHeaders(includeCommercial = false) {
     'Shipment',
     'Jenis Pekerjaan',
     'Jumlah Container',
+    'Container Aktif',
+    'Container Selesai',
+    'Container Batal',
     'Quantity',
     'Unit',
   ];
@@ -184,7 +187,10 @@ export function mapSalesReportRow(order, index, includeCommercial = false) {
     order.destination,
     order.shipment,
     order.jobType,
-    order.containers?.length || 0,
+    order.plannedContainers ?? order.containers?.length ?? order.quantity ?? 0,
+    order.activeContainers ?? (order.containers || []).filter((container) => container.status !== 'cancelled').length,
+    order.completedContainers ?? (order.containers || []).filter((container) => container.status === 'completed').length,
+    order.cancelledContainers ?? (order.containers || []).filter((container) => container.status === 'cancelled').length,
     formatCsvNumber(order.quantity),
     order.unit,
   ];

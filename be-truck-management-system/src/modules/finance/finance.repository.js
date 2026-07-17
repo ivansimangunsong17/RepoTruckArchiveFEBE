@@ -39,6 +39,16 @@ function normalizeVerificationStatus(row) {
   return row.finance_verification_status === 'verified' && row.so_number ? 'verified' : 'pending_so';
 }
 
+function paymentTermsExpression(alias = 'so') {
+  return `
+    case
+      when lower(coalesce(${alias}.payment_type, 'cash')) = 'tempo'
+      then concat('Tempo ', greatest(coalesce(${alias}.payment_term_days, 0), 1), ' hari')
+      else 'Cash'
+    end
+  `;
+}
+
 function mapOrderVerificationRow(row) {
   const verificationStatus = normalizeVerificationStatus(row);
   const referenceDocuments = parseJsonArray(row.reference_documents);
@@ -630,7 +640,7 @@ function invoiceOrdersCte() {
         so.customer_name,
         so.destination,
         so.updated_at,
-        null::text as payment_terms,
+        ${paymentTermsExpression('so')} as payment_terms,
         max(fr.completed_at) as completed_at,
         count(fr.id)::int as total_jobs_count,
         count(fr.id) filter (where fr.document_status = 'BELUM_LENGKAP')::int as incomplete_documents_count,
@@ -789,7 +799,7 @@ export async function getOrderVerificationsPage(options = {}) {
           so.container_summary,
           to_jsonb(so)->'line_items' as line_items,
           so.terminal,
-          null::text as payment_terms,
+          ${paymentTermsExpression('so')} as payment_terms,
           so.origin,
           so.destination,
           so.quantity,
@@ -926,7 +936,7 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
           so.container_summary,
           to_jsonb(so)->'line_items' as line_items,
           so.terminal,
-          null::text as payment_terms,
+          ${paymentTermsExpression('so')} as payment_terms,
           so.origin,
           so.destination,
           so.quantity,

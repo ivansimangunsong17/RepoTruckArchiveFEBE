@@ -199,6 +199,8 @@ function normalizeContainers(payload) {
 function normalizeSalesOrderPayload(payload) {
   const lineItems = normalizeLineItems(payload);
   const containers = normalizeContainers({ ...payload, lineItems });
+  const paymentType = String(payload.paymentType || '').trim().toLowerCase() === 'tempo' ? 'tempo' : 'cash';
+  const paymentTermDays = paymentType === 'tempo' ? Math.max(1, Number(payload.paymentTermDays || 30)) : 0;
   const price = Number(payload.price || 0);
   const quantity = Number(payload.quantity || lineItems.reduce((total, item) => total + Number(item.qty || 0), 0) || containers.length || 0);
   const totalAmount = Number(
@@ -229,6 +231,8 @@ function normalizeSalesOrderPayload(payload) {
     cargoType: uniqueContainerTypes.length === 1 ? uniqueContainerTypes[0] : payload.cargoType || null,
     containers,
     billingStatus: normalizeSalesOrderBillingStatus(payload.billingStatus),
+    paymentType,
+    paymentTermDays,
     referenceDocuments: normalizeReferenceDocuments(payload.referenceDocuments),
   };
 }
@@ -334,6 +338,20 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
   );
   if (duplicatedContainer) {
     const error = new Error('Nomor container wajib unik di dalam Sales Order.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const paymentType = String(payload.paymentType || 'cash').trim().toLowerCase();
+  if (!['cash', 'tempo'].includes(paymentType)) {
+    const error = new Error('Jenis pembayaran harus Cash atau Tempo.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  if (paymentType === 'tempo' && Number(payload.paymentTermDays || 0) < 1) {
+    const error = new Error('Termin pembayaran wajib diisi minimal 1 hari untuk pembayaran Tempo.');
     error.statusCode = 400;
     error.code = 'VALIDATION_ERROR';
     throw error;

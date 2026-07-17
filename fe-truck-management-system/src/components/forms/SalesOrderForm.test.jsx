@@ -19,9 +19,12 @@ const locationMasters = {
 
 async function fillBaseFields(user, overrides = {}) {
   await user.selectOptions(screen.getByLabelText('Customer'), 'PT Armada Test');
-  fireEvent.change(screen.getByLabelText('No. Sales Order'), {
-    target: { value: overrides.soNumber || 'SO-2026-TEST' },
-  });
+  const soInput = screen.queryByLabelText('No. Sales Order');
+  if (soInput) {
+    fireEvent.change(soInput, {
+      target: { value: overrides.soNumber || 'SO-2026-TEST' },
+    });
+  }
   await user.selectOptions(screen.getByLabelText('Depo'), overrides.origin || 'Jakarta');
   await user.selectOptions(screen.getByLabelText('Lokasi Tujuan'), overrides.destination || 'Bandung');
 }
@@ -62,7 +65,7 @@ describe('SalesOrderForm', () => {
     expect(screen.getByLabelText('Customer')).toHaveValue('');
   });
 
-  it('menolak nomor Sales Order yang sudah digunakan', async () => {
+  it('tidak meminta nomor Sales Order saat order baru dibuat Sales', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(
@@ -79,8 +82,8 @@ describe('SalesOrderForm', () => {
     await fillFirstLineItem(user, { serviceName: 'Bon Muat/Bongkar', quantity: '1', price: '50000' });
     await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
 
-    expect(screen.getByText('Nomor Sales Order sudah digunakan.')).toBeInTheDocument();
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('No. Sales Order')).not.toBeInTheDocument();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ soNumber: '' }));
   });
 
   it('menolak rincian dengan qty nol', async () => {
@@ -163,6 +166,10 @@ describe('SalesOrderForm', () => {
     );
 
     await fillBaseFields(user, { soNumber: 'SO-VALID-001' });
+    await user.selectOptions(screen.getByLabelText('Jenis Pembayaran'), 'Tempo');
+    fireEvent.change(screen.getByLabelText('Termin Pembayaran (Hari)'), {
+      target: { value: '14' },
+    });
     await fillFirstLineItem(user, {
       serviceName: 'Jasa Angkut D20',
       containerType: 'Dry',
@@ -183,8 +190,10 @@ describe('SalesOrderForm', () => {
 
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-      soNumber: 'SO-VALID-001',
+      soNumber: '',
       customer: 'PT Armada Test',
+      paymentType: 'tempo',
+      paymentTermDays: 14,
       serviceName: 'Campuran',
       quantity: 3,
       totalAmount: 350000,

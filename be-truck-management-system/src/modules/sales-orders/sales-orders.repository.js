@@ -24,6 +24,8 @@ const salesOrderColumnCandidates = [
   'invoice_issued_at',
   'invoice_input_by_name',
   'billing_status',
+  'payment_type',
+  'payment_term_days',
   'container_summary',
   'line_items',
   'terminal',
@@ -101,7 +103,9 @@ const jobColumns = `
   travel_document_number, weighing_document_number, tila_gatepass_document_number,
   tila_gatepass_migration_note, driver_id, vehicle_id, assignment_snapshot,
   status, received_at, running_at, completed_at, created_by_name, updated_by_name,
-  created_at, updated_at
+  created_at, updated_at, cancelled_at, cancel_reason, cancel_source, cancelled_by_name,
+  cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role,
+  cancel_requested_at, cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note
 `;
 
 const attachmentColumns = `
@@ -370,7 +374,8 @@ export async function findSalesOrdersPage(options = {}) {
           (select count(*)::int from filtered where status = 'cancelled') as cancelled_orders,
           (select coalesce(sum(quantity), 0)::int from filtered) as containers,
           coalesce(count(cj.id) filter (where cj.status = 'completed'), 0)::int as completed_containers,
-          coalesce(count(cj.id) filter (where cj.status <> 'completed'), 0)::int as active_containers
+          coalesce(count(cj.id) filter (where cj.status = 'cancelled'), 0)::int as cancelled_containers,
+          coalesce(count(cj.id) filter (where cj.status not in ('completed', 'cancelled')), 0)::int as active_containers
         from filtered
         left join container_jobs cj on cj.sales_order_id = filtered.id
       `,
@@ -388,6 +393,7 @@ export async function findSalesOrdersPage(options = {}) {
       containers: Number(summary.containers || 0),
       activeContainers: Number(summary.active_containers || 0),
       completedContainers: Number(summary.completed_containers || 0),
+      cancelledContainers: Number(summary.cancelled_containers || 0),
       waitingOrders: Number(summary.waiting_orders || 0),
       runningOrders: Number(summary.running_orders || 0),
       completedOrders: Number(summary.completed_orders || 0),

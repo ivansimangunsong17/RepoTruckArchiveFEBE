@@ -952,13 +952,13 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
       </div>
 
       <div className="table-wrap">
-          <table className="data-table master-table finance-master-table min-w-[960px] table-fixed">
+          <table className="data-table master-table finance-master-table min-w-[1180px] table-fixed">
             <colgroup>
-              <col className="w-[17%]" />
-              <col className="w-[19%]" />
-              <col className="w-[11%]" />
               <col className="w-[25%]" />
-              <col className="w-[28%]" />
+              <col className="w-[18%]" />
+              <col className="w-[12%]" />
+              <col className="w-[22%]" />
+              <col className="w-[23%]" />
             </colgroup>
             <thead>
               <tr>
@@ -980,11 +980,11 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                     <tr className="finance-group-row">
                       <td colSpan={5}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <strong className="text-xs font-black text-slate-950">{soNumber}</strong>
-                            <span className="truncate font-semibold text-slate-700">{firstRow.customer}</span>
+                          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                            <strong className="min-w-0 break-words text-xs font-black text-slate-950">{soNumber}</strong>
+                            <span className="min-w-0 truncate font-semibold text-slate-700">{firstRow.customer}</span>
                             <span className="text-slate-300">|</span>
-                            <span className="truncate font-medium text-slate-500">{firstRow.destination}</span>
+                            <span className="min-w-0 truncate font-medium text-slate-500">{firstRow.destination}</span>
                           </div>
                           <div className="flex flex-wrap items-center gap-1">
                             <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{soRows.length} container</span>
@@ -1005,34 +1005,34 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                       return (
                         <Fragment key={row.id}>
                           <tr className="align-middle hover:bg-slate-50">
-                            <td className="px-2 py-1.5">
-                              <strong className="block text-[11px] font-semibold text-slate-900">{row.jobNumber}</strong>
-                              <span className="mt-0.5 block break-words text-[9px] font-medium text-slate-500">{row.container}</span>
+                            <td className="finance-wrap-cell px-2 py-2">
+                              <strong className="block break-words text-[11px] font-semibold leading-snug text-slate-900">{row.jobNumber}</strong>
+                              <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-500">{row.container}</span>
                               <span className="mt-0.5 block text-[9px] font-medium text-slate-400">{row.departureDate}</span>
                             </td>
-                            <td className="px-2 py-1.5">
-                              <strong className="block text-[11px] font-semibold text-slate-900">{formatCurrency(rowTotal)}</strong>
+                            <td className="finance-wrap-cell px-2 py-2">
+                              <strong className="block text-[12px] font-black text-slate-900">{formatCurrency(rowTotal)}</strong>
                               <span className="mt-0.5 block text-[9px] font-medium leading-snug text-slate-500">UJ {formatCurrency(row.totalUj)} + Tambahan {formatCurrency(row.additionalCost)}</span>
                             </td>
-                            <td className="px-2 py-1.5">
+                            <td className="finance-wrap-cell px-2 py-2">
                               <StatusPill value={compactRpujStatus(row.status)} />
                             </td>
-                            <td className="px-2 py-1.5">
-                              <span className="block text-[11px] font-semibold text-slate-800">{row.driver}</span>
+                            <td className="finance-wrap-cell px-2 py-2">
+                              <span className="block break-words text-[11px] font-semibold leading-snug text-slate-800">{row.driver}</span>
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-600">{row.driverBankAccount}</span>
-                              <span className="mt-0.5 block text-[9px] font-medium text-slate-400">{row.truck}</span>
+                              <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-400">{row.truck}</span>
                             </td>
-                            <td className="px-2 py-1.5">
-                              <div className="grid grid-cols-2 gap-1">
-                                <button className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectRpuj(row.id)} type="button">Detail</button>
+                            <td className="px-2 py-2">
+                              <div className="grid min-w-[230px] grid-cols-3 gap-1.5">
+                                <button className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectRpuj(row.id)} type="button">Detail</button>
                                 {activeRpujTab === 'need-approval' ? (
                                   <>
-                                    <button className="inline-flex h-7 items-center justify-center rounded-md bg-slate-900 px-2 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40" disabled={busy} onClick={() => onApprove(row.id)} type="button">Approve</button>
-                                    <button className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={busy} onClick={() => onReject(row.id)} type="button">Reject</button>
+                                    <button className="inline-flex h-8 items-center justify-center rounded-md bg-emerald-600 px-2 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40" disabled={busy} onClick={() => onApprove(row.id)} type="button">Approve</button>
+                                    <button className="inline-flex h-8 items-center justify-center rounded-md border border-rose-200 bg-white px-2 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40" disabled={busy} onClick={() => onReject(row.id)} type="button">Reject</button>
                                   </>
                                 ) : null}
                                 {activeRpujTab === 'ready-transfer' ? (
-                                  <label className={`inline-flex h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 ${canUploadTransfer && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
+                                  <label className={`col-span-2 inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 ${canUploadTransfer && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
                                     <Upload size={11} /> {busy ? 'Proses' : 'Upload'}
                                     <input
                                       accept=".pdf,.jpg,.jpeg,.png"
@@ -1048,7 +1048,7 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                                   </label>
                                 ) : null}
                                 {activeRpujTab === 'paid' ? (
-                                  <span className="col-span-2 min-w-0 truncate rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[10px] font-semibold text-emerald-700" title={row.transferProof || 'Bukti transfer sudah dikirim'}>
+                                  <span className="col-span-2 min-w-0 truncate rounded-md border border-emerald-100 bg-emerald-50 px-2 py-2 text-[10px] font-semibold text-emerald-700" title={row.transferProof || 'Bukti transfer sudah dikirim'}>
                                     {row.transferProof || 'Bukti transfer sudah dikirim'}
                                   </span>
                                 ) : null}

@@ -80,4 +80,27 @@ describe('containerJobService', () => {
     expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1', { status: 'cancelled', updatedBy: 'Ops' });
     expect(result.status).toBe('cancelled');
   });
+
+  it('membatalkan Container Job dengan alasan dan sumber pembatalan', async () => {
+    httpClient.patch.mockResolvedValue({
+      id: 'job-1',
+      status: 'cancelled',
+      cancelReason: 'Customer hanya menjalankan 2 dari 3 container',
+      cancelSource: 'customer',
+    });
+
+    const result = await cancelContainerJob('job-1', {
+      updatedBy: 'Ops',
+      cancelReason: 'Customer hanya menjalankan 2 dari 3 container',
+      cancelSource: 'customer',
+    });
+
+    expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1', {
+      status: 'cancelled',
+      updatedBy: 'Ops',
+      cancelReason: 'Customer hanya menjalankan 2 dari 3 container',
+      cancelSource: 'customer',
+    });
+    expect(result.cancelSource).toBe('customer');
+  });
 });

@@ -223,25 +223,57 @@ export async function getSalesOrderReport(options = {}) {
   const [rows, total, summary] = await Promise.all([
     query(
       `
-        select id, so_number, do_number, so_date, trip_date, received_at,
-               customer_name, customer_pic, customer_phone, shipment_type,
-               job_type, origin, destination, status, quantity, price,
-               unit, total_amount, sales_name, created_by_name, notes, created_at
-        from sales_orders
-        ${whereSql}
-        order by trip_date desc, created_at desc
-        limit $${limitIndex} offset $${offsetIndex}
+        with filtered_orders as (
+          select *
+          from sales_orders
+          ${whereSql}
+          order by trip_date desc, created_at desc
+          limit $${limitIndex} offset $${offsetIndex}
+        )
+        select fo.id, fo.so_number, fo.do_number, fo.so_date, fo.trip_date, fo.received_at,
+               fo.customer_name, fo.customer_pic, fo.customer_phone, fo.shipment_type,
+               fo.job_type, fo.origin, fo.destination, fo.status, fo.quantity, fo.price,
+               fo.unit, fo.total_amount, fo.sales_name, fo.created_by_name, fo.notes, fo.created_at,
+               coalesce(count(cj.id), 0)::int as planned_containers,
+               coalesce(count(cj.id) filter (where cj.status not in ('cancelled')), 0)::int as active_containers,
+               coalesce(count(cj.id) filter (where cj.status = 'completed'), 0)::int as completed_containers,
+               coalesce(count(cj.id) filter (where cj.status = 'cancelled'), 0)::int as cancelled_containers
+        from filtered_orders fo
+        left join container_jobs cj on cj.sales_order_id = fo.id
+        group by fo.id, fo.so_number, fo.do_number, fo.so_date, fo.trip_date, fo.received_at,
+                 fo.customer_name, fo.customer_pic, fo.customer_phone, fo.shipment_type,
+                 fo.job_type, fo.origin, fo.destination, fo.status, fo.quantity, fo.price,
+                 fo.unit, fo.total_amount, fo.sales_name, fo.created_by_name, fo.notes, fo.created_at
+        order by fo.trip_date desc, fo.created_at desc
       `,
       [...params, pageSize, offset],
     ),
     query(`select count(*)::int as total from sales_orders ${whereSql}`, params),
     query(
       `
+        with filtered_orders as (
+          select id, quantity, total_amount
+          from sales_orders
+          ${whereSql}
+        ),
+        job_summary as (
+          select
+            sales_order_id,
+            count(*) filter (where status <> 'cancelled')::int as active_containers,
+            count(*) filter (where status = 'completed')::int as completed_containers,
+            count(*) filter (where status = 'cancelled')::int as cancelled_containers
+          from container_jobs
+          where sales_order_id in (select id from filtered_orders)
+          group by sales_order_id
+        )
         select count(*)::int as orders,
-               coalesce(sum(quantity), 0)::int as containers,
-               coalesce(sum(total_amount), 0)::numeric as revenue
-        from sales_orders
-        ${whereSql}
+               coalesce(sum(fo.quantity), 0)::int as containers,
+               coalesce(sum(js.active_containers), 0)::int as active_containers,
+               coalesce(sum(js.completed_containers), 0)::int as completed_containers,
+               coalesce(sum(js.cancelled_containers), 0)::int as cancelled_containers,
+               coalesce(sum(fo.total_amount), 0)::numeric as revenue
+        from filtered_orders fo
+        left join job_summary js on js.sales_order_id = fo.id
       `,
       params,
     ),
@@ -264,6 +296,10 @@ export async function getSalesOrderReport(options = {}) {
       destination: row.destination,
       status: row.status,
       quantity: Number(row.quantity || 0),
+      plannedContainers: Number(row.planned_containers || row.quantity || 0),
+      activeContainers: Number(row.active_containers || 0),
+      completedContainers: Number(row.completed_containers || 0),
+      cancelledContainers: Number(row.cancelled_containers || 0),
       price: Number(row.price || 0),
       unit: row.unit,
       totalAmount: Number(row.total_amount || 0),
@@ -276,6 +312,9 @@ export async function getSalesOrderReport(options = {}) {
     summary: {
       orders: summary.rows[0]?.orders || 0,
       containers: summary.rows[0]?.containers || 0,
+      activeContainers: summary.rows[0]?.active_containers || 0,
+      completedContainers: summary.rows[0]?.completed_containers || 0,
+      cancelledContainers: summary.rows[0]?.cancelled_containers || 0,
       revenue: Number(summary.rows[0]?.revenue || 0),
     },
   };
@@ -307,6 +346,7 @@ export async function getMonthlyRevenueReport(options = {}) {
       with order_job_totals as (
         select sales_order_id, count(*)::int as total_jobs
         from container_jobs
+        where status <> 'cancelled'
         group by sales_order_id
       ),
       completed_jobs as (
@@ -322,7 +362,7 @@ export async function getMonthlyRevenueReport(options = {}) {
           cj.completed_at::date as completed_date,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
           nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
-          greatest(1, coalesce(nullif(so.quantity, 0), ojt.total_jobs, 1))::int as total_containers
+          greatest(1, coalesce(nullif(ojt.total_jobs, 0), nullif(so.quantity, 0), 1))::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
         left join order_job_totals ojt on ojt.sales_order_id = so.id

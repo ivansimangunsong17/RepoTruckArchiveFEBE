@@ -15,6 +15,7 @@ const joinedJobColumns = `
   cj.updated_by_name, cj.created_at, cj.updated_at, cj.cancel_request_status, cj.cancel_request_note,
   cj.cancel_requested_by_name, cj.cancel_requested_by_role, cj.cancel_requested_at,
   cj.cancel_reviewed_by_name, cj.cancel_reviewed_at, cj.cancel_review_note,
+  cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
@@ -111,6 +112,33 @@ async function findVehicle(client, form) {
   return result.rows[0] || null;
 }
 
+async function findMappedContainerJob(client, id) {
+  const result = await client.query(
+    `
+      select ${joinedJobColumns}
+      from container_jobs cj
+      join sales_orders so on so.id = cj.sales_order_id
+      where cj.id = $1
+    `,
+    [id],
+  );
+  const attachmentResult = await client.query(
+    `
+      select ${attachmentColumns}
+      from attachments
+      where entity_type = 'container_job' and entity_id = $1
+      order by created_at asc
+    `,
+    [id],
+  );
+  return mapContainerJob(result.rows[0], attachmentResult.rows);
+}
+
+async function refreshOrderStatusAndMapJob(client, orderId, jobId) {
+  await refreshOrderStatus(client, orderId);
+  return findMappedContainerJob(client, jobId);
+}
+
 function normalizeContainerSize(value) {
   const normalized = String(value || '').toUpperCase().replace(/\s/g, '');
   if (normalized === 'COMBO') return 'COMBO';
@@ -180,6 +208,11 @@ function validationError(message, code = 'VALIDATION_ERROR', statusCode = 400) {
   return error;
 }
 
+function normalizeCancelSource(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['customer', 'sales', 'operational', 'other'].includes(normalized) ? normalized : 'operational';
+}
+
 function requireTripStartAllowed(nextStatus, rpujStatus) {
   if (!['running', 'completed'].includes(nextStatus)) return;
   if (['approved', 'paid'].includes(rpujStatus)) return;
@@ -195,11 +228,29 @@ function pickFormValue(form, key, fallback = null) {
 }
 
 async function requireCompletedJobReady(client, id, form, existing) {
+  if (!['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
+    throw validationError(
+      'Pekerjaan belum dapat diselesaikan. UJ harus disetujui/dikirim Finance terlebih dahulu.',
+      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
+      409,
+    );
+  }
+
+  const runningAt = form.runningAt || existing.running_at;
+  const completedAt = form.completedAt;
+  if (runningAt && completedAt && new Date(completedAt) < new Date(runningAt)) {
+    throw validationError(
+      'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu mulai.',
+      'CONTAINER_JOB_COMPLETION_INVALID_TIME',
+      409,
+    );
+  }
+
   const requiredValues = [
     ['driver', form.driver || form.driverId || existing.driver_id],
     ['truck', form.plateNumber || form.vehicleId || existing.vehicle_id],
-    ['waktu mulai', form.runningAt || existing.running_at],
-    ['waktu selesai', form.completedAt],
+    ['waktu mulai', runningAt],
+    ['waktu selesai', completedAt],
     ['No. EIR', pickFormValue(form, 'eirNumber', existing.eir_number)],
     ['No. Bon Muat / Bon Bongkar', pickFormValue(form, 'loadingVoucher', existing.loading_voucher_number)],
     ['No. TILA / Delivery Card / Gatepass / SP2', pickFormValue(form, 'tilaGatepassDocument', existing.tila_gatepass_document_number)],
@@ -222,9 +273,16 @@ async function requireCompletedJobReady(client, id, form, existing) {
         and entity_id = $1
         and category = any($2::text[])
     `,
-    [id, ['eirDocument', 'loadingVoucherDocument', 'tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'travelDocumentFile']],
+    [id, ['spkDocument', 'eirDocument', 'loadingVoucherDocument', 'tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'travelDocumentFile']],
   );
   const categories = new Set(attachmentResult.rows.map((row) => row.category));
+  if (!(form.spkNumber || existing.spk_number || categories.has('spkDocument'))) {
+    throw validationError(
+      'Pekerjaan belum dapat diselesaikan. Lengkapi SPK terlebih dahulu.',
+      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
+      409,
+    );
+  }
   const requiredAttachments = [
     ['Lampiran EIR', ['eirDocument']],
     ['Lampiran Bon Muat / Bon Bongkar', ['loadingVoucherDocument']],
@@ -374,6 +432,7 @@ export async function updateContainerJob(id, form) {
         select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.cancelled_at,
                cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.status, cj.eir_number,
                cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
+               cj.spk_number, cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
                so.so_number, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -393,6 +452,13 @@ export async function updateContainerJob(id, form) {
     const vehicle = await findVehicle(client, form);
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
     const nextStatus = form.status || existing.rows[0].status || 'received';
+    if (nextStatus === 'cancelled' && existing.rows[0].status === 'completed') {
+      throw validationError(
+        'Container Job yang sudah selesai tidak dapat dibatalkan.',
+        'CONTAINER_JOB_COMPLETED_CANNOT_CANCEL',
+        409,
+      );
+    }
     const nextRpujStatus = normalizeRpujStatusForOperational(existing.rows[0], form.rpujStatus);
     requireTripStartAllowed(nextStatus, nextRpujStatus);
     if (nextStatus === 'completed') {
@@ -410,6 +476,15 @@ export async function updateContainerJob(id, form) {
     const cancelledAt = nextStatus === 'cancelled'
       ? form.cancelledAt || existing.rows[0].cancelled_at || new Date().toISOString()
       : null;
+    const cancelReason = nextStatus === 'cancelled'
+      ? String(form.cancelReason || form.cancelRequestNote || existing.rows[0].cancel_reason || 'Pembatalan Container Job').trim()
+      : existing.rows[0].cancel_reason || null;
+    const cancelSource = nextStatus === 'cancelled'
+      ? normalizeCancelSource(form.cancelSource || existing.rows[0].cancel_source)
+      : existing.rows[0].cancel_source || null;
+    const cancelledByName = nextStatus === 'cancelled'
+      ? form.cancelledByName || form.updatedBy || existing.rows[0].cancelled_by_name || 'Operational'
+      : existing.rows[0].cancelled_by_name || null;
 
     await client.query(
       `
@@ -431,9 +506,16 @@ export async function updateContainerJob(id, form) {
             running_at = $15,
             completed_at = $16,
             cancelled_at = $17,
-            updated_by_name = $18,
+            cancel_reason = $18,
+            cancel_source = $19,
+            cancelled_by_name = $20,
+            cancel_request_status = case when $14 = 'cancelled' then 'approved' else cancel_request_status end,
+            cancel_request_note = case when $14 = 'cancelled' then coalesce($18, cancel_request_note) else cancel_request_note end,
+            cancel_reviewed_by_name = case when $14 = 'cancelled' then coalesce($20, cancel_reviewed_by_name) else cancel_reviewed_by_name end,
+            cancel_reviewed_at = case when $14 = 'cancelled' then now() else cancel_reviewed_at end,
+            updated_by_name = $21,
             updated_at = now()
-        where id = $19
+        where id = $22
       `,
       [
         nextContainerNumber,
@@ -453,6 +535,9 @@ export async function updateContainerJob(id, form) {
         runningAt,
         nextStatus === 'completed' ? form.completedAt || new Date().toISOString() : null,
         cancelledAt,
+        cancelReason,
+        cancelSource,
+        cancelledByName,
         form.updatedBy || 'Operational',
         id,
       ],
@@ -511,7 +596,7 @@ async function ensureCanRequestCancellation(client, id) {
 export async function requestContainerJobCancellation(id, form = {}) {
   return withTransaction(async (client) => {
     await ensureCanRequestCancellation(client, id);
-    const result = await client.query(
+    await client.query(
       `
         update container_jobs
         set cancel_request_status = 'submitted',
@@ -525,7 +610,6 @@ export async function requestContainerJobCancellation(id, form = {}) {
             updated_by_name = $4,
             updated_at = now()
         where id = $5
-        returning ${joinedJobColumns}
       `,
       [
         form.cancelRequestNote || null,
@@ -535,23 +619,14 @@ export async function requestContainerJobCancellation(id, form = {}) {
         id,
       ],
     );
-    const attachmentResult = await client.query(
-      `
-        select ${attachmentColumns}
-        from attachments
-        where entity_type = 'container_job' and entity_id = $1
-        order by created_at asc
-      `,
-      [id],
-    );
-    return mapContainerJob(result.rows[0], attachmentResult.rows);
+    return findMappedContainerJob(client, id);
   });
 }
 
 export async function reviewContainerJobCancellation(id, form = {}) {
   return withTransaction(async (client) => {
     const existing = await client.query(
-      'select id, sales_order_id, status, cancel_request_status, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at from container_jobs where id = $1',
+      'select id, sales_order_id, status, cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at, cancel_reason, cancel_source from container_jobs where id = $1',
       [id],
     );
     if (!existing.rows[0]) {
@@ -568,11 +643,21 @@ export async function reviewContainerJobCancellation(id, form = {}) {
     }
 
     if (form.approved) {
-      const result = await client.query(
+      const cancelReason = String(
+        form.cancelRequestNote
+        || existing.rows[0].cancel_request_note
+        || existing.rows[0].cancel_reason
+        || 'Pembatalan Container Job',
+      ).trim();
+      const cancelSource = normalizeCancelSource(form.cancelSource || existing.rows[0].cancel_source || 'sales');
+      await client.query(
         `
           update container_jobs
           set status = 'cancelled',
               cancelled_at = now(),
+              cancel_reason = $8,
+              cancel_source = $9,
+              cancelled_by_name = $5,
               cancel_request_status = 'approved',
               cancel_request_note = coalesce($1, cancel_request_note),
               cancel_requested_by_name = coalesce($2, cancel_requested_by_name),
@@ -584,7 +669,6 @@ export async function reviewContainerJobCancellation(id, form = {}) {
               updated_by_name = $5,
               updated_at = now()
           where id = $7
-          returning ${joinedJobColumns}
         `,
         [
           form.cancelRequestNote || null,
@@ -594,22 +678,14 @@ export async function reviewContainerJobCancellation(id, form = {}) {
           form.cancelReviewedByName || null,
           form.cancelReviewNote || null,
           id,
+          cancelReason,
+          cancelSource,
         ],
       );
-      await refreshOrderStatus(client, existing.rows[0].sales_order_id);
-      const attachmentResult = await client.query(
-        `
-          select ${attachmentColumns}
-          from attachments
-          where entity_type = 'container_job' and entity_id = $1
-          order by created_at asc
-        `,
-        [id],
-      );
-      return mapContainerJob(result.rows[0], attachmentResult.rows);
+      return refreshOrderStatusAndMapJob(client, existing.rows[0].sales_order_id, id);
     }
 
-    const result = await client.query(
+    await client.query(
       `
         update container_jobs
         set cancel_request_status = 'rejected',
@@ -623,7 +699,6 @@ export async function reviewContainerJobCancellation(id, form = {}) {
             updated_by_name = $5,
             updated_at = now()
         where id = $7
-        returning ${joinedJobColumns}
       `,
       [
         form.cancelRequestNote || null,
@@ -635,16 +710,7 @@ export async function reviewContainerJobCancellation(id, form = {}) {
         id,
       ],
     );
-    const attachmentResult = await client.query(
-      `
-        select ${attachmentColumns}
-        from attachments
-        where entity_type = 'container_job' and entity_id = $1
-        order by created_at asc
-      `,
-      [id],
-    );
-    return mapContainerJob(result.rows[0], attachmentResult.rows);
+    return findMappedContainerJob(client, id);
   });
 }
 

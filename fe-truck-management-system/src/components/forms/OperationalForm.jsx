@@ -149,6 +149,19 @@ function escapePdfText(value) {
     .replace(/\)/g, '\\)');
 }
 
+function fitPdfText(value, maxLength = 72) {
+  const text = normalizePdfText(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function formatSpkShipment(value) {
+  const shipment = String(value || '').toLowerCase();
+  const checked = (keyword) => (shipment.includes(keyword) ? '[x]' : '[ ]');
+  const domesticChecked = shipment.includes('domestik') || shipment.includes('domestic');
+  return `${checked('import')} Import    ${checked('export')} Export    ${domesticChecked ? '[x]' : '[ ]'} Domestic`;
+}
+
 function buildPdfFile(contentStream) {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
@@ -206,32 +219,18 @@ function createSpkPdfBlob(documentData) {
 
     rows.forEach((row) => {
       const rowBottom = currentY - rowHeight;
+      if (row.highlight) {
+        commands.push(`q 0.96 0.96 0.96 rg ${leftX} ${rowBottom} ${pageWidth} ${rowHeight} re f Q`);
+      }
       commands.push(`0.82 0.82 0.82 RG ${leftX} ${rowBottom} ${pageWidth} ${rowHeight} re S`);
       commands.push(`0.82 0.82 0.82 RG ${leftX + labelWidth} ${rowBottom} 0 ${rowHeight} re S`);
       drawText(row.label, leftX + 8, rowBottom + 5, { bold: true, size: 6.4 });
       drawText(':', leftX + labelWidth + 8, rowBottom + 5, { size: 6.4 });
-      drawText(row.value, leftX + labelWidth + 22, rowBottom + 5, { size: 6.4 });
+      drawText(fitPdfText(row.value, row.maxLength || 76), leftX + labelWidth + 22, rowBottom + 5, { bold: Boolean(row.highlight), size: row.highlight ? 7 : 6.4 });
       currentY = rowBottom;
     });
 
     return currentY - 10;
-  }
-
-  function drawApproval(y) {
-    commands.push(`q 0.62 0.06 0.08 rg ${leftX} ${y - sectionHeaderHeight} ${pageWidth} ${sectionHeaderHeight} re f Q`);
-    drawText('5. PERSETUJUAN', leftX + 8, y - 11, { bold: true, size: 7, color: '1 1 1' });
-    const boxTop = y - sectionHeaderHeight;
-    const boxHeight = 82;
-    const colWidth = pageWidth / 3;
-    documentData.approvals.forEach((label, index) => {
-      const x = leftX + (index * colWidth);
-      commands.push(`0.82 0.82 0.82 RG ${x} ${boxTop - boxHeight} ${colWidth} ${boxHeight} re S`);
-      commands.push(`q 0.96 0.96 0.96 rg ${x} ${boxTop - 15} ${colWidth} 15 re f Q`);
-      commands.push(`0.82 0.82 0.82 RG ${x} ${boxTop - 15} ${colWidth} 15 re S`);
-      drawText(label, x + 42, boxTop - 10, { bold: true, size: 6.4 });
-      drawText('Tanggal:', x + 9, boxTop - 72, { size: 6 });
-    });
-    return boxTop - boxHeight - 12;
   }
 
   let y = 710;
@@ -239,7 +238,6 @@ function createSpkPdfBlob(documentData) {
   y = drawSection('2. INFORMASI ARMADA & DRIVER', documentData.driverRows, y);
   y = drawSection('3. INFORMASI OPERASIONAL', documentData.operationalRows, y);
   y = drawSection('4. INFORMASI RPUJ / SPK', documentData.rpujRows, y);
-  y = drawApproval(y);
   drawText('Catatan:', leftX, y, { bold: true, size: 6.4, color: '0.62 0.06 0.08' });
   documentData.notes.forEach((note, index) => drawText(`${index + 1}. ${note}`, leftX, y - 10 - (index * 9), { size: 5.7 }));
   commands.push('0.82 0.82 0.82 RG 430 44 131 50 re S');
@@ -305,6 +303,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         : 'Ajukan Uang Jalan';
   const canStartTrip = ['approved', 'paid'].includes(rpujStatus);
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.';
+  const hasRequiredOperationalDocuments = Boolean(
+    form.eirNumber
+      && form.eirDocument
+      && operationalDocumentFields.every((field) => form[field.valueField] && form[field.fileField]),
+  );
+  const hasSpkDocument = Boolean(form.spkNumber || form.spkDocument);
+  const closingChecklist = [
+    { label: 'Truck dan driver ada', ready: Boolean(form.plateNumber && form.driver) },
+    { label: 'Waktu mulai dan selesai ada', ready: Boolean(form.runningAt && form.completedAt) },
+    { label: 'UJ sudah disetujui/dikirim', ready: canStartTrip },
+    { label: 'SPK ada', ready: hasSpkDocument },
+    { label: 'Dokumen wajib lengkap', ready: hasRequiredOperationalDocuments },
+  ];
 
   useEffect(() => {
     function closeOnEscape(event) {
@@ -420,11 +431,13 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const truckPlate = truckCode && plateNumber ? `${truckCode} - ${plateNumber}` : truckCode || plateNumber || '-';
     const otherCostLabel = otherCostAmountValue > 0 ? formatCurrency(otherCostAmountValue) : '-';
     const totalRpujLabel = totalJourneyCost > 0 ? formatCurrency(totalJourneyCost) : '-';
-    const shipment = String(container.shipment || container.jobType || '').toLowerCase();
-    const checked = (value) => (shipment.includes(value) ? '[x]' : '[ ]');
+    const shipment = container.shipment || container.jobType || container.orderType;
     const terminal = spkValue(container.terminal);
     const depo = spkValue(container.origin);
     const destination = spkValue(container.destination);
+    const route = `${depo} - ${destination}`;
+    const containerNumber = form.containerNumber || container.containerNumber;
+    const spkNumber = form.spkNumber || container.spkNumber;
 
     return {
       company: {
@@ -434,33 +447,34 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       },
       effectiveDate: spkDateValue(new Date().toISOString()),
       orderRows: [
-        { label: 'No. SPK', value: spkValue(form.spkNumber) },
+        { label: 'No. SPK', value: spkValue(spkNumber) },
+        { label: 'No. SO', value: spkValue(container.soNumber) },
+        { label: 'No. DO', value: spkValue(container.doNumber) },
+        { label: 'No. Job / Container', value: `${spkValue(container.jobNumber || container.id)} / ${spkValue(containerNumber)}` },
         { label: 'Customer', value: spkValue(container.customer) },
-        { label: 'Jenis Order', value: `${checked('import')} Import    ${checked('export')} Export    ${checked('domestic')} Domestic` },
-        { label: 'Nama Kapal', value: spkValue(container.vesselName || container.shipName || container.namaKapal) },
-        { label: 'Terminal', value: terminal },
-        { label: 'Depo', value: depo },
-        { label: 'Destination', value: destination },
+        { label: 'Jenis Order', value: formatSpkShipment(shipment) },
+        { label: 'Nama Kapal / Voyage', value: spkValue(container.vesselName || container.shipName || container.namaKapal || container.voyage) },
         { label: 'Container Size', value: spkValue(container.size || container.containerSize) },
-        { label: 'Tanggal Jalan', value: spkDateValue(container.tripDate) },
+        { label: 'Tanggal Jalan', value: spkDateValue(container.tripDate || container.runningAt) },
       ],
       driverRows: [
         { label: 'Truck / Plat', value: truckPlate },
         { label: 'Driver', value: spkValue(form.driver || container.driver) },
+        { label: 'Chassis', value: spkValue(form.chassis || container.chassis) },
       ],
       operationalRows: [
         { label: 'Terminal', value: terminal },
         { label: 'Depo', value: depo },
-        { label: 'Destination', value: destination },
-        { label: 'Catatan Operasional', value: spkValue(container.notes || container.containerNotes) },
+        { label: 'Tujuan', value: destination },
+        { label: 'Rute Operasional', value: route },
+        { label: 'Catatan Operasional', value: spkValue(container.notes || container.containerNotes), maxLength: 64 },
       ],
       rpujRows: [
-        { label: 'UJ', value: ujAmount > 0 ? formatCurrency(ujAmount) : '-' },
+        { label: 'Total RPUJ', value: totalRpujLabel, highlight: true },
+        { label: 'Uang Jalan', value: ujAmount > 0 ? formatCurrency(ujAmount) : '-' },
         { label: 'Biaya Lainnya', value: otherCostLabel },
-        { label: 'Catatan Biaya Lainnya', value: spkValue(form.otherCostNotes) },
-        { label: 'Total RPUJ', value: totalRpujLabel },
+        { label: 'Catatan Biaya Lainnya', value: spkValue(form.otherCostNotes), maxLength: 64 },
       ],
-      approvals: ['OPERATIONAL', 'FINANCE', 'DRIVER'],
       notes: [
         'SPK ini adalah perintah kerja resmi dan diselesaikan dengan penuh tanggung jawab.',
         'Jika terdapat perubahan rencana, segera hubungi tim operasional.',
@@ -475,7 +489,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const documentData = buildSpkDocumentData();
     const renderRows = (rows) => rows
       .map((row) => `
-        <tr>
+        <tr class="${row.highlight ? 'is-highlight' : ''}">
           <th>${escapeHtml(row.label)}</th>
           <td class="separator">:</td>
           <td>${escapeHtml(row.value)}</td>
@@ -566,40 +580,18 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               background: #f9fafb;
               font-weight: 700;
             }
+            tr.is-highlight th,
+            tr.is-highlight td {
+              background: #f3f4f6;
+              font-size: 13px;
+              font-weight: 800;
+            }
+            tr.is-highlight td:last-child {
+              font-size: 16px;
+            }
             .separator {
               width: 22px;
               text-align: center;
-            }
-            .rpuj-total {
-              text-align: center;
-              font-size: 16px;
-              font-weight: 800;
-            }
-            .approval {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              border: 1px solid #d1d5db;
-              border-top: 0;
-            }
-            .approval > div {
-              min-height: 120px;
-              border-right: 1px solid #d1d5db;
-            }
-            .approval > div:last-child { border-right: 0; }
-            .approval h3 {
-              margin: 0;
-              padding: 7px;
-              border-bottom: 1px solid #d1d5db;
-              background: #f3f4f6;
-              font-size: 11px;
-              text-align: center;
-            }
-            .approval span {
-              display: block;
-              margin: 76px 12px 0;
-              padding-top: 6px;
-              border-top: 1px solid #9ca3af;
-              font-size: 10px;
             }
             .notes {
               display: grid;
@@ -634,12 +626,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             ${renderSection('2', 'Informasi Armada & Driver', documentData.driverRows)}
             ${renderSection('3', 'Informasi Operasional', documentData.operationalRows)}
             ${renderSection('4', 'Informasi RPUJ / SPK', documentData.rpujRows)}
-            <section class="spk-section">
-              <h2>5. Persetujuan</h2>
-              <div class="approval">
-                ${documentData.approvals.map((label) => `<div><h3>${escapeHtml(label)}</h3><span>Tanggal:</span></div>`).join('')}
-              </div>
-            </section>
             <div class="notes">
               <div>
                 <strong>Catatan:</strong>
@@ -751,11 +737,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     }
     if (submitForm.status === 'completed') {
       const missingAssignment = !submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt || !submitForm.completedAt;
+      const missingSpk = !submitForm.spkNumber && !submitForm.spkDocument;
       const missingRequiredDocuments = !submitForm.eirNumber
         || !submitForm.eirDocument
         || operationalDocumentFields.some((field) => !submitForm[field.valueField] || !submitForm[field.fileField]);
-      if (missingAssignment || missingRequiredDocuments) {
-        setError('Pekerjaan belum dapat diselesaikan. Lengkapi assignment, waktu jalan, waktu selesai, EIR, dan dokumen operasional wajib.');
+      if (missingAssignment || missingSpk || missingRequiredDocuments) {
+        setError('Pekerjaan belum dapat diselesaikan. Lengkapi truck/driver, waktu jalan, waktu selesai, SPK, dan dokumen operasional wajib.');
         return;
       }
       if (submitForm.completedAt && submitForm.runningAt && new Date(submitForm.completedAt) < new Date(submitForm.runningAt)) {
@@ -822,37 +809,44 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             </div>
             <div className="operational-rpuj-spk-grid">
               <div className="operational-document-card operational-rpuj-card">
-                <span>Biaya Lainnya</span>
-                <label className="operational-inline-label">
-                  Nominal Biaya
-                  <input
-                    name="otherCostAmount"
-                    type="number"
-                    min="0"
-                    step="1000"
-                    value={form.otherCostAmount}
-                    onChange={updateField}
-                    placeholder="Contoh: 150000"
-                  />
-                </label>
-                <label className="operational-inline-label">
-                  Catatan Biaya
-                  <input
-                    name="otherCostNotes"
-                    value={form.otherCostNotes}
-                    onChange={updateField}
-                    placeholder="Contoh: tol, parkir, bongkar"
-                  />
-                </label>
-                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/70 px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-3">
+                <div className="operational-rpuj-card-head">
+                  <span>Biaya Lainnya</span>
+                  <small>Tambahkan biaya operasional di luar UJ utama.</small>
+                </div>
+
+                <div className="operational-cost-fields">
+                  <label className="operational-inline-label">
+                    Nominal Biaya
+                    <input
+                      name="otherCostAmount"
+                      type="number"
+                      min="0"
+                      step="1000"
+                      value={form.otherCostAmount}
+                      onChange={updateField}
+                      placeholder="Contoh: 150000"
+                    />
+                  </label>
+                  <label className="operational-inline-label">
+                    Catatan Biaya
+                    <input
+                      name="otherCostNotes"
+                      value={form.otherCostNotes}
+                      onChange={updateField}
+                      placeholder="Contoh: tol, parkir, bongkar"
+                    />
+                  </label>
+                </div>
+
+                <div className="operational-cost-summary">
+                  <div className="operational-cost-summary-head">
                     <div>
                       <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Subtotal Perjalanan</span>
                       <small className="block text-[11px] text-slate-400">UJ + biaya lainnya</small>
                     </div>
                     <strong className="text-base font-semibold text-slate-900">{formatCurrency(totalJourneyCost)}</strong>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="operational-cost-pills">
                     <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
                       <span className="text-slate-400">UJ</span>
                       <strong className="font-semibold text-slate-800">{formatCurrency(ujAmount)}</strong>
@@ -863,40 +857,45 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     </span>
                   </div>
                 </div>
-                <div className="operational-rpuj-actions">
-                  <button
-                    type="button"
-                    className="primary-button operational-rpuj-submit"
-                    onClick={handleSubmitRpujRequest}
-                    disabled={!canSubmitRpujRequest}
-                  >
-                    <Send size={14} />
-                    {rpujActionLabel}
-                  </button>
-                  <small>
-                    {canSubmitRpujRequest
-                      ? 'Kirim total UJ dan biaya lainnya ke Finance untuk approval.'
-                      : 'Pengajuan uang jalan sudah masuk ke alur Finance.'}
-                  </small>
+
+                <div className="operational-rpuj-footer">
+                  <div className="operational-rpuj-actions">
+                    <button
+                      type="button"
+                      className="primary-button operational-rpuj-submit"
+                      onClick={handleSubmitRpujRequest}
+                      disabled={!canSubmitRpujRequest}
+                    >
+                      <Send size={14} />
+                      {rpujActionLabel}
+                    </button>
+                    <small>
+                      {canSubmitRpujRequest
+                        ? 'Kirim total UJ dan biaya lainnya ke Finance untuk approval.'
+                        : 'Pengajuan uang jalan sudah masuk ke alur Finance.'}
+                    </small>
+                  </div>
+                  <div className="operational-rpuj-upload">
+                    <AttachmentUploadField
+                      id="operational-spk-document"
+                      label="Lampiran Biaya Lainnya"
+                      value={form.spkDocument}
+                      title={form.spkDocument?.name ? 'Ubah File' : 'Pilih File'}
+                      helper="PDF, JPG, PNG - Maks. 5 MB"
+                      accept={OPERATIONAL_FILE_ACCEPT}
+                      compact
+                      validationOptions={{
+                        label: 'Lampiran Biaya Lainnya',
+                      }}
+                      onSelect={(file, validationError) => {
+                        if (validationError) return setError(validationError);
+                        setError('');
+                        updateFile('spkDocument', file);
+                      }}
+                      onClear={() => setForm((current) => ({ ...current, spkDocument: null }))}
+                    />
+                  </div>
                 </div>
-                <AttachmentUploadField
-                  id="operational-spk-document"
-                  label="Lampiran Biaya Lainnya"
-                  value={form.spkDocument}
-                  title={form.spkDocument?.name ? 'Ubah File' : 'Pilih File'}
-                  helper="PDF, JPG, PNG - Maks. 5 MB"
-                  accept={OPERATIONAL_FILE_ACCEPT}
-                  compact
-                  validationOptions={{
-                    label: 'Lampiran Biaya Lainnya',
-                  }}
-                  onSelect={(file, validationError) => {
-                    if (validationError) return setError(validationError);
-                    setError('');
-                    updateFile('spkDocument', file);
-                  }}
-                  onClear={() => setForm((current) => ({ ...current, spkDocument: null }))}
-                />
               </div>
 
               <div className="operational-document-card operational-spk-card">
@@ -929,38 +928,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                   )}
                 </div>
               </div>
-
-              <div className="operational-document-card operational-eir-card">
-                <span>EIR</span>
-                <p className="operational-eir-note">Dokumen EIR wajib diisi untuk serah terima container.</p>
-                <label className="operational-inline-label">
-                  No. EIR
-                  <input
-                    name="eirNumber"
-                    value={form.eirNumber}
-                    onChange={updateField}
-                    placeholder="EIR-2026-001"
-                  />
-                </label>
-                <AttachmentUploadField
-                  id="operational-eir-document"
-                  label="Lampiran EIR"
-                  value={form.eirDocument}
-                  title={form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
-                  helper="PDF, JPG, PNG - Maks. 5 MB"
-                  accept={OPERATIONAL_FILE_ACCEPT}
-                  compact
-                  validationOptions={{
-                    label: 'Lampiran EIR',
-                  }}
-                  onSelect={(file, validationError) => {
-                    if (validationError) return setError(validationError);
-                    setError('');
-                    updateFile('eirDocument', file);
-                  }}
-                  onClear={() => setForm((current) => ({ ...current, eirDocument: null }))}
-                />
-              </div>
             </div>
           </div>
           ) : null}
@@ -970,6 +937,37 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             <div className="form-section">
               <h3>Dokumen Operasional</h3>
               <div className="order-form-grid">
+                <div className="operational-document-card operational-eir-card">
+                  <span>EIR</span>
+                  <p className="operational-eir-note">Bukti akhir container sudah diserahkan.</p>
+                  <label className="operational-inline-label">
+                    No. EIR
+                    <input
+                      name="eirNumber"
+                      value={form.eirNumber}
+                      onChange={updateField}
+                      placeholder="EIR-2026-001"
+                    />
+                  </label>
+                  <AttachmentUploadField
+                    id="operational-eir-document"
+                    label="Lampiran EIR"
+                    value={form.eirDocument}
+                    title={form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
+                    helper="PDF, JPG, PNG - Maks. 5 MB"
+                    accept={OPERATIONAL_FILE_ACCEPT}
+                    compact
+                    validationOptions={{
+                      label: 'Lampiran EIR',
+                    }}
+                    onSelect={(file, validationError) => {
+                      if (validationError) return setError(validationError);
+                      setError('');
+                      updateFile('eirDocument', file);
+                    }}
+                    onClear={() => setForm((current) => ({ ...current, eirDocument: null }))}
+                  />
+                </div>
                 {operationalDocumentFields.map((field) => (
                   <div className="operational-document-card" key={field.valueField}>
                     <span>{field.label}</span>
@@ -1058,8 +1056,16 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
             <div className="form-section">
               <h3>Status & Timeline</h3>
-              <div className="order-form-grid">
-                <label>
+              <div className="operational-closing-checklist" aria-label="Checklist closing sebelum selesai">
+                {closingChecklist.map((item) => (
+                  <div className={item.ready ? 'ready' : ''} key={item.label}>
+                    <span>{item.ready ? 'OK' : '!'}</span>
+                    <strong>{item.label}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="operational-timeline-grid">
+                <label className="operational-status-field">
                   Status Pekerjaan
                   <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle}>
                     {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -1074,8 +1080,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     </small>
                   ) : null}
                 </label>
-                <label>Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} /></label>
-                <label>Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} /></label>
+                <label className="operational-date-field operational-date-start">Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} /></label>
+                <label className="operational-date-field operational-date-end">Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} /></label>
               </div>
             </div>
           </>

@@ -118,6 +118,9 @@ function normalizeLocalContainers(containers, receivedAt) {
     cancelReviewedAt: container.cancelReviewedAt || null,
     cancelReviewNote: container.cancelReviewNote || '',
     cancelledAt: container.cancelledAt || null,
+    cancelledByName: container.cancelledByName || '',
+    cancelReason: container.cancelReason || container.cancelRequestNote || '',
+    cancelSource: container.cancelSource || '',
     receivedAt: container.receivedAt || receivedAt,
     runningAt: container.runningAt || null,
     completedAt: container.completedAt || null,
@@ -509,6 +512,11 @@ export function ArchiveDataProvider({ children }) {
         const containers = order.containers.map((container) => container.id === id ? {
           ...container,
           ...normalizedForm,
+          cancelReason: normalizedForm.status === 'cancelled' ? normalizedForm.cancelReason || normalizedForm.cancelRequestNote || container.cancelReason || 'Pembatalan Container Job' : container.cancelReason,
+          cancelSource: normalizedForm.status === 'cancelled' ? normalizedForm.cancelSource || container.cancelSource || 'operational' : container.cancelSource,
+          cancelledByName: normalizedForm.status === 'cancelled' ? normalizedForm.cancelledByName || user?.fullName || user?.name || 'Operational' : container.cancelledByName,
+          cancelledAt: normalizedForm.status === 'cancelled' ? normalizedForm.cancelledAt || container.cancelledAt || now : container.cancelledAt,
+          cancelRequestStatus: normalizedForm.status === 'cancelled' ? 'approved' : container.cancelRequestStatus,
           updatedBy: user?.fullName || 'Operational',
           updatedAt: now,
         } : container);
@@ -611,6 +619,7 @@ export function ArchiveDataProvider({ children }) {
         approved: Boolean(payload.approved),
         cancelRequestNote: payload.cancelRequestNote || '',
         cancelReviewNote: payload.cancelReviewNote || '',
+        cancelSource: payload.cancelSource || 'sales',
         cancelReviewedByName: reviewedByName,
       });
       setOrders((current) => current.map((order) => {
@@ -651,6 +660,9 @@ export function ArchiveDataProvider({ children }) {
       if (payload.approved) {
         nextContainer.status = 'cancelled';
         nextContainer.cancelledAt = now;
+        nextContainer.cancelReason = payload.cancelRequestNote || container.cancelRequestNote || container.cancelReason || 'Pembatalan Container Job';
+        nextContainer.cancelSource = payload.cancelSource || container.cancelSource || 'sales';
+        nextContainer.cancelledByName = reviewedByName;
       }
       const nextOrders = current.map((item) => {
         if (item.id !== order.id) return item;

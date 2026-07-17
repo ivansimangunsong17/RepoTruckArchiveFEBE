@@ -97,6 +97,7 @@ export async function reviewContainerJobCancellation(id, actor, payload = {}) {
     approved: Boolean(payload.approved),
     cancelRequestNote: payload.cancelRequestNote || '',
     cancelReviewNote: payload.cancelReviewNote || '',
+    cancelSource: payload.cancelSource || 'sales',
     cancelReviewedByName: getActorName(actor),
   });
 }

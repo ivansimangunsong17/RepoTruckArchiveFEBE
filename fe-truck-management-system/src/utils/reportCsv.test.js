@@ -63,8 +63,12 @@ describe('reportCsv', () => {
       destination: 'Bandung',
       shipment: 'domestic',
       jobType: 'Trucking',
-      containers: [{ id: 'job-1' }],
-      quantity: 1,
+      containers: [{ id: 'job-1', status: 'completed' }, { id: 'job-2', status: 'cancelled' }],
+      quantity: 2,
+      plannedContainers: 2,
+      activeContainers: 1,
+      completedContainers: 1,
+      cancelledContainers: 1,
       unit: 'Container',
       price: 1000,
       totalAmount: 1000,
@@ -74,6 +78,8 @@ describe('reportCsv', () => {
 
     expect(mapSalesReportRow(order, 0, false)).not.toContain(1000);
     expect(mapSalesReportRow(order, 0, true)).toContain(1000);
+    expect(getSalesReportHeaders(false)).toContain('Container Batal');
+    expect(mapSalesReportRow(order, 0, false)).toContain(1);
   });
 
   it('membuat baris Operational Report dengan status dan tanggal rapi', () => {

@@ -37,9 +37,12 @@ describe('OperationalForm', () => {
 
     await openOperationalPhase(user, /uang jalan & spk/i);
     expect(screen.getByText('Biaya Lainnya')).toBeInTheDocument();
+    expect(screen.queryByText('EIR')).not.toBeInTheDocument();
 
     await openOperationalPhase(user, /dokumen & closing/i);
     expect(screen.getByText('Dokumen Operasional')).toBeInTheDocument();
+    expect(screen.getByText('EIR')).toBeInTheDocument();
+    expect(screen.getByLabelText('No. EIR')).toBeInTheDocument();
   });
 
   it('tidak memakai truck dummy ketika master truck API kosong', () => {
@@ -96,6 +99,28 @@ describe('OperationalForm', () => {
 
     expect(screen.getByText(/Truck, driver otomatis, dan waktu mulai wajib diisi/i)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('menampilkan checklist final sebelum status selesai', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={{ ...container, rpujStatus: 'approved', spkNumber: 'SPK-TEST-001' }}
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /dokumen & closing/i);
+
+    expect(screen.getByText('Truck dan driver ada')).toBeInTheDocument();
+    expect(screen.getByText('Waktu mulai dan selesai ada')).toBeInTheDocument();
+    expect(screen.getByText('UJ sudah disetujui/dikirim')).toBeInTheDocument();
+    expect(screen.getByText('SPK ada')).toBeInTheDocument();
+    expect(screen.getByText('Dokumen wajib lengkap')).toBeInTheDocument();
   });
 
   it('menolak status sedang jalan sebelum UJ disetujui Finance', async () => {
@@ -178,6 +203,9 @@ describe('OperationalForm', () => {
       <OperationalForm
         container={{
           ...container,
+          doNumber: 'DO-TEST-001',
+          jobNumber: 'JOB-TEST-001',
+          shipment: 'import',
           spkNumber: 'SPK-TEST-001',
           rpujNotes: JSON.stringify({ amount: 150000, notes: 'Tol dan parkir' }),
         }}
@@ -192,11 +220,20 @@ describe('OperationalForm', () => {
     await user.click(screen.getByRole('button', { name: /preview spk/i }));
 
     const html = write.mock.calls.map(([value]) => value).join('');
+    expect(html).toContain('No. SO');
+    expect(html).toContain('No. DO');
+    expect(html).toContain('No. Job / Container');
+    expect(html).toContain('JOB-TEST-001 / MSCU-123456-7');
     expect(html).toContain('UJ');
+    expect(html).toContain('Uang Jalan');
     expect(html).toContain('Biaya Lainnya');
     expect(html).toContain('Catatan Biaya Lainnya');
     expect(html).toContain('Tol dan parkir');
     expect(html).toContain('Total RPUJ');
+    expect(html).not.toContain('Persetujuan');
+    expect(html).not.toContain('OPERATIONAL');
+    expect(html).not.toContain('FINANCE');
+    expect(html).not.toContain('DRIVER');
 
     open.mockRestore();
   });
