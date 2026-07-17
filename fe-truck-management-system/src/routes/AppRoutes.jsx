@@ -45,7 +45,7 @@ const orderRoles = nonFinanceRoles;
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
 const adminRoles = [USER_ROLES.ADMIN];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
-const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
+const financeRoles = [USER_ROLES.FINANCE];
 
 function guardedPage(roles, element) {
   return {

@@ -74,6 +74,38 @@ function serializeFileMetadata(file) {
   };
 }
 
+function normalizeDateForInput(value) {
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const rawValue = String(value).trim();
+  if (!rawValue) return '';
+
+  const isoDateMatch = rawValue.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDateMatch) return isoDateMatch[1];
+
+  const parsed = new Date(rawValue);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  return rawValue;
+}
+
+function mergeEditedRow(baseRow, payload, editingId) {
+  if (!editingId || !baseRow) return payload;
+  return {
+    ...baseRow,
+    ...payload,
+    id: editingId,
+  };
+}
+
 function formatFileSize(size = 0) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
@@ -356,6 +388,9 @@ function MasterDataPage({
 
   async function handleSubmit(event) {
     event.preventDefault();
+    const currentEditingRow = editingId
+      ? editingRow || safeRows.find((row) => String(row.id) === String(editingId)) || null
+      : null;
     const activeFields = fields.filter((field) => !field.showIf || field.showIf(form));
     const validationError = activeFields
       .map((field) => field.validate?.(form, { editing: Boolean(editingId) }))
@@ -399,18 +434,19 @@ function MasterDataPage({
       return result;
     }, {});
 
-    let savePayload = payload;
+    const mergedPayload = mergeEditedRow(currentEditingRow, payload, editingId);
+    let savePayload = mergedPayload;
     let relatedRows = [];
     if (beforeSave) {
       const prepared = await beforeSave({
-        payload,
+        payload: mergedPayload,
         editingId,
         rows: safeRows,
         form,
         confirmAction,
       });
       if (!prepared) return;
-      savePayload = prepared.payload || prepared;
+      savePayload = mergeEditedRow(currentEditingRow, prepared.payload || prepared, editingId);
       relatedRows = prepared.relatedRows || [];
     }
 
@@ -470,7 +506,8 @@ function MasterDataPage({
     setForm(fields.reduce(
       (next, field) => {
         const value = row[field.key] ?? '';
-        return { ...next, [field.key]: field.sensitive ? '' : field.normalize ? field.normalize(value, row) : value };
+        const normalizedValue = field.type === 'date' ? normalizeDateForInput(value) : field.normalize ? field.normalize(value, row) : value;
+        return { ...next, [field.key]: field.sensitive ? '' : normalizedValue };
       },
       {},
     ));
@@ -690,7 +727,7 @@ function MasterDataPage({
                   <div>
                     <span>{editingId ? 'Mode penyuntingan' : 'Input data baru'}</span>
                     <h2 id="master-form-title">{editingId ? `Edit Data ${singular}` : `Input Data ${singular}`}</h2>
-                    <p>Lengkapi informasi berikut. Kolom bertanda * wajib diisi.</p>
+                    <p>Lengkapi seperlunya. Saat ini semua kolom bersifat opsional.</p>
                   </div>
                 </div>
                 <button className="modal-close-button" type="button" onClick={closeForm} aria-label="Tutup modal">
@@ -710,12 +747,11 @@ function MasterDataPage({
                         const fieldDisabled = resolveFieldDisabled(field, form);
                         return (
                         <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''} ${field.className || ''}`.trim()}>
-                          <span>{field.label}{field.required ? <em>*</em> : null}</span>
+                          <span>{field.label}</span>
                           {field.type === 'select' ? (
                             <select
                               value={form[field.key]}
                               onChange={(event) => updateFormField(field, event.target.value)}
-                              required={field.required || field.requiredIf?.(form)}
                               disabled={fieldDisabled}
                             >
                               {fieldOptions.map((option) => (
@@ -777,7 +813,6 @@ function MasterDataPage({
                               value={form[field.key]}
                               onChange={(event) => updateFormField(field, event.target.value)}
                               placeholder={field.placeholder}
-                              required={field.required}
                               disabled={fieldDisabled}
                               rows="3"
                             />
@@ -787,7 +822,6 @@ function MasterDataPage({
                               value={form[field.key]}
                               onChange={(event) => updateFormField(field, event.target.value)}
                               placeholder={field.placeholder}
-                              required={(field.required || field.requiredIf?.(form)) && (!field.requiredOnCreate || !editingId)}
                               disabled={fieldDisabled}
                               minLength={field.minLength}
                               min={field.min}

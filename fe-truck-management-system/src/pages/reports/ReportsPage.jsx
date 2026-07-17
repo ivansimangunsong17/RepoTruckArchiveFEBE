@@ -145,7 +145,7 @@ function buildUtilizationTruckRows(masterTrucks = [], rows = []) {
   });
 }
 
-function buildDriverPerformanceRows(masterDrivers = [], performanceRows = []) {
+export function buildDriverPerformanceRows(masterDrivers = [], performanceRows = []) {
   const drivers = new Map();
 
   masterDrivers.forEach((driver) => {
@@ -167,7 +167,7 @@ function buildDriverPerformanceRows(masterDrivers = [], performanceRows = []) {
       });
     }
 
-    drivers.get(name).totalTrips = Number(row.monthlyTrips || row.totalTrips || 0);
+    drivers.get(name).totalTrips = Number(row.monthlyTrips ?? row.totalTrips ?? 0);
   });
 
   return Array.from(drivers.values()).sort((left, right) => {

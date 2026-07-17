@@ -34,7 +34,7 @@ const fields = [
     ],
   },
   { key: 'kirNumber', section: 'Dokumen Chassis', label: 'Nomor Chassis', placeholder: 'Contoh: CHS-DOC-2026-001' },
-  { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'Tanggal Chassis OFF', type: 'date' },
+  { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'KIR OFF', type: 'date' },
   {
     key: 'status',
     section: 'Status',
@@ -64,7 +64,7 @@ function KirChassisPage() {
         { key: 'plateNumber', label: 'Plat / Identitas', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'kirNumber', label: 'Nomor Chassis', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
-        { key: 'kirExpiryDate', label: 'Tanggal Chassis OFF', render: (value) => <span className="master-plain-cell strong">{formatDate(value)}</span> },
+        { key: 'kirExpiryDate', label: 'KIR OFF', render: (value) => <span className="master-plain-cell strong">{formatDate(value)}</span> },
         { key: 'status', label: 'Status', render: (value) => <ChassisStatus value={value} /> },
       ]}
       initialRows={emptyRows}

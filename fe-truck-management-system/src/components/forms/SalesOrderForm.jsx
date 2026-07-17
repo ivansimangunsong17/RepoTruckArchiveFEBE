@@ -377,14 +377,13 @@ function SalesOrderForm({
     event.preventDefault();
 
     const soNumber = form.soNumber.trim();
-    const duplicates = existingOrders.some((item) =>
+    const duplicates = soNumber && existingOrders.some((item) =>
       item.id !== order?.id &&
-      item.soNumber.toLowerCase() === soNumber.toLowerCase(),
+      String(item.soNumber || '').toLowerCase() === soNumber.toLowerCase(),
     );
 
     if (duplicates) return setError('Nomor Sales Order sudah digunakan.');
     if (!selectedCustomer) return setError('Pilih customer dari Master Customer.');
-    if (!soNumber) return setError('Nomor Sales Order wajib diisi.');
     if (!form.origin.trim()) return setError('Depo wajib diisi.');
     if (!form.destination.trim()) return setError('Lokasi tujuan wajib diisi.');
     if (!lineItems.length) return setError('Tambahkan minimal 1 rincian.');
@@ -442,7 +441,7 @@ function SalesOrderForm({
         <header>
           <div>
             <p className="eyebrow">{editing ? 'Edit Sales' : 'Input Sales'}</p>
-            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber}` : 'Sales Order Baru'}</h2>
+            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber || 'Order Menunggu SO'}` : 'Sales Order Baru'}</h2>
             <span>Lengkapi customer, rincian order, dan dokumen referensi.</span>
           </div>
 
@@ -492,16 +491,16 @@ function SalesOrderForm({
             <p className="section-helper-text">No. Invoice diisi setelah pekerjaan selesai dan invoice dibuat.</p>
 
             <div className="order-form-grid">
-              <label>
-                No. Sales Order
-                <input
-                  name="soNumber"
-                  value={form.soNumber}
-                  onChange={updateField}
-                  placeholder="NO SO DI AMBIL DARI ACCURATE"
-                  required
-                />
-              </label>
+              {editing ? (
+                <label>
+                  No. Sales Order
+                  <input
+                    name="soNumber"
+                    value={form.soNumber || 'Menunggu Finance'}
+                    readOnly
+                  />
+                </label>
+              ) : null}
 
               <label>
                 No. DO Customer

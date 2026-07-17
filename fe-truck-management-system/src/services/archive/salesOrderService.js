@@ -351,6 +351,10 @@ export function saveSalesOrder(form, user, existing) {
   }));
 }
 
+export function updateSalesOrderInvoiceDeliveryStatus(id, billingStatus) {
+  return httpClient.patch(`/sales-orders/${id}/invoice-delivery-status`, { billingStatus });
+}
+
 export function cancelSalesOrder(id) {
   return httpClient.patch(`/sales-orders/${id}/cancel`, {});
 }

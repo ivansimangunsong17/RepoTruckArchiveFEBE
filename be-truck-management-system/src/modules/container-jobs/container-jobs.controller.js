@@ -45,6 +45,20 @@ export async function updateContainerJobController(request, response) {
       },
     });
   }
+  if (before.rpujStatus !== 'submitted' && saved.rpujStatus === 'submitted') {
+    await safeRecordActivityLog(request, {
+      action: 'OPERATIONAL_REQUEST_RPUJ',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: saved.id,
+      beforeData: { rpujStatus: before.rpujStatus },
+      afterData: { rpujStatus: saved.rpujStatus, rpujNotes: saved.rpujNotes },
+      metadata: {
+        salesOrderId: saved.orderId,
+        soNumber: saved.soNumber,
+      },
+    });
+  }
   sendSuccess(response, saved, 'Container Job berhasil diperbarui.');
 }
 
@@ -59,6 +73,15 @@ export async function generateContainerJobSpkController(request, response) {
     beforeData: before,
     afterData: saved,
     metadata: { changedField: 'spkNumber' },
+  });
+  await safeRecordActivityLog(request, {
+    action: 'GENERATE_SPK',
+    module: 'container_jobs',
+    entityType: 'container_job',
+    entityId: saved.id,
+    beforeData: { spkNumber: before.spkNumber || null },
+    afterData: { spkNumber: saved.spkNumber },
+    metadata: { salesOrderId: saved.orderId, soNumber: saved.soNumber },
   });
   sendSuccess(response, saved, 'SPK berhasil digenerate.');
 }

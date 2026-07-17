@@ -508,9 +508,16 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       setError('Nominal biaya lainnya tidak boleh negatif.');
       return;
     }
+    const currentRpujStatus = form.rpujStatus || 'pending';
+    const hasRpujRequest = ujAmount > 0 || otherCostAmount > 0 || Boolean(form.otherCostNotes.trim());
+    const nextRpujStatus = ['approved', 'paid'].includes(currentRpujStatus)
+      ? currentRpujStatus
+      : hasRpujRequest
+        ? 'submitted'
+        : 'pending';
     const submitForm = {
       ...form,
-      rpujStatus: otherCostAmount || form.otherCostNotes ? 'submitted' : 'pending',
+      rpujStatus: nextRpujStatus,
       rpujNotes: serializeOtherCost({
         amount: otherCostAmount,
         notes: form.otherCostNotes,

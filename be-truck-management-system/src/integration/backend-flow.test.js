@@ -59,15 +59,15 @@ if (!hasDatabase) {
         select storage_path
         from attachments
         where entity_id in (
-          select id from sales_orders where so_number ilike $1
+          select id from sales_orders where so_number ilike $1 or notes ilike $3 or customer_name ilike $3
           union
           select cj.id from container_jobs cj
           join sales_orders so on so.id = cj.sales_order_id
-          where so.so_number ilike $1
+          where so.so_number ilike $1 or so.notes ilike $3 or so.customer_name ilike $3
         )
         or storage_path ilike $2
       `,
-      [`SO-${runId}%`, `%${runId}%`],
+      [`SO-${runId}%`, `%${runId}%`, `%${runId}%`],
     );
     const vehicleDocuments = await query(
       `
@@ -80,8 +80,8 @@ if (!hasDatabase) {
     );
 
     await query('delete from activity_logs where metadata::text ilike $1 or actor_name ilike $2 or target ilike $2', [`%${runId}%`, `%${runId}%`]);
-    await query('delete from attachments where storage_path ilike $1 or entity_id in (select id from sales_orders where so_number ilike $2)', [`%${runId}%`, `SO-${runId}%`]);
-    await query('delete from sales_orders where so_number ilike $1', [`SO-${runId}%`]);
+    await query('delete from attachments where storage_path ilike $1 or entity_id in (select id from sales_orders where so_number ilike $2 or notes ilike $1 or customer_name ilike $1)', [`%${runId}%`, `SO-${runId}%`]);
+    await query('delete from sales_orders where so_number ilike $1 or notes ilike $2 or customer_name ilike $2', [`SO-${runId}%`, `%${runId}%`]);
     await query('delete from vehicles where plate_number like $1', [`B-${String(runId).slice(-4)}%`]);
     await query('delete from users where email like $1', [`${runId}.%@example.test`]);
 
@@ -331,11 +331,29 @@ if (!hasDatabase) {
         body: salesOrderPayload(),
       });
       assert.equal(createdOrder.status, 201);
-      assert.equal(createdOrder.body.data.soNumber, created.orderSoNumber);
+      assert.equal(createdOrder.body.data.soNumber, null);
+      assert.equal(createdOrder.body.data.financeVerificationStatus, 'pending_so');
       assert.equal(createdOrder.body.data.billingStatus, 'belum_invoice');
       assert.equal(createdOrder.body.data.containers.length, 1);
       created.orderId = createdOrder.body.data.id;
       created.jobId = createdOrder.body.data.containers[0].id;
+
+      const hiddenFromOperational = await api(`/api/container-jobs?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
+      assert.equal(hiddenFromOperational.status, 200);
+      assert.equal(hiddenFromOperational.body.data.rows.some((row) => row.id === created.jobId), false);
+
+      const financeQueue = await api(`/api/finance/order-verifications?query=${encodeURIComponent(runId)}`, { token: financeToken });
+      assert.equal(financeQueue.status, 200);
+      assert.equal(financeQueue.body.data.rows.some((row) => row.id === created.orderId && row.verificationStatus === 'pending_so'), true);
+
+      const financeVerified = await api(`/api/finance/order-verifications/${created.orderId}/so-number`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { soNumber: created.orderSoNumber },
+      });
+      assert.equal(financeVerified.status, 200);
+      assert.equal(financeVerified.body.data.soNumber, created.orderSoNumber);
+      assert.equal(financeVerified.body.data.verificationStatus, 'verified');
 
       const list = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
       assert.equal(list.status, 200);
@@ -411,6 +429,14 @@ if (!hasDatabase) {
       const cancelLog = await latestActivity('CANCEL_SALES_ORDER');
       assert.equal(cancelLog.action, 'CANCEL_SALES_ORDER');
       assert.equal(cancelLog.metadata.entityId, created.cancelOrderId);
+
+      const financeInputLog = await latestActivityForEntity('FINANCE_INPUT_SO_NUMBER', created.orderId);
+      assert.equal(financeInputLog.action, 'FINANCE_INPUT_SO_NUMBER');
+      assert.equal(financeInputLog.actor_role, 'finance');
+
+      const financeApproveLog = await latestActivityForEntity('FINANCE_APPROVE_ORDER', created.orderId);
+      assert.equal(financeApproveLog.action, 'FINANCE_APPROVE_ORDER');
+      assert.equal(financeApproveLog.actor_role, 'finance');
     });
 
     await t.test('container job: list, create via sales order, update, update status', async () => {
@@ -476,6 +502,65 @@ if (!hasDatabase) {
       assert.equal(statusLog.action, 'UPDATE_JOB_STATUS');
       assert.equal(statusLog.metadata.fromStatus, 'received');
       assert.equal(statusLog.metadata.toStatus, 'running');
+
+      const rpujRequestLog = await latestActivityForEntity('OPERATIONAL_REQUEST_RPUJ', created.jobId);
+      assert.equal(rpujRequestLog.action, 'OPERATIONAL_REQUEST_RPUJ');
+
+      const rpujQueue = await api(`/api/finance/rpuj-requests?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(rpujQueue.status, 200);
+      assert.equal(rpujQueue.body.data.rows.some((row) => row.id === created.jobId && row.rpujStatus === 'submitted'), true);
+
+      const prematureSpk = await api(`/api/container-jobs/${created.jobId}/spk`, {
+        method: 'POST',
+        token: adminToken,
+        body: { updatedBy: 'Sprint2C Operational' },
+      });
+      assert.equal(prematureSpk.status, 409);
+      assert.equal(prematureSpk.body.error.code, 'SPK_WAITING_FINANCE_TRANSFER');
+
+      const approvedRpuj = await api(`/api/finance/rpuj-requests/${created.jobId}/approve`, {
+        method: 'PATCH',
+        token: financeToken,
+      });
+      assert.equal(approvedRpuj.status, 200);
+      assert.equal(approvedRpuj.body.data.rpujStatus, 'approved');
+
+      const spkWithoutProof = await api(`/api/container-jobs/${created.jobId}/spk`, {
+        method: 'POST',
+        token: adminToken,
+        body: { updatedBy: 'Sprint2C Operational' },
+      });
+      assert.equal(spkWithoutProof.status, 409);
+      assert.equal(spkWithoutProof.body.error.code, 'SPK_WAITING_FINANCE_TRANSFER');
+
+      const transferProof = await api(`/api/finance/rpuj-requests/${created.jobId}/transfer-proof`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          fileName: `transfer-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% transfer ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(transferProof.status, 200);
+      assert.equal(transferProof.body.data.rpujStatus, 'paid');
+
+      const generatedSpk = await api(`/api/container-jobs/${created.jobId}/spk`, {
+        method: 'POST',
+        token: adminToken,
+        body: { updatedBy: 'Sprint2C Operational' },
+      });
+      assert.equal(generatedSpk.status, 200);
+      assert.ok(generatedSpk.body.data.spkNumber);
+
+      const approveRpujLog = await latestActivityForEntity('FINANCE_APPROVE_RPUJ', created.jobId);
+      assert.equal(approveRpujLog.action, 'FINANCE_APPROVE_RPUJ');
+
+      const uploadTransferLog = await latestActivityForEntity('FINANCE_UPLOAD_TRANSFER_PROOF', created.jobId);
+      assert.equal(uploadTransferLog.action, 'FINANCE_UPLOAD_TRANSFER_PROOF');
+
+      const generateSpkLog = await latestActivityForEntity('GENERATE_SPK', created.jobId);
+      assert.equal(generateSpkLog.action, 'GENERATE_SPK');
 
       const requiredDocumentCategories = [
         'spkDocument',
@@ -544,6 +629,13 @@ if (!hasDatabase) {
       assert.equal(cancelJobOrder.status, 201);
       const cancelJobId = cancelJobOrder.body.data.containers[0].id;
 
+      const cancelJobVerified = await api(`/api/finance/order-verifications/${cancelJobOrder.body.data.id}/so-number`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { soNumber: created.cancelJobSoNumber },
+      });
+      assert.equal(cancelJobVerified.status, 200);
+
       const cancelledJob = await api(`/api/container-jobs/${cancelJobId}/status`, {
         method: 'PATCH',
         token: adminToken,
@@ -561,16 +653,57 @@ if (!hasDatabase) {
     });
 
     await t.test('sales order: billing status workflow bisa disimpan setelah operational selesai', async () => {
-      const updatedBilling = await api(`/api/sales-orders/${created.orderId}`, {
+      const invoiceQueue = await api(`/api/finance/invoices?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(invoiceQueue.status, 200);
+      assert.ok(invoiceQueue.body.data.rows.some((row) => row.id === created.orderId));
+
+      const financeInvoice = await api(`/api/finance/invoices/${created.orderId}/number`, {
         method: 'PATCH',
-        token: adminToken,
+        token: financeToken,
+        body: {
+          invoiceNumber: `INV-${runId}-001`,
+        },
+      });
+      assert.equal(financeInvoice.status, 200);
+      assert.equal(financeInvoice.body.data.invoiceNumber, `INV-${runId}-001`);
+      assert.equal(financeInvoice.body.data.invoiceStatus, 'Menunggu Update Status');
+
+      const invoiceLog = await latestActivityForEntity('FINANCE_INPUT_INVOICE_NUMBER', created.orderId);
+      assert.equal(invoiceLog.action, 'FINANCE_INPUT_INVOICE_NUMBER');
+
+      const sentInvoice = await api(`/api/sales-orders/${created.orderId}/invoice-delivery-status`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { billingStatus: 'belum_diterima' },
+      });
+      assert.equal(sentInvoice.status, 200);
+      assert.equal(sentInvoice.body.data.billingStatus, 'belum_diterima');
+      assert.equal(sentInvoice.body.data.invoiceNumber, `INV-${runId}-001`);
+
+      const sendInvoiceLog = await latestActivityForEntity('SALES_SEND_INVOICE', created.orderId);
+      assert.equal(sendInvoiceLog.action, 'SALES_SEND_INVOICE');
+
+      const updatedBilling = await api(`/api/sales-orders/${created.orderId}/invoice-delivery-status`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { billingStatus: 'menunggu_pembayaran' },
+      });
+      assert.equal(updatedBilling.status, 200);
+      assert.equal(updatedBilling.body.data.billingStatus, 'menunggu_pembayaran');
+
+      const deliveryStatusLog = await latestActivityForEntity('SALES_UPDATE_INVOICE_DELIVERY_STATUS', created.orderId);
+      assert.equal(deliveryStatusLog.action, 'SALES_UPDATE_INVOICE_DELIVERY_STATUS');
+
+      const blockedInvoiceNumberMutation = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: salesToken,
         body: salesOrderPayload({
           containerId: created.jobId,
           destination: 'Karawang',
           status: 'completed',
-          invoiceNumber: `INV-${runId}-001`,
-          billingStatus: 'belum_dikirim',
-          updatedBy: 'Sprint2C Admin',
+          invoiceNumber: `INV-${runId}-SALES-BLOCKED`,
+          billingStatus: 'lunas',
+          updatedBy: 'Sprint2C Sales',
           containers: [
             {
               id: created.jobId,
@@ -580,7 +713,7 @@ if (!hasDatabase) {
               status: 'completed',
               driver: `Driver ${runId}`,
               plateNumber: `B-${String(runId).slice(-4)}-20T`,
-              rpujStatus: 'approved',
+              rpujStatus: 'paid',
               spkNumber: `SPK-${runId}`,
               loadingVoucher: `BM-${runId}`,
               tilaGatepassDocument: `TILA-GP-${runId}`,
@@ -591,9 +724,9 @@ if (!hasDatabase) {
           ],
         }),
       });
-      assert.equal(updatedBilling.status, 200);
-      assert.equal(updatedBilling.body.data.billingStatus, 'belum_dikirim');
-      assert.equal(updatedBilling.body.data.invoiceNumber, `INV-${runId}-001`);
+      assert.equal(blockedInvoiceNumberMutation.status, 200);
+      assert.equal(blockedInvoiceNumberMutation.body.data.invoiceNumber, `INV-${runId}-001`);
+      assert.equal(blockedInvoiceNumberMutation.body.data.billingStatus, 'menunggu_pembayaran');
     });
 
     await t.test('finance: dashboard dan perjalanan selesai read-only', async () => {
@@ -601,6 +734,10 @@ if (!hasDatabase) {
       assert.equal(dashboard.status, 200);
       assert.equal(typeof dashboard.body.data.totalCompletedTrips, 'number');
       assert.ok(dashboard.body.data.totalCompletedTrips >= 1);
+      assert.equal(typeof dashboard.body.data.queues, 'object');
+      assert.equal(typeof dashboard.body.data.queues.pendingSo, 'number');
+      assert.equal(typeof dashboard.body.data.queues.rpujSubmitted, 'number');
+      assert.equal(typeof dashboard.body.data.queues.invoiceWaitingSales, 'number');
 
       const completedTrips = await api(`/api/finance/completed-trips?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
       assert.equal(completedTrips.status, 200);
@@ -624,6 +761,14 @@ if (!hasDatabase) {
       });
       assert.equal(blockedUpdate.status, 403);
       assert.equal(blockedUpdate.body.error.code, 'FORBIDDEN');
+
+      const blockedDeliveryStatus = await api(`/api/sales-orders/${created.orderId}/invoice-delivery-status`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { billingStatus: 'lunas' },
+      });
+      assert.equal(blockedDeliveryStatus.status, 403);
+      assert.equal(blockedDeliveryStatus.body.error.code, 'FORBIDDEN');
     });
 
     await t.test('attachments: upload, list, delete, fileBase64 tidak masuk activity log metadata', async () => {

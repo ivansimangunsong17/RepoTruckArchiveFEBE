@@ -3,7 +3,11 @@ import { mapContainerJob, toAssignmentSnapshot } from './container-jobs.mapper.j
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.container_type,
-  cj.container_notes, cj.rpuj_status, cj.rpuj_notes, cj.spk_number, cj.eir_number,
+  cj.container_notes, cj.rpuj_status, cj.rpuj_notes,
+  cj.rpuj_requested_by_name, cj.rpuj_requested_at, cj.rpuj_reviewed_by_name,
+  cj.rpuj_reviewed_at, cj.rpuj_rejection_note, cj.rpuj_transfer_uploaded_by_name,
+  cj.rpuj_transfer_uploaded_at,
+  cj.spk_number, cj.eir_number,
   cj.loading_voucher_number, cj.unloading_voucher_number, cj.travel_document_number,
   cj.weighing_document_number, cj.tila_gatepass_document_number, cj.tila_gatepass_migration_note,
   cj.driver_id, cj.vehicle_id, cj.assignment_snapshot,
@@ -12,6 +16,7 @@ const joinedJobColumns = `
   cj.cancel_requested_by_name, cj.cancel_requested_by_role, cj.cancel_requested_at,
   cj.cancel_reviewed_by_name, cj.cancel_reviewed_at, cj.cancel_review_note,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
+  so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
   so.terminal, so.service_name, so.origin, so.destination, so.trip_date,
   so.created_by_name as order_created_by_name,
@@ -41,7 +46,11 @@ function parsePage(options = {}) {
 }
 
 function buildJobWhere({ query: keyword = '', status = '', requestStatus = '' } = {}) {
-  const clauses = ["so.status <> 'cancelled'"];
+  const clauses = [
+    "so.status <> 'cancelled'",
+    "so.finance_verification_status = 'verified'",
+    "nullif(btrim(so.so_number), '') is not null",
+  ];
   const params = [];
   const cleanKeyword = keyword.trim();
 
@@ -137,6 +146,23 @@ async function refreshOrderStatus(client, salesOrderId) {
   );
 }
 
+function ensureSalesOrderVerifiedForOperational(row) {
+  if (row?.finance_verification_status === 'verified' && String(row?.so_number || '').trim()) return;
+  const error = new Error('Order belum memiliki Nomor SO Accurate dari Finance. Operational baru bisa memproses setelah SO terbit.');
+  error.statusCode = 409;
+  error.code = 'SALES_ORDER_NOT_VERIFIED_BY_FINANCE';
+  throw error;
+}
+
+function normalizeRpujStatusForOperational(existing, nextStatus) {
+  const currentStatus = existing?.rpuj_status || 'pending';
+  const normalizedNext = nextStatus || currentStatus || 'pending';
+  if (['approved', 'paid'].includes(currentStatus)) return currentStatus;
+  if (['approved', 'paid'].includes(normalizedNext)) return currentStatus;
+  if (currentStatus === 'rejected' && normalizedNext !== 'submitted') return currentStatus;
+  return normalizedNext;
+}
+
 export async function findContainerJobsPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildJobWhere(options);
@@ -180,6 +206,8 @@ export async function findContainerJobsPage(options = {}) {
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         where so.status <> 'cancelled'
+          and so.finance_verification_status = 'verified'
+          and nullif(btrim(so.so_number), '') is not null
         group by cj.status
       `,
     ),
@@ -241,19 +269,34 @@ export async function findContainerJobById(id) {
 
 export async function updateContainerJob(id, form) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, sales_order_id, container_number, container_size, running_at, cancelled_at from container_jobs where id = $1', [id]);
+    const existing = await client.query(
+      `
+        select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.cancelled_at,
+               cj.rpuj_status,
+               so.so_number, so.finance_verification_status
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.id = $1
+      `,
+      [id],
+    );
     if (!existing.rows[0]) {
       const error = new Error('Container Job tidak ditemukan.');
       error.statusCode = 404;
       error.code = 'CONTAINER_JOB_NOT_FOUND';
       throw error;
     }
+    ensureSalesOrderVerifiedForOperational(existing.rows[0]);
 
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
     const hasAssignment = Boolean(form.driver || form.driverId || form.plateNumber || form.vehicleId);
     const nextStatus = form.status || (hasAssignment ? 'running' : 'received');
+    const nextRpujStatus = normalizeRpujStatusForOperational(existing.rows[0], form.rpujStatus);
+    const requestRpujAt = nextRpujStatus === 'submitted' && existing.rows[0].rpuj_status !== 'submitted'
+      ? new Date().toISOString()
+      : null;
     const nextContainerNumber = String(form.containerNumber || existing.rows[0].container_number || '').trim().toUpperCase() || null;
     const runningAt = nextStatus === 'cancelled'
       ? existing.rows[0].running_at
@@ -273,26 +316,30 @@ export async function updateContainerJob(id, form) {
             assignment_snapshot = $4::jsonb,
             rpuj_status = $5,
             rpuj_notes = $6,
-            spk_number = $7,
-            eir_number = $8,
-            loading_voucher_number = $9,
-            travel_document_number = $10,
-            tila_gatepass_document_number = $11,
-            status = $12,
-            running_at = $13,
-            completed_at = $14,
-            cancelled_at = $15,
-            updated_by_name = $16,
+            rpuj_requested_by_name = case when $7::timestamptz is not null then $8 else rpuj_requested_by_name end,
+            rpuj_requested_at = coalesce($7::timestamptz, rpuj_requested_at),
+            spk_number = case when $9::text is null then spk_number else spk_number end,
+            eir_number = $10,
+            loading_voucher_number = $11,
+            travel_document_number = $12,
+            tila_gatepass_document_number = $13,
+            status = $14,
+            running_at = $15,
+            completed_at = $16,
+            cancelled_at = $17,
+            updated_by_name = $18,
             updated_at = now()
-        where id = $17
+        where id = $19
       `,
       [
         nextContainerNumber,
         driver?.id || form.driverId || null,
         vehicle?.id || form.vehicleId || null,
         JSON.stringify(toAssignmentSnapshot(form, driver, vehicle)),
-        form.rpujStatus || 'pending',
+        nextRpujStatus,
         form.rpujNotes || null,
+        requestRpujAt,
+        form.updatedBy || 'Operational',
         form.spkNumber || null,
         form.eirNumber || null,
         form.loadingVoucher || null,
@@ -514,6 +561,7 @@ export async function updateContainerJobEir(id, form = {}) {
       error.code = 'CONTAINER_JOB_NOT_FOUND';
       throw error;
     }
+    ensureSalesOrderVerifiedForOperational(existing.rows[0]);
 
     await client.query(
       `
@@ -581,6 +629,32 @@ export async function generateContainerJobSpk(id, form = {}) {
       const error = new Error('Container Job tidak ditemukan.');
       error.statusCode = 404;
       error.code = 'CONTAINER_JOB_NOT_FOUND';
+      throw error;
+    }
+    ensureSalesOrderVerifiedForOperational(existing.rows[0]);
+
+    if (existing.rows[0].rpuj_status !== 'paid') {
+      const error = new Error('SPK belum bisa terbit. Finance harus approve RPUJ dan upload bukti transfer UJ terlebih dahulu.');
+      error.statusCode = 409;
+      error.code = 'SPK_WAITING_FINANCE_TRANSFER';
+      throw error;
+    }
+
+    const transferProof = await client.query(
+      `
+        select id
+        from attachments
+        where entity_type = 'container_job'
+          and entity_id = $1
+          and category = 'rpujTransferProof'
+        limit 1
+      `,
+      [id],
+    );
+    if (!transferProof.rows[0]) {
+      const error = new Error('SPK belum bisa terbit karena bukti transfer UJ belum diupload Finance.');
+      error.statusCode = 409;
+      error.code = 'SPK_TRANSFER_PROOF_REQUIRED';
       throw error;
     }
 

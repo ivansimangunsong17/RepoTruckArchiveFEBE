@@ -7,6 +7,7 @@ import {
   requestSalesOrderCancellation,
   saveSalesOrder,
   reviewSalesOrderCancellation,
+  updateInvoiceDeliveryStatus,
 } from './sales-orders.service.js';
 
 export async function listSalesOrdersController(request, response) {
@@ -69,6 +70,38 @@ export async function updateSalesOrderController(request, response) {
       metadata: { salesOrderId: saved.id, soNumber: saved.soNumber },
     })));
   sendSuccess(response, saved, 'Sales Order berhasil diperbarui.');
+}
+
+export async function updateInvoiceDeliveryStatusController(request, response) {
+  const before = await getSalesOrder(request.params.id);
+  const saved = await updateInvoiceDeliveryStatus(request.params.id, request.body, request.user);
+  const metadata = {
+    soNumber: saved.soNumber,
+    invoiceNumber: saved.invoiceNumber,
+    beforeStatus: before.billingStatus,
+    afterStatus: saved.billingStatus,
+  };
+  if (before.billingStatus === 'belum_dikirim' && saved.billingStatus !== 'belum_dikirim') {
+    await safeRecordActivityLog(request, {
+      action: 'SALES_SEND_INVOICE',
+      module: 'sales_orders',
+      entityType: 'sales_order',
+      entityId: saved.id,
+      beforeData: before,
+      afterData: saved,
+      metadata,
+    });
+  }
+  await safeRecordActivityLog(request, {
+    action: 'SALES_UPDATE_INVOICE_DELIVERY_STATUS',
+    module: 'sales_orders',
+    entityType: 'sales_order',
+    entityId: saved.id,
+    beforeData: before,
+    afterData: saved,
+    metadata,
+  });
+  sendSuccess(response, saved, 'Status pengiriman invoice berhasil diperbarui.');
 }
 
 export async function cancelSalesOrderController(request, response) {

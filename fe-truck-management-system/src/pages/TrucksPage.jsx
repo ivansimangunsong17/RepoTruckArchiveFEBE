@@ -114,15 +114,15 @@ function getChassisCapacity(rows, chassisValue) {
 
 function createFields(driverOptions, chassisRows = []) {
   return [
-    { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL', required: true },
-    { key: 'unitCode', section: 'Identitas Unit', label: 'Kode Unit', placeholder: 'TRK-001', required: true, hint: 'Kode internal harus unik.' },
+    { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL' },
+    { key: 'unitCode', section: 'Identitas Unit', label: 'Kode Unit', placeholder: 'TRK-001', hint: 'Kode internal harus unik.' },
     { key: 'status', section: 'Identitas Unit', label: 'Status Truck', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
       { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Maintenance', label: 'Maintenance' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
     ] },
-    { key: 'brand', section: 'Spesifikasi Kendaraan', label: 'Merk Truck', placeholder: 'Contoh: Hino', required: true },
-    { key: 'type', section: 'Spesifikasi Kendaraan', label: 'Tipe Truck', placeholder: 'Contoh: Ranger FG 235 JJ', required: true },
-    { key: 'vin', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Rangka (VIN)', placeholder: 'Masukkan nomor rangka kendaraan', required: true },
-    { key: 'engineNumber', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Mesin', placeholder: 'Masukkan nomor mesin kendaraan', required: true },
+    { key: 'brand', section: 'Spesifikasi Kendaraan', label: 'Merk Truck', placeholder: 'Contoh: Hino' },
+    { key: 'type', section: 'Spesifikasi Kendaraan', label: 'Tipe Truck', placeholder: 'Contoh: Ranger FG 235 JJ' },
+    { key: 'vin', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Rangka (VIN)', placeholder: 'Masukkan nomor rangka kendaraan' },
+    { key: 'engineNumber', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Mesin', placeholder: 'Masukkan nomor mesin kendaraan' },
     {
       key: 'kirChassisNumber',
       section: 'Data Chassis',
@@ -131,10 +131,9 @@ function createFields(driverOptions, chassisRows = []) {
       type: 'select',
       defaultValue: '',
       full: true,
-      required: true,
       options: (form) => {
         const options = buildChassisOptions(chassisRows, form.kirChassisNumber);
-        return [{ value: '', label: options.length ? 'Wajib pilih chassis dari master' : 'Belum ada data master chassis' }, ...options];
+        return [{ value: '', label: options.length ? 'Pilih chassis dari master' : 'Belum ada data master chassis' }, ...options];
       },
       onChange: (value, form) => {
         const capacity = getChassisCapacity(chassisRows, value);
@@ -144,7 +143,7 @@ function createFields(driverOptions, chassisRows = []) {
           capacity: capacity || form.capacity,
         };
       },
-      hint: 'Pilih chassis dari master data yang saat ini dipasangkan ke unit truck ini.',
+      hint: 'Pilih chassis dari master data jika unit sudah dipasangkan.',
     },
     {
       key: 'kirNumber',
@@ -162,6 +161,10 @@ function createFields(driverOptions, chassisRows = []) {
     { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'span-third' },
     { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'span-third' },
     { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'span-third', compactUpload: true },
+    { key: 'insuranceCompany', section: 'Asuransi Kendaraan', label: 'Nama Asuransi', placeholder: 'Contoh: PT Asuransi Jasa Indonesia', className: 'span-third' },
+    { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Polis', placeholder: 'Contoh: POL-TRK-001', className: 'span-third' },
+    { key: 'insuranceExpiryDate', section: 'Asuransi Kendaraan', label: 'Masa Berlaku Asuransi', type: 'date', className: 'span-third' },
+    { key: 'insuranceDocument', section: 'Dokumen Asuransi', label: 'Dokumen Asuransi', type: 'file', className: 'span-third', compactUpload: true },
     { key: 'defaultDriver', section: 'Assignment Default', label: 'Driver Tetap', type: 'select', defaultValue: '', options: [{ value: '', label: 'Belum di-assign' }, ...driverOptions], hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.' },
   ];
 }
@@ -533,7 +536,7 @@ function TrucksPage() {
     : getLocalDriverOptions(activeJobs, truckRows);
   const fields = createFields(driverOptions, chassisRows);
   const detailFields = fields.map((field) => {
-    if (field.key === 'kirExpiryDate' || field.key === 'stnkExpiryDate' || field.key === 'stidExpiryDate') {
+    if (field.key === 'kirExpiryDate' || field.key === 'stnkExpiryDate' || field.key === 'stidExpiryDate' || field.key === 'insuranceExpiryDate') {
       return {
         ...field,
         renderDetail: (value) => <ExpiryDetail value={value} />,
@@ -569,7 +572,7 @@ function TrucksPage() {
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Truck"
-      toolbarDescription="Cari unit, plat, sopir, chassis, nomor KIR, size, dan kondisi truck."
+      toolbarDescription="Cari unit, plat, sopir, chassis, dokumen, asuransi, dan kondisi truck."
       sortRows={sortTrucksByUnit}
       beforeSave={(args) => prepareTruckSave({ ...args, chassisRows })}
       extraDetailContent={(row) => <VehicleDocumentsPanel vehicle={row} />}

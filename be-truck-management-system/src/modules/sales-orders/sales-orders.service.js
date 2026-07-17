@@ -5,6 +5,7 @@ import {
   findSalesOrdersPage,
   requestSalesOrderCancellation as requestSalesOrderCancellationRepository,
   reviewSalesOrderCancellation as reviewSalesOrderCancellationRepository,
+  updateSalesOrderBillingStatus,
   updateSalesOrder,
 } from './sales-orders.repository.js';
 import {
@@ -19,6 +20,15 @@ const SERVICE_OPTIONS = [
   'Tila/Gatepass',
   'Jasa Handling',
   'Jasa Lainnya',
+];
+
+const SALES_INVOICE_DELIVERY_STATUSES = [
+  'belum_dikirim',
+  'belum_diterima',
+  'belum_dikonfirmasi',
+  'menunggu_pembayaran',
+  'revisi_dispute',
+  'lunas',
 ];
 
 function isContainerService(serviceName) {
@@ -251,11 +261,23 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
       createdByUserId: currentOrder.createdByUserId || null,
       updatedBy: actorName,
       updatedByUserId: actor?.sub || null,
+      soNumber: currentOrder.soNumber || payload.soNumber || '',
+      financeVerificationStatus: currentOrder.financeVerificationStatus || payload.financeVerificationStatus || 'pending_so',
+      financeVerifiedBy: currentOrder.financeVerifiedBy || payload.financeVerifiedBy || null,
+      financeVerifiedAt: currentOrder.financeVerifiedAt || payload.financeVerifiedAt || null,
+      invoiceNumber: currentOrder.invoiceNumber || '',
+      billingStatus: actor?.role === 'sales'
+        ? currentOrder.billingStatus || 'belum_invoice'
+        : payload.billingStatus || currentOrder.billingStatus || 'belum_invoice',
     };
   }
 
   return {
     ...payload,
+    soNumber: '',
+    financeVerificationStatus: 'pending_so',
+    financeVerifiedBy: null,
+    financeVerifiedAt: null,
     createdBy: actorName,
     createdByUserId: actor?.sub || null,
     updatedBy: actorName,
@@ -271,7 +293,7 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
     throw error;
   }
 
-  const required = ['soNumber', 'customer', 'origin', 'destination'];
+  const required = ['customer', 'origin', 'destination'];
   const missing = required.filter((field) => !payload[field]);
   if (missing.length) {
     const error = new Error(`Field wajib belum lengkap: ${missing.join(', ')}.`);
@@ -368,6 +390,51 @@ export async function saveSalesOrder(payload, id, actor) {
   const payloadWithActor = applyActorToPayload(normalizedPayload, actor, currentOrder);
   validateSalesOrderPayload(payloadWithActor, currentOrder);
   return id ? updateSalesOrder(id, payloadWithActor) : createSalesOrder(payloadWithActor);
+}
+
+export async function updateInvoiceDeliveryStatus(id, payload = {}, actor) {
+  if (!actor || !['sales', 'admin'].includes(actor.role)) {
+    const error = new Error('Status pengiriman invoice hanya dapat diubah oleh Sales atau Admin.');
+    error.statusCode = 403;
+    error.code = 'INVOICE_DELIVERY_STATUS_FORBIDDEN';
+    throw error;
+  }
+
+  const order = await findSalesOrderById(id);
+  if (!order) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  ensureCanAccessSalesOrder(actor, order);
+
+  if (order.status !== 'completed') {
+    const error = new Error('Status pengiriman invoice hanya dapat diubah setelah order selesai.');
+    error.statusCode = 400;
+    error.code = 'INVOICE_DELIVERY_STATUS_ORDER_NOT_COMPLETED';
+    throw error;
+  }
+
+  if (!String(order.invoiceNumber || '').trim()) {
+    const error = new Error('Nomor invoice belum tersedia. Tunggu Finance input nomor invoice.');
+    error.statusCode = 409;
+    error.code = 'INVOICE_NUMBER_REQUIRED';
+    throw error;
+  }
+
+  const billingStatus = normalizeSalesOrderBillingStatus(payload.billingStatus);
+  if (!SALES_INVOICE_DELIVERY_STATUSES.includes(billingStatus)) {
+    const error = new Error('Status pengiriman invoice tidak valid untuk Sales.');
+    error.statusCode = 400;
+    error.code = 'INVALID_INVOICE_DELIVERY_STATUS';
+    throw error;
+  }
+
+  return updateSalesOrderBillingStatus(id, {
+    billingStatus,
+    updatedByName: getActorName(actor),
+  });
 }
 
 export async function removeSalesOrder(id, actor) {

@@ -93,7 +93,7 @@ function moneyValue(value) {
 
 function StatusPill({ value }) {
   return (
-    <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusTone[value] || statusTone.BELUM_DIBUAT}`}>
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusTone[value] || statusTone.BELUM_DIBUAT}`}>
       {statusLabel[value] || value || '-'}
     </span>
   );
@@ -109,27 +109,27 @@ function SummaryCard({ icon: Icon, label, value, helper, tone = 'slate' }) {
   };
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <span className={`mb-3 block h-1 w-10 rounded-full ${accents[tone] || accents.slate}`} />
-          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
-          <strong className="mt-2 block text-2xl font-black text-slate-950">{value}</strong>
+          <span className={`mb-2 block h-1 w-8 rounded-full ${accents[tone] || accents.slate}`} />
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+          <strong className="mt-1 block text-xl font-black text-slate-950">{value}</strong>
         </div>
-        <span className="grid h-9 w-9 place-items-center rounded-md border border-slate-200 bg-slate-50 text-slate-600">
-          <Icon size={18} />
+        <span className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 bg-slate-50 text-slate-600">
+          <Icon size={16} />
         </span>
       </div>
-      {helper ? <p className="mt-2 text-xs font-medium text-slate-500">{helper}</p> : null}
+      {helper ? <p className="mt-1.5 text-[11px] font-medium text-slate-500">{helper}</p> : null}
     </section>
   );
 }
 
 function ReadOnlyField({ label, value }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
-      <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-      <strong className="mt-1 block break-words text-sm text-slate-950">{value || '-'}</strong>
+    <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
+      <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
+      <strong className="mt-0.5 block break-words text-sm font-semibold text-slate-950">{value || '-'}</strong>
     </div>
   );
 }
@@ -146,20 +146,20 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-lg bg-slate-50 shadow-2xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation" onMouseDown={onClose}>
+      <section className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Detail Perjalanan Finance</p>
-            <h2 className="mt-1 text-xl font-black text-slate-950">{trip?.soNumber || 'Memuat detail'}</h2>
-            <p className="text-sm text-slate-500">{trip?.customer || '-'}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Perjalanan Finance</p>
+            <h2 className="mt-0.5 text-lg font-black text-slate-950">{trip?.soNumber || 'Memuat detail'}</h2>
+            <p className="text-xs text-slate-500">{trip?.customer || '-'}</p>
           </div>
-          <button className="grid h-10 w-10 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-100" type="button" onClick={onClose} aria-label="Tutup detail">
+          <button className="grid h-9 w-9 place-items-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-100" type="button" onClick={onClose} aria-label="Tutup detail">
             <X size={19} />
           </button>
         </header>
 
-        <div className="max-h-[calc(92vh-78px)] overflow-y-auto p-5">
+        <div className="max-h-[calc(92vh-72px)] overflow-y-auto p-4">
           {loading ? (
             <div className="grid min-h-64 place-items-center text-sm font-semibold text-slate-500">
               <span className="inline-flex items-center gap-2"><Loader2 className="animate-spin" size={18} /> Memuat detail perjalanan...</span>
@@ -167,20 +167,20 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
           ) : null}
 
           {!loading && error ? (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
               <strong className="block">Detail tidak dapat dimuat.</strong>
               <p className="mt-1">{error}</p>
-              <button className="mt-3 inline-flex items-center gap-2 rounded-md border border-rose-200 bg-white px-3 py-2 font-bold" type="button" onClick={onRetry}>
+              <button className="mt-3 inline-flex items-center gap-2 rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-bold" type="button" onClick={onRetry}>
                 <RefreshCw size={15} /> Coba lagi
               </button>
             </div>
           ) : null}
 
           {!loading && trip ? (
-            <div className="grid gap-5">
+            <div className="grid gap-4">
               <section>
-                <h3 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-700">Informasi Sales Order</h3>
-                <div className="grid gap-3 md:grid-cols-3">
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Informasi Sales Order</h3>
+                <div className="grid gap-2 md:grid-cols-3">
                   <ReadOnlyField label="Nomor SO" value={trip.soNumber} />
                   <ReadOnlyField label="Nomor DO" value={trip.doNumber} />
                   <ReadOnlyField label="Nomor SPK" value={trip.spkNumber} />
@@ -191,8 +191,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
               </section>
 
               <section>
-                <h3 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-700">Informasi Customer</h3>
-                <div className="grid gap-3 md:grid-cols-4">
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Informasi Customer</h3>
+                <div className="grid gap-2 md:grid-cols-4">
                   <ReadOnlyField label="Customer" value={trip.customer} />
                   <ReadOnlyField label="PIC" value={trip.customerPic} />
                   <ReadOnlyField label="Telepon" value={trip.customerPhone} />
@@ -201,8 +201,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
               </section>
 
               <section>
-                <h3 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-700">Container / Ritase</h3>
-                <div className="grid gap-3 md:grid-cols-4">
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Container / Ritase</h3>
+                <div className="grid gap-2 md:grid-cols-4">
                   <ReadOnlyField label="Container" value={trip.containerNumber} />
                   <ReadOnlyField label="Ukuran" value={trip.containerSize} />
                   <ReadOnlyField label="Tipe" value={trip.containerType} />
@@ -215,8 +215,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
               </section>
 
               <section>
-                <h3 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-700">Riwayat Perjalanan</h3>
-                <div className="grid gap-3 md:grid-cols-4">
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Riwayat Perjalanan</h3>
+                <div className="grid gap-2 md:grid-cols-4">
                   <ReadOnlyField label="Tanggal Berangkat" value={formatDate(trip.tripDate)} />
                   <ReadOnlyField label="Diterima" value={formatDateTime(trip.receivedAt)} />
                   <ReadOnlyField label="Mulai" value={formatDateTime(trip.runningAt)} />
@@ -225,8 +225,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
               </section>
 
               <section>
-                <h3 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-700">Revenue dan Uang Jalan</h3>
-                <div className="grid gap-3 md:grid-cols-4">
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Revenue dan Uang Jalan</h3>
+                <div className="grid gap-2 md:grid-cols-4">
                   <ReadOnlyField label="Tarif" value={moneyValue(trip.tariff)} />
                   <ReadOnlyField label="Total Revenue" value={moneyValue(trip.totalRevenue)} />
                   <ReadOnlyField label="Uang Jalan" value={moneyValue(trip.journeyMoney)} />
@@ -238,23 +238,23 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
               </section>
 
               <section>
-                <h3 className="mb-3 text-sm font-black uppercase tracking-wide text-slate-700">Daftar Dokumen Perjalanan</h3>
-                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Daftar Dokumen Perjalanan</h3>
+                <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
                   <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                    <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                       <tr>
-                        <th className="px-3 py-3">Dokumen</th>
-                        <th className="px-3 py-3">Nomor</th>
-                        <th className="px-3 py-3">File</th>
+                        <th className="px-3 py-2">Dokumen</th>
+                        <th className="px-3 py-2">Nomor</th>
+                        <th className="px-3 py-2">File</th>
                       </tr>
                     </thead>
                     <tbody>
                       {docs.map(([label, number, file]) => (
                         <tr className="border-t border-slate-100" key={label}>
-                          <td className="px-3 py-3 font-bold text-slate-900">{label}</td>
-                          <td className="px-3 py-3 text-slate-700">{number || '-'}</td>
-                          <td className="px-3 py-3">
-                            <DocumentLink file={file} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" />
+                          <td className="px-3 py-2 font-semibold text-slate-900">{label}</td>
+                          <td className="px-3 py-2 text-slate-700">{number || '-'}</td>
+                          <td className="px-3 py-2">
+                            <DocumentLink file={file} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" />
                           </td>
                         </tr>
                       ))}
@@ -370,19 +370,20 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
   }
 
   const summary = dashboard || {};
+  const queues = summary.queues || {};
   const rows = trips.rows || [];
   const hasRows = rows.length > 0;
 
   return (
-    <div className="min-h-screen bg-slate-100 px-5 py-5 text-slate-900">
-      <header className="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="min-h-screen bg-slate-50 px-4 py-4 text-slate-900">
+      <header className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{view.eyebrow}</p>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">{view.title}</h1>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{view.eyebrow}</p>
+            <h1 className="mt-0.5 text-lg font-black text-slate-950">{view.title}</h1>
             <p className="mt-1 text-sm text-slate-500">{view.description}</p>
           </div>
-          <button className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50" type="button" onClick={() => setFilters((current) => ({ ...current }))}>
+          <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button" onClick={() => setFilters((current) => ({ ...current }))}>
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
@@ -390,41 +391,73 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
 
       {isDashboard ? (
         <>
-          <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-6">
-              <div className="rounded-md bg-slate-50 p-3">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Perjalanan selesai</span>
-                <strong className="mt-1 block text-base text-slate-950">{summary.totalCompletedTrips || 0} trip</strong>
+          <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black text-slate-950">Antrean Kerja Finance</h2>
+                <p className="mt-1 text-xs text-slate-500">Ringkasan pekerjaan yang perlu dicek tanpa membuka tiap menu.</p>
               </div>
-              <div className="rounded-md bg-slate-50 p-3">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Customer</span>
-                <strong className="mt-1 block text-base text-slate-950">{summary.totalCustomers || 0} customer</strong>
+              <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-600">Armada Workflow</span>
+            </div>
+            <div className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Menunggu No. SO</span>
+                <strong className="mt-1 block text-lg text-slate-950">{queues.pendingSo || 0}</strong>
+                <small className="mt-1 block text-xs text-slate-500">Order dari Sales perlu nomor SO Accurate.</small>
               </div>
-              <div className="rounded-md bg-slate-50 p-3">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Container / ritase</span>
-                <strong className="mt-1 block text-base text-slate-950">{summary.totalCompletedContainers || 0} ritase</strong>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Approval RPUJ</span>
+                <strong className="mt-1 block text-lg text-slate-950">{queues.rpujSubmitted || 0}</strong>
+                <small className="mt-1 block text-xs text-slate-500">Pengajuan UJ menunggu approve/reject.</small>
               </div>
-              <div className="rounded-md bg-emerald-50 p-3">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Revenue</span>
-                <strong className="mt-1 block text-base text-slate-950">{summary.missingRevenue && !summary.totalRevenue ? 'Data belum tersedia' : formatCurrency(summary.totalRevenue || 0)}</strong>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Transfer Pending</span>
+                <strong className="mt-1 block text-lg text-slate-950">{queues.rpujApprovedWaitingTransfer || 0}</strong>
+                <small className="mt-1 block text-xs text-slate-500">RPUJ approve, bukti transfer belum upload.</small>
               </div>
-              <div className="rounded-md bg-blue-50 p-3">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Uang jalan</span>
-                <strong className="mt-1 block text-base text-slate-950">{summary.missingJourneyMoney && !summary.totalJourneyMoney ? 'Data belum tersedia' : formatCurrency(summary.totalJourneyMoney || 0)}</strong>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Menunggu Sales</span>
+                <strong className="mt-1 block text-lg text-slate-950">{queues.invoiceWaitingSales || 0}</strong>
+                <small className="mt-1 block text-xs text-slate-500">Invoice sudah ada, follow up di Sales.</small>
               </div>
-              <div className="rounded-md bg-slate-50 p-3">
-                <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Estimasi margin</span>
-                <strong className="mt-1 block text-base text-slate-950">{(summary.missingRevenue || summary.missingJourneyMoney) && !summary.estimatedMargin ? 'Data belum tersedia' : formatCurrency(summary.estimatedMargin || 0)}</strong>
+            </div>
+          </section>
+
+          <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="grid gap-2 text-sm md:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Perjalanan selesai</span>
+                <strong className="mt-1 block text-sm text-slate-950">{summary.totalCompletedTrips || 0} trip</strong>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Customer</span>
+                <strong className="mt-1 block text-sm text-slate-950">{summary.totalCustomers || 0} customer</strong>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Container / ritase</span>
+                <strong className="mt-1 block text-sm text-slate-950">{summary.totalCompletedContainers || 0} ritase</strong>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Revenue</span>
+                <strong className="mt-1 block text-sm text-slate-950">{summary.missingRevenue && !summary.totalRevenue ? 'Data belum tersedia' : formatCurrency(summary.totalRevenue || 0)}</strong>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Uang jalan</span>
+                <strong className="mt-1 block text-sm text-slate-950">{summary.missingJourneyMoney && !summary.totalJourneyMoney ? 'Data belum tersedia' : formatCurrency(summary.totalJourneyMoney || 0)}</strong>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-white p-3">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Estimasi margin</span>
+                <strong className="mt-1 block text-sm text-slate-950">{(summary.missingRevenue || summary.missingJourneyMoney) && !summary.estimatedMargin ? 'Data belum tersedia' : formatCurrency(summary.estimatedMargin || 0)}</strong>
               </div>
             </div>
             {summary.missingRevenue || summary.missingJourneyMoney ? (
-              <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+              <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                 {summary.missingRevenue || 0} perjalanan belum punya tarif, {summary.missingJourneyMoney || 0} perjalanan belum punya uang jalan.
               </p>
             ) : null}
           </section>
 
-          <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <SummaryCard icon={ReceiptText} label="Siap ditagihkan" value={summary.readyToInvoice || 0} tone="green" />
             <SummaryCard icon={FileQuestion} label="Dokumen belum lengkap" value={summary.incompleteDocuments || 0} tone="rose" />
             <SummaryCard icon={FileText} label="Belum dibuat invoice" value={summary.notInvoiced || 0} tone="amber" />
@@ -436,58 +469,58 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
       {isDashboard ? null : (
         <>
           {isReadiness ? (
-            <section className="mb-5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-black text-slate-950">Fokus Kesiapan Tagihan</h2>
+                  <h2 className="text-sm font-black text-slate-950">Fokus Kesiapan Tagihan</h2>
                   <p className="mt-1 text-xs text-slate-500">Pilih antrean kerja yang ingin dicek Finance.</p>
                 </div>
-                <button className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50" type="button" onClick={resetFilters}>
+                <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50" type="button" onClick={resetFilters}>
                   Reset Antrean
                 </button>
               </div>
-              <div className="mt-4 grid gap-2 md:grid-cols-3">
-                <button className="rounded-md border border-emerald-200 bg-white px-3 py-3 text-left text-sm font-bold text-emerald-700 hover:bg-emerald-50" type="button" onClick={() => applyReadinessFilter({ documentStatus: 'SIAP_DITAGIHKAN', invoiceStatus: 'BELUM_DIBUAT' })}>
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                <button className="rounded-md border border-slate-200 bg-white px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50" type="button" onClick={() => applyReadinessFilter({ documentStatus: 'SIAP_DITAGIHKAN', invoiceStatus: 'BELUM_DIBUAT' })}>
                   Siap Ditagihkan
                 </button>
-                <button className="rounded-md border border-rose-200 bg-white px-3 py-3 text-left text-sm font-bold text-rose-700 hover:bg-rose-50" type="button" onClick={() => applyReadinessFilter({ documentStatus: 'BELUM_LENGKAP', invoiceStatus: '' })}>
+                <button className="rounded-md border border-slate-200 bg-white px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50" type="button" onClick={() => applyReadinessFilter({ documentStatus: 'BELUM_LENGKAP', invoiceStatus: '' })}>
                   Dokumen Belum Lengkap
                 </button>
-                <button className="rounded-md border border-amber-200 bg-white px-3 py-3 text-left text-sm font-bold text-amber-700 hover:bg-amber-50" type="button" onClick={() => applyReadinessFilter({ documentStatus: '', invoiceStatus: 'BELUM_DIBUAT' })}>
+                <button className="rounded-md border border-slate-200 bg-white px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50" type="button" onClick={() => applyReadinessFilter({ documentStatus: '', invoiceStatus: 'BELUM_DIBUAT' })}>
                   Belum Invoice
                 </button>
               </div>
             </section>
           ) : null}
 
-      <section className="mb-5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-black text-slate-950">Filter Data</h2>
+            <h2 className="text-sm font-black text-slate-950">Filter Data</h2>
             <p className="mt-1 text-xs text-slate-500">Persempit daftar berdasarkan tanggal selesai, customer, tujuan, dokumen, atau invoice.</p>
           </div>
-          <button className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50" type="button" onClick={resetFilters}>Reset Filter</button>
+          <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50" type="button" onClick={resetFilters}>Reset Filter</button>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Rentang selesai dari
-            <input className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" type="date" name="dateFrom" value={filters.dateFrom} onChange={updateFilter} />
+            <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" type="date" name="dateFrom" value={filters.dateFrom} onChange={updateFilter} />
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Rentang selesai sampai
-            <input className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" type="date" name="dateTo" value={filters.dateTo} onChange={updateFilter} />
+            <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" type="date" name="dateTo" value={filters.dateTo} onChange={updateFilter} />
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Customer
-            <input className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" name="customer" value={filters.customer} onChange={updateFilter} placeholder="Nama customer" />
+            <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" name="customer" value={filters.customer} onChange={updateFilter} placeholder="Nama customer" />
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Tujuan
-            <input className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" name="destination" value={filters.destination} onChange={updateFilter} placeholder="Lokasi tujuan" />
+            <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" name="destination" value={filters.destination} onChange={updateFilter} placeholder="Lokasi tujuan" />
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Ukuran container
-            <select className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" name="containerSize" value={filters.containerSize} onChange={updateFilter}>
+            <select className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" name="containerSize" value={filters.containerSize} onChange={updateFilter}>
               <option value="">Semua Ukuran</option>
               <option value="20FT">20FT</option>
               <option value="40FT">40FT</option>
@@ -495,13 +528,13 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Status dokumen
-            <select className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" name="documentStatus" value={filters.documentStatus} onChange={updateFilter}>
+            <select className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" name="documentStatus" value={filters.documentStatus} onChange={updateFilter}>
               {documentStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Status invoice
-            <select className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400" name="invoiceStatus" value={filters.invoiceStatus} onChange={updateFilter}>
+            <select className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-slate-400" name="invoiceStatus" value={filters.invoiceStatus} onChange={updateFilter}>
               {invoiceStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
@@ -509,23 +542,23 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
             Cari SO / DO
             <span className="flex items-center rounded-md border border-slate-200 px-3 py-2 focus-within:border-slate-400">
               <Search size={16} className="mr-2 text-slate-400" />
-              <input className="w-full border-0 p-0 text-sm font-semibold text-slate-900 outline-none" name="query" value={filters.query} onChange={updateFilter} placeholder="SO, DO, SPK" />
+              <input className="w-full border-0 p-0 text-sm text-slate-900 outline-none" name="query" value={filters.query} onChange={updateFilter} placeholder="SO, DO, SPK" />
             </span>
           </label>
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <section className="rounded-md border border-slate-200 bg-white shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
-            <h2 className="text-base font-black text-slate-950">Perjalanan Selesai</h2>
+            <h2 className="text-sm font-black text-slate-950">Perjalanan Selesai</h2>
             <p className="text-xs text-slate-500">Menampilkan {rows.length} dari {trips.total || 0} perjalanan selesai.</p>
           </div>
           {loading ? <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-500"><Loader2 className="animate-spin" size={15} /> Memuat</span> : null}
         </header>
 
         {error ? (
-          <div className="m-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          <div className="m-4 rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
             <div className="flex items-start gap-2">
               <AlertTriangle size={18} />
               <div>
@@ -540,7 +573,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
           <div className="grid min-h-72 place-items-center px-4 py-10 text-center">
             <div>
               <FileQuestion className="mx-auto text-slate-300" size={42} />
-              <h3 className="mt-3 text-lg font-black text-slate-800">Belum ada perjalanan selesai</h3>
+              <h3 className="mt-3 text-base font-black text-slate-800">Belum ada perjalanan selesai</h3>
               <p className="mt-1 text-sm text-slate-500">Data akan muncul setelah Container Job berstatus Selesai.</p>
             </div>
           </div>
@@ -549,7 +582,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
         {hasRows ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1120px] border-collapse text-left text-xs">
-              <thead className="bg-slate-100 uppercase tracking-wide text-slate-500">
+              <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
                 <tr>
                   {[
                     'Selesai',
@@ -560,35 +593,35 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                     'Nilai',
                     'Status',
                     'Aksi',
-                  ].map((column) => <th className="px-3 py-3" key={column}>{column}</th>)}
+                  ].map((column) => <th className="px-3 py-2" key={column}>{column}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr className="border-t border-slate-100 align-top hover:bg-slate-50" key={row.id}>
-                    <td className="px-3 py-4">
+                    <td className="px-3 py-2">
                       <strong className="block text-sm text-slate-900">{formatDate(row.completedAt)}</strong>
-                      <span className="mt-1 block text-[11px] font-semibold text-slate-500">{formatDateTime(row.completedAt)}</span>
+                      <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{formatDateTime(row.completedAt)}</span>
                     </td>
-                    <td className="px-3 py-4">
+                    <td className="px-3 py-2">
                       <strong className="block text-sm text-slate-950">{row.soNumber || '-'}</strong>
-                      <span className="mt-1 block text-[11px] font-semibold text-slate-500">DO: {row.doNumber || '-'}</span>
-                      <span className="block text-[11px] font-semibold text-slate-500">SPK: {row.spkNumber || '-'}</span>
+                      <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">DO: {row.doNumber || '-'}</span>
+                      <span className="block text-[10px] font-semibold text-slate-500">SPK: {row.spkNumber || '-'}</span>
                     </td>
-                    <td className="px-3 py-4">
+                    <td className="px-3 py-2">
                       <strong className="block max-w-[210px] text-sm text-slate-900">{row.customer || '-'}</strong>
-                      <span className="mt-1 block max-w-[210px] text-[11px] font-semibold text-slate-500">{row.serviceName || '-'}</span>
+                      <span className="mt-0.5 block max-w-[210px] text-[10px] font-semibold text-slate-500">{row.serviceName || '-'}</span>
                     </td>
-                    <td className="px-3 py-4">
+                    <td className="px-3 py-2">
                       <strong className="block max-w-[220px] text-sm text-slate-900">{row.origin || '-'} ke {row.destination || '-'}</strong>
-                      <span className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">{row.containerSize || '-'} - {row.quantity || 1} ritase</span>
+                      <span className="mt-0.5 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{row.containerSize || '-'} - {row.quantity || 1} ritase</span>
                     </td>
-                    <td className="px-3 py-4">
+                    <td className="px-3 py-2">
                       <strong className="block text-sm text-slate-900">{row.truck || '-'}</strong>
-                      <span className="mt-1 block text-[11px] font-semibold text-slate-500">{row.driver || '-'}</span>
-                      <span className="block text-[11px] font-semibold text-slate-500">Jalan: {formatDate(row.tripDate)}</span>
+                      <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{row.driver || '-'}</span>
+                      <span className="block text-[10px] font-semibold text-slate-500">Jalan: {formatDate(row.tripDate)}</span>
                     </td>
-                    <td className="px-3 py-4">
+                    <td className="px-3 py-2">
                       <div className="grid min-w-[210px] grid-cols-2 gap-2">
                         <div className="rounded-md bg-emerald-50 px-2 py-1.5">
                           <span className="block text-[10px] font-bold uppercase text-emerald-700">Revenue</span>
@@ -608,14 +641,14 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-4">
-                      <div className="flex min-w-[150px] flex-col items-start gap-2">
+                    <td className="px-3 py-2">
+                      <div className="flex min-w-[150px] flex-col items-start gap-1.5">
                         <StatusPill value={row.documentStatus} />
                         <StatusPill value={row.invoiceStatus} />
                       </div>
                     </td>
-                    <td className="px-3 py-4">
-                      <button className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 font-bold text-slate-700 hover:bg-white" type="button" onClick={() => setDetailId(row.id)}>
+                    <td className="px-3 py-2">
+                      <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button" onClick={() => setDetailId(row.id)}>
                         <Eye size={15} /> Detail
                       </button>
                     </td>
@@ -629,8 +662,8 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
           <p className="text-xs font-semibold text-slate-500">Halaman {trips.page || page} dari {trips.totalPages || 1}</p>
           <div className="flex gap-2">
-            <button className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Sebelumnya</button>
-            <button className="rounded-md border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={page >= (trips.totalPages || 1)} onClick={() => setPage((current) => current + 1)}>Berikutnya</button>
+            <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Sebelumnya</button>
+            <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={page >= (trips.totalPages || 1)} onClick={() => setPage((current) => current + 1)}>Berikutnya</button>
           </div>
         </footer>
       </section>

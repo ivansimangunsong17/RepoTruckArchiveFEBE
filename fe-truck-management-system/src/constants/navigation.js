@@ -34,7 +34,7 @@ const operationalRoles = [
   USER_ROLES.OBSERVER,
 ];
 const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
-const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
+const financeRoles = [USER_ROLES.FINANCE];
 
 export const navigationGroups = [
   {

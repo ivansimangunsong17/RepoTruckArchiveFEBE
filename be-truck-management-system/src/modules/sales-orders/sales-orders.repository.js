@@ -5,6 +5,9 @@ const salesOrderColumnCandidates = [
   'id',
   'customer_id',
   'so_number',
+  'finance_verification_status',
+  'finance_verified_by_name',
+  'finance_verified_at',
   'do_number',
   'so_date',
   'trip_date',
@@ -18,6 +21,8 @@ const salesOrderColumnCandidates = [
   'vessel_name',
   'job_description',
   'invoice_number',
+  'invoice_issued_at',
+  'invoice_input_by_name',
   'billing_status',
   'container_summary',
   'line_items',
@@ -89,7 +94,10 @@ async function filterSalesOrderPayload(payload, executor = query) {
 
 const jobColumns = `
   id, sales_order_id, container_number, container_size, container_type, container_notes,
-  rpuj_status, rpuj_notes, spk_number, loading_voucher_number, unloading_voucher_number,
+  rpuj_status, rpuj_notes, rpuj_requested_by_name, rpuj_requested_at,
+  rpuj_reviewed_by_name, rpuj_reviewed_at, rpuj_rejection_note,
+  rpuj_transfer_uploaded_by_name, rpuj_transfer_uploaded_at,
+  spk_number, loading_voucher_number, unloading_voucher_number,
   travel_document_number, weighing_document_number, tila_gatepass_document_number,
   tila_gatepass_migration_note, driver_id, vehicle_id, assignment_snapshot,
   status, received_at, running_at, completed_at, created_by_name, updated_by_name,
@@ -544,6 +552,20 @@ export async function updateSalesOrder(id, form) {
       attachments.rows,
     );
   });
+}
+
+export async function updateSalesOrderBillingStatus(id, patch = {}) {
+  await query(
+    `
+      update sales_orders
+      set billing_status = $1,
+          updated_by_name = $2,
+          updated_at = now()
+      where id = $3
+    `,
+    [patch.billingStatus || 'belum_dikirim', patch.updatedByName || 'Sales', id],
+  );
+  return findSalesOrderById(id);
 }
 
 export async function cancelSalesOrder(id) {

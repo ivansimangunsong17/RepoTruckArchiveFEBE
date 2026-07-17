@@ -71,7 +71,6 @@ function ClientsPage() {
       columns={[
         { key: 'name', label: 'Customer', render: (_, row, meta) => <CustomerName row={row} rowNumber={meta.rowNumber} /> },
         { key: 'pic', label: 'PIC', render: (_, row) => <CustomerPic row={row} /> },
-        { key: 'address', label: 'Area', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'contract', label: 'Contract', render: (value) => <CustomerContract value={value} /> },
         { key: 'contractDocument', label: 'Dokumen', render: (_, row) => <CustomerDocumentSummary row={row} /> },
       ]}
@@ -84,7 +83,7 @@ function ClientsPage() {
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Customer"
-      toolbarDescription="Cari customer, PIC, area, dan status contract."
+      toolbarDescription="Cari customer, PIC, dan status contract."
       stats={(data) => [
         { label: 'Total Customer', value: data.length, detail: 'Terdaftar' },
         { label: 'Aktif', value: data.filter((item) => item.contract === 'Aktif').length, detail: 'Bisa order' },

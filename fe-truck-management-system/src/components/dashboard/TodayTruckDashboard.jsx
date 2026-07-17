@@ -43,8 +43,7 @@ function getTruckSortKey(unitCode) {
 }
 
 function chassisSizeLabel(truck) {
-  if (!truck?.chassisCode) return '-';
-  return `${truck.chassisCode} - ${truck.chassisSize || truck.capacity || '-'}`;
+  return truck?.chassisSize || truck?.capacity || '-';
 }
 
 function documentSummary(job) {

@@ -4,6 +4,7 @@ export const SALES_ORDER_BILLING_STATUSES = [
   'belum_diterima',
   'belum_dikonfirmasi',
   'menunggu_pembayaran',
+  'revisi_dispute',
   'lunas',
 ];
 

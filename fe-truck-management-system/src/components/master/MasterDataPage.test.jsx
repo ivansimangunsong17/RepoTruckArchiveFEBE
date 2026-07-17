@@ -95,6 +95,20 @@ describe('MasterDataPage database mode', () => {
     }));
   });
 
+  it('tetap menyimpan data meski field dibiarkan kosong', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: /Input Data Baru/i }));
+    await user.click(screen.getByRole('button', { name: 'Simpan Data' }));
+
+    await waitFor(() => expect(upsertMaster).toHaveBeenCalledWith(
+      'customers',
+      { name: '', status: 'Aktif' },
+      null,
+    ));
+  });
+
   it('menolak nilai unik yang sudah digunakan', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -142,6 +156,86 @@ describe('MasterDataPage database mode', () => {
       query: '',
       filters: {},
     }));
+  });
+
+  it('mempertahankan data lama saat edit meski ada field yang disembunyikan', async () => {
+    const user = userEvent.setup();
+    const hiddenRows = [{ id: 'row-2', name: 'Data Lama', status: 'Aktif', secretInfo: 'tetap-ada' }];
+    fetchMasterPage.mockResolvedValue({ rows: hiddenRows, total: hiddenRows.length });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { customers: hiddenRows },
+      upsertMaster,
+      removeMaster,
+    });
+
+    const { container } = renderPage({
+      pageFields: [
+        { key: 'name', label: 'Nama Data', placeholder: 'Masukkan nama', required: true },
+        { key: 'status', label: 'Status', type: 'select', defaultValue: 'Aktif', options: [
+          { value: 'Aktif', label: 'Aktif' },
+          { value: 'Tidak Aktif', label: 'Tidak Aktif' },
+        ] },
+        {
+          key: 'secretInfo',
+          label: 'Info Rahasia',
+          placeholder: 'Info internal',
+          showIf: (form) => form.status === 'Aktif',
+        },
+      ],
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Data' }));
+    await user.clear(screen.getByPlaceholderText('Masukkan nama'));
+    await user.type(screen.getByPlaceholderText('Masukkan nama'), 'Data Baru');
+
+    const statusSelect = container.querySelector('select');
+    await user.selectOptions(statusSelect, 'Tidak Aktif');
+    await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));
+
+    await waitFor(() => expect(upsertMaster).toHaveBeenCalledWith(
+      'customers',
+      expect.objectContaining({
+        id: 'row-2',
+        name: 'Data Baru',
+        status: 'Tidak Aktif',
+        secretInfo: 'tetap-ada',
+      }),
+      'row-2',
+    ));
+  });
+
+  it('mengisi ulang field tanggal dalam format yang valid saat edit', async () => {
+    const user = userEvent.setup();
+    const dateRows = [{
+      id: 'row-3',
+      name: 'Sopir ISO',
+      status: 'Aktif',
+      licenseExpiry: '2027-03-18T00:00:00.000Z',
+    }];
+    fetchMasterPage.mockResolvedValue({ rows: dateRows, total: dateRows.length });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { customers: dateRows },
+      upsertMaster,
+      removeMaster,
+    });
+
+    const { container } = renderPage({
+      pageFields: [
+        { key: 'name', label: 'Nama Data', placeholder: 'Masukkan nama', required: true },
+        { key: 'licenseExpiry', label: 'Masa Berlaku SIM', type: 'date', required: true },
+        { key: 'status', label: 'Status', type: 'select', defaultValue: 'Aktif', options: [
+          { value: 'Aktif', label: 'Aktif' },
+          { value: 'Tidak Aktif', label: 'Tidak Aktif' },
+        ] },
+      ],
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Edit Data' }));
+
+    const dateInput = container.querySelector('input[type="date"]');
+    expect(dateInput).toHaveValue('2027-03-18');
   });
 
   it('menolak PDF pada field import gambar', async () => {

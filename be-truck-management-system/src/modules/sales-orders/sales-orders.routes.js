@@ -5,6 +5,7 @@ import {
   listSalesOrdersController,
   requestCancelSalesOrderController,
   reviewCancelSalesOrderController,
+  updateInvoiceDeliveryStatusController,
   updateSalesOrderController,
 } from './sales-orders.controller.js';
 
@@ -32,6 +33,12 @@ export const salesOrderRoutes = [
     path: '/api/sales-orders/:id',
     permission: 'sales_order.update',
     handler: updateSalesOrderController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/sales-orders/:id/invoice-delivery-status',
+    permission: 'sales_order.update',
+    handler: updateInvoiceDeliveryStatusController,
   },
   {
     method: 'PUT',

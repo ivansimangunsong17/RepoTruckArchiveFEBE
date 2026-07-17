@@ -25,17 +25,21 @@ import { formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
-import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
+import { fetchSalesOrdersPage, updateSalesOrderInvoiceDeliveryStatus } from '../../services/archive/salesOrderService';
 
 const PAGE_SIZE = 8;
 const LOCAL_BILLING_STATUS_KEY = 'tms-sales-order-billing-status-v2';
 const BILLING_STATUS_OPTIONS = [
-  { value: 'belum_invoice', label: 'Belum Invoice' },
   { value: 'belum_dikirim', label: 'Belum Dikirim' },
-  { value: 'belum_diterima', label: 'Belum Diterima' },
-  { value: 'belum_dikonfirmasi', label: 'Belum Dikonfirmasi' },
-  { value: 'menunggu_pembayaran', label: 'Menunggu Pembayaran' },
+  { value: 'belum_diterima', label: 'Dikirim ke Customer' },
+  { value: 'belum_dikonfirmasi', label: 'Diterima Customer' },
+  { value: 'menunggu_pembayaran', label: 'Follow Up' },
+  { value: 'revisi_dispute', label: 'Revisi / Dispute' },
   { value: 'lunas', label: 'Lunas' },
+];
+const BILLING_STATUS_LABELS = [
+  { value: 'belum_invoice', label: 'Belum Invoice' },
+  ...BILLING_STATUS_OPTIONS,
 ];
 const STATUS_NAVIGATION = [
   { value: 'running', label: 'Sedang Jalan', tone: 'running' },
@@ -122,7 +126,7 @@ function normalizeBillingStatus(value, invoiceNumber = '') {
     waiting_payment: 'menunggu_pembayaran',
     paid: 'lunas',
   };
-  if (BILLING_STATUS_OPTIONS.some((option) => option.value === normalized)) return normalized;
+  if (BILLING_STATUS_LABELS.some((option) => option.value === normalized)) return normalized;
   if (legacyMap[normalized]) return legacyMap[normalized];
   return isInvoiced({ invoiceNumber }) ? 'belum_dikirim' : 'belum_invoice';
 }
@@ -133,7 +137,7 @@ function getBillingStatusValue(order, overrideValue = '') {
 
 function getBillingStatusLabel(order, overrideValue = '') {
   const status = getBillingStatusValue(order, overrideValue);
-  return BILLING_STATUS_OPTIONS.find((option) => option.value === status)?.label || 'Belum Invoice';
+  return BILLING_STATUS_LABELS.find((option) => option.value === status)?.label || 'Belum Invoice';
 }
 
 function getBillingStatusTone(order, overrideValue = '') {
@@ -258,12 +262,10 @@ function SalesOrdersPage() {
   const [loading, setLoading] = useState(archive.isDatabaseMode);
   const [error, setError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [invoiceOverrides, setInvoiceOverrides] = useState({});
+  const [invoiceOverrides] = useState({});
   const [billingStatusOverrides, setBillingStatusOverrides] = useState(() => (
     archive.isDatabaseMode ? {} : readLocalBillingStatusOverrides()
   ));
-  const [invoiceDraft, setInvoiceDraft] = useState('');
-  const [invoiceEditOpen, setInvoiceEditOpen] = useState(false);
   const [billingStatusDraft, setBillingStatusDraft] = useState('belum_invoice');
   const [formOpen, setFormOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
@@ -317,10 +319,8 @@ function SalesOrdersPage() {
   ), [archive.isDatabaseMode, billingStatusOverrides]);
 
   useEffect(() => {
-    if (!selectedOrder || !canEditSelectedCommercial) setInvoiceEditOpen(false);
-    setInvoiceDraft(getOrderInvoiceNumber(selectedOrder));
     setBillingStatusDraft(getBillingStatusValue(selectedOrder, getBillingStatusOverride(selectedOrder)));
-  }, [selectedOrder, getOrderInvoiceNumber, getBillingStatusOverride, canEditSelectedCommercial]);
+  }, [selectedOrder, getBillingStatusOverride]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) persistLocalBillingStatusOverrides(billingStatusOverrides);
@@ -380,58 +380,14 @@ function SalesOrdersPage() {
 
   function openOrderDetail(order) {
     setSelectedOrder(order);
-    setInvoiceDraft(getOrderInvoiceNumber(order));
     setBillingStatusDraft(getBillingStatusValue(order, getBillingStatusOverride(order)));
   }
-
-  async function saveInvoiceDraft() {
-    if (!canEditSelectedCommercial || !selectedOrder) return;
-
-      const nextValue = invoiceDraft.trim();
-    if (!nextValue) {
-      notify({
-        type: 'error',
-        title: 'No. invoice belum diisi',
-        message: 'Masukkan nomor invoice sebelum disimpan.',
-      });
-      return;
-    }
-
-    try {
-      const nextOrder = {
-        ...selectedOrder,
-        invoiceNumber: nextValue,
-        billingStatus: billingStatusDraft === 'belum_invoice' ? 'belum_dikirim' : billingStatusDraft,
-      };
-      if (archive.isDatabaseMode) {
-        const savedOrder = await archive.upsertOrder(nextOrder, selectedOrder);
-        setSelectedOrder(savedOrder);
-        setListVersion((value) => value + 1);
-      } else {
-        setInvoiceOverrides((current) => ({ ...current, [selectedOrder.id]: nextValue }));
-        setSelectedOrder(nextOrder);
-      }
-
-      setInvoiceEditOpen(false);
-      notify({
-        title: 'Invoice tersimpan',
-        message: `No. invoice untuk ${selectedOrder.soNumber} berhasil diperbarui.`,
-      });
-    } catch (requestError) {
-      notify({
-        type: 'error',
-        title: 'Invoice gagal disimpan',
-        message: requestError.message,
-      });
-    }
-  }
-
-  const invoiceActionLabel = getOrderInvoiceNumber(selectedOrder) ? 'Edit' : 'Simpan';
 
   async function saveBillingStatusDraft(nextValue = billingStatusDraft) {
     if (!canEditSelectedCommercial || !selectedOrder) return;
 
-    const nextBillingStatus = normalizeBillingStatus(nextValue, getOrderInvoiceNumber(selectedOrder));
+    const resolvedValue = typeof nextValue === 'string' ? nextValue : billingStatusDraft;
+    const nextBillingStatus = normalizeBillingStatus(resolvedValue, getOrderInvoiceNumber(selectedOrder));
     if (selectedOrder.status !== 'completed') {
       notify({
         type: 'error',
@@ -441,11 +397,11 @@ function SalesOrdersPage() {
       return;
     }
 
-    if (nextBillingStatus !== 'belum_invoice' && !getOrderInvoiceNumber(selectedOrder)) {
+    if (!getOrderInvoiceNumber(selectedOrder)) {
       notify({
         type: 'error',
         title: 'Invoice belum tersedia',
-        message: 'Isi nomor invoice dulu sebelum memilih status lanjutan.',
+        message: 'Tunggu Finance input nomor invoice sebelum update status pengiriman.',
       });
       return;
     }
@@ -458,7 +414,7 @@ function SalesOrdersPage() {
     try {
       const nextOrder = { ...selectedOrder, billingStatus: nextBillingStatus };
       if (archive.isDatabaseMode) {
-        const savedOrder = await archive.upsertOrder(nextOrder, selectedOrder);
+        const savedOrder = await updateSalesOrderInvoiceDeliveryStatus(selectedOrder.id, nextBillingStatus);
         setSelectedOrder(savedOrder);
         setListVersion((value) => value + 1);
       } else {
@@ -477,13 +433,6 @@ function SalesOrdersPage() {
         message: requestError.message,
       });
     }
-  }
-
-  function openInvoiceEditModal() {
-    if (!canEditSelectedCommercial) return;
-    if (!selectedOrder) return;
-    setInvoiceDraft(getOrderInvoiceNumber(selectedOrder));
-    setInvoiceEditOpen(true);
   }
 
   useEffect(() => {
@@ -532,7 +481,12 @@ function SalesOrdersPage() {
       setEditingOrder(null);
       setFormOpen(false);
       setSelectedOrder(null);
-      notify({ title: editingOrder ? 'Sales Order diperbarui' : 'Sales Order dibuat', message: `${form.soNumber} berhasil disimpan.` });
+      notify({
+        title: editingOrder ? 'Sales Order diperbarui' : 'Sales Order dibuat',
+        message: form.soNumber
+          ? `${form.soNumber} berhasil disimpan.`
+          : 'Order berhasil disimpan dan menunggu Nomor SO dari Finance.',
+      });
     } catch (requestError) {
       notify({ type: 'error', title: 'Sales Order gagal disimpan', message: requestError.message });
     }
@@ -657,7 +611,7 @@ function SalesOrdersPage() {
                       </div>
                       <div className="order-primary">
                         <span>Nomor SO</span>
-                        <strong>{order.soNumber}</strong>
+                        <strong>{order.soNumber || 'Menunggu Finance'}</strong>
                       </div>
                       <div>
                         <span>Customer</span>
@@ -720,7 +674,7 @@ function SalesOrdersPage() {
             <header>
               <div>
                 <span>Detail Sales Order</span>
-                <h2>{selectedOrder.soNumber}</h2>
+                <h2>{selectedOrder.soNumber || 'Menunggu Nomor SO Finance'}</h2>
                 <p>{selectedOrder.customer} - {formatShipmentLabel(selectedOrder.shipment)}</p>
               </div>
               <button type="button" aria-label="Tutup detail Sales Order" onClick={() => setSelectedOrder(null)}><X size={19} /></button>
@@ -761,38 +715,22 @@ function SalesOrdersPage() {
                           {getBillingStatusLabel(selectedOrder, getBillingStatusOverride(selectedOrder))}
                         </strong>
                       </div>
-                      {canEditSelectedCommercial && getOrderInvoiceNumber(selectedOrder) ? (
-                        <button type="button" className="secondary-button invoice-edit-button" onClick={openInvoiceEditModal}>
-                          <Edit3 size={15} /> Edit
-                        </button>
-                      ) : null}
                     </div>
                     {getOrderInvoiceNumber(selectedOrder) ? (
                       <div className="order-invoice-card-value order-invoice-card-primary">
                         <span>No. Invoice</span>
                         <strong>{getOrderInvoiceNumber(selectedOrder)}</strong>
                       </div>
-                    ) : canEditSelectedCommercial ? (
-                      <div className="order-invoice-card-body">
-                        <input
-                          value={invoiceDraft}
-                          onChange={(event) => setInvoiceDraft(event.target.value)}
-                          placeholder="INV-2026-001"
-                        />
-                        <button type="button" className="primary-button invoice-save-button" onClick={saveInvoiceDraft}>
-                          {invoiceActionLabel}
-                        </button>
-                      </div>
                     ) : (
                       <div className="order-invoice-card-value order-invoice-card-primary">
                         <span>No. Invoice</span>
-                        <strong>Belum terinvoice</strong>
+                        <strong>Menunggu Finance</strong>
                       </div>
                     )}
-                    {canEditSelectedCommercial ? (
+                    {canEditSelectedCommercial && getOrderInvoiceNumber(selectedOrder) ? (
                       <div className="order-billing-controls">
                         <label className="order-billing-select">
-                          Status Billing
+                          Status Pengiriman Invoice
                           <select
                             value={billingStatusDraft}
                             style={getBillingSelectStyle(selectedOrder, billingStatusDraft)}
@@ -807,7 +745,6 @@ function SalesOrdersPage() {
                               <option
                                 key={option.value}
                                 value={option.value}
-                                disabled={option.value !== 'belum_invoice' && !getOrderInvoiceNumber(selectedOrder)}
                               >
                                 {option.label}
                               </option>
@@ -817,14 +754,13 @@ function SalesOrdersPage() {
                         <button
                           type="button"
                           className="secondary-button invoice-edit-button"
-                          onClick={saveBillingStatusDraft}
+                          onClick={() => saveBillingStatusDraft()}
                         >
                           Simpan Status
                         </button>
-                        {!getOrderInvoiceNumber(selectedOrder) ? (
-                          <small className="order-billing-note">Status selain Belum Invoice membutuhkan nomor invoice.</small>
-                        ) : null}
                       </div>
+                    ) : canEditSelectedCommercial ? (
+                      <small className="order-billing-note">Finance perlu input nomor invoice sebelum Sales bisa update status pengiriman.</small>
                     ) : null}
                   </div>
                 ) : null}
@@ -878,35 +814,6 @@ function SalesOrdersPage() {
 
             <footer>
               <button className="secondary-button" type="button" onClick={() => setSelectedOrder(null)}>Tutup</button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
-
-      {canEditSelectedCommercial && invoiceEditOpen ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setInvoiceEditOpen(false)}>
-          <section className="invoice-confirm-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <span>Invoice</span>
-                <h2>Ubah No. Invoice</h2>
-                <p>{selectedOrder?.soNumber || '-'}</p>
-              </div>
-            </header>
-            <div className="invoice-confirm-body">
-              <p>Masukkan nomor invoice baru.</p>
-              <div>
-                <span>No. Invoice</span>
-                <input
-                  value={invoiceDraft}
-                  onChange={(event) => setInvoiceDraft(event.target.value)}
-                  placeholder="INV-2026-001"
-                />
-              </div>
-            </div>
-            <footer>
-              <button className="secondary-button" type="button" onClick={() => setInvoiceEditOpen(false)}>Batal</button>
-              <button className="primary-button" type="button" onClick={saveInvoiceDraft}>Simpan</button>
             </footer>
           </section>
         </div>
