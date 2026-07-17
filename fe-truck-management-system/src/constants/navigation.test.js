@@ -13,4 +13,13 @@ describe('navigationGroups', () => {
       expect(item.roles).not.toContain(USER_ROLES.ADMIN);
     });
   });
+
+  it('menampilkan dashboard today dan order mingguan untuk finance', () => {
+    const overviewGroup = navigationGroups.find((group) => group.label === 'Overview');
+    const dashboardItem = overviewGroup?.items.find((item) => item.to === '/dashboard');
+    const weeklyItem = overviewGroup?.items.find((item) => item.to === '/weekly-orders');
+
+    expect(dashboardItem?.roles).toContain(USER_ROLES.FINANCE);
+    expect(weeklyItem?.roles).toContain(USER_ROLES.FINANCE);
+  });
 });

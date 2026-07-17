@@ -22,6 +22,10 @@ const nonFinanceRoles = [
   USER_ROLES.OPERATIONAL,
   USER_ROLES.OBSERVER,
 ];
+const overviewRoles = [
+  ...nonFinanceRoles,
+  USER_ROLES.FINANCE,
+];
 const orderRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.SALES,
@@ -40,8 +44,8 @@ export const navigationGroups = [
   {
     label: 'Overview',
     items: [
-      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: nonFinanceRoles },
-      { to: '/weekly-orders', label: 'Order Mingguan', icon: CalendarDays, roles: nonFinanceRoles },
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: overviewRoles },
+      { to: '/weekly-orders', label: 'Order Mingguan', icon: CalendarDays, roles: overviewRoles },
     ],
   },
   {

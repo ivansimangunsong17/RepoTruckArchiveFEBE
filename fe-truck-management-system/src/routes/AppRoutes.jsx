@@ -41,6 +41,7 @@ function LazyPage({ children }) {
 }
 
 const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
+const overviewRoles = [...nonFinanceRoles, USER_ROLES.FINANCE];
 const orderRoles = nonFinanceRoles;
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
 const adminRoles = [USER_ROLES.ADMIN];
@@ -64,7 +65,7 @@ export const router = createBrowserRouter([
       children: [
         { index: true, element: <Navigate to="/dashboard" replace /> },
         { path: 'dashboard', element: <LazyPage><Dashboard /></LazyPage> },
-        { path: 'weekly-orders', children: [guardedPage(nonFinanceRoles, <LazyPage><WeeklyOrdersPage /></LazyPage>)] },
+        { path: 'weekly-orders', children: [guardedPage(overviewRoles, <LazyPage><WeeklyOrdersPage /></LazyPage>)] },
         { path: 'profile', element: <LazyPage><ProfilePage /></LazyPage> },
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },

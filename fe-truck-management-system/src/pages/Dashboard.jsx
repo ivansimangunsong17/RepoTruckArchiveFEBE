@@ -1,4 +1,3 @@
-import { Navigate } from 'react-router-dom';
 import { USER_ROLES } from '../constants/roles';
 import { useAuth } from '../hooks/useAuth';
 import AdminDashboard from './dashboard/AdminDashboard';
@@ -12,7 +11,6 @@ function Dashboard() {
   if (user?.role === USER_ROLES.ADMIN) return <AdminDashboard />;
   if (user?.role === USER_ROLES.SALES) return <SalesDashboard />;
   if (user?.role === USER_ROLES.OPERATIONAL) return <OperationalDashboard />;
-  if (user?.role === USER_ROLES.FINANCE) return <Navigate to="/finance/order-verification" replace />;
   return <ManagementDashboard />;
 }
 
