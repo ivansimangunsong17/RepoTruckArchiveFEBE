@@ -739,8 +739,8 @@ function InvoiceDetailModal({ invoice, onClose }) {
 function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onSoChange, onSaveSoNumber, savingSoId }) {
   const isVerifiedOrder = (row) => row.verificationStatus === 'verified' || Boolean(row.soNumber);
   const orderTabs = [
-    { id: 'need-so', label: 'Belum Ada Nomor SO', match: (row) => !isVerifiedOrder(row) },
-    { id: 'running', label: 'SO Berjalan', match: isVerifiedOrder },
+    { id: 'need-so', label: 'Belum Ada Nomor SO', icon: Clock3, match: (row) => !isVerifiedOrder(row) },
+    { id: 'running', label: 'SO Berjalan', icon: CheckCircle2, match: isVerifiedOrder },
   ];
   const [activeOrderTab, setActiveOrderTab] = useState(orderTabs[0].id);
   const currentTab = orderTabs.find((tab) => tab.id === activeOrderTab) || orderTabs[0];
@@ -761,41 +761,61 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onS
         </div>
       </div>
 
-      <div className="border-b border-slate-200 bg-slate-50 px-2 py-1">
-        <div className="flex flex-wrap items-center justify-start gap-1">
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter verifikasi nomor SO">
           {orderTabs.map((tab) => {
             const count = searchedRows.filter((row) => tab.match(row)).length;
             const active = tab.id === activeOrderTab;
+            const Icon = tab.icon;
+            const activeTone = tab.id === 'need-so'
+              ? 'border-red-200 bg-red-50 text-red-800 ring-red-100'
+              : 'border-sky-200 bg-sky-50 text-sky-800 ring-sky-100';
+            const inactiveTone = 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-800';
+            const iconTone = active
+              ? tab.id === 'need-so'
+                ? 'bg-white text-red-600 ring-1 ring-red-100'
+                : 'bg-white text-sky-600 ring-1 ring-sky-100'
+              : 'bg-white text-slate-400';
+            const countTone = active
+              ? tab.id === 'need-so'
+                ? 'bg-red-100 text-red-700'
+                : 'bg-sky-100 text-sky-700'
+              : 'bg-white text-slate-500';
 
             return (
               <button
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-1.5 py-0.5 text-[10px] font-semibold ${active ? 'border-slate-300 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                aria-selected={active}
+                className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${active ? `${activeTone} shadow-sm ring-1` : inactiveTone}`}
                 key={tab.id}
                 onClick={() => setActiveOrderTab(tab.id)}
+                role="tab"
                 type="button"
               >
-                <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${active ? 'bg-white text-slate-700' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
-                {tab.label}
+                <span className={`grid h-5 w-5 place-items-center rounded-full ${iconTone}`}>
+                  <Icon size={12} />
+                </span>
+                <span className="whitespace-nowrap">{tab.label}</span>
+                <span className={`grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] leading-none ${countTone}`}>{count}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1020px] border-collapse text-left text-[11px]">
-          <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+      <div className="table-wrap">
+        <table className="data-table master-table finance-master-table min-w-[1020px]">
+          <thead>
             <tr>
               {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Nomor SO Accurate', 'Aksi'].map((column) => (
-                <th className="whitespace-nowrap px-2 py-1.5" key={column}>{column}</th>
+                <th key={column}>{column}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {Object.entries(groupedRows).map(([salesName, salesRows]) => (
               <Fragment key={salesName}>
-                <tr className="bg-white">
-                  <td className="border-b border-t border-slate-200 px-2 py-1" colSpan={7}>
+                <tr className="finance-group-row">
+                  <td colSpan={7}>
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Sales</span>
@@ -907,9 +927,9 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
   }, [activeRpujTab]);
 
   const tabs = [
-    { id: 'need-approval', label: 'RPUJ Butuh Approval', count: pendingRows.length },
-    { id: 'approved', label: 'RPUJ Sudah Approved', count: approvedRows.length },
-    { id: 'recap', label: 'Recap Semua Data Selesai', count: recapRows.length },
+    { id: 'need-approval', label: 'RPUJ Butuh Approval', icon: Clock3, count: pendingRows.length, tone: 'red' },
+    { id: 'approved', label: 'RPUJ Sudah Approved', icon: CheckCircle2, count: approvedRows.length, tone: 'emerald' },
+    { id: 'recap', label: 'Recap Semua Data Selesai', icon: FileText, count: recapRows.length, tone: 'sky' },
   ];
 
   const activeRows = activeRpujTab === 'approved'
@@ -923,23 +943,47 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
-        <div className="flex flex-wrap items-center gap-1">
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter RPUJ Finance">
           {tabs.map((tab) => {
             const active = tab.id === activeRpujTab;
+            const Icon = tab.icon;
+            const toneClass = {
+              red: {
+                active: 'border-red-200 bg-red-50 text-red-800 ring-red-100',
+                icon: 'bg-white text-red-600 ring-1 ring-red-100',
+                count: 'bg-red-100 text-red-700',
+              },
+              emerald: {
+                active: 'border-emerald-200 bg-emerald-50 text-emerald-800 ring-emerald-100',
+                icon: 'bg-white text-emerald-600 ring-1 ring-emerald-100',
+                count: 'bg-emerald-100 text-emerald-700',
+              },
+              sky: {
+                active: 'border-sky-200 bg-sky-50 text-sky-800 ring-sky-100',
+                icon: 'bg-white text-sky-600 ring-1 ring-sky-100',
+                count: 'bg-sky-100 text-sky-700',
+              },
+            }[tab.tone];
+
             return (
               <button
+                aria-selected={active}
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveRpujTab(tab.id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[10px] font-semibold ${
+                role="tab"
+                className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${
                   active
-                    ? 'border-slate-300 bg-slate-100 text-slate-900'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    ? `${toneClass.active} shadow-sm ring-1`
+                    : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-800'
                 }`}
               >
-                <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${active ? 'bg-white text-slate-700' : 'bg-slate-100 text-slate-500'}`}>{tab.count}</span>
+                <span className={`grid h-5 w-5 place-items-center rounded-full ${active ? toneClass.icon : 'bg-white text-slate-400'}`}>
+                  <Icon size={12} />
+                </span>
                 <span className="whitespace-nowrap">{tab.label}</span>
+                <span className={`grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] leading-none ${active ? toneClass.count : 'bg-white text-slate-500'}`}>{tab.count}</span>
               </button>
             );
           })}
@@ -947,10 +991,10 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
       </div>
 
       {activeRpujTab === 'recap' ? (
-        <div className="overflow-x-auto">
+        <div className="table-wrap">
           {recapError ? <div className="border-b border-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">{recapError}</div> : null}
           {recapLoading ? <div className="border-b border-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">Memuat recap perjalanan selesai...</div> : null}
-          <table className="w-full min-w-[1060px] table-fixed border-collapse text-left text-[11px]">
+          <table className="data-table master-table finance-master-table min-w-[1060px] table-fixed">
             <colgroup>
               <col className="w-[10%]" />
               <col className="w-[15%]" />
@@ -960,10 +1004,10 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
               <col className="w-[16%]" />
               <col className="w-[8%]" />
             </colgroup>
-            <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+            <thead>
               <tr>
                 {['Selesai', 'SO / Dokumen', 'Customer', 'Rute', 'Unit', 'Nilai', 'Status'].map((column) => (
-                <th className="whitespace-nowrap px-2 py-1.5" key={column}>{column}</th>
+                <th key={column}>{column}</th>
               ))}
               </tr>
             </thead>
@@ -974,12 +1018,12 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                     <strong className="block text-[11px] font-semibold text-slate-900">{row.completedAt}</strong>
                     <span className="mt-0.5 block text-[9px] font-medium text-slate-500">{row.tripDate}</span>
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className="finance-wrap-cell px-2 py-1.5">
                     <strong className="block text-[11px] font-semibold text-slate-950">{row.soNumber || '-'}</strong>
                     <span className="mt-0.5 block text-[9px] font-medium text-slate-500">DO: {row.doNumber || '-'}</span>
                     <span className="block text-[9px] font-medium text-slate-500">SPK: {row.spkNumber || '-'}</span>
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td className="finance-wrap-cell px-2 py-1.5">
                     <strong className="block max-w-[210px] text-[11px] font-semibold text-slate-900">{row.customer || '-'}</strong>
                     <span className="mt-0.5 block max-w-[210px] text-[9px] font-medium text-slate-500">{row.serviceName || '-'}</span>
                   </td>
@@ -1022,8 +1066,8 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
           </table>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-[11px]">
+        <div className="table-wrap">
+          <table className="data-table master-table finance-master-table min-w-[960px] table-fixed">
             <colgroup>
               <col className="w-[17%]" />
               <col className="w-[19%]" />
@@ -1031,10 +1075,10 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
               <col className="w-[25%]" />
               <col className="w-[28%]" />
             </colgroup>
-            <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+            <thead>
               <tr>
                 {['Job / Container', 'Pengajuan', 'Status', 'Driver / Rekening', 'Aksi'].map((column) => (
-                  <th className="whitespace-nowrap px-2 py-1.5" key={column}>{column}</th>
+                  <th key={column}>{column}</th>
                 ))}
               </tr>
             </thead>
@@ -1048,8 +1092,8 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
 
                 return (
                   <Fragment key={soNumber}>
-                    <tr className="bg-white">
-                      <td className="border-b border-t border-slate-200 px-2 py-1.5" colSpan={5}>
+                    <tr className="finance-group-row">
+                      <td colSpan={5}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             <strong className="text-xs font-black text-slate-950">{soNumber}</strong>
@@ -1149,18 +1193,21 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
       id: 'need-number',
       label: 'Belum Nomor Invoice',
       icon: FileText,
+      tone: 'red',
       match: (row) => row.invoiceStatus === 'Butuh Nomor Invoice',
     },
     {
       id: 'in-progress',
       label: 'Menunggu Sales',
       icon: Clock3,
+      tone: 'sky',
       match: (row) => row.invoiceStatus === 'Menunggu Update Status',
     },
     {
       id: 'paid',
       label: 'Lunas',
       icon: CheckCircle2,
+      tone: 'emerald',
       match: (row) => row.invoiceStatus === 'Lunas',
     },
   ];
@@ -1171,34 +1218,59 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
           <Info size={12} />
           <span>Keterangan</span>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter invoice Finance">
           {invoiceTabs.map((tab) => {
           const count = searchedRows.filter((row) => tab.match(row)).length;
           const active = tab.id === activeInvoiceTab;
+          const toneClass = {
+            red: {
+              active: 'border-red-200 bg-red-50 text-red-800 ring-red-100',
+              icon: 'bg-white text-red-600 ring-1 ring-red-100',
+              count: 'bg-red-100 text-red-700',
+            },
+            sky: {
+              active: 'border-sky-200 bg-sky-50 text-sky-800 ring-sky-100',
+              icon: 'bg-white text-sky-600 ring-1 ring-sky-100',
+              count: 'bg-sky-100 text-sky-700',
+            },
+            emerald: {
+              active: 'border-emerald-200 bg-emerald-50 text-emerald-800 ring-emerald-100',
+              icon: 'bg-white text-emerald-600 ring-1 ring-emerald-100',
+              count: 'bg-emerald-100 text-emerald-700',
+            },
+          }[tab.tone];
 
           return (
             <button
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[10px] font-semibold ${active ? 'border-slate-300 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+              aria-selected={active}
+              className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${
+                active
+                  ? `${toneClass.active} shadow-sm ring-1`
+                  : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-800'
+              }`}
               key={tab.id}
               onClick={() => setActiveInvoiceTab(tab.id)}
+              role="tab"
               type="button"
             >
-              <tab.icon size={12} />
+              <span className={`grid h-5 w-5 place-items-center rounded-full ${active ? toneClass.icon : 'bg-white text-slate-400'}`}>
+                <tab.icon size={12} />
+              </span>
               <span className="whitespace-nowrap">{tab.label}</span>
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-white text-slate-700' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+              <span className={`grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] leading-none ${active ? toneClass.count : 'bg-white text-slate-500'}`}>{count}</span>
             </button>
           );
         })}
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1000px] table-fixed border-collapse text-left text-sm">
+      <div className="table-wrap">
+        <table className="data-table master-table finance-master-table min-w-[1000px] table-fixed">
           <colgroup>
             <col className="w-[12%]" />
             <col className="w-[17%]" />
@@ -1210,10 +1282,10 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
             <col className="w-[10%]" />
             <col className="w-[21%]" />
           </colgroup>
-          <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+          <thead>
             <tr>
               {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Nominal', 'No. Invoice', 'Aksi'].map((column) => (
-                <th className="whitespace-nowrap px-2.5 py-1.5" key={column}>{column}</th>
+                <th key={column}>{column}</th>
               ))}
             </tr>
           </thead>

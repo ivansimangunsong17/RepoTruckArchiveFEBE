@@ -42,7 +42,7 @@ describe('OperationalForm', () => {
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText('Status Pekerjaan'), 'completed');
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
     expect(screen.getByText(/Pekerjaan belum dapat diselesaikan/i)).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe('OperationalForm', () => {
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText('Status Pekerjaan'), 'running');
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'running');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
     expect(screen.getByText(/Truck, driver otomatis, dan waktu mulai wajib diisi/i)).toBeInTheDocument();
@@ -108,5 +108,39 @@ describe('OperationalForm', () => {
 
     expect(screen.getByRole('option', { name: /B 2020 OK/i })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /B 4040 NO/i })).not.toBeInTheDocument();
+  });
+
+  it('memasukkan biaya lainnya ke preview SPK', async () => {
+    const user = userEvent.setup();
+    const write = vi.fn();
+    const close = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue({
+      document: { write, close },
+    });
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          spkNumber: 'SPK-TEST-001',
+          rpujNotes: JSON.stringify({ amount: 150000, notes: 'Tol dan parkir' }),
+        }}
+        masterDestinations={[{ name: 'Bandung', uj20ft: 500000 }]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /preview spk/i }));
+
+    const html = write.mock.calls.map(([value]) => value).join('');
+    expect(html).toContain('UJ');
+    expect(html).toContain('Biaya Lainnya');
+    expect(html).toContain('Catatan Biaya Lainnya');
+    expect(html).toContain('Tol dan parkir');
+    expect(html).toContain('Total RPUJ');
+
+    open.mockRestore();
   });
 });

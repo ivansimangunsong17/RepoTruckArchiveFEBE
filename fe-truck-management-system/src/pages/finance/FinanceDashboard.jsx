@@ -239,13 +239,13 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
 
               <section>
                 <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Daftar Dokumen Perjalanan</h3>
-                <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
-                  <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <div className="table-wrap rounded-md border border-slate-200 bg-white">
+                  <table className="data-table master-table finance-master-table min-w-[760px]">
+                    <thead>
                       <tr>
-                        <th className="px-3 py-2">Dokumen</th>
-                        <th className="px-3 py-2">Nomor</th>
-                        <th className="px-3 py-2">File</th>
+                        <th>Dokumen</th>
+                        <th>Nomor</th>
+                        <th>File</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -580,9 +580,9 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
         ) : null}
 
         {hasRows ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1120px] border-collapse text-left text-xs">
-              <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
+          <div className="table-wrap">
+            <table className="data-table master-table finance-master-table min-w-[1120px]">
+              <thead>
                 <tr>
                   {[
                     'Selesai',
@@ -593,17 +593,17 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                     'Nilai',
                     'Status',
                     'Aksi',
-                  ].map((column) => <th className="px-3 py-2" key={column}>{column}</th>)}
+                  ].map((column) => <th key={column}>{column}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr className="border-t border-slate-100 align-top hover:bg-slate-50" key={row.id}>
-                    <td className="px-3 py-2">
+                    <td className="finance-wrap-cell px-3 py-2">
                       <strong className="block text-sm text-slate-900">{formatDate(row.completedAt)}</strong>
                       <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{formatDateTime(row.completedAt)}</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="finance-wrap-cell px-3 py-2">
                       <strong className="block text-sm text-slate-950">{row.soNumber || '-'}</strong>
                       <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">DO: {row.doNumber || '-'}</span>
                       <span className="block text-[10px] font-semibold text-slate-500">SPK: {row.spkNumber || '-'}</span>

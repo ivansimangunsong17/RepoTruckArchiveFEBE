@@ -380,7 +380,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const truckCode = formatTruckUnitCode(selectedTruck?.unitCode || container.unitCode || container.truckCode);
     const plateNumber = form.plateNumber || container.plateNumber || '';
     const truckPlate = truckCode && plateNumber ? `${truckCode} - ${plateNumber}` : truckCode || plateNumber || '-';
-    const rpujLabel = ujAmount > 0 ? formatCurrency(ujAmount) : '-';
+    const otherCostLabel = otherCostAmountValue > 0 ? formatCurrency(otherCostAmountValue) : '-';
+    const totalRpujLabel = totalJourneyCost > 0 ? formatCurrency(totalJourneyCost) : '-';
 
     return [
       { label: 'No. SPK', value: form.spkNumber || '-' },
@@ -394,7 +395,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       { label: 'Destination', value: spkValue(container.destination) },
       { label: 'Container Size', value: spkValue(container.size || container.containerSize) },
       { label: 'Tanggal Jalan', value: spkDateValue(container.tripDate) },
-      { label: 'RPUJ', value: rpujLabel, textSeparator: '' },
+      { label: 'UJ', value: ujAmount > 0 ? formatCurrency(ujAmount) : '-', textSeparator: '' },
+      { label: 'Biaya Lainnya', value: otherCostLabel, textSeparator: '' },
+      { label: 'Catatan Biaya Lainnya', value: spkValue(form.otherCostNotes), textSeparator: '' },
+      { label: 'Total RPUJ', value: totalRpujLabel, textSeparator: '' },
     ];
   }
 

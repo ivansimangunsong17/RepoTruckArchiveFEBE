@@ -154,6 +154,52 @@
 .master-table .cell-main strong { color: #202124; font-size: .76rem; font-weight: 800; }
 .master-table .cell-main span { color: #686b71; font-size: .65rem; font-weight: 500; }
 .master-table .badge { align-items: center; gap: 5px; white-space: nowrap; }
+.finance-master-table th {
+  padding: 12px 16px;
+  color: #474a50;
+  background: #f1f1f2;
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+.finance-master-table td {
+  padding: 14px 16px;
+  color: #3f4248;
+  font-size: .74rem;
+  font-weight: 500;
+  vertical-align: middle;
+}
+.finance-master-table tbody tr:hover {
+  background: #fafcff;
+}
+.finance-master-table .finance-group-row td {
+  border-top: 1px solid #edf0f4;
+  border-bottom: 1px solid #edf0f4;
+  background: #fafafa;
+}
+.finance-master-table tr[aria-hidden="true"] td {
+  height: 1px;
+  padding: 0;
+  border-bottom: 0;
+  background: #edf0f4;
+}
+.finance-master-table .finance-wrap-cell {
+  white-space: normal;
+}
+.finance-master-table input {
+  min-height: 34px;
+  border: 1px solid #cfd1d5;
+  border-radius: 7px;
+  color: #25272b;
+  background: #fff;
+  font-size: .71rem;
+  font-weight: 550;
+}
+.finance-master-table input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px #dc171f18;
+}
 .table-actions button.danger { color: #c74343; border-color: #f1d6d6; }
 .inline-action { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid #f0d4d5; border-radius: 6px; color: #b91118; background: #fff5f5; font-size: .63rem; font-weight: 700; }
 .master-pagination { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 13px 17px; border-top: 1px solid var(--border); color: #73767c; background: #fafafa; font-size: .62rem; }
