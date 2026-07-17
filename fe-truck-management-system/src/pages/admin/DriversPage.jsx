@@ -3,9 +3,28 @@ import { buildOperationalJobs, getActiveOperationalJobs } from '../../data/opera
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { useArchiveData } from '../../hooks/useArchiveData';
 
+function parseDateAsLocal(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
 function formatLicenseDate(value) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '-';
+  const parsed = parseDateAsLocal(value);
+  if (!parsed) return '-';
   return parsed.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
@@ -17,7 +36,9 @@ function formatTruckNumber(unitCode) {
 
 function getLicenseState(value) {
   const today = new Date();
-  const expiry = new Date(value);
+  today.setHours(0, 0, 0, 0);
+  const expiry = parseDateAsLocal(value);
+  if (!expiry) return { label: '-', tone: 'muted' };
   const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
   if (Number.isNaN(daysLeft)) return { label: '-', tone: 'muted' };
   if (daysLeft < 0) return { label: 'Expired', tone: 'danger' };

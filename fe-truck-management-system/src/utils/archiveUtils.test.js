@@ -43,4 +43,8 @@ describe('formatting', () => {
   it('memformat tanggal valid menggunakan locale Indonesia', () => {
     expect(formatDate('2026-06-23')).toMatch(/23.*Jun.*2026/i);
   });
+
+  it('tidak menggeser tanggal saat menerima format YYYY-MM-DD', () => {
+    expect(formatDate('2026-07-17')).toMatch(/17.*Jul.*2026/i);
+  });
 });

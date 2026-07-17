@@ -238,6 +238,46 @@ describe('MasterDataPage database mode', () => {
     expect(dateInput).toHaveValue('2027-03-18');
   });
 
+  it('tidak menggeser tanggal saat row edit berasal dari Date object', async () => {
+    const user = userEvent.setup();
+    const originalToISOString = Date.prototype.toISOString;
+    Date.prototype.toISOString = vi.fn(() => '2027-03-17T17:00:00.000Z');
+
+    try {
+      const dateRows = [{
+        id: 'row-4',
+        name: 'Sopir Lokal',
+        status: 'Aktif',
+        licenseExpiry: new Date(2027, 2, 18),
+      }];
+      fetchMasterPage.mockResolvedValue({ rows: dateRows, total: dateRows.length });
+      useArchiveData.mockReturnValue({
+        isDatabaseMode: true,
+        masters: { customers: dateRows },
+        upsertMaster,
+        removeMaster,
+      });
+
+      const { container } = renderPage({
+        pageFields: [
+          { key: 'name', label: 'Nama Data', placeholder: 'Masukkan nama', required: true },
+          { key: 'licenseExpiry', label: 'Masa Berlaku SIM', type: 'date', required: true },
+          { key: 'status', label: 'Status', type: 'select', defaultValue: 'Aktif', options: [
+            { value: 'Aktif', label: 'Aktif' },
+            { value: 'Tidak Aktif', label: 'Tidak Aktif' },
+          ] },
+        ],
+      });
+
+      await user.click(await screen.findByRole('button', { name: 'Edit Data' }));
+
+      const dateInput = container.querySelector('input[type="date"]');
+      expect(dateInput).toHaveValue('2027-03-18');
+    } finally {
+      Date.prototype.toISOString = originalToISOString;
+    }
+  });
+
   it('menolak PDF pada field import gambar', async () => {
     const user = userEvent.setup();
     const { container } = renderPage({

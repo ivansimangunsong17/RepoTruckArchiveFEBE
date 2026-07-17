@@ -2,8 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Clock3,
-  FileText,
   Info,
+  FileText,
   ReceiptText,
   RotateCcw,
   Search,
@@ -12,6 +12,7 @@ import {
 import {
   approveFinanceRpuj,
   fetchFinanceInvoices,
+  fetchFinanceCompletedTrips,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
   rejectFinanceRpuj,
@@ -368,6 +369,7 @@ function normalizeFinanceOrderRow(row = {}) {
     notes: row.notes || '-',
     status: row.status || (row.soNumber ? 'No. SO Terisi' : 'Menunggu No. SO Accurate'),
     soNumber: row.soNumber || '',
+    soNumberDraft: row.soNumber || '',
     verificationStatus: row.verificationStatus || (row.soNumber ? 'verified' : 'pending_so'),
     operationalStatus: row.operationalStatus || '',
   };
@@ -425,6 +427,31 @@ function normalizeFinanceInvoiceRow(row = {}) {
   };
 }
 
+function normalizeFinanceCompletedTripRow(row = {}) {
+  return {
+    id: row.id,
+    completedAt: formatDisplayDate(row.completedAt || row.completed_at || row.finishedAt),
+    soNumber: row.soNumber || row.so_number || '-',
+    doNumber: row.doNumber || row.do_number || '-',
+    spkNumber: row.spkNumber || row.spk_number || '-',
+    customer: row.customer || row.customerName || '-',
+    serviceName: row.serviceName || row.orderType || row.shipmentType || '-',
+    origin: row.origin || row.source || '-',
+    destination: row.destination || '-',
+    containerSize: row.containerSize || row.container || '-',
+    quantity: Number(row.quantity || row.containerQuantity || 1),
+    truck: row.truck || '-',
+    driver: row.driver || '-',
+    totalRevenue: Number(row.totalRevenue || row.revenue || 0),
+    journeyMoney: Number(row.journeyMoney || row.ujAmount || 0),
+    additionalCost: Number(row.additionalCost || 0),
+    estimatedMargin: Number(row.estimatedMargin || row.margin || 0),
+    documentStatus: row.documentStatus || row.document_status || '-',
+    invoiceStatus: row.invoiceStatus || row.invoice_status || '-',
+    tripDate: formatDisplayDate(row.tripDate || row.departureDate || row.runningDate || row.completedAt),
+  };
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -443,8 +470,8 @@ function statusClass(value) {
 
 function StatusPill({ value }) {
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(value)}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-45" aria-hidden="true" />
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${statusClass(value)}`}>
+      <span className="h-1 w-1 rounded-full bg-current opacity-45" aria-hidden="true" />
       {value || '-'}
     </span>
   );
@@ -462,8 +489,8 @@ function StatusFlow({ items }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map((item, index) => (
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600" key={item}>
-          <span className="grid h-4 w-4 place-items-center rounded bg-slate-100 text-[10px] text-slate-500">{index + 1}</span>
+        <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600" key={item}>
+          <span className="grid h-4 w-4 place-items-center rounded bg-slate-100 text-[9px] text-slate-500">{index + 1}</span>
           {item}
         </span>
       ))}
@@ -474,9 +501,9 @@ function StatusFlow({ items }) {
 function SearchBar({ query, onChange }) {
   return (
     <label className="flex h-8 items-center rounded-lg border border-slate-300 bg-white px-2.5 focus-within:border-slate-400">
-      <Search className="mr-2 text-slate-400" size={15} />
+      <Search className="mr-2 text-slate-400" size={14} />
       <input
-        className="w-full border-0 bg-transparent text-xs font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+        className="w-full border-0 bg-transparent text-xs font-medium text-slate-900 outline-none placeholder:text-slate-400"
         onChange={(event) => onChange(event.target.value)}
         placeholder="Cari No. SO, sales, customer, tujuan..."
         value={query}
@@ -709,10 +736,11 @@ function InvoiceDetailModal({ invoice, onClose }) {
   );
 }
 
-function OrderVerificationTable({ rows, query, onSelectOrder, onSoChange, onSaveSoNumber, savingSoId }) {
+function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onSoChange, onSaveSoNumber, savingSoId }) {
+  const isVerifiedOrder = (row) => row.verificationStatus === 'verified' || Boolean(row.soNumber);
   const orderTabs = [
-    { id: 'need-so', label: 'Belum Ada Nomor SO', match: (row) => !row.soNumber },
-    { id: 'running', label: 'SO Berjalan', match: (row) => Boolean(row.soNumber) },
+    { id: 'need-so', label: 'Belum Ada Nomor SO', match: (row) => !isVerifiedOrder(row) },
+    { id: 'running', label: 'SO Berjalan', match: isVerifiedOrder },
   ];
   const [activeOrderTab, setActiveOrderTab] = useState(orderTabs[0].id);
   const currentTab = orderTabs.find((tab) => tab.id === activeOrderTab) || orderTabs[0];
@@ -726,221 +754,391 @@ function OrderVerificationTable({ rows, query, onSelectOrder, onSoChange, onSave
   }, {});
 
   return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white px-3 py-1.5">
-        {orderTabs.map((tab) => {
-          const count = searchedRows.filter((row) => tab.match(row)).length;
-          const active = tab.id === activeOrderTab;
+    <div className="space-y-0">
+      <div className="border-b border-slate-200 bg-slate-50 px-2 py-1">
+        <div className="max-w-sm">
+          <SearchBar query={query} onChange={onQueryChange} />
+        </div>
+      </div>
 
-          return (
-            <button
-              className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-black ${active ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
-              key={tab.id}
-              onClick={() => setActiveOrderTab(tab.id)}
-              type="button"
-            >
-              {tab.label}
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>{count}</span>
-            </button>
-          );
-        })}
+      <div className="border-b border-slate-200 bg-slate-50 px-2 py-1">
+        <div className="flex flex-wrap items-center justify-start gap-1">
+          {orderTabs.map((tab) => {
+            const count = searchedRows.filter((row) => tab.match(row)).length;
+            const active = tab.id === activeOrderTab;
+
+            return (
+              <button
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-1.5 py-0.5 text-[10px] font-semibold ${active ? 'border-slate-300 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                key={tab.id}
+                onClick={() => setActiveOrderTab(tab.id)}
+                type="button"
+              >
+                <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${active ? 'bg-white text-slate-700' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
-        <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
-          <tr>
-            {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Nomor SO Accurate', 'Aksi'].map((column) => (
-              <th className="px-3 py-1.5" key={column}>{column}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(groupedRows).map(([salesName, salesRows]) => (
-            <Fragment key={salesName}>
-              <tr className="bg-white">
-                <td className="border-b border-t border-slate-200 px-3 py-1.5" colSpan={7}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Sales</span>
-                      <strong className="ml-2 text-sm font-black text-slate-900">{salesName}</strong>
-                    </div>
-                    <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700">{salesRows.length} order</span>
-                  </div>
-                </td>
-              </tr>
-              <tr aria-hidden="true">
-                <td className="h-px bg-slate-300 p-0" colSpan={7} />
-              </tr>
-              {salesRows.map((row) => (
-                <Fragment key={row.id}>
-                  <tr className="align-middle hover:bg-slate-50">
-                    <td className="px-3 py-1.5 font-semibold text-slate-700">{row.orderDate}</td>
-                    <td className="px-3 py-1.5 font-black text-slate-900">{row.destination}</td>
-                    <td className="px-3 py-1.5 text-slate-700">{row.orderType}</td>
-                    <td className="px-3 py-1.5">
-                      <StatusPill value={row.paymentTerms} />
-                    </td>
-                    <td className="px-3 py-1.5 font-semibold text-slate-800">{row.runningDate}</td>
-                    <td className="px-3 py-1.5">
-                      {activeOrderTab === 'need-so' ? (
-                        <div className="flex min-w-[230px] items-center gap-1.5">
-                          <input
-                            className="h-8 w-40 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-rose-400"
-                            onChange={(event) => onSoChange(row.id, event.target.value)}
-                            placeholder="SO Accurate"
-                            value={row.soNumber}
-                          />
-                          <button
-                            className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-40"
-                            disabled={!row.soNumber || savingSoId === row.id}
-                            onClick={() => onSaveSoNumber(row.id)}
-                            type="button"
-                          >
-                            {savingSoId === row.id ? 'Menyimpan' : 'Simpan'}
-                          </button>
-                        </div>
-                      ) : (
-                        <div>
-                          <span className="block font-black text-slate-900">{row.soNumber}</span>
-                          <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">Order sedang berjalan</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <button className="rounded-md bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700" onClick={() => onSelectOrder(row.id)} type="button">Detail</button>
-                    </td>
-                  </tr>
-                  <tr aria-hidden="true">
-                    <td className="h-px bg-slate-200 p-0" colSpan={7} />
-                  </tr>
-                </Fragment>
-              ))}
-            </Fragment>
-          ))}
-          {!filteredRows.length ? (
+        <table className="w-full min-w-[1020px] border-collapse text-left text-[11px]">
+          <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
             <tr>
-              <td className="px-3 py-4 text-center text-sm font-semibold text-slate-400" colSpan={7}>Tidak ada order pada klasifikasi ini.</td>
+              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Nomor SO Accurate', 'Aksi'].map((column) => (
+                <th className="whitespace-nowrap px-2 py-1.5" key={column}>{column}</th>
+              ))}
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {Object.entries(groupedRows).map(([salesName, salesRows]) => (
+              <Fragment key={salesName}>
+                <tr className="bg-white">
+                  <td className="border-b border-t border-slate-200 px-2 py-1" colSpan={7}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Sales</span>
+                        <strong className="ml-2 text-[11px] font-black text-slate-900">{salesName}</strong>
+                      </div>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{salesRows.length} order</span>
+                    </div>
+                  </td>
+                </tr>
+                <tr aria-hidden="true">
+                  <td className="h-px bg-slate-200 p-0" colSpan={7} />
+                </tr>
+                {salesRows.map((row) => (
+                  <Fragment key={row.id}>
+                    <tr className="align-middle hover:bg-slate-50">
+                      <td className="px-2 py-1 font-semibold text-slate-700">{row.orderDate}</td>
+                      <td className="px-2 py-1 font-black text-slate-900">{row.destination}</td>
+                      <td className="px-2 py-1 text-slate-700">{row.orderType}</td>
+                      <td className="px-2 py-1">
+                        <StatusPill value={row.paymentTerms} />
+                      </td>
+                      <td className="px-2 py-1 font-semibold text-slate-800">{row.runningDate}</td>
+                      <td className="px-2 py-1">
+                        {activeOrderTab === 'need-so' ? (
+                          <div className="flex min-w-[190px] items-center gap-1">
+                            <input
+                              className="h-6 w-32 rounded-lg border border-slate-300 px-2 text-[11px] font-semibold text-slate-900 outline-none focus:border-slate-400"
+                              onChange={(event) => onSoChange(row.id, event.target.value)}
+                              placeholder="SO Accurate"
+                              value={row.soNumberDraft || ''}
+                            />
+                            <button
+                              className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                              disabled={!String(row.soNumberDraft || '').trim() || savingSoId === row.id}
+                              onClick={() => onSaveSoNumber(row.id)}
+                              type="button"
+                            >
+                              {savingSoId === row.id ? 'Menyimpan' : 'Simpan'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="block text-[11px] font-black text-slate-900">{row.soNumber}</span>
+                            <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Order sedang berjalan</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-1">
+                        <button className="rounded-md bg-slate-900 px-1.5 py-1 text-[10px] font-semibold text-white hover:bg-slate-800" onClick={() => onSelectOrder(row.id)} type="button">Detail</button>
+                      </td>
+                    </tr>
+                    <tr aria-hidden="true">
+                      <td className="h-px bg-slate-200 p-0" colSpan={7} />
+                    </tr>
+                  </Fragment>
+                ))}
+              </Fragment>
+            ))}
+            {!filteredRows.length ? (
+              <tr>
+                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={7}>Tidak ada order pada klasifikasi ini.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
 
 function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelectRpuj, rpujBusyId }) {
-  const filteredRows = rows.filter((row) => `${row.soNumber} ${row.jobNumber} ${row.customer} ${row.destination} ${row.container} ${row.driver} ${row.truck}`.toLowerCase().includes(query.toLowerCase()));
-  const groupedRows = filteredRows.reduce((groups, row) => {
+  const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
+  const [recapRows, setRecapRows] = useState([]);
+  const [recapLoading, setRecapLoading] = useState(false);
+  const [recapError, setRecapError] = useState('');
+
+  const searchableRows = rows.filter((row) =>
+    `${row.soNumber} ${row.jobNumber} ${row.customer} ${row.destination} ${row.container} ${row.driver} ${row.truck} ${row.status}`.toLowerCase().includes(query.toLowerCase()));
+
+  const pendingRows = searchableRows.filter((row) => row.status === 'Menunggu Approval Finance');
+  const approvedRows = searchableRows.filter((row) =>
+    ['Disetujui Finance', 'Bukti Transfer Diupload', 'SPK Terbit'].includes(row.status));
+  const recapSearchableRows = recapRows.filter((row) =>
+    `${row.completedAt} ${row.soNumber} ${row.doNumber} ${row.spkNumber} ${row.customer} ${row.serviceName} ${row.origin} ${row.destination} ${row.containerSize} ${row.truck} ${row.driver} ${row.documentStatus} ${row.invoiceStatus}`.toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => {
+    if (activeRpujTab !== 'recap') return undefined;
+    let active = true;
+    setRecapLoading(true);
+    setRecapError('');
+    fetchFinanceCompletedTrips({ page: 1, pageSize: 100 })
+      .then((result) => {
+        if (!active) return;
+        const normalized = Array.isArray(result?.rows)
+          ? result.rows.map(normalizeFinanceCompletedTripRow).filter((row) => row.completedAt || row.soNumber !== '-')
+          : [];
+        setRecapRows(normalized);
+      })
+      .catch((requestError) => {
+        if (active) setRecapError(requestError.message || 'Recap perjalanan selesai gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setRecapLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeRpujTab]);
+
+  const tabs = [
+    { id: 'need-approval', label: 'RPUJ Butuh Approval', count: pendingRows.length },
+    { id: 'approved', label: 'RPUJ Sudah Approved', count: approvedRows.length },
+    { id: 'recap', label: 'Recap Semua Data Selesai', count: recapRows.length },
+  ];
+
+  const activeRows = activeRpujTab === 'approved'
+    ? approvedRows
+    : pendingRows;
+  const groupedRows = activeRows.reduce((groups, row) => {
     if (!groups[row.soNumber]) groups[row.soNumber] = [];
     groups[row.soNumber].push(row);
     return groups;
   }, {});
 
   return (
-    <div className="overflow-hidden">
-      <table className="w-full table-fixed border-collapse text-left text-[11px]">
-        <colgroup>
-          <col className="w-[18%]" />
-          <col className="w-[20%]" />
-          <col className="w-[13%]" />
-          <col className="w-[26%]" />
-          <col className="w-[23%]" />
-        </colgroup>
-        <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
-          <tr>
-            {['Job / Container', 'Pengajuan', 'Status', 'Driver / Rekening', 'Aksi'].map((column) => (
-              <th className="px-2 py-2" key={column}>{column}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(groupedRows).map(([soNumber, soRows]) => {
-            const firstRow = soRows[0];
-            const totalUj = soRows.reduce((sum, row) => sum + Number(row.totalUj || 0), 0);
-            const totalAdditional = soRows.reduce((sum, row) => sum + Number(row.additionalCost || 0), 0);
-            const totalRequest = totalUj + totalAdditional;
-            const pendingCount = soRows.filter((row) => row.status === 'Menunggu Approval Finance').length;
-
+    <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
+        <div className="flex flex-wrap items-center gap-1">
+          {tabs.map((tab) => {
+            const active = tab.id === activeRpujTab;
             return (
-              <Fragment key={soNumber}>
-                <tr className="bg-white">
-                  <td className="border-b border-t border-slate-200 px-2 py-2" colSpan={5}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                        <strong className="text-sm font-black text-slate-950">{soNumber}</strong>
-                        <span className="font-bold text-slate-700">{firstRow.customer}</span>
-                        <span className="text-slate-400">|</span>
-                        <span className="font-semibold text-slate-600">{firstRow.destination}</span>
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveRpujTab(tab.id)}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[10px] font-semibold ${
+                  active
+                    ? 'border-slate-300 bg-slate-100 text-slate-900'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${active ? 'bg-white text-slate-700' : 'bg-slate-100 text-slate-500'}`}>{tab.count}</span>
+                <span className="whitespace-nowrap">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeRpujTab === 'recap' ? (
+        <div className="overflow-x-auto">
+          {recapError ? <div className="border-b border-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">{recapError}</div> : null}
+          {recapLoading ? <div className="border-b border-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">Memuat recap perjalanan selesai...</div> : null}
+          <table className="w-full min-w-[1060px] table-fixed border-collapse text-left text-[11px]">
+            <colgroup>
+              <col className="w-[10%]" />
+              <col className="w-[15%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[15%]" />
+              <col className="w-[16%]" />
+              <col className="w-[8%]" />
+            </colgroup>
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              <tr>
+                {['Selesai', 'SO / Dokumen', 'Customer', 'Rute', 'Unit', 'Nilai', 'Status'].map((column) => (
+                <th className="whitespace-nowrap px-2 py-1.5" key={column}>{column}</th>
+              ))}
+              </tr>
+            </thead>
+            <tbody>
+              {recapSearchableRows.map((row) => (
+                <tr className="border-t border-slate-100 align-top hover:bg-slate-50" key={row.id}>
+                    <td className="px-2 py-1.5">
+                    <strong className="block text-[11px] font-semibold text-slate-900">{row.completedAt}</strong>
+                    <span className="mt-0.5 block text-[9px] font-medium text-slate-500">{row.tripDate}</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <strong className="block text-[11px] font-semibold text-slate-950">{row.soNumber || '-'}</strong>
+                    <span className="mt-0.5 block text-[9px] font-medium text-slate-500">DO: {row.doNumber || '-'}</span>
+                    <span className="block text-[9px] font-medium text-slate-500">SPK: {row.spkNumber || '-'}</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <strong className="block max-w-[210px] text-[11px] font-semibold text-slate-900">{row.customer || '-'}</strong>
+                    <span className="mt-0.5 block max-w-[210px] text-[9px] font-medium text-slate-500">{row.serviceName || '-'}</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <strong className="block max-w-[220px] text-[11px] font-semibold text-slate-900">{row.origin || '-'} ke {row.destination || '-'}</strong>
+                    <span className="mt-0.5 inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{row.containerSize || '-'} - {row.quantity || 1} ritase</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <strong className="block text-[11px] font-semibold text-slate-900">{row.truck || '-'}</strong>
+                    <span className="mt-0.5 block text-[9px] font-medium text-slate-500">{row.driver || '-'}</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <div className="grid min-w-[160px] grid-cols-2 gap-1">
+                      <div className="rounded-md bg-slate-50 px-1.5 py-0.75">
+                        <span className="block text-[8px] font-semibold uppercase tracking-wide text-slate-500">Revenue</span>
+                        <strong className="text-[9px] font-semibold text-slate-950">{formatCurrency(row.totalRevenue)}</strong>
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600">{soRows.length} container</span>
-                        {pendingCount ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">{pendingCount} pending</span> : null}
-                        <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-black text-white">Total {formatCurrency(totalRequest)}</span>
+                      <div className="rounded-md bg-slate-50 px-1.5 py-0.75">
+                        <span className="block text-[8px] font-semibold uppercase tracking-wide text-slate-500">Margin</span>
+                        <strong className="text-[9px] font-semibold text-slate-950">{formatCurrency(row.estimatedMargin)}</strong>
                       </div>
                     </div>
                   </td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex min-w-[120px] flex-col items-start gap-0.5">
+                      <StatusPill value={row.documentStatus} />
+                      <StatusPill value={row.invoiceStatus} />
+                    </div>
+                  </td>
                 </tr>
-                <tr aria-hidden="true">
-                  <td className="h-px bg-slate-300 p-0" colSpan={5} />
+              ))}
+              {!recapSearchableRows.length ? (
+                <tr>
+                  <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={7}>
+                    {recapLoading ? 'Memuat data...' : 'Belum ada recap perjalanan selesai.'}
+                  </td>
                 </tr>
-                {soRows.map((row) => {
-                  const approved = row.status === 'Disetujui Finance' || row.status === 'Bukti Transfer Diupload' || row.status === 'SPK Terbit';
-                  const busy = rpujBusyId === row.id;
-                  const rowTotal = row.totalUj + row.additionalCost;
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-[11px]">
+            <colgroup>
+              <col className="w-[17%]" />
+              <col className="w-[19%]" />
+              <col className="w-[11%]" />
+              <col className="w-[25%]" />
+              <col className="w-[28%]" />
+            </colgroup>
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              <tr>
+                {['Job / Container', 'Pengajuan', 'Status', 'Driver / Rekening', 'Aksi'].map((column) => (
+                  <th className="whitespace-nowrap px-2 py-1.5" key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(groupedRows).map(([soNumber, soRows]) => {
+                const firstRow = soRows[0];
+                const totalUj = soRows.reduce((sum, row) => sum + Number(row.totalUj || 0), 0);
+                const totalAdditional = soRows.reduce((sum, row) => sum + Number(row.additionalCost || 0), 0);
+                const totalRequest = totalUj + totalAdditional;
+                const pendingCount = soRows.filter((row) => row.status === 'Menunggu Approval Finance').length;
 
-                  return (
-                    <Fragment key={row.id}>
-                      <tr className="align-middle hover:bg-slate-50">
-                        <td className="px-2 py-2">
-                          <strong className="block font-black text-slate-950">{row.jobNumber}</strong>
-                          <span className="mt-0.5 block break-words font-semibold text-slate-500">{row.container}</span>
-                          <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{row.departureDate}</span>
-                        </td>
-                        <td className="px-2 py-2">
-                          <strong className="block font-black text-slate-950">{formatCurrency(rowTotal)}</strong>
-                          <span className="mt-0.5 block text-[10px] font-semibold leading-snug text-slate-500">UJ {formatCurrency(row.totalUj)} + Tambahan {formatCurrency(row.additionalCost)}</span>
-                        </td>
-                        <td className="px-2 py-2"><StatusPill value={compactRpujStatus(row.status)} /></td>
-                        <td className="px-2 py-2">
-                          <span className="block font-semibold text-slate-800">{row.driver}</span>
-                          <span className="mt-0.5 block break-words text-[10px] font-black leading-snug text-slate-600">{row.driverBankAccount}</span>
-                          <span className="mt-0.5 block text-[10px] font-bold text-slate-400">{row.truck}</span>
-                        </td>
-                        <td className="px-2 py-2">
-                          <div className="grid grid-cols-2 gap-1">
-                            <button className="whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 hover:bg-slate-50" onClick={() => onSelectRpuj(row.id)} type="button">Detail</button>
-                            <button className="whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 font-bold text-white hover:bg-slate-800 disabled:opacity-40" disabled={busy} onClick={() => onApprove(row.id)} type="button">Approve</button>
-                            <button className="whitespace-nowrap rounded-md border border-rose-200 bg-white px-1.5 py-1 font-bold text-rose-700 disabled:opacity-40" disabled={busy} onClick={() => onReject(row.id)} type="button">Reject</button>
-                            <label className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 py-1 font-bold text-slate-700 ${approved && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
-                              <Upload size={14} /> {busy ? 'Proses' : 'Upload'}
-                              <input
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                className="hidden"
-                                disabled={!approved || busy}
-                                onChange={(event) => {
-                                  const file = event.target.files?.[0];
-                                  event.target.value = '';
-                                  if (file) onUpload(row.id, file);
-                                }}
-                                type="file"
-                              />
-                            </label>
+                return (
+                  <Fragment key={soNumber}>
+                    <tr className="bg-white">
+                      <td className="border-b border-t border-slate-200 px-2 py-1.5" colSpan={5}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <strong className="text-xs font-black text-slate-950">{soNumber}</strong>
+                            <span className="truncate font-semibold text-slate-700">{firstRow.customer}</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="truncate font-medium text-slate-500">{firstRow.destination}</span>
                           </div>
-                        </td>
-                      </tr>
-                      <tr aria-hidden="true">
-                        <td className="h-px bg-slate-200 p-0" colSpan={5} />
-                      </tr>
-                    </Fragment>
-                  );
-                })}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{soRows.length} container</span>
+                            {pendingCount ? <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{pendingCount} pending</span> : null}
+                            <span className="rounded-full border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-700">Total {formatCurrency(totalRequest)}</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr aria-hidden="true">
+                      <td className="h-px bg-slate-200 p-0" colSpan={5} />
+                    </tr>
+                    {soRows.map((row) => {
+                      const approved = row.status === 'Disetujui Finance' || row.status === 'Bukti Transfer Diupload' || row.status === 'SPK Terbit';
+                      const busy = rpujBusyId === row.id;
+                      const rowTotal = row.totalUj + row.additionalCost;
+
+                      return (
+                        <Fragment key={row.id}>
+                          <tr className="align-middle hover:bg-slate-50">
+                            <td className="px-2 py-1.5">
+                              <strong className="block text-[11px] font-semibold text-slate-900">{row.jobNumber}</strong>
+                              <span className="mt-0.5 block break-words text-[9px] font-medium text-slate-500">{row.container}</span>
+                              <span className="mt-0.5 block text-[9px] font-medium text-slate-400">{row.departureDate}</span>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <strong className="block text-[11px] font-semibold text-slate-900">{formatCurrency(rowTotal)}</strong>
+                              <span className="mt-0.5 block text-[9px] font-medium leading-snug text-slate-500">UJ {formatCurrency(row.totalUj)} + Tambahan {formatCurrency(row.additionalCost)}</span>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <StatusPill value={compactRpujStatus(row.status)} />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <span className="block text-[11px] font-semibold text-slate-800">{row.driver}</span>
+                              <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-600">{row.driverBankAccount}</span>
+                              <span className="mt-0.5 block text-[9px] font-medium text-slate-400">{row.truck}</span>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <div className="grid grid-cols-2 gap-1">
+                                <button className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectRpuj(row.id)} type="button">Detail</button>
+                                {activeRpujTab === 'need-approval' ? (
+                                  <>
+                                    <button className="inline-flex h-7 items-center justify-center rounded-md bg-slate-900 px-2 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40" disabled={busy} onClick={() => onApprove(row.id)} type="button">Approve</button>
+                                    <button className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={busy} onClick={() => onReject(row.id)} type="button">Reject</button>
+                                  </>
+                                ) : null}
+                                {activeRpujTab === 'approved' ? (
+                                  <label className={`inline-flex h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 ${approved && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
+                                    <Upload size={11} /> {busy ? 'Proses' : 'Upload'}
+                                    <input
+                                      accept=".pdf,.jpg,.jpeg,.png"
+                                      className="hidden"
+                                      disabled={!approved || busy}
+                                      onChange={(event) => {
+                                        const file = event.target.files?.[0];
+                                        event.target.value = '';
+                                        if (file) onUpload(row.id, file);
+                                      }}
+                                      type="file"
+                                    />
+                                  </label>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                          <tr aria-hidden="true">
+                            <td className="h-px bg-slate-200 p-0" colSpan={5} />
+                          </tr>
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+              {!Object.keys(groupedRows).length ? (
+                <tr>
+                  <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={5}>Tidak ada RPUJ pada klasifikasi ini.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -973,8 +1171,8 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+      <div className="border-b border-slate-200 bg-slate-50 px-2.5 py-1.5">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
           <Info size={12} />
           <span>Keterangan</span>
         </div>
@@ -985,7 +1183,7 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
 
           return (
             <button
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold ${active ? 'border-slate-300 bg-slate-100 text-slate-900 shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[10px] font-semibold ${active ? 'border-slate-300 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
               key={tab.id}
               onClick={() => setActiveInvoiceTab(tab.id)}
               type="button"
@@ -1000,22 +1198,22 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-sm">
+        <table className="w-full min-w-[1000px] table-fixed border-collapse text-left text-sm">
           <colgroup>
-            <col className="w-[14%]" />
-            <col className="w-[19%]" />
-            <col className="w-[11%]" />
-            <col className="w-[11%]" />
-            <col className="w-[11%]" />
-            <col className="w-[11%]" />
-            <col className="w-[11%]" />
-            <col className="w-[10%]" />
             <col className="w-[12%]" />
+            <col className="w-[17%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[10%]" />
+            <col className="w-[21%]" />
           </colgroup>
           <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.18em] text-slate-500">
             <tr>
               {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Nominal', 'No. Invoice', 'Aksi'].map((column) => (
-                <th className="whitespace-nowrap px-3 py-2.5" key={column}>{column}</th>
+                <th className="whitespace-nowrap px-2.5 py-1.5" key={column}>{column}</th>
               ))}
             </tr>
           </thead>
@@ -1026,19 +1224,19 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
 
               return (
                 <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
-                  <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700">{row.soNumber}</td>
-                  <td className="px-3 py-2.5">
+                  <td className="whitespace-nowrap px-2.5 py-1.5 font-semibold text-slate-700">{row.soNumber}</td>
+                  <td className="px-2.5 py-1.5">
                     <span className="block truncate font-semibold text-slate-900">{row.customer}</span>
                     <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-500">{row.destination}</span>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5">
+                  <td className="whitespace-nowrap px-2.5 py-1.5">
                     <StatusPill value={row.invoiceStatus} />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-700">{row.completedAt}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-700">{row.invoiceDate}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-700">{row.dueDate}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-900">{formatCurrency(row.billingAmount)}</td>
-                  <td className="px-3 py-2.5">
+                  <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-700">{row.completedAt}</td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-700">{row.invoiceDate}</td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-700">{row.dueDate}</td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5 font-semibold text-slate-900">{formatCurrency(row.billingAmount)}</td>
+                  <td className="px-2.5 py-1.5">
                     {needsInvoiceNumber ? (
                       <input
                         className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-400"
@@ -1050,13 +1248,13 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
                       <span className="whitespace-nowrap font-semibold text-slate-900">{row.invoiceNumber}</span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5">
-                    <div className="flex items-center justify-end gap-2">
-                      <button className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectInvoice(row.id)} type="button">
+                  <td className="whitespace-nowrap px-2.5 py-1.5">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectInvoice(row.id)} type="button">
                         Detail
                       </button>
                       {needsInvoiceNumber ? (
-                        <button className="inline-flex h-8 items-center rounded-md bg-slate-900 px-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40" disabled={!row.invoiceNumber || isBusy} onClick={() => onSaveInvoice(row.id)} type="button">
+                        <button className="inline-flex h-7 items-center rounded-md bg-slate-900 px-2 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40" disabled={!row.invoiceNumber || isBusy} onClick={() => onSaveInvoice(row.id)} type="button">
                           {isBusy ? 'Menyimpan' : 'Simpan'}
                         </button>
                       ) : null}
@@ -1067,7 +1265,7 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
             })}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-8 text-center text-sm font-semibold text-slate-400" colSpan={9}>Tidak ada data pada klasifikasi ini.</td>
+                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={9}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
@@ -1101,63 +1299,67 @@ function FinanceTable({
   const isInvoiceNumber = activeTab.id === 'invoice-number';
 
   return (
-    <section className="rounded-md border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 p-2.5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <div className="mb-1 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500">
+            <div className="mb-1 inline-flex rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500">
               {activeTab.badge}
             </div>
             <h2 className="text-sm font-black text-slate-950">{activeTab.label}</h2>
-            <p className="mt-1 max-w-3xl text-xs font-medium text-slate-500">{activeTab.description}</p>
+            {!isRpujApproval && !isOrderVerification ? (
+              <p className="mt-0.5 max-w-3xl text-[11px] font-medium text-slate-500">{activeTab.description}</p>
+            ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-500">
-              <Clock3 size={15} /> {isOrderVerification || isRpujApproval || isInvoiceNumber ? 'Data Finance API' : 'Data simulasi meeting'}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500">
+              <Clock3 size={13} /> {isOrderVerification || isRpujApproval || isInvoiceNumber ? 'Data Finance API' : 'Data simulasi meeting'}
             </div>
-            <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50" onClick={onReset} type="button">
-              <RotateCcw size={14} /> {isOrderVerification || isRpujApproval || isInvoiceNumber ? 'Refresh' : 'Reset'}
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-50" onClick={onReset} type="button">
+              <RotateCcw size={13} /> {isOrderVerification || isRpujApproval || isInvoiceNumber ? 'Refresh' : 'Reset'}
             </button>
           </div>
         </div>
 
-        {activeTab.id !== 'invoice-number' && activeTab.id !== 'order-verification' ? (
-          <div className="mt-2">
+        {activeTab.id !== 'invoice-number' && activeTab.id !== 'order-verification' && !isRpujApproval ? (
+          <div className="mt-1.5">
             <StatusFlow items={activeTab.statusFlow} />
           </div>
         ) : null}
       </div>
 
-      <div className="border-b border-slate-200 p-3">
-        <SearchBar query={query} onChange={onQueryChange} />
-      </div>
+      {isOrderVerification ? null : (
+        <div className="border-b border-slate-200 px-2.5 py-1.5">
+          <SearchBar query={query} onChange={onQueryChange} />
+        </div>
+      )}
 
       {isOrderVerification && orderError ? (
-        <div className="border-b border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{orderError}</div>
+        <div className="border-b border-rose-100 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold text-rose-700">{orderError}</div>
       ) : null}
 
       {isOrderVerification && orderLoading ? (
-        <div className="border-b border-slate-100 px-3 py-3 text-xs font-semibold text-slate-500">Memuat data verifikasi order...</div>
+        <div className="border-b border-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">Memuat data verifikasi order...</div>
       ) : null}
 
       {isRpujApproval && rpujError ? (
-        <div className="border-b border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{rpujError}</div>
+        <div className="border-b border-rose-100 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold text-rose-700">{rpujError}</div>
       ) : null}
 
       {isRpujApproval && rpujLoading ? (
-        <div className="border-b border-slate-100 px-3 py-3 text-xs font-semibold text-slate-500">Memuat pengajuan RPUJ...</div>
+        <div className="border-b border-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">Memuat pengajuan RPUJ...</div>
       ) : null}
 
       {activeTab.id === 'invoice-number' && invoiceError ? (
-        <div className="border-b border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">{invoiceError}</div>
+        <div className="border-b border-rose-100 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold text-rose-700">{invoiceError}</div>
       ) : null}
 
       {activeTab.id === 'invoice-number' && invoiceLoading ? (
-        <div className="border-b border-slate-100 px-3 py-3 text-xs font-semibold text-slate-500">Memuat daftar invoice...</div>
+        <div className="border-b border-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">Memuat daftar invoice...</div>
       ) : null}
 
       {activeTab.id === 'order-verification' ? (
-        <OrderVerificationTable rows={orderRows} query={query} savingSoId={savingSoId} {...handlers} />
+        <OrderVerificationTable rows={orderRows} query={query} onQueryChange={onQueryChange} savingSoId={savingSoId} {...handlers} />
       ) : null}
       {activeTab.id === 'rpuj-approval' ? (
         <RpujApprovalTable rows={rpujRows} query={query} rpujBusyId={rpujBusyId} {...handlers} />
@@ -1275,7 +1477,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const handlers = {
     onSaveSoNumber: async (id) => {
       const row = orderRows.find((item) => item.id === id);
-      const soNumber = String(row?.soNumber || '').trim();
+      const soNumber = String(row?.soNumberDraft || row?.soNumber || '').trim();
       if (!soNumber) return;
 
       setSavingSoId(id);
@@ -1322,7 +1524,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       }
     },
     onSoChange: (id, value) => {
-      setOrderRows((rows) => rows.map((row) => (row.id === id ? { ...row, soNumber: value } : row)));
+      setOrderRows((rows) => rows.map((row) => (row.id === id ? { ...row, soNumberDraft: value } : row)));
     },
     onUpload: async (id, file) => {
       const validationError = validateArchiveFile(file, { label: 'Bukti transfer UJ' });
@@ -1365,7 +1567,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-4 text-slate-900">
+    <main className="min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
       <FinanceTable
         activeTab={activeTab}
         handlers={handlers}

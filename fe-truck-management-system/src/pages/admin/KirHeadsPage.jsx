@@ -1,17 +1,7 @@
 import MasterDataPage from '../../components/master/MasterDataPage';
+import { formatDate } from '../../utils/formatDate';
 
 const emptyRows = [];
-
-function formatDate(value) {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
 
 function KirStatus({ value }) {
   const statusClass = value === 'Aktif' ? 'available' : value === 'Perlu Perpanjang' ? 'in_use' : 'maintenance';
