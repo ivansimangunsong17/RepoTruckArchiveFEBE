@@ -478,7 +478,7 @@ if (!hasDatabase) {
       assert.equal(mismatchedJob.status, 400);
       assert.equal(mismatchedJob.body.error.code, 'VEHICLE_SIZE_MISMATCH');
 
-      const updatedJob = await api(`/api/container-jobs/${created.jobId}/status`, {
+      const blockedRunningBeforeRpujApproval = await api(`/api/container-jobs/${created.jobId}/status`, {
         method: 'PATCH',
         token: adminToken,
         body: {
@@ -491,17 +491,28 @@ if (!hasDatabase) {
           updatedBy: 'Sprint2C Operational',
         },
       });
-      assert.equal(updatedJob.status, 200);
-      assert.equal(updatedJob.body.data.status, 'running');
+      assert.equal(blockedRunningBeforeRpujApproval.status, 409);
+      assert.equal(blockedRunningBeforeRpujApproval.body.error.code, 'TRIP_WAITING_RPUJ_APPROVAL');
+
+      const submittedRpujJob = await api(`/api/container-jobs/${created.jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: `Driver ${runId}`,
+          plateNumber: plate20,
+          status: 'received',
+          rpujStatus: 'submitted',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(submittedRpujJob.status, 200);
+      assert.equal(submittedRpujJob.body.data.status, 'received');
+      assert.equal(submittedRpujJob.body.data.rpujStatus, 'submitted');
 
       const updateLog = await latestActivity('UPDATE_CONTAINER_JOB');
       assert.equal(updateLog.action, 'UPDATE_CONTAINER_JOB');
       assert.equal(updateLog.metadata.entityId, created.jobId);
-
-      const statusLog = await latestActivity('UPDATE_JOB_STATUS');
-      assert.equal(statusLog.action, 'UPDATE_JOB_STATUS');
-      assert.equal(statusLog.metadata.fromStatus, 'received');
-      assert.equal(statusLog.metadata.toStatus, 'running');
 
       const rpujRequestLog = await latestActivityForEntity('OPERATIONAL_REQUEST_RPUJ', created.jobId);
       assert.equal(rpujRequestLog.action, 'OPERATIONAL_REQUEST_RPUJ');
@@ -516,7 +527,7 @@ if (!hasDatabase) {
         body: { updatedBy: 'Sprint2C Operational' },
       });
       assert.equal(prematureSpk.status, 409);
-      assert.equal(prematureSpk.body.error.code, 'SPK_WAITING_FINANCE_TRANSFER');
+      assert.equal(prematureSpk.body.error.code, 'SPK_WAITING_FINANCE_APPROVAL');
 
       const approvedRpuj = await api(`/api/finance/rpuj-requests/${created.jobId}/approve`, {
         method: 'PATCH',
@@ -525,13 +536,33 @@ if (!hasDatabase) {
       assert.equal(approvedRpuj.status, 200);
       assert.equal(approvedRpuj.body.data.rpujStatus, 'approved');
 
-      const spkWithoutProof = await api(`/api/container-jobs/${created.jobId}/spk`, {
+      const updatedJob = await api(`/api/container-jobs/${created.jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: `Driver ${runId}`,
+          plateNumber: plate20,
+          status: 'running',
+          runningAt: '2026-07-11T08:00:00.000Z',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(updatedJob.status, 200);
+      assert.equal(updatedJob.body.data.status, 'running');
+
+      const statusLog = await latestActivity('UPDATE_JOB_STATUS');
+      assert.equal(statusLog.action, 'UPDATE_JOB_STATUS');
+      assert.equal(statusLog.metadata.fromStatus, 'received');
+      assert.equal(statusLog.metadata.toStatus, 'running');
+
+      const generatedSpk = await api(`/api/container-jobs/${created.jobId}/spk`, {
         method: 'POST',
         token: adminToken,
         body: { updatedBy: 'Sprint2C Operational' },
       });
-      assert.equal(spkWithoutProof.status, 409);
-      assert.equal(spkWithoutProof.body.error.code, 'SPK_WAITING_FINANCE_TRANSFER');
+      assert.equal(generatedSpk.status, 200);
+      assert.ok(generatedSpk.body.data.spkNumber);
 
       const transferProof = await api(`/api/finance/rpuj-requests/${created.jobId}/transfer-proof`, {
         method: 'POST',
@@ -545,14 +576,6 @@ if (!hasDatabase) {
       assert.equal(transferProof.status, 200);
       assert.equal(transferProof.body.data.rpujStatus, 'paid');
 
-      const generatedSpk = await api(`/api/container-jobs/${created.jobId}/spk`, {
-        method: 'POST',
-        token: adminToken,
-        body: { updatedBy: 'Sprint2C Operational' },
-      });
-      assert.equal(generatedSpk.status, 200);
-      assert.ok(generatedSpk.body.data.spkNumber);
-
       const approveRpujLog = await latestActivityForEntity('FINANCE_APPROVE_RPUJ', created.jobId);
       assert.equal(approveRpujLog.action, 'FINANCE_APPROVE_RPUJ');
 
@@ -564,6 +587,7 @@ if (!hasDatabase) {
 
       const requiredDocumentCategories = [
         'spkDocument',
+        'eirDocument',
         'loadingVoucherDocument',
         'tilaGatepassDocumentFile',
         'travelDocumentFile',
@@ -597,6 +621,7 @@ if (!hasDatabase) {
           completedAt: '2026-07-11T15:00:00.000Z',
           rpujStatus: 'approved',
           spkNumber: `SPK-${runId}`,
+          eirNumber: `EIR-${runId}`,
           loadingVoucher: `BM-${runId}`,
           tilaGatepassDocument: `TILA-GP-${runId}`,
           travelDocument: `SJ-${runId}`,

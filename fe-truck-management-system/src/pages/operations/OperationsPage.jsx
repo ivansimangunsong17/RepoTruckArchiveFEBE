@@ -29,6 +29,11 @@ import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } f
 
 const PAGE_SIZE = 8;
 const STATUS_ORDER = { received: 0, running: 1, completed: 2, cancelled: 3 };
+const rpujStageOptions = [
+  { value: 'queue', label: 'Antri Pengajuan', description: 'Belum diajukan atau perlu diajukan ulang' },
+  { value: 'submitted', label: 'Sudah Diajukan', description: 'Menunggu approval atau transfer Finance' },
+  { value: 'paid', label: 'UJ Dikirim', description: 'Bukti transfer UJ sudah masuk' },
+];
 
 function getStatusOrder(status) {
   return STATUS_ORDER[status] ?? Number.MAX_SAFE_INTEGER;
@@ -72,6 +77,19 @@ function otherCostValue(job) {
     notes: otherCost.notes || '-',
     amountLabel: otherCost.amount ? formatCurrency(otherCost.amount) : '-',
   };
+}
+
+function getRpujStage(job) {
+  if (job?.rpujStatus === 'paid') return 'paid';
+  if (['submitted', 'approved'].includes(job?.rpujStatus)) return 'submitted';
+  return 'queue';
+}
+
+function rpujStageText(job) {
+  const stage = getRpujStage(job);
+  if (stage === 'paid') return 'UJ Dikirim';
+  if (stage === 'submitted') return job?.rpujStatus === 'approved' ? 'Approved Finance' : 'Sudah Diajukan';
+  return job?.rpujStatus === 'rejected' ? 'Perlu Diajukan Ulang' : 'Antri Pengajuan';
 }
 
 function flattenDemoJobs(orders) {
@@ -124,8 +142,10 @@ function OperationsPage() {
   const [pendingDatabaseJobs, setPendingDatabaseJobs] = useState([]);
   const [serverTotal, setServerTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState({ received: 0, running: 0, completed: 0, cancelled: 0 });
+  const [rpujCounts, setRpujCounts] = useState({ queue: 0, submitted: 0, paid: 0 });
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
+  const [rpujStage, setRpujStage] = useState('');
   const [page, setPage] = useState(1);
   const [listVersion, setListVersion] = useState(0);
   const [loading, setLoading] = useState(archive.isDatabaseMode);
@@ -157,8 +177,9 @@ function OperationsPage() {
     const matchesQuery = !query || [
       job.soNumber, job.doNumber, job.customer, job.containerNumber, job.driver, job.plateNumber,
     ].some((value) => value?.toLowerCase().includes(query.toLowerCase()));
-    return matchesQuery && (!status || job.status === status);
-  })), [demoJobs, query, status]);
+    const matchesRpujStage = !rpujStage || getRpujStage(job) === rpujStage;
+    return matchesQuery && (!status || job.status === status) && matchesRpujStage;
+  })), [demoJobs, query, rpujStage, status]);
 
   const jobs = archive.isDatabaseMode
     ? sortOperationalJobs(databaseJobs)
@@ -168,6 +189,11 @@ function OperationsPage() {
     running: demoJobs.filter((job) => job.status === 'running').length,
     completed: demoJobs.filter((job) => job.status === 'completed').length,
     cancelled: demoJobs.filter((job) => job.status === 'cancelled').length,
+  };
+  const activeRpujCounts = archive.isDatabaseMode ? rpujCounts : {
+    queue: demoJobs.filter((job) => getRpujStage(job) === 'queue').length,
+    submitted: demoJobs.filter((job) => getRpujStage(job) === 'submitted').length,
+    paid: demoJobs.filter((job) => getRpujStage(job) === 'paid').length,
   };
   const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoJobs.length;
@@ -180,7 +206,7 @@ function OperationsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [query, status]);
+  }, [query, rpujStage, status]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -190,16 +216,18 @@ function OperationsPage() {
       setLoading(true);
       setError('');
       try {
-        const result = await fetchContainerJobsPage({ page, pageSize: PAGE_SIZE, query, status });
+        const result = await fetchContainerJobsPage({ page, pageSize: PAGE_SIZE, query, status, rpujStage });
         if (!active) return;
         setDatabaseJobs(result.rows);
         setServerTotal(result.total);
         setStatusCounts({ received: 0, running: 0, completed: 0, cancelled: 0, ...result.counts });
+        setRpujCounts({ queue: 0, submitted: 0, paid: 0, ...result.rpujCounts });
       } catch (requestError) {
         if (!active) return;
         setDatabaseJobs([]);
         setServerTotal(0);
         setStatusCounts({ received: 0, running: 0, completed: 0, cancelled: 0 });
+        setRpujCounts({ queue: 0, submitted: 0, paid: 0 });
         setError(requestError.message || 'Data Container Job gagal dimuat dari database.');
       } finally {
         if (active) setLoading(false);
@@ -210,7 +238,7 @@ function OperationsPage() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive.isDatabaseMode, listVersion, page, query, status]);
+  }, [archive.isDatabaseMode, listVersion, page, query, rpujStage, status]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -395,14 +423,34 @@ function OperationsPage() {
             </button>
           ))}
         </div>
+        <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
+          {rpujStageOptions.map((option) => {
+            const active = rpujStage === option.value;
+            return (
+              <button
+                aria-selected={active}
+                className={active ? 'active' : ''}
+                key={option.value}
+                onClick={() => setRpujStage(active ? '' : option.value)}
+                role="tab"
+                title={option.description}
+                type="button"
+              >
+                <span>{option.label}</span>
+                <strong>{activeRpujCounts[option.value] || 0}</strong>
+              </button>
+            );
+          })}
+        </div>
         <FilterStatus
           total={totalItems}
           filtered={totalItems}
-          active={Boolean(query.trim() || status)}
+          active={Boolean(query.trim() || status || rpujStage)}
           label="container job"
           onReset={() => {
             setQuery('');
             setStatus('');
+            setRpujStage('');
           }}
         />
 
@@ -434,6 +482,7 @@ function OperationsPage() {
                       <span>{shipmentLabel}</span>
                       <span>{sizeTypeLabel}</span>
                     </div>
+                    <span className={`job-rpuj-badge ${getRpujStage(job)}`}>{rpujStageText(job)}</span>
                   </div>
                   <StatusBadge status={job.status} />
                 </div>

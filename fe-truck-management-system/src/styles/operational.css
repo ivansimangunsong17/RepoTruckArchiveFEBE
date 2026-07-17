@@ -424,6 +424,89 @@
   font-weight: 750;
 }
 
+.job-rpuj-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px 0 2px;
+}
+
+.job-rpuj-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d9e0ea;
+  border-radius: 8px;
+  color: #526176;
+  background: #f8fafc;
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.job-rpuj-tabs button:hover {
+  border-color: #c8d2df;
+  background: #fff;
+  color: #253044;
+}
+
+.job-rpuj-tabs button.active {
+  border-color: #b6c7da;
+  background: #eef6ff;
+  color: #0f4f7a;
+  box-shadow: 0 1px 2px #0f172a12;
+}
+
+.job-rpuj-tabs strong {
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #fff;
+  color: #53657c;
+  font-size: .62rem;
+}
+
+.job-rpuj-tabs button.active strong {
+  background: #dbeafe;
+  color: #0f4f7a;
+}
+
+.job-rpuj-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border: 1px solid #dce3ec;
+  border-radius: 999px;
+  color: #5f6f84;
+  background: #f8fafc;
+  font-size: .56rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.job-rpuj-badge.submitted {
+  border-color: #c7d2fe;
+  color: #3949a7;
+  background: #eef2ff;
+}
+
+.job-rpuj-badge.paid {
+  border-color: #bbf7d0;
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.job-rpuj-badge.queue {
+  border-color: #fed7aa;
+  color: #9a3412;
+  background: #fff7ed;
+}
+
 .operational-job-card .job-route {
   min-height: 38px;
   padding: 0 9px;

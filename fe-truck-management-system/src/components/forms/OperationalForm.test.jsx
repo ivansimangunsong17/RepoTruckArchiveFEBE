@@ -14,7 +14,34 @@ const container = {
   status: 'received',
 };
 
+async function openOperationalPhase(user, name) {
+  await user.click(screen.getByRole('tab', { name }));
+}
+
 describe('OperationalForm', () => {
+  it('membagi form operasional ke dalam phase kerja', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Truck')).toBeInTheDocument();
+    expect(screen.queryByText('Biaya Lainnya')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dokumen Operasional')).not.toBeInTheDocument();
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    expect(screen.getByText('Biaya Lainnya')).toBeInTheDocument();
+
+    await openOperationalPhase(user, /dokumen & closing/i);
+    expect(screen.getByText('Dokumen Operasional')).toBeInTheDocument();
+  });
+
   it('tidak memakai truck dummy ketika master truck API kosong', () => {
     render(
       <OperationalForm
@@ -34,7 +61,7 @@ describe('OperationalForm', () => {
     const onSubmit = vi.fn();
     render(
       <OperationalForm
-        container={container}
+        container={{ ...container, rpujStatus: 'approved' }}
         masterDrivers={[]}
         masterTrucks={[]}
         onClose={vi.fn()}
@@ -42,6 +69,7 @@ describe('OperationalForm', () => {
       />,
     );
 
+    await openOperationalPhase(user, /dokumen & closing/i);
     await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
@@ -54,7 +82,7 @@ describe('OperationalForm', () => {
     const onSubmit = vi.fn();
     render(
       <OperationalForm
-        container={container}
+        container={{ ...container, rpujStatus: 'approved' }}
         masterDrivers={[]}
         masterTrucks={[]}
         onClose={vi.fn()}
@@ -62,10 +90,38 @@ describe('OperationalForm', () => {
       />,
     );
 
+    await openOperationalPhase(user, /dokumen & closing/i);
     await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'running');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
     expect(screen.getByText(/Truck, driver otomatis, dan waktu mulai wajib diisi/i)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('menolak status sedang jalan sebelum UJ disetujui Finance', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{ ...container, rpujStatus: 'submitted' }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+
+    await openOperationalPhase(user, /dokumen & closing/i);
+    expect(screen.getByLabelText(/status pekerjaan/i)).toHaveValue('received');
+
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'running');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(screen.getByText(/UJ disetujui Finance/i)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -132,6 +188,7 @@ describe('OperationalForm', () => {
       />,
     );
 
+    await openOperationalPhase(user, /uang jalan & spk/i);
     await user.click(screen.getByRole('button', { name: /preview spk/i }));
 
     const html = write.mock.calls.map(([value]) => value).join('');
@@ -142,5 +199,89 @@ describe('OperationalForm', () => {
     expect(html).toContain('Total RPUJ');
 
     open.mockRestore();
+  });
+
+  it('mengajukan uang jalan ke Finance dari tombol RPUJ', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={container}
+        masterDestinations={[{ name: 'Bandung', uj20ft: 500000 }]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    await user.type(screen.getByLabelText(/nominal biaya/i), '150000');
+    await user.type(screen.getByLabelText(/catatan biaya/i), 'Tol dan parkir');
+    await user.click(screen.getByRole('button', { name: /ajukan uang jalan/i }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      rpujStatus: 'submitted',
+      otherCostAmount: '150000',
+      otherCostNotes: 'Tol dan parkir',
+    });
+    expect(onSubmit.mock.calls[0][0].rpujNotes).toContain('"amount":150000');
+    expect(onSubmit.mock.calls[0][0].rpujNotes).toContain('Tol dan parkir');
+  });
+
+  it('menahan generate SPK sampai Finance approve RPUJ', async () => {
+    const user = userEvent.setup();
+    const onGenerateSpk = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'submitted',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onGenerateSpk={onGenerateSpk}
+      />,
+    );
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    const generateButton = screen.getByRole('button', { name: /menunggu finance/i });
+
+    expect(generateButton).toBeDisabled();
+    expect(screen.getByText(/Finance approve RPUJ/i)).toBeInTheDocument();
+
+    await user.click(generateButton);
+
+    expect(onGenerateSpk).not.toHaveBeenCalled();
+  });
+
+  it('mengizinkan generate SPK setelah RPUJ diapprove tanpa bukti transfer', async () => {
+    const user = userEvent.setup();
+    const onGenerateSpk = vi.fn().mockResolvedValue({
+      spkNumber: 'SPK-PAID-001',
+      spkGeneratedAt: '2026-07-17T08:00:00.000Z',
+    });
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onGenerateSpk={onGenerateSpk}
+      />,
+    );
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    await user.click(screen.getByRole('button', { name: /generate spk/i }));
+
+    expect(onGenerateSpk).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('SPK-PAID-001')).toBeInTheDocument();
   });
 });

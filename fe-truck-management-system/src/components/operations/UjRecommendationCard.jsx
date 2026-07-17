@@ -6,12 +6,15 @@ function UjRecommendationCard({ job, destinations = [] }) {
   const recommendation = calculateUjRecommendation(job, destinations);
 
   if (!recommendation.hasConfiguredTariff) {
+    const sizeLabel = recommendation.currentSize ? ` ${recommendation.currentSize}` : '';
+    const destinationLabel = recommendation.destinationName ? ` untuk ${recommendation.destinationName}` : '';
+
     return (
       <div className="!block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <strong className="block font-semibold">Tarif UJ tujuan belum diatur.</strong>
+            <strong className="block font-semibold">Tarif UJ{sizeLabel}{destinationLabel} belum diatur.</strong>
             <span className="text-amber-800">Lengkapi UJ 20FT/40FT di Master Lokasi Tujuan.</span>
           </div>
         </div>

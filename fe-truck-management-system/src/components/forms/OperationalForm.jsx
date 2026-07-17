@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
+import { Plus, Send, Trash2, X } from 'lucide-react';
 import { fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
@@ -21,6 +21,12 @@ const operationalDocumentFields = [
   { valueField: 'loadingVoucher', fileField: 'loadingVoucherDocument', label: 'No. Bon Muat / Bon Bongkar' },
   { valueField: 'tilaGatepassDocument', fileField: 'tilaGatepassDocumentFile', label: 'No. TILA / Delivery Card / Gatepass / SP2' },
   { valueField: 'travelDocument', fileField: 'travelDocumentFile', label: 'No. Surat Jalan' },
+];
+
+const operationalPhaseOptions = [
+  { id: 'preparation', label: 'Persiapan Job', description: 'Assignment truck dan nomor container' },
+  { id: 'rpuj', label: 'Uang Jalan & SPK', description: 'Pengajuan RPUJ, biaya lainnya, dan SPK' },
+  { id: 'closing', label: 'Dokumen & Closing', description: 'Dokumen operasional dan status perjalanan' },
 ];
 
 const statusOptions = [
@@ -143,32 +149,6 @@ function escapePdfText(value) {
     .replace(/\)/g, '\\)');
 }
 
-function wrapPdfText(value, maxLength) {
-  const words = normalizePdfText(value).split(' ').filter(Boolean);
-  const lines = [];
-
-  words.forEach((word) => {
-    if (word.length > maxLength) {
-      let rest = word;
-      while (rest.length > maxLength) {
-        lines.push(rest.slice(0, maxLength));
-        rest = rest.slice(maxLength);
-      }
-      if (rest) lines.push(rest);
-      return;
-    }
-
-    const current = lines[lines.length - 1] || '';
-    if (!current || `${current} ${word}`.length > maxLength) {
-      lines.push(word);
-    } else {
-      lines[lines.length - 1] = `${current} ${word}`;
-    }
-  });
-
-  return lines.length ? lines : ['-'];
-}
-
 function buildPdfFile(contentStream) {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
@@ -197,43 +177,75 @@ function buildPdfFile(contentStream) {
   return new Blob([pdf], { type: 'application/pdf' });
 }
 
-function createSpkPdfBlob(rows) {
-  const pageWidth = 595.28;
-  const marginX = 50;
-  const tableX = marginX;
-  const tableWidth = pageWidth - (marginX * 2);
-  const labelWidth = 165;
-  const valueWidth = tableWidth - labelWidth;
-  const rowLineHeight = 14;
+function createSpkPdfBlob(documentData) {
   const commands = [
     '0.8 w',
-    'BT /F2 17 Tf 0 0 0 rg 174 790 Td (SURAT PERINTAH KERJA) Tj ET',
-    '1.2 w 50 770 m 545.28 770 l S',
+    'BT /F2 17 Tf 0 0 0 rg 185 812 Td (SURAT PERINTAH KERJA \\(SPK\\)) Tj ET',
+    '0.62 0.06 0.08 RG 34 790 m 561 790 l S',
+    'BT /F2 34 Tf 0.72 0.08 0.10 rg 44 744 Td (A) Tj ET',
+    `BT /F2 10 Tf 0 0 0 rg 95 768 Td (${escapePdfText(documentData.company.name)}) Tj ET`,
+    `BT /F1 7 Tf 0.25 0.25 0.25 rg 95 755 Td (${escapePdfText(documentData.company.address)}) Tj ET`,
+    `BT /F1 7 Tf 0.25 0.25 0.25 rg 95 744 Td (${escapePdfText(documentData.company.contact)}) Tj ET`,
+    '0.65 0.65 0.65 RG 34 730 m 561 730 l S',
   ];
 
-  let rowTopY = 740;
+  const leftX = 34;
+  const pageWidth = 527;
+  const sectionHeaderHeight = 16;
+  const rowHeight = 16;
+  const labelWidth = 122;
 
-  rows.forEach((row) => {
-    const labelLines = wrapPdfText(row.label, 22);
-    const valueLines = wrapPdfText(row.value, 48);
-    const rowHeight = Math.max(labelLines.length, valueLines.length) * rowLineHeight + 14;
-    const rowBottomY = rowTopY - rowHeight;
+  function drawText(text, x, y, { bold = false, size = 7, color = '0 0 0' } = {}) {
+    commands.push(`BT /${bold ? 'F2' : 'F1'} ${size} Tf ${color} rg ${x} ${y} Td (${escapePdfText(text)}) Tj ET`);
+  }
 
-    commands.push(`q 0.97 0.98 0.99 rg ${tableX} ${rowBottomY} ${labelWidth} ${rowHeight} re f Q`);
-    commands.push(`0.78 0.82 0.87 RG ${tableX} ${rowBottomY} ${labelWidth} ${rowHeight} re S`);
-    commands.push(`0.78 0.82 0.87 RG ${tableX + labelWidth} ${rowBottomY} ${valueWidth} ${rowHeight} re S`);
+  function drawSection(title, rows, y) {
+    commands.push(`q 0.62 0.06 0.08 rg ${leftX} ${y - sectionHeaderHeight} ${pageWidth} ${sectionHeaderHeight} re f Q`);
+    drawText(title, leftX + 8, y - 11, { bold: true, size: 7, color: '1 1 1' });
+    let currentY = y - sectionHeaderHeight;
 
-    labelLines.forEach((line, index) => {
-      commands.push(`BT /F2 10 Tf 0 0 0 rg ${tableX + 12} ${rowTopY - 21 - (index * rowLineHeight)} Td (${escapePdfText(line)}) Tj ET`);
+    rows.forEach((row) => {
+      const rowBottom = currentY - rowHeight;
+      commands.push(`0.82 0.82 0.82 RG ${leftX} ${rowBottom} ${pageWidth} ${rowHeight} re S`);
+      commands.push(`0.82 0.82 0.82 RG ${leftX + labelWidth} ${rowBottom} 0 ${rowHeight} re S`);
+      drawText(row.label, leftX + 8, rowBottom + 5, { bold: true, size: 6.4 });
+      drawText(':', leftX + labelWidth + 8, rowBottom + 5, { size: 6.4 });
+      drawText(row.value, leftX + labelWidth + 22, rowBottom + 5, { size: 6.4 });
+      currentY = rowBottom;
     });
-    valueLines.forEach((line, index) => {
-      commands.push(`BT /F1 10 Tf 0 0 0 rg ${tableX + labelWidth + 12} ${rowTopY - 21 - (index * rowLineHeight)} Td (${escapePdfText(line)}) Tj ET`);
+
+    return currentY - 10;
+  }
+
+  function drawApproval(y) {
+    commands.push(`q 0.62 0.06 0.08 rg ${leftX} ${y - sectionHeaderHeight} ${pageWidth} ${sectionHeaderHeight} re f Q`);
+    drawText('5. PERSETUJUAN', leftX + 8, y - 11, { bold: true, size: 7, color: '1 1 1' });
+    const boxTop = y - sectionHeaderHeight;
+    const boxHeight = 82;
+    const colWidth = pageWidth / 3;
+    documentData.approvals.forEach((label, index) => {
+      const x = leftX + (index * colWidth);
+      commands.push(`0.82 0.82 0.82 RG ${x} ${boxTop - boxHeight} ${colWidth} ${boxHeight} re S`);
+      commands.push(`q 0.96 0.96 0.96 rg ${x} ${boxTop - 15} ${colWidth} 15 re f Q`);
+      commands.push(`0.82 0.82 0.82 RG ${x} ${boxTop - 15} ${colWidth} 15 re S`);
+      drawText(label, x + 42, boxTop - 10, { bold: true, size: 6.4 });
+      drawText('Tanggal:', x + 9, boxTop - 72, { size: 6 });
     });
+    return boxTop - boxHeight - 12;
+  }
 
-    rowTopY = rowBottomY;
-  });
-
-  commands.push(`BT /F1 8 Tf 0.35 0.35 0.35 rg 50 ${Math.max(rowTopY - 28, 60)} Td (Dokumen digenerate dari sistem operasional.) Tj ET`);
+  let y = 710;
+  y = drawSection('1. INFORMASI SPK / ORDER', documentData.orderRows, y);
+  y = drawSection('2. INFORMASI ARMADA & DRIVER', documentData.driverRows, y);
+  y = drawSection('3. INFORMASI OPERASIONAL', documentData.operationalRows, y);
+  y = drawSection('4. INFORMASI RPUJ / SPK', documentData.rpujRows, y);
+  y = drawApproval(y);
+  drawText('Catatan:', leftX, y, { bold: true, size: 6.4, color: '0.62 0.06 0.08' });
+  documentData.notes.forEach((note, index) => drawText(`${index + 1}. ${note}`, leftX, y - 10 - (index * 9), { size: 5.7 }));
+  commands.push('0.82 0.82 0.82 RG 430 44 131 50 re S');
+  drawText('No. Dokumen : FM-OPS-09-01', 437, 82, { size: 5.8 });
+  drawText('Rev         : 01', 437, 70, { size: 5.8 });
+  drawText(`Tgl Berlaku : ${documentData.effectiveDate}`, 437, 58, { size: 5.8 });
 
   return buildPdfFile(commands.join('\n'));
 }
@@ -271,11 +283,28 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     runningAt: container.runningAt?.slice(0, 16) || '',
     completedAt: container.completedAt?.slice(0, 16) || '',
   });
+  const [activePhase, setActivePhase] = useState('preparation');
   const [error, setError] = useState('');
   const ujRecommendation = calculateUjRecommendation(container, masterDestinations);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const otherCostAmountValue = Number(form.otherCostAmount || 0);
   const totalJourneyCost = ujAmount + otherCostAmountValue;
+  const requiresFinanceApprovalForSpk = Boolean(onGenerateSpk);
+  const canGenerateSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
+  const spkRequirementMessage = requiresFinanceApprovalForSpk && !form.spkNumber && !canGenerateSpk
+    ? 'SPK bisa dibuat setelah Finance approve RPUJ.'
+    : '';
+  const rpujStatus = form.rpujStatus || 'pending';
+  const canSubmitRpujRequest = !['submitted', 'approved', 'paid'].includes(rpujStatus);
+  const rpujActionLabel = rpujStatus === 'submitted'
+    ? 'Sudah Diajukan'
+    : rpujStatus === 'approved'
+      ? 'Disetujui Finance'
+      : rpujStatus === 'paid'
+        ? 'Sudah Dibayar'
+        : 'Ajukan Uang Jalan';
+  const canStartTrip = ['approved', 'paid'].includes(rpujStatus);
+  const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.';
 
   useEffect(() => {
     function closeOnEscape(event) {
@@ -297,6 +326,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
   function updateStatusValue(status) {
     const now = nowForDateTimeInput();
+    if (['running', 'completed'].includes(status) && !canStartTrip) {
+      setError(tripStartRequirementMessage);
+    } else {
+      setError('');
+    }
     setForm((current) => ({
       ...current,
       status,
@@ -325,12 +359,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       plateNumber,
       driver: getTruckDefaultDriver(truck, fallbackTruckRows),
       chassis: truck ? `${truck.unitCode} - ${truck.brand} ${truck.type}` : '',
-      status: plateNumber && current.status === 'received'
+      status: plateNumber && current.status === 'received' && canStartTrip
         ? 'running'
         : !plateNumber && current.status === 'running'
           ? 'received'
           : current.status,
-      runningAt: plateNumber && current.status === 'received' && !current.runningAt
+      runningAt: plateNumber && current.status === 'received' && canStartTrip && !current.runningAt
         ? now
         : !plateNumber && current.status === 'running'
           ? ''
@@ -359,6 +393,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
   async function handleGenerateSpk() {
     if (form.spkNumber) return;
+    if (!canGenerateSpk) {
+      setError(spkRequirementMessage || 'SPK belum bisa dibuat.');
+      return;
+    }
 
     try {
       const generated = onGenerateSpk
@@ -375,44 +413,81 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     }
   }
 
-  function buildSpkRows() {
+  function buildSpkDocumentData() {
     const selectedTruck = trucks.find((truck) => truck.plateNumber === form.plateNumber || truck.plateNumber === container.plateNumber);
     const truckCode = formatTruckUnitCode(selectedTruck?.unitCode || container.unitCode || container.truckCode);
     const plateNumber = form.plateNumber || container.plateNumber || '';
     const truckPlate = truckCode && plateNumber ? `${truckCode} - ${plateNumber}` : truckCode || plateNumber || '-';
     const otherCostLabel = otherCostAmountValue > 0 ? formatCurrency(otherCostAmountValue) : '-';
     const totalRpujLabel = totalJourneyCost > 0 ? formatCurrency(totalJourneyCost) : '-';
+    const shipment = String(container.shipment || container.jobType || '').toLowerCase();
+    const checked = (value) => (shipment.includes(value) ? '[x]' : '[ ]');
+    const terminal = spkValue(container.terminal);
+    const depo = spkValue(container.origin);
+    const destination = spkValue(container.destination);
 
-    return [
-      { label: 'No. SPK', value: form.spkNumber || '-' },
-      { label: 'Customer', value: spkValue(container.customer) },
-      { label: 'Jenis Order', value: spkValue(container.shipment || container.jobType) },
-      { label: 'Truck / Plat', value: truckPlate },
-      { label: 'Driver', value: spkValue(form.driver || container.driver) },
-      { label: 'Nama Kapal', value: spkValue(container.vesselName || container.shipName || container.namaKapal), textSeparator: ' :' },
-      { label: 'Terminal', value: spkValue(container.terminal), textSeparator: ' :' },
-      { label: 'Depo', value: spkValue(container.origin), textSeparator: ' :' },
-      { label: 'Destination', value: spkValue(container.destination) },
-      { label: 'Container Size', value: spkValue(container.size || container.containerSize) },
-      { label: 'Tanggal Jalan', value: spkDateValue(container.tripDate) },
-      { label: 'UJ', value: ujAmount > 0 ? formatCurrency(ujAmount) : '-', textSeparator: '' },
-      { label: 'Biaya Lainnya', value: otherCostLabel, textSeparator: '' },
-      { label: 'Catatan Biaya Lainnya', value: spkValue(form.otherCostNotes), textSeparator: '' },
-      { label: 'Total RPUJ', value: totalRpujLabel, textSeparator: '' },
-    ];
+    return {
+      company: {
+        name: 'PT Armada Logistik Indonesia',
+        address: 'Jl. Raya Cakung Cilincing No. 88, Jakarta Utara 14110, Indonesia',
+        contact: 'Telp. (021) 1234 5678 | Email: ops@armada-logistik.co.id | www.armada-logistik.co.id',
+      },
+      effectiveDate: spkDateValue(new Date().toISOString()),
+      orderRows: [
+        { label: 'No. SPK', value: spkValue(form.spkNumber) },
+        { label: 'Customer', value: spkValue(container.customer) },
+        { label: 'Jenis Order', value: `${checked('import')} Import    ${checked('export')} Export    ${checked('domestic')} Domestic` },
+        { label: 'Nama Kapal', value: spkValue(container.vesselName || container.shipName || container.namaKapal) },
+        { label: 'Terminal', value: terminal },
+        { label: 'Depo', value: depo },
+        { label: 'Destination', value: destination },
+        { label: 'Container Size', value: spkValue(container.size || container.containerSize) },
+        { label: 'Tanggal Jalan', value: spkDateValue(container.tripDate) },
+      ],
+      driverRows: [
+        { label: 'Truck / Plat', value: truckPlate },
+        { label: 'Driver', value: spkValue(form.driver || container.driver) },
+      ],
+      operationalRows: [
+        { label: 'Terminal', value: terminal },
+        { label: 'Depo', value: depo },
+        { label: 'Destination', value: destination },
+        { label: 'Catatan Operasional', value: spkValue(container.notes || container.containerNotes) },
+      ],
+      rpujRows: [
+        { label: 'UJ', value: ujAmount > 0 ? formatCurrency(ujAmount) : '-' },
+        { label: 'Biaya Lainnya', value: otherCostLabel },
+        { label: 'Catatan Biaya Lainnya', value: spkValue(form.otherCostNotes) },
+        { label: 'Total RPUJ', value: totalRpujLabel },
+      ],
+      approvals: ['OPERATIONAL', 'FINANCE', 'DRIVER'],
+      notes: [
+        'SPK ini adalah perintah kerja resmi dan diselesaikan dengan penuh tanggung jawab.',
+        'Jika terdapat perubahan rencana, segera hubungi tim operasional.',
+        'Simpan dokumen ini sebagai arsip operasional.',
+      ],
+    };
   }
 
   function previewSpk() {
     const previewWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=760');
     if (!previewWindow) return;
-    const rowsHtml = buildSpkRows()
+    const documentData = buildSpkDocumentData();
+    const renderRows = (rows) => rows
       .map((row) => `
         <tr>
           <th>${escapeHtml(row.label)}</th>
+          <td class="separator">:</td>
           <td>${escapeHtml(row.value)}</td>
         </tr>
       `)
       .join('');
+    const renderSection = (number, title, rows) => `
+      <section class="spk-section">
+        <h2>${number}. ${escapeHtml(title)}</h2>
+        <table><tbody>${renderRows(rows)}</tbody></table>
+      </section>
+    `;
     previewWindow.document.write(`
       <!doctype html>
       <html>
@@ -428,54 +503,156 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               font-family: Arial, sans-serif;
             }
             .sheet {
-              width: 760px;
+              width: 820px;
               max-width: 100%;
               margin: 0 auto;
-              padding: 36px 42px;
-              border: 1px solid #d1d5db;
+              padding: 22px 24px 20px;
+              border: 1px solid #9ca3af;
               background: #ffffff;
             }
             h1 {
-              margin: 0 0 28px;
-              padding-bottom: 14px;
-              border-bottom: 2px solid #111827;
-              font-size: 22px;
-              font-weight: 700;
+              margin: 0;
+              padding-bottom: 8px;
+              border-bottom: 2px solid #9f141a;
+              font-size: 25px;
+              font-weight: 800;
               letter-spacing: 0;
               text-align: center;
+            }
+            .company {
+              display: grid;
+              grid-template-columns: 74px 1fr;
+              gap: 14px;
+              align-items: center;
+              padding: 14px 0 10px;
+              border-bottom: 1px solid #9ca3af;
+            }
+            .logo {
+              color: #9f141a;
+              font-size: 58px;
+              font-weight: 900;
+              line-height: 1;
+            }
+            .company strong,
+            .company span {
+              display: block;
+            }
+            .company strong { font-size: 15px; }
+            .company span { margin-top: 3px; color: #374151; font-size: 10px; }
+            .spk-section { margin-top: 10px; }
+            h2 {
+              margin: 0;
+              padding: 5px 8px;
+              color: white;
+              background: #9f141a;
+              font-size: 11px;
+              font-weight: 800;
+              text-transform: uppercase;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              font-size: 14px;
+              font-size: 11px;
             }
             th,
             td {
-              padding: 10px 12px;
+              padding: 7px 9px;
               border: 1px solid #d1d5db;
               vertical-align: top;
               text-align: left;
             }
             th {
-              width: 210px;
+              width: 190px;
               background: #f9fafb;
               font-weight: 700;
             }
-            td {
-              font-weight: 600;
+            .separator {
+              width: 22px;
+              text-align: center;
+            }
+            .rpuj-total {
+              text-align: center;
+              font-size: 16px;
+              font-weight: 800;
+            }
+            .approval {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              border: 1px solid #d1d5db;
+              border-top: 0;
+            }
+            .approval > div {
+              min-height: 120px;
+              border-right: 1px solid #d1d5db;
+            }
+            .approval > div:last-child { border-right: 0; }
+            .approval h3 {
+              margin: 0;
+              padding: 7px;
+              border-bottom: 1px solid #d1d5db;
+              background: #f3f4f6;
+              font-size: 11px;
+              text-align: center;
+            }
+            .approval span {
+              display: block;
+              margin: 76px 12px 0;
+              padding-top: 6px;
+              border-top: 1px solid #9ca3af;
+              font-size: 10px;
+            }
+            .notes {
+              display: grid;
+              grid-template-columns: 1fr 190px;
+              gap: 16px;
+              margin-top: 10px;
+              font-size: 9px;
+            }
+            .notes strong { color: #9f141a; }
+            .doc-control {
+              border: 1px solid #d1d5db;
+              padding: 7px;
             }
             @media print {
               body { padding: 0; background: #ffffff; }
-              .sheet { width: 100%; border: 0; padding: 24px; }
+              .sheet { width: 100%; border: 0; padding: 18px; }
             }
           </style>
         </head>
         <body>
           <div class="sheet">
-            <h1>SURAT PERINTAH KERJA</h1>
-            <table>
-              <tbody>${rowsHtml}</tbody>
-            </table>
+            <h1>SURAT PERINTAH KERJA (SPK)</h1>
+            <div class="company">
+              <div class="logo">A</div>
+              <div>
+                <strong>${escapeHtml(documentData.company.name)}</strong>
+                <span>${escapeHtml(documentData.company.address)}</span>
+                <span>${escapeHtml(documentData.company.contact)}</span>
+              </div>
+            </div>
+            ${renderSection('1', 'Informasi SPK / Order', documentData.orderRows)}
+            ${renderSection('2', 'Informasi Armada & Driver', documentData.driverRows)}
+            ${renderSection('3', 'Informasi Operasional', documentData.operationalRows)}
+            ${renderSection('4', 'Informasi RPUJ / SPK', documentData.rpujRows)}
+            <section class="spk-section">
+              <h2>5. Persetujuan</h2>
+              <div class="approval">
+                ${documentData.approvals.map((label) => `<div><h3>${escapeHtml(label)}</h3><span>Tanggal:</span></div>`).join('')}
+              </div>
+            </section>
+            <div class="notes">
+              <div>
+                <strong>Catatan:</strong>
+                <ol>
+                  ${documentData.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}
+                </ol>
+              </div>
+              <div class="doc-control">
+                <div>No. Dokumen : FM-OPS-09-01</div>
+                <div>Rev : 01</div>
+                <div>Tgl Berlaku : ${escapeHtml(documentData.effectiveDate)}</div>
+              </div>
+            </div>
           </div>
         </body>
       </html>
@@ -484,7 +661,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   }
 
   function downloadSpk() {
-    const blob = createSpkPdfBlob(buildSpkRows());
+    const blob = createSpkPdfBlob(buildSpkDocumentData());
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -505,20 +682,18 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     updateFile(fileField, file);
   }
 
-  function handleSubmit(event) {
-    event.preventDefault();
+  function buildSubmitForm({ forceRpujStatus } = {}) {
     const otherCostAmount = Number(form.otherCostAmount || 0);
     if (otherCostAmount < 0) {
-      setError('Nominal biaya lainnya tidak boleh negatif.');
-      return;
+      return { error: 'Nominal biaya lainnya tidak boleh negatif.' };
     }
     const currentRpujStatus = form.rpujStatus || 'pending';
     const hasRpujRequest = ujAmount > 0 || otherCostAmount > 0 || Boolean(form.otherCostNotes.trim());
     const nextRpujStatus = ['approved', 'paid'].includes(currentRpujStatus)
       ? currentRpujStatus
-      : hasRpujRequest
+      : forceRpujStatus || (hasRpujRequest
         ? 'submitted'
-        : 'pending';
+        : 'pending');
     const submitForm = {
       ...form,
       rpujStatus: nextRpujStatus,
@@ -527,7 +702,37 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         notes: form.otherCostNotes,
       }),
     };
-    if (submitForm.plateNumber && submitForm.driver && submitForm.status === 'received') {
+    return { submitForm, hasRpujRequest, otherCostAmount };
+  }
+
+  async function handleSubmitRpujRequest() {
+    if (!canSubmitRpujRequest) return;
+    const { submitForm, hasRpujRequest, error: submitError } = buildSubmitForm({ forceRpujStatus: 'submitted' });
+    if (submitError) {
+      setError(submitError);
+      return;
+    }
+    if (!hasRpujRequest) {
+      setError('Nominal uang jalan belum tersedia. Lengkapi tarif UJ atau biaya lainnya terlebih dahulu.');
+      return;
+    }
+    setError('');
+    setForm((current) => ({
+      ...current,
+      rpujStatus: 'submitted',
+      rpujNotes: submitForm.rpujNotes,
+    }));
+    await onSubmit(submitForm);
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const { submitForm, error: submitError } = buildSubmitForm();
+    if (submitError) {
+      setError(submitError);
+      return;
+    }
+    if (submitForm.plateNumber && submitForm.driver && submitForm.status === 'received' && canStartTrip) {
       submitForm.status = 'running';
       submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
     }
@@ -536,11 +741,23 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       setError(`Truck ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }
+    if (['running', 'completed'].includes(submitForm.status) && !canStartTrip) {
+      setError(tripStartRequirementMessage);
+      return;
+    }
     if (submitForm.status === 'running' && (!submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt)) {
       setError('Truck, driver otomatis, dan waktu mulai wajib diisi untuk status Sedang Jalan.');
       return;
     }
     if (submitForm.status === 'completed') {
+      const missingAssignment = !submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt || !submitForm.completedAt;
+      const missingRequiredDocuments = !submitForm.eirNumber
+        || !submitForm.eirDocument
+        || operationalDocumentFields.some((field) => !submitForm[field.valueField] || !submitForm[field.fileField]);
+      if (missingAssignment || missingRequiredDocuments) {
+        setError('Pekerjaan belum dapat diselesaikan. Lengkapi assignment, waktu jalan, waktu selesai, EIR, dan dokumen operasional wajib.');
+        return;
+      }
       if (submitForm.completedAt && submitForm.runningAt && new Date(submitForm.completedAt) < new Date(submitForm.runningAt)) {
         setError('Waktu selesai tidak boleh lebih awal dari waktu mulai.');
         return;
@@ -568,6 +785,24 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         <form onSubmit={handleSubmit}>
           {error ? <div className="alert error operational-form-error">{error}</div> : null}
 
+          <div className="operational-phase-tabs" role="tablist" aria-label="Phase Operational">
+            {operationalPhaseOptions.map((phase, index) => (
+              <button
+                aria-selected={activePhase === phase.id}
+                className={activePhase === phase.id ? 'active' : ''}
+                key={phase.id}
+                onClick={() => setActivePhase(phase.id)}
+                role="tab"
+                title={phase.description}
+                type="button"
+              >
+                <span>{index + 1}</span>
+                <strong>{phase.label}</strong>
+              </button>
+            ))}
+          </div>
+
+          {activePhase === 'preparation' ? (
           <div className="form-section">
             <h3>Assignment</h3>
             <div className="order-form-grid">
@@ -577,7 +812,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <label>Detail Truck<input value={form.chassis} readOnly /></label>
             </div>
           </div>
+          ) : null}
 
+          {activePhase === 'rpuj' ? (
           <div className="form-section">
             <h3>Biaya Lainnya & SPK</h3>
             <div className="mb-4">
@@ -626,6 +863,22 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     </span>
                   </div>
                 </div>
+                <div className="operational-rpuj-actions">
+                  <button
+                    type="button"
+                    className="primary-button operational-rpuj-submit"
+                    onClick={handleSubmitRpujRequest}
+                    disabled={!canSubmitRpujRequest}
+                  >
+                    <Send size={14} />
+                    {rpujActionLabel}
+                  </button>
+                  <small>
+                    {canSubmitRpujRequest
+                      ? 'Kirim total UJ dan biaya lainnya ke Finance untuk approval.'
+                      : 'Pengajuan uang jalan sudah masuk ke alur Finance.'}
+                  </small>
+                </div>
                 <AttachmentUploadField
                   id="operational-spk-document"
                   label="Lampiran Biaya Lainnya"
@@ -650,11 +903,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                 <span>SPK</span>
                 <div className="operational-spk-head">
                   <strong>{form.spkNumber || 'SPK belum dibuat'}</strong>
+                  {spkRequirementMessage ? (
+                    <small className="operational-spk-note">{spkRequirementMessage}</small>
+                  ) : null}
                 </div>
                 <div className="operational-spk-actions">
                   {!form.spkNumber ? (
-                    <button type="button" className="secondary-button operational-spk-button" onClick={handleGenerateSpk}>
-                      Generate SPK
+                    <button
+                      type="button"
+                      className="secondary-button operational-spk-button"
+                      onClick={handleGenerateSpk}
+                      disabled={!canGenerateSpk}
+                    >
+                      {canGenerateSpk ? 'Generate SPK' : 'Menunggu Finance'}
                     </button>
                   ) : (
                     <>
@@ -702,113 +963,123 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               </div>
             </div>
           </div>
+          ) : null}
 
-          <div className="form-section">
-            <h3>Dokumen Operasional</h3>
-            <div className="order-form-grid">
-              {operationalDocumentFields.map((field) => (
-                <div className="operational-document-card" key={field.valueField}>
-                  <span>{field.label}</span>
-                  <input
-                    className="operational-document-input"
-                    name={field.valueField}
-                    value={form[field.valueField]}
-                    onChange={updateField}
-                  />
-                  <div className="operational-document-upload-row">
+          {activePhase === 'closing' ? (
+          <>
+            <div className="form-section">
+              <h3>Dokumen Operasional</h3>
+              <div className="order-form-grid">
+                {operationalDocumentFields.map((field) => (
+                  <div className="operational-document-card" key={field.valueField}>
+                    <span>{field.label}</span>
                     <input
-                      ref={(node) => {
-                        if (node) {
-                          fileInputRefs.current[field.fileField] = node;
-                        }
-                      }}
-                      className="operational-document-hidden-input"
-                      id={`operational-${field.fileField}`}
-                      type="file"
-                      accept={OPERATIONAL_FILE_ACCEPT}
-                      onChange={(event) => {
-                        const nextFile = event.target.files?.[0];
-                        if (!nextFile) return;
-                        const validationError = validateArchiveFile(nextFile, { label: field.label });
-                        if (validationError) {
-                          event.target.value = '';
-                          handleOperationalFileChange(field.fileField, field.label, null, validationError);
-                          return;
-                        }
-                        handleOperationalFileChange(field.fileField, field.label, nextFile, '');
-                        event.target.value = '';
-                      }}
+                      className="operational-document-input"
+                      name={field.valueField}
+                      value={form[field.valueField]}
+                      onChange={updateField}
                     />
-                    <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)}>
-                      Pilih File
-                    </button>
-                    <span className="operational-file-name">
-                      {form[field.fileField]?.name || 'Belum ada file'}
-                    </span>
+                    <div className="operational-document-upload-row">
+                      <input
+                        ref={(node) => {
+                          if (node) {
+                            fileInputRefs.current[field.fileField] = node;
+                          }
+                        }}
+                        className="operational-document-hidden-input"
+                        id={`operational-${field.fileField}`}
+                        type="file"
+                        accept={OPERATIONAL_FILE_ACCEPT}
+                        onChange={(event) => {
+                          const nextFile = event.target.files?.[0];
+                          if (!nextFile) return;
+                          const validationError = validateArchiveFile(nextFile, { label: field.label });
+                          if (validationError) {
+                            event.target.value = '';
+                            handleOperationalFileChange(field.fileField, field.label, null, validationError);
+                            return;
+                          }
+                          handleOperationalFileChange(field.fileField, field.label, nextFile, '');
+                          event.target.value = '';
+                        }}
+                      />
+                      <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)}>
+                        Pilih File
+                      </button>
+                      <span className="operational-file-name">
+                        {form[field.fileField]?.name || 'Belum ada file'}
+                      </span>
+                    </div>
+                    <small className="operational-document-helper">PDF, JPG, PNG - Maks. 5 MB</small>
                   </div>
-                  <small className="operational-document-helper">PDF, JPG, PNG - Maks. 5 MB</small>
-                </div>
-              ))}
-            </div>
-            <div className="other-document-section">
-              <div className="form-section-heading">
-                <div><h3>Other Documents</h3><p>Dokumen tambahan bersifat opsional.</p></div>
-                <button className="secondary-button" type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: [...current.otherDocuments, { name: '', file: null }] }))}><Plus size={15} /> Tambah</button>
+                ))}
               </div>
-              {form.otherDocuments.map((document, index) => (
-                <div className="other-document-row" key={`other-${index}`}>
-                  <input value={document.name} onChange={(event) => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Nama dokumen" />
-                  <AttachmentUploadField
-                    id={`other-document-${index}`}
-                    label="Dokumen tambahan"
-                    value={document.file}
-                      title={document.file?.name ? 'Ubah File' : 'Pilih File'}
-                    helper="PDF, JPG, atau PNG - Maksimal 5 MB"
-                    accept={OPERATIONAL_FILE_ACCEPT}
-                    validationOptions={{
-                      label: 'Dokumen tambahan',
-                    }}
-                    onSelect={(file, validationError) => {
-                      if (validationError) return setError(validationError);
-                      setError('');
-                      setForm((current) => ({
+              <div className="other-document-section">
+                <div className="form-section-heading">
+                  <div><h3>Other Documents</h3><p>Dokumen tambahan bersifat opsional.</p></div>
+                  <button className="secondary-button" type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: [...current.otherDocuments, { name: '', file: null }] }))}><Plus size={15} /> Tambah</button>
+                </div>
+                {form.otherDocuments.map((document, index) => (
+                  <div className="other-document-row" key={`other-${index}`}>
+                    <input value={document.name} onChange={(event) => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Nama dokumen" />
+                    <AttachmentUploadField
+                      id={`other-document-${index}`}
+                      label="Dokumen tambahan"
+                      value={document.file}
+                        title={document.file?.name ? 'Ubah File' : 'Pilih File'}
+                      helper="PDF, JPG, atau PNG - Maksimal 5 MB"
+                      accept={OPERATIONAL_FILE_ACCEPT}
+                      validationOptions={{
+                        label: 'Dokumen tambahan',
+                      }}
+                      onSelect={(file, validationError) => {
+                        if (validationError) return setError(validationError);
+                        setError('');
+                        setForm((current) => ({
+                          ...current,
+                          otherDocuments: current.otherDocuments.map((item, itemIndex) => (
+                            itemIndex === index ? { ...item, file: fileMetadata(file) } : item
+                          )),
+                        }));
+                        return undefined;
+                      }}
+                      onClear={() => setForm((current) => ({
                         ...current,
                         otherDocuments: current.otherDocuments.map((item, itemIndex) => (
-                          itemIndex === index ? { ...item, file: fileMetadata(file) } : item
+                          itemIndex === index ? { ...item, file: null } : item
                         )),
-                      }));
-                      return undefined;
-                    }}
-                    onClear={() => setForm((current) => ({
-                      ...current,
-                      otherDocuments: current.otherDocuments.map((item, itemIndex) => (
-                        itemIndex === index ? { ...item, file: null } : item
-                      )),
-                    }))}
-                  />
-                  <button type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={15} /></button>
-                </div>
-              ))}
+                      }))}
+                    />
+                    <button type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={15} /></button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="form-section">
-            <h3>Status & Timeline</h3>
-            <div className="order-form-grid">
-              <label>
-                Status Pekerjaan
-                <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle}>
-                  {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-                <span className={`mt-1 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${activeStatusOption.tone}`}>
-                  {activeStatusOption.label}
-                </span>
-                <small className="text-[11px] font-semibold leading-snug text-slate-500">{activeStatusOption.description}</small>
-              </label>
-              <label>Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} /></label>
-              <label>Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} /></label>
+            <div className="form-section">
+              <h3>Status & Timeline</h3>
+              <div className="order-form-grid">
+                <label>
+                  Status Pekerjaan
+                  <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle}>
+                    {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <span className={`mt-1 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${activeStatusOption.tone}`}>
+                    {activeStatusOption.label}
+                  </span>
+                  <small className="text-[11px] font-semibold leading-snug text-slate-500">{activeStatusOption.description}</small>
+                  {!canStartTrip ? (
+                    <small className="text-[11px] font-semibold leading-snug text-amber-700">
+                      UJ harus disetujui Finance sebelum perjalanan berjalan.
+                    </small>
+                  ) : null}
+                </label>
+                <label>Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} /></label>
+                <label>Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} /></label>
+              </div>
             </div>
-          </div>
+          </>
+          ) : null}
 
           <footer><button className="secondary-button" type="button" onClick={onClose}>Batal</button><button className="primary-button" type="submit">Simpan Container Job</button></footer>
         </form>

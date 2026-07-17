@@ -266,6 +266,7 @@
   .rincian-summary > div {
     width: 100%;
   }
+  .operational-phase-tabs { grid-template-columns: 1fr; }
   .operational-rpuj-spk-grid { grid-template-columns: 1fr; }
   .operational-document-card { grid-template-columns: 1fr; }
   .commercial-grid, .order-detail-sections { grid-template-columns: 1fr; }

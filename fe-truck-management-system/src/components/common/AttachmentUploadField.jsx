@@ -70,7 +70,7 @@ function AttachmentUploadField({
 
     setPreviewUrl('');
     return undefined;
-  }, [value]);
+  }, [value]);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
 
   function handleChange(event) {
     const file = event.target.files?.[0];

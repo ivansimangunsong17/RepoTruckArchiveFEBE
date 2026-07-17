@@ -15,6 +15,7 @@ export function fetchContainerJobsPage({
   query = '',
   status = '',
   requestStatus = '',
+  rpujStage = '',
 } = {}) {
   const params = new URLSearchParams({
     page: String(page),
@@ -23,6 +24,7 @@ export function fetchContainerJobsPage({
   });
   if (status) params.set('status', status);
   if (requestStatus) params.set('requestStatus', requestStatus);
+  if (rpujStage) params.set('rpujStage', rpujStage);
   return httpClient.get(`/container-jobs?${params.toString()}`);
 }
 

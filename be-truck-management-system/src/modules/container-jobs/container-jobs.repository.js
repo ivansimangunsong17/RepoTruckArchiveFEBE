@@ -45,7 +45,7 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
-function buildJobWhere({ query: keyword = '', status = '', requestStatus = '' } = {}) {
+function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', includeRpujStage = true } = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
     "so.finance_verification_status = 'verified'",
@@ -73,6 +73,16 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '' } 
   if (requestStatus) {
     params.push(requestStatus);
     clauses.push(`cj.cancel_request_status = $${params.length}`);
+  }
+
+  if (includeRpujStage && rpujStage) {
+    if (rpujStage === 'queue') {
+      clauses.push("coalesce(cj.rpuj_status, 'pending') in ('pending', 'rejected')");
+    } else if (rpujStage === 'submitted') {
+      clauses.push("cj.rpuj_status in ('submitted', 'approved')");
+    } else if (rpujStage === 'paid') {
+      clauses.push("cj.rpuj_status = 'paid'");
+    }
   }
 
   return {
@@ -163,13 +173,82 @@ function normalizeRpujStatusForOperational(existing, nextStatus) {
   return normalizedNext;
 }
 
+function validationError(message, code = 'VALIDATION_ERROR', statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+}
+
+function requireTripStartAllowed(nextStatus, rpujStatus) {
+  if (!['running', 'completed'].includes(nextStatus)) return;
+  if (['approved', 'paid'].includes(rpujStatus)) return;
+  throw validationError(
+    'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.',
+    'TRIP_WAITING_RPUJ_APPROVAL',
+    409,
+  );
+}
+
+function pickFormValue(form, key, fallback = null) {
+  return Object.prototype.hasOwnProperty.call(form, key) ? form[key] : fallback;
+}
+
+async function requireCompletedJobReady(client, id, form, existing) {
+  const requiredValues = [
+    ['driver', form.driver || form.driverId || existing.driver_id],
+    ['truck', form.plateNumber || form.vehicleId || existing.vehicle_id],
+    ['waktu mulai', form.runningAt || existing.running_at],
+    ['waktu selesai', form.completedAt],
+    ['No. EIR', pickFormValue(form, 'eirNumber', existing.eir_number)],
+    ['No. Bon Muat / Bon Bongkar', pickFormValue(form, 'loadingVoucher', existing.loading_voucher_number)],
+    ['No. TILA / Delivery Card / Gatepass / SP2', pickFormValue(form, 'tilaGatepassDocument', existing.tila_gatepass_document_number)],
+    ['No. Surat Jalan', pickFormValue(form, 'travelDocument', existing.travel_document_number)],
+  ];
+  const missingValue = requiredValues.find(([, value]) => !value);
+  if (missingValue) {
+    throw validationError(
+      `Pekerjaan belum dapat diselesaikan. Lengkapi ${missingValue[0]} terlebih dahulu.`,
+      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
+      409,
+    );
+  }
+
+  const attachmentResult = await client.query(
+    `
+      select category
+      from attachments
+      where entity_type = 'container_job'
+        and entity_id = $1
+        and category = any($2::text[])
+    `,
+    [id, ['eirDocument', 'loadingVoucherDocument', 'tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'travelDocumentFile']],
+  );
+  const categories = new Set(attachmentResult.rows.map((row) => row.category));
+  const requiredAttachments = [
+    ['Lampiran EIR', ['eirDocument']],
+    ['Lampiran Bon Muat / Bon Bongkar', ['loadingVoucherDocument']],
+    ['Lampiran TILA / Delivery Card / Gatepass / SP2', ['tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile']],
+    ['Lampiran Surat Jalan', ['travelDocumentFile']],
+  ];
+  const missingAttachment = requiredAttachments.find(([, alternatives]) => !alternatives.some((category) => categories.has(category)));
+  if (missingAttachment) {
+    throw validationError(
+      `Pekerjaan belum dapat diselesaikan. Lengkapi ${missingAttachment[0]} terlebih dahulu.`,
+      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
+      409,
+    );
+  }
+}
+
 export async function findContainerJobsPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildJobWhere(options);
+  const rpujCountWhere = buildJobWhere({ ...options, includeRpujStage: false });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
-  const [rowsResult, countResult, statusResult] = await Promise.all([
+  const [rowsResult, countResult, statusResult, rpujStatusResult] = await Promise.all([
     query(
       `
         select ${joinedJobColumns}
@@ -211,6 +290,22 @@ export async function findContainerJobsPage(options = {}) {
         group by cj.status
       `,
     ),
+    query(
+      `
+        select
+          case
+            when cj.rpuj_status = 'paid' then 'paid'
+            when cj.rpuj_status in ('submitted', 'approved') then 'submitted'
+            else 'queue'
+          end as stage,
+          count(*)::int as total
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        ${rpujCountWhere.whereSql}
+        group by 1
+      `,
+      rpujCountWhere.params,
+    ),
   ]);
 
   const jobIds = rowsResult.rows.map((row) => row.id);
@@ -235,11 +330,16 @@ export async function findContainerJobsPage(options = {}) {
   statusResult.rows.forEach((row) => {
     counts[row.status] = row.total;
   });
+  const rpujCounts = { queue: 0, submitted: 0, paid: 0 };
+  rpujStatusResult.rows.forEach((row) => {
+    rpujCounts[row.stage] = row.total;
+  });
 
   return {
     rows: rowsResult.rows.map((row) => mapContainerJob(row, groupedAttachments[row.id] || [])),
     total: countResult.rows[0]?.total || 0,
     counts,
+    rpujCounts,
   };
 }
 
@@ -272,7 +372,8 @@ export async function updateContainerJob(id, form) {
     const existing = await client.query(
       `
         select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.cancelled_at,
-               cj.rpuj_status,
+               cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.status, cj.eir_number,
+               cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
                so.so_number, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -291,9 +392,12 @@ export async function updateContainerJob(id, form) {
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
-    const hasAssignment = Boolean(form.driver || form.driverId || form.plateNumber || form.vehicleId);
-    const nextStatus = form.status || (hasAssignment ? 'running' : 'received');
+    const nextStatus = form.status || existing.rows[0].status || 'received';
     const nextRpujStatus = normalizeRpujStatusForOperational(existing.rows[0], form.rpujStatus);
+    requireTripStartAllowed(nextStatus, nextRpujStatus);
+    if (nextStatus === 'completed') {
+      await requireCompletedJobReady(client, id, form, existing.rows[0]);
+    }
     const requestRpujAt = nextRpujStatus === 'submitted' && existing.rows[0].rpuj_status !== 'submitted'
       ? new Date().toISOString()
       : null;
@@ -633,28 +737,10 @@ export async function generateContainerJobSpk(id, form = {}) {
     }
     ensureSalesOrderVerifiedForOperational(existing.rows[0]);
 
-    if (existing.rows[0].rpuj_status !== 'paid') {
-      const error = new Error('SPK belum bisa terbit. Finance harus approve RPUJ dan upload bukti transfer UJ terlebih dahulu.');
+    if (!['approved', 'paid'].includes(existing.rows[0].rpuj_status)) {
+      const error = new Error('SPK belum bisa terbit. Finance harus approve RPUJ terlebih dahulu.');
       error.statusCode = 409;
-      error.code = 'SPK_WAITING_FINANCE_TRANSFER';
-      throw error;
-    }
-
-    const transferProof = await client.query(
-      `
-        select id
-        from attachments
-        where entity_type = 'container_job'
-          and entity_id = $1
-          and category = 'rpujTransferProof'
-        limit 1
-      `,
-      [id],
-    );
-    if (!transferProof.rows[0]) {
-      const error = new Error('SPK belum bisa terbit karena bukti transfer UJ belum diupload Finance.');
-      error.statusCode = 409;
-      error.code = 'SPK_TRANSFER_PROOF_REQUIRED';
+      error.code = 'SPK_WAITING_FINANCE_APPROVAL';
       throw error;
     }
 

@@ -277,6 +277,15 @@ async function ensureSalesOrderCanBeCancelled(client, id) {
   }
 }
 
+function ensureContainerTripGate(container = {}) {
+  if (!['running', 'completed'].includes(container.status)) return;
+  if (['approved', 'paid'].includes(container.rpujStatus)) return;
+  const error = new Error('Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.');
+  error.statusCode = 409;
+  error.code = 'TRIP_WAITING_RPUJ_APPROVAL';
+  throw error;
+}
+
 async function updateSalesOrderCancellation(client, id, patch = {}) {
   const result = await client.query(
     `
@@ -413,6 +422,7 @@ export async function createSalesOrder(form) {
     const order = orderResult.rows[0];
 
     for (const container of form.containers || []) {
+      ensureContainerTripGate(container);
       const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
       const jobEntries = Object.entries(jobPayload);
       await client.query(
@@ -495,6 +505,7 @@ export async function updateSalesOrder(id, form) {
     }
 
     for (const container of form.containers || []) {
+      ensureContainerTripGate(container);
       const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
       const jobEntries = Object.entries(jobPayload);
       if (container.id && currentJobs.rows.some((job) => job.id === container.id)) {

@@ -12,7 +12,6 @@ import {
 import {
   approveFinanceRpuj,
   fetchFinanceInvoices,
-  fetchFinanceCompletedTrips,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
   rejectFinanceRpuj,
@@ -36,8 +35,8 @@ const financeTabs = [
     label: 'Approval RPUJ / SPK',
     icon: ReceiptText,
     badge: 'Operational',
-    description: 'Review total UJ, biaya tambahan, approve/reject, lalu upload bukti transfer sebelum SPK terbit.',
-    statusFlow: ['Menunggu Approval Finance', 'Disetujui Finance', 'Bukti Transfer Diupload', 'SPK Terbit'],
+    description: 'Review total UJ, approve/reject, upload bukti transfer, dan pantau UJ yang sudah dikirim.',
+    statusFlow: ['Butuh Approval', 'Siap Transfer', 'UJ Dikirim'],
   },
   {
     id: 'invoice-number',
@@ -375,7 +374,17 @@ function normalizeFinanceOrderRow(row = {}) {
   };
 }
 
+function normalizeRpujStatus(row = {}) {
+  if (row.rpujStatus) return row.rpujStatus;
+  if (row.status === 'Menunggu Approval Finance') return 'submitted';
+  if (row.status === 'Disetujui Finance') return 'approved';
+  if (['Bukti Transfer Diupload', 'SPK Terbit'].includes(row.status)) return 'paid';
+  if (row.status === 'Ditolak Finance') return 'rejected';
+  return 'pending';
+}
+
 function normalizeFinanceRpujRow(row = {}) {
+  const rpujStatus = normalizeRpujStatus(row);
   return {
     id: row.id,
     soNumber: row.soNumber || '-',
@@ -396,7 +405,7 @@ function normalizeFinanceRpujRow(row = {}) {
     totalUj: Number(row.totalUj || 0),
     additionalCost: Number(row.additionalCost || 0),
     status: row.status || 'Belum Diajukan',
-    rpujStatus: row.rpujStatus || 'pending',
+    rpujStatus,
     transferProof: row.transferProof || row.transferProofFile?.name || '',
     transferProofFile: row.transferProofFile || null,
   };
@@ -424,31 +433,6 @@ function normalizeFinanceInvoiceRow(row = {}) {
     invoiceStatus: row.invoiceStatus || (row.invoiceNumber ? 'Menunggu Update Status' : 'Butuh Nomor Invoice'),
     paymentStatus: row.paymentStatus || '-',
     billingStatus: row.billingStatus || 'belum_invoice',
-  };
-}
-
-function normalizeFinanceCompletedTripRow(row = {}) {
-  return {
-    id: row.id,
-    completedAt: formatDisplayDate(row.completedAt || row.completed_at || row.finishedAt),
-    soNumber: row.soNumber || row.so_number || '-',
-    doNumber: row.doNumber || row.do_number || '-',
-    spkNumber: row.spkNumber || row.spk_number || '-',
-    customer: row.customer || row.customerName || '-',
-    serviceName: row.serviceName || row.orderType || row.shipmentType || '-',
-    origin: row.origin || row.source || '-',
-    destination: row.destination || '-',
-    containerSize: row.containerSize || row.container || '-',
-    quantity: Number(row.quantity || row.containerQuantity || 1),
-    truck: row.truck || '-',
-    driver: row.driver || '-',
-    totalRevenue: Number(row.totalRevenue || row.revenue || 0),
-    journeyMoney: Number(row.journeyMoney || row.ujAmount || 0),
-    additionalCost: Number(row.additionalCost || 0),
-    estimatedMargin: Number(row.estimatedMargin || row.margin || 0),
-    documentStatus: row.documentStatus || row.document_status || '-',
-    invoiceStatus: row.invoiceStatus || row.invoice_status || '-',
-    tripDate: formatDisplayDate(row.tripDate || row.departureDate || row.runningDate || row.completedAt),
   };
 }
 
@@ -888,53 +872,25 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onS
 
 function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelectRpuj, rpujBusyId }) {
   const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
-  const [recapRows, setRecapRows] = useState([]);
-  const [recapLoading, setRecapLoading] = useState(false);
-  const [recapError, setRecapError] = useState('');
 
   const searchableRows = rows.filter((row) =>
     `${row.soNumber} ${row.jobNumber} ${row.customer} ${row.destination} ${row.container} ${row.driver} ${row.truck} ${row.status}`.toLowerCase().includes(query.toLowerCase()));
 
-  const pendingRows = searchableRows.filter((row) => row.status === 'Menunggu Approval Finance');
-  const approvedRows = searchableRows.filter((row) =>
-    ['Disetujui Finance', 'Bukti Transfer Diupload', 'SPK Terbit'].includes(row.status));
-  const recapSearchableRows = recapRows.filter((row) =>
-    `${row.completedAt} ${row.soNumber} ${row.doNumber} ${row.spkNumber} ${row.customer} ${row.serviceName} ${row.origin} ${row.destination} ${row.containerSize} ${row.truck} ${row.driver} ${row.documentStatus} ${row.invoiceStatus}`.toLowerCase().includes(query.toLowerCase()));
-
-  useEffect(() => {
-    if (activeRpujTab !== 'recap') return undefined;
-    let active = true;
-    setRecapLoading(true);
-    setRecapError('');
-    fetchFinanceCompletedTrips({ page: 1, pageSize: 100 })
-      .then((result) => {
-        if (!active) return;
-        const normalized = Array.isArray(result?.rows)
-          ? result.rows.map(normalizeFinanceCompletedTripRow).filter((row) => row.completedAt || row.soNumber !== '-')
-          : [];
-        setRecapRows(normalized);
-      })
-      .catch((requestError) => {
-        if (active) setRecapError(requestError.message || 'Recap perjalanan selesai gagal dimuat.');
-      })
-      .finally(() => {
-        if (active) setRecapLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [activeRpujTab]);
+  const needsApprovalRows = searchableRows.filter((row) => row.rpujStatus === 'submitted');
+  const readyTransferRows = searchableRows.filter((row) => row.rpujStatus === 'approved');
+  const paidRows = searchableRows.filter((row) => row.rpujStatus === 'paid');
 
   const tabs = [
-    { id: 'need-approval', label: 'RPUJ Butuh Approval', icon: Clock3, count: pendingRows.length, tone: 'red' },
-    { id: 'approved', label: 'RPUJ Sudah Approved', icon: CheckCircle2, count: approvedRows.length, tone: 'emerald' },
-    { id: 'recap', label: 'Recap Semua Data Selesai', icon: FileText, count: recapRows.length, tone: 'sky' },
+    { id: 'need-approval', label: 'Butuh Approval', icon: Clock3, count: needsApprovalRows.length, tone: 'red' },
+    { id: 'ready-transfer', label: 'Siap Transfer', icon: Upload, count: readyTransferRows.length, tone: 'amber' },
+    { id: 'paid', label: 'UJ Dikirim', icon: CheckCircle2, count: paidRows.length, tone: 'emerald' },
   ];
 
-  const activeRows = activeRpujTab === 'approved'
-    ? approvedRows
-    : pendingRows;
+  const activeRows = activeRpujTab === 'ready-transfer'
+    ? readyTransferRows
+    : activeRpujTab === 'paid'
+      ? paidRows
+      : needsApprovalRows;
   const groupedRows = activeRows.reduce((groups, row) => {
     if (!groups[row.soNumber]) groups[row.soNumber] = [];
     groups[row.soNumber].push(row);
@@ -958,6 +914,11 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                 active: 'border-emerald-200 bg-emerald-50 text-emerald-800 ring-emerald-100',
                 icon: 'bg-white text-emerald-600 ring-1 ring-emerald-100',
                 count: 'bg-emerald-100 text-emerald-700',
+              },
+              amber: {
+                active: 'border-amber-200 bg-amber-50 text-amber-800 ring-amber-100',
+                icon: 'bg-white text-amber-600 ring-1 ring-amber-100',
+                count: 'bg-amber-100 text-amber-700',
               },
               sky: {
                 active: 'border-sky-200 bg-sky-50 text-sky-800 ring-sky-100',
@@ -990,83 +951,7 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
         </div>
       </div>
 
-      {activeRpujTab === 'recap' ? (
-        <div className="table-wrap">
-          {recapError ? <div className="border-b border-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">{recapError}</div> : null}
-          {recapLoading ? <div className="border-b border-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">Memuat recap perjalanan selesai...</div> : null}
-          <table className="data-table master-table finance-master-table min-w-[1060px] table-fixed">
-            <colgroup>
-              <col className="w-[10%]" />
-              <col className="w-[15%]" />
-              <col className="w-[18%]" />
-              <col className="w-[18%]" />
-              <col className="w-[15%]" />
-              <col className="w-[16%]" />
-              <col className="w-[8%]" />
-            </colgroup>
-            <thead>
-              <tr>
-                {['Selesai', 'SO / Dokumen', 'Customer', 'Rute', 'Unit', 'Nilai', 'Status'].map((column) => (
-                <th key={column}>{column}</th>
-              ))}
-              </tr>
-            </thead>
-            <tbody>
-              {recapSearchableRows.map((row) => (
-                <tr className="border-t border-slate-100 align-top hover:bg-slate-50" key={row.id}>
-                    <td className="px-2 py-1.5">
-                    <strong className="block text-[11px] font-semibold text-slate-900">{row.completedAt}</strong>
-                    <span className="mt-0.5 block text-[9px] font-medium text-slate-500">{row.tripDate}</span>
-                  </td>
-                  <td className="finance-wrap-cell px-2 py-1.5">
-                    <strong className="block text-[11px] font-semibold text-slate-950">{row.soNumber || '-'}</strong>
-                    <span className="mt-0.5 block text-[9px] font-medium text-slate-500">DO: {row.doNumber || '-'}</span>
-                    <span className="block text-[9px] font-medium text-slate-500">SPK: {row.spkNumber || '-'}</span>
-                  </td>
-                  <td className="finance-wrap-cell px-2 py-1.5">
-                    <strong className="block max-w-[210px] text-[11px] font-semibold text-slate-900">{row.customer || '-'}</strong>
-                    <span className="mt-0.5 block max-w-[210px] text-[9px] font-medium text-slate-500">{row.serviceName || '-'}</span>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <strong className="block max-w-[220px] text-[11px] font-semibold text-slate-900">{row.origin || '-'} ke {row.destination || '-'}</strong>
-                    <span className="mt-0.5 inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{row.containerSize || '-'} - {row.quantity || 1} ritase</span>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <strong className="block text-[11px] font-semibold text-slate-900">{row.truck || '-'}</strong>
-                    <span className="mt-0.5 block text-[9px] font-medium text-slate-500">{row.driver || '-'}</span>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <div className="grid min-w-[160px] grid-cols-2 gap-1">
-                      <div className="rounded-md bg-slate-50 px-1.5 py-0.75">
-                        <span className="block text-[8px] font-semibold uppercase tracking-wide text-slate-500">Revenue</span>
-                        <strong className="text-[9px] font-semibold text-slate-950">{formatCurrency(row.totalRevenue)}</strong>
-                      </div>
-                      <div className="rounded-md bg-slate-50 px-1.5 py-0.75">
-                        <span className="block text-[8px] font-semibold uppercase tracking-wide text-slate-500">Margin</span>
-                        <strong className="text-[9px] font-semibold text-slate-950">{formatCurrency(row.estimatedMargin)}</strong>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <div className="flex min-w-[120px] flex-col items-start gap-0.5">
-                      <StatusPill value={row.documentStatus} />
-                      <StatusPill value={row.invoiceStatus} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!recapSearchableRows.length ? (
-                <tr>
-                  <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={7}>
-                    {recapLoading ? 'Memuat data...' : 'Belum ada recap perjalanan selesai.'}
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="table-wrap">
+      <div className="table-wrap">
           <table className="data-table master-table finance-master-table min-w-[960px] table-fixed">
             <colgroup>
               <col className="w-[17%]" />
@@ -1113,7 +998,7 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                       <td className="h-px bg-slate-200 p-0" colSpan={5} />
                     </tr>
                     {soRows.map((row) => {
-                      const approved = row.status === 'Disetujui Finance' || row.status === 'Bukti Transfer Diupload' || row.status === 'SPK Terbit';
+                      const canUploadTransfer = row.rpujStatus === 'approved';
                       const busy = rpujBusyId === row.id;
                       const rowTotal = row.totalUj + row.additionalCost;
 
@@ -1146,13 +1031,13 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                                     <button className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={busy} onClick={() => onReject(row.id)} type="button">Reject</button>
                                   </>
                                 ) : null}
-                                {activeRpujTab === 'approved' ? (
-                                  <label className={`inline-flex h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 ${approved && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
+                                {activeRpujTab === 'ready-transfer' ? (
+                                  <label className={`inline-flex h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 ${canUploadTransfer && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
                                     <Upload size={11} /> {busy ? 'Proses' : 'Upload'}
                                     <input
                                       accept=".pdf,.jpg,.jpeg,.png"
                                       className="hidden"
-                                      disabled={!approved || busy}
+                                      disabled={!canUploadTransfer || busy}
                                       onChange={(event) => {
                                         const file = event.target.files?.[0];
                                         event.target.value = '';
@@ -1161,6 +1046,11 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                                       type="file"
                                     />
                                   </label>
+                                ) : null}
+                                {activeRpujTab === 'paid' ? (
+                                  <span className="col-span-2 min-w-0 truncate rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[10px] font-semibold text-emerald-700" title={row.transferProof || 'Bukti transfer sudah dikirim'}>
+                                    {row.transferProof || 'Bukti transfer sudah dikirim'}
+                                  </span>
                                 ) : null}
                               </div>
                             </td>
@@ -1182,7 +1072,6 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
             </tbody>
           </table>
         </div>
-      )}
     </div>
   );
 }

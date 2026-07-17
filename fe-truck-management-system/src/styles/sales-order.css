@@ -267,6 +267,59 @@
 .order-modal footer { position: sticky; z-index: 3; bottom: 0; display: flex; justify-content: flex-end; gap: 10px; padding: 16px 22px; border-top: 1px solid #d8dade; background: white; box-shadow: 0 -7px 20px #11131812; }
 .operational-modal { width: min(900px, 100%); }
 .operational-form-error { margin: 10px 12px 0; border: 1px solid #efc9cb; font-weight: 700; }
+.operational-phase-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 14px 0;
+}
+.operational-phase-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid #d9e0ea;
+  border-radius: 9px;
+  color: #59687d;
+  background: #f8fafc;
+  font-size: .66rem;
+  font-weight: 800;
+  text-align: left;
+}
+.operational-phase-tabs button:hover {
+  border-color: #c7d2df;
+  background: #fff;
+  color: #253044;
+}
+.operational-phase-tabs button.active {
+  border-color: #efb9bc;
+  color: #97141a;
+  background: #fff5f5;
+  box-shadow: 0 1px 2px #11182712;
+}
+.operational-phase-tabs span {
+  display: grid;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  color: #64748b;
+  background: #fff;
+  font-size: .63rem;
+  font-weight: 900;
+}
+.operational-phase-tabs button.active span {
+  color: #fff;
+  background: #c6131a;
+}
+.operational-phase-tabs strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .operational-files-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .operational-file-field { display: grid; gap: 4px; }
 .operational-file-field > span { color: #4d5056; font-size: .62rem; font-weight: 700; }
@@ -390,6 +443,30 @@
 }
 .operational-rpuj-card .document-upload,
 .operational-eir-card .document-upload { margin-top: 2px; }
+.operational-rpuj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+}
+.operational-rpuj-actions small {
+  color: #718096;
+  font-size: .58rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.operational-rpuj-submit {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: .62rem;
+}
+.operational-rpuj-submit:disabled {
+  border-color: #d7dde6;
+  color: #748196;
+  background: #eef3f8;
+  cursor: not-allowed;
+  opacity: 1;
+}
 .operational-eir-card > span {
   color: #8a5b00;
 }
@@ -446,6 +523,13 @@
   font-size: .78rem;
   font-weight: 800;
 }
+.operational-spk-note {
+  max-width: 360px;
+  color: #7b4d0b;
+  font-size: .58rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
 .operational-spk-actions {
   display: flex;
   flex-wrap: wrap;
@@ -455,6 +539,13 @@
   min-height: 30px;
   padding: 0 10px;
   font-size: .6rem;
+}
+.operational-spk-button:disabled {
+  border-color: #d7dde6;
+  color: #758196;
+  background: #f4f7fb;
+  cursor: not-allowed;
+  opacity: 1;
 }
 .other-document-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e3e4e7; }
 .other-document-row { display: grid; grid-template-columns: 1fr 1fr 34px; align-items: center; gap: 9px; margin-top: 8px; }
