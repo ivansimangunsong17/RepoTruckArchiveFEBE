@@ -669,7 +669,9 @@ function OperationsPage() {
         <OperationalForm
           container={editing}
           masterTrucks={archive.masters.trucks}
+          masterDrivers={archive.masters.drivers}
           masterDestinations={archive.masters.destinations}
+          activeJobs={archive.isDatabaseMode ? databaseJobs : demoJobs}
           onClose={() => setEditing(null)}
           onSubmit={updateOperational}
           onGenerateSpk={generateOperationalSpk}

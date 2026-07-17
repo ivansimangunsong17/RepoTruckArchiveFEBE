@@ -625,7 +625,7 @@ function RpujDetailModal({ rpuj, onClose }) {
               <DetailField label="Truck" value={rpuj.truck} />
               <DetailField label="Jenis Order" value={rpuj.orderType} />
               <DetailField label="Driver" value={rpuj.driver} />
-              <DetailField label="No. Rekening Driver" value={rpuj.driverBankAccount} />
+              <DetailField label="Rekening / E-Money Driver" value={rpuj.driverBankAccount} />
               <DetailField label="Terminal" value={rpuj.terminal} />
               <DetailField label="Depo" value={rpuj.depo} />
             </div>

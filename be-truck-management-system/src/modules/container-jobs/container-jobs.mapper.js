@@ -64,6 +64,13 @@ export function mapContainerJob(row, attachments = []) {
     driverId: row.driver_id,
     vehicleId: row.vehicle_id,
     driver: assignment.driver || null,
+    driverPaymentMethod: assignment.driverPaymentMethod || 'bank',
+    driverBankAccount: assignment.driverBankAccount || assignment.bankAccount || '',
+    driverBankName: assignment.driverBankName || '',
+    driverBankAccountNumber: assignment.driverBankAccountNumber || '',
+    driverBankAccountHolder: assignment.driverBankAccountHolder || '',
+    driverEmoneyProvider: assignment.driverEmoneyProvider || '',
+    driverEmoneyNumber: assignment.driverEmoneyNumber || '',
     plateNumber: assignment.plateNumber || null,
     chassis: assignment.vehicleDetail || null,
     rpujStatus: row.rpuj_status,
@@ -119,10 +126,26 @@ export function toAssignmentSnapshot(form, driver, vehicle) {
   const vehicleDetail = form.chassis || (vehicle
     ? `${vehicle.unit_code || ''}${vehicle.brand ? ` - ${vehicle.brand}` : ''}${vehicle.vehicle_type ? ` ${vehicle.vehicle_type}` : ''}`.trim()
     : null);
+  const paymentMethod = form.driverPaymentMethod || driver?.payment_method || 'bank';
+  const bankAccount = [
+    form.driverBankName || driver?.bank_name,
+    form.driverBankAccountNumber || driver?.bank_account_number,
+  ].filter(Boolean).join(' ');
+  const emoneyAccount = [
+    form.driverEmoneyProvider || driver?.emoney_provider,
+    form.driverEmoneyNumber || driver?.emoney_number,
+  ].filter(Boolean).join(' ');
 
   return {
     driver: form.driver || driver?.name || null,
     plateNumber: form.plateNumber || vehicle?.plate_number || null,
     vehicleDetail,
+    driverPaymentMethod: paymentMethod === 'emoney' ? 'emoney' : 'bank',
+    driverBankAccount: paymentMethod === 'emoney' ? emoneyAccount || null : bankAccount || null,
+    driverBankName: form.driverBankName || driver?.bank_name || null,
+    driverBankAccountNumber: form.driverBankAccountNumber || driver?.bank_account_number || null,
+    driverBankAccountHolder: form.driverBankAccountHolder || driver?.bank_account_holder || null,
+    driverEmoneyProvider: form.driverEmoneyProvider || driver?.emoney_provider || null,
+    driverEmoneyNumber: form.driverEmoneyNumber || driver?.emoney_number || null,
   };
 }

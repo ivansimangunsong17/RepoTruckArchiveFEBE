@@ -150,7 +150,7 @@ describe('OperationalForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('menampilkan truck aktif atau bertugas dan mengisi driver otomatis dari truck', async () => {
+  it('menampilkan truck aktif dan mengisi driver otomatis dari truck', async () => {
     const user = userEvent.setup();
     render(
       <OperationalForm
@@ -166,12 +166,69 @@ describe('OperationalForm', () => {
     );
 
     expect(screen.getByRole('option', { name: /B 1000 AA/i })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /B 2000 BB/i })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /B 2000 BB/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /B 3000 CC/i })).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
 
     expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Driver Aktif');
+  });
+
+  it('tidak menampilkan truck jika driver atau truck masih aktif di job lain', () => {
+    render(
+      <OperationalForm
+        container={container}
+        activeJobs={[
+          { id: 'job-busy-driver', status: 'running', driver: 'Driver Sibuk', plateNumber: 'B 9999 ZZ' },
+          { id: 'job-busy-truck', status: 'received', driver: 'Driver Lain', plateNumber: 'B 2000 BB' },
+        ]}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Sibuk' },
+          { id: 'truck-2', plateNumber: 'B 2000 BB', unitCode: 'TRK-002', capacity: '20FT', brand: 'Fuso', type: 'FN', status: 'Aktif', defaultDriver: 'Driver Siap' },
+          { id: 'truck-3', plateNumber: 'B 3000 CC', unitCode: 'TRK-003', capacity: '20FT', brand: 'UD', type: 'Quester', status: 'Aktif', defaultDriver: 'Driver Siap 2' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('option', { name: /B 1000 AA/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /B 2000 BB/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /B 3000 CC/i })).toBeInTheDocument();
+  });
+
+  it('mengisi info pembayaran UJ driver dari master sopir', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={container}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver E Money', paymentMethod: 'emoney', emoneyProvider: 'DANA', emoneyNumber: '081299990000' },
+        ]}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver E Money' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+
+    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Driver E Money');
+    expect(screen.getByLabelText('Pembayaran UJ Driver')).toHaveValue('DANA 081299990000');
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    await user.type(screen.getByLabelText(/nominal biaya/i), '150000');
+    await user.click(screen.getByRole('button', { name: /ajukan uang jalan/i }));
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      driverPaymentMethod: 'emoney',
+      driverBankAccount: 'DANA 081299990000',
+      driverEmoneyProvider: 'DANA',
+      driverEmoneyNumber: '081299990000',
+    });
   });
 
   it('menyaring truck yang kapasitasnya tidak sesuai dengan ukuran container', () => {

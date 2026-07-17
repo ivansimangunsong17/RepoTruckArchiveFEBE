@@ -368,7 +368,13 @@ function rpujRowsSelect() {
       cj.rpuj_transfer_uploaded_by_name,
       cj.rpuj_transfer_uploaded_at,
       cj.spk_number,
+      cj.driver_id,
       cj.assignment_snapshot,
+      case
+        when lower(coalesce(d.payment_method, 'bank')) = 'emoney'
+          then nullif(concat_ws(' ', nullif(d.emoney_provider, ''), nullif(d.emoney_number, '')), '')
+        else nullif(concat_ws(' ', nullif(d.bank_name, ''), nullif(d.bank_account_number, '')), '')
+      end as driver_payment_account,
       so.so_number,
       so.customer_name,
       so.shipment_type,
@@ -387,6 +393,7 @@ function rpujRowsSelect() {
       tp.file_size as transfer_proof_file_size
     from container_jobs cj
     join sales_orders so on so.id = cj.sales_order_id
+    left join drivers d on d.id = cj.driver_id and d.archived_at is null
     left join destination_locations dl on lower(trim(dl.name)) = lower(trim(so.destination)) and dl.archived_at is null
     left join lateral (
       select id, file_name, storage_path, mime_type, file_size
@@ -534,7 +541,7 @@ function mapRpujRequestRow(row) {
     customer: row.customer_name,
     destination: row.destination,
     driver: row.assignment_snapshot?.driver || null,
-    driverBankAccount: row.assignment_snapshot?.driverBankAccount || row.assignment_snapshot?.bankAccount || '',
+    driverBankAccount: row.assignment_snapshot?.driverBankAccount || row.assignment_snapshot?.bankAccount || row.driver_payment_account || '',
     truck: row.assignment_snapshot?.plateNumber || null,
     orderType: row.shipment_type,
     container: [row.container_size, row.container_number].filter(Boolean).join(' / ') || row.container_size || '-',

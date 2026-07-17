@@ -124,6 +124,21 @@ function DriverLicense({ row }) {
   );
 }
 
+function getDriverPaymentLabel(row) {
+  if (row.paymentMethod === 'emoney') {
+    return [row.emoneyProvider || 'E-Money', row.emoneyNumber].filter(Boolean).join(' ') || '-';
+  }
+  return [row.bankName, row.bankAccountNumber].filter(Boolean).join(' ') || '-';
+}
+
+function DriverPayment({ row }) {
+  return (
+    <div className="driver-doc-cell">
+      <strong>{getDriverPaymentLabel(row)}</strong>
+    </div>
+  );
+}
+
 function DriverDocumentSummary({ row }) {
   const complete = [row.identityDocument, row.licenseDocument, row.partnershipLetter].filter(Boolean).length;
   return (
@@ -136,6 +151,14 @@ function DriverDocumentSummary({ row }) {
 const fields = [
   { key: 'name', section: 'Identitas Driver', label: 'Nama Driver', placeholder: 'Nama lengkap sesuai identitas', required: true },
   { key: 'phone', section: 'Identitas Driver', label: 'Kontak Driver', placeholder: '08xx xxxx xxxx', required: true },
+  { key: 'paymentMethod', section: 'Pembayaran UJ Sopir', label: 'Metode Pembayaran', type: 'select', defaultValue: 'bank', options: [
+    { value: 'bank', label: 'Bank Transfer' }, { value: 'emoney', label: 'E-Money' },
+  ] },
+  { key: 'bankName', section: 'Pembayaran UJ Sopir', label: 'Nama Bank', placeholder: 'Contoh: BCA / Mandiri / BRI', showIf: (form) => form.paymentMethod !== 'emoney' },
+  { key: 'bankAccountNumber', section: 'Pembayaran UJ Sopir', label: 'No. Rekening Sopir', placeholder: 'Nomor rekening', inputMode: 'numeric', showIf: (form) => form.paymentMethod !== 'emoney' },
+  { key: 'bankAccountHolder', section: 'Pembayaran UJ Sopir', label: 'Nama Pemilik Rekening', placeholder: 'Nama sesuai rekening', showIf: (form) => form.paymentMethod !== 'emoney' },
+  { key: 'emoneyProvider', section: 'Pembayaran UJ Sopir', label: 'Provider E-Money', placeholder: 'Contoh: OVO / DANA / GoPay', showIf: (form) => form.paymentMethod === 'emoney' },
+  { key: 'emoneyNumber', section: 'Pembayaran UJ Sopir', label: 'No. E-Money', placeholder: 'Nomor HP / akun e-money', inputMode: 'numeric', showIf: (form) => form.paymentMethod === 'emoney' },
   { key: 'licenseType', section: 'Informasi SIM', label: 'Jenis SIM', type: 'select', defaultValue: 'SIM B2 Umum', options: [
     { value: 'SIM B1 Umum', label: 'SIM B1 Umum' }, { value: 'SIM B2 Umum', label: 'SIM B2 Umum' },
   ] },
@@ -170,6 +193,7 @@ function DriversPage() {
         { key: 'name', label: 'Nama Sopir', render: (_, row) => <DriverIdentity row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (_, row) => <DriverPlate row={row} trucks={truckRows} /> },
         { key: 'licenseExpiry', label: 'Masa SIM', render: (_, row) => <DriverLicense row={row} /> },
+        { key: 'paymentMethod', label: 'Rekening / E-Money', render: (_, row) => <DriverPayment row={row} /> },
         { key: 'status', label: 'Kondisi', render: (_, row) => <DriverStatus row={row} activeJobs={activeJobs} /> },
         { key: 'licenseDocument', label: 'Dokumen', render: (_, row) => <DriverDocumentSummary row={row} /> },
       ]}

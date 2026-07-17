@@ -557,6 +557,35 @@ if (!hasDatabase) {
       assert.equal(updatedJob.status, 200);
       assert.equal(updatedJob.body.data.status, 'running');
 
+      const busyAssignmentSoNumber = `SO-BUSY-${runId}`;
+      const busyAssignmentOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: busyAssignmentSoNumber }),
+      });
+      assert.equal(busyAssignmentOrder.status, 201);
+
+      const busyAssignmentVerified = await api(`/api/finance/order-verifications/${busyAssignmentOrder.body.data.id}/so-number`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { soNumber: busyAssignmentSoNumber },
+      });
+      assert.equal(busyAssignmentVerified.status, 200);
+
+      const blockedBusyAssignment = await api(`/api/container-jobs/${busyAssignmentOrder.body.data.containers[0].id}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${busyAssignmentSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: `Driver ${runId}`,
+          plateNumber: plate20,
+          status: 'received',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(blockedBusyAssignment.status, 409);
+      assert.equal(blockedBusyAssignment.body.error.code, 'ASSIGNMENT_ALREADY_ACTIVE');
+
       const statusLog = await latestActivity('UPDATE_JOB_STATUS');
       assert.equal(statusLog.action, 'UPDATE_JOB_STATUS');
       assert.equal(statusLog.metadata.fromStatus, 'received');

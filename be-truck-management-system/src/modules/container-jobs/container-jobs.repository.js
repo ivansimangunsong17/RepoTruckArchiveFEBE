@@ -227,6 +227,40 @@ function pickFormValue(form, key, fallback = null) {
   return Object.prototype.hasOwnProperty.call(form, key) ? form[key] : fallback;
 }
 
+async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus) {
+  if (['completed', 'cancelled'].includes(nextStatus)) return;
+  const driverName = String(form.driver || driver?.name || '').trim();
+  const plateNumber = String(form.plateNumber || vehicle?.plate_number || '').trim();
+  if (!driver?.id && !driverName && !vehicle?.id && !plateNumber) return;
+
+  const result = await client.query(
+    `
+      select cj.id, cj.container_number, cj.assignment_snapshot, so.so_number
+      from container_jobs cj
+      join sales_orders so on so.id = cj.sales_order_id
+      where cj.id <> $1
+        and cj.status not in ('completed', 'cancelled')
+        and (
+          ($2::uuid is not null and cj.driver_id = $2::uuid)
+          or ($3::uuid is not null and cj.vehicle_id = $3::uuid)
+          or ($4::text <> '' and lower(trim(cj.assignment_snapshot->>'driver')) = lower(trim($4::text)))
+          or ($5::text <> '' and trim(cj.assignment_snapshot->>'plateNumber') = trim($5::text))
+        )
+      limit 1
+    `,
+    [id, driver?.id || form.driverId || null, vehicle?.id || form.vehicleId || null, driverName, plateNumber],
+  );
+
+  if (result.rows[0]) {
+    const activeJob = result.rows[0];
+    throw validationError(
+      `Driver atau truck masih aktif di job lain (${activeJob.so_number || '-'} / ${activeJob.container_number || 'container belum diisi'}). Selesaikan atau batalkan job tersebut terlebih dahulu.`,
+      'ASSIGNMENT_ALREADY_ACTIVE',
+      409,
+    );
+  }
+}
+
 async function requireCompletedJobReady(client, id, form, existing) {
   if (!['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
     throw validationError(
@@ -461,6 +495,7 @@ export async function updateContainerJob(id, form) {
     }
     const nextRpujStatus = normalizeRpujStatusForOperational(existing.rows[0], form.rpujStatus);
     requireTripStartAllowed(nextStatus, nextRpujStatus);
+    await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus);
     if (nextStatus === 'completed') {
       await requireCompletedJobReady(client, id, form, existing.rows[0]);
     }

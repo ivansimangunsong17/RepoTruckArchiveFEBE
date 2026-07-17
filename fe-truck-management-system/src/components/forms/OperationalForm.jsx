@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Send, Trash2, X } from 'lucide-react';
-import { fallbackTruckUnits } from '../../data/truckData';
+import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
 import { calculateUjRecommendation } from '../../utils/ujRecommendation';
@@ -92,6 +92,52 @@ function normalizeTruck(truck, fallbackRows = []) {
 function isTruckCompatibleWithContainer(truck, containerSize) {
   const truckCapacity = getTruckCapacity(truck);
   return !containerSize || !truckCapacity || truckCapacity === 'COMBO' || truckCapacity === containerSize;
+}
+
+function isActiveAssignmentJob(job) {
+  return job && !['completed', 'cancelled'].includes(job.status || 'received');
+}
+
+function normalizeName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isTruckBusyForAnotherJob(truck, activeJobs = [], currentJobId) {
+  if (!truck) return false;
+  const truckPlate = String(truck.plateNumber || '').trim();
+  const defaultDriver = normalizeName(truck.defaultDriver);
+  return (activeJobs || []).some((job) => {
+    if (!isActiveAssignmentJob(job) || String(job.id) === String(currentJobId)) return false;
+    const sameTruck = truckPlate && String(job.plateNumber || '').trim() === truckPlate;
+    const sameDriver = defaultDriver && normalizeName(job.driver) === defaultDriver;
+    return sameTruck || sameDriver;
+  });
+}
+
+function getDriverPaymentInfo(driver) {
+  if (!driver) {
+    return {
+      driverPaymentMethod: 'bank',
+      driverBankAccount: '',
+      driverBankName: '',
+      driverBankAccountNumber: '',
+      driverBankAccountHolder: '',
+      driverEmoneyProvider: '',
+      driverEmoneyNumber: '',
+    };
+  }
+  const driverPaymentMethod = driver.paymentMethod === 'emoney' ? 'emoney' : 'bank';
+  const bankAccount = [driver.bankName, driver.bankAccountNumber].filter(Boolean).join(' ');
+  const emoneyAccount = [driver.emoneyProvider || 'E-Money', driver.emoneyNumber].filter(Boolean).join(' ');
+  return {
+    driverPaymentMethod,
+    driverBankAccount: driverPaymentMethod === 'emoney' ? emoneyAccount : bankAccount,
+    driverBankName: driver.bankName || '',
+    driverBankAccountNumber: driver.bankAccountNumber || '',
+    driverBankAccountHolder: driver.bankAccountHolder || '',
+    driverEmoneyProvider: driver.emoneyProvider || '',
+    driverEmoneyNumber: driver.emoneyNumber || '',
+  };
 }
 
 function nowForDateTimeInput() {
@@ -248,13 +294,26 @@ function createSpkPdfBlob(documentData) {
   return buildPdfFile(commands.join('\n'));
 }
 
-function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDestinations }) {
+function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDrivers, masterDestinations, activeJobs = [] }) {
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
+  const [fallbackDriverRows] = useState(() => getMasterData('tms-master-drivers-v2', fallbackDrivers));
   const fileInputRefs = useRef({});
   const trucks = (Array.isArray(masterTrucks) ? masterTrucks : fallbackTruckRows)
     .map((truck) => normalizeTruck(truck, fallbackTruckRows));
+  const drivers = Array.isArray(masterDrivers) ? masterDrivers : fallbackDriverRows;
   const containerSize = normalizeSize(container.size || container.containerSize);
   const initialOtherCost = parseOtherCost(container.rpujNotes);
+  const initialDriver = drivers.find((driver) => normalizeName(driver.name) === normalizeName(container.driver));
+  const initialDriverPayment = {
+    ...getDriverPaymentInfo(initialDriver),
+    driverPaymentMethod: container.driverPaymentMethod || getDriverPaymentInfo(initialDriver).driverPaymentMethod,
+    driverBankAccount: container.driverBankAccount || getDriverPaymentInfo(initialDriver).driverBankAccount,
+    driverBankName: container.driverBankName || getDriverPaymentInfo(initialDriver).driverBankName,
+    driverBankAccountNumber: container.driverBankAccountNumber || getDriverPaymentInfo(initialDriver).driverBankAccountNumber,
+    driverBankAccountHolder: container.driverBankAccountHolder || getDriverPaymentInfo(initialDriver).driverBankAccountHolder,
+    driverEmoneyProvider: container.driverEmoneyProvider || getDriverPaymentInfo(initialDriver).driverEmoneyProvider,
+    driverEmoneyNumber: container.driverEmoneyNumber || getDriverPaymentInfo(initialDriver).driverEmoneyNumber,
+  };
   const [form, setForm] = useState({
     containerNumber: container.containerNumber || '',
     rpujStatus: container.rpujStatus || 'pending',
@@ -272,6 +331,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     tilaGatepassDocument: container.tilaGatepassDocument || container.unloadingVoucher || container.weighingDocument || '',
     tilaGatepassDocumentFile: container.tilaGatepassDocumentFile || container.unloadingVoucherDocument || container.weighingDocumentFile || null,
     driver: container.driver || '',
+    ...initialDriverPayment,
     chassis: container.chassis || '',
     plateNumber: container.plateNumber || '',
     travelDocument: container.travelDocument || '',
@@ -364,11 +424,15 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       return;
     }
     const now = nowForDateTimeInput();
+    const driverName = getTruckDefaultDriver(truck, fallbackTruckRows);
+    const selectedDriver = drivers.find((driver) => normalizeName(driver.name) === normalizeName(driverName));
+    const driverPayment = getDriverPaymentInfo(selectedDriver);
     setError('');
     setForm((current) => ({
       ...current,
       plateNumber,
-      driver: getTruckDefaultDriver(truck, fallbackTruckRows),
+      driver: driverName,
+      ...driverPayment,
       chassis: truck ? `${truck.unitCode} - ${truck.brand} ${truck.type}` : '',
       status: plateNumber && current.status === 'received' && canStartTrip
         ? 'running'
@@ -757,8 +821,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   }
 
   const availableTrucks = trucks.filter((truck) => (
-    (['Aktif', 'Bertugas', 'Siap'].includes(truck.status) || truck.plateNumber === form.plateNumber)
+    (['Aktif', 'Siap'].includes(truck.status) || truck.plateNumber === form.plateNumber)
     && isTruckCompatibleWithContainer(truck, containerSize)
+    && !isTruckBusyForAnotherJob(truck, activeJobs, container.id)
   ));
   const currentTruckExists = availableTrucks.some((truck) => truck.plateNumber === form.plateNumber);
 
@@ -796,6 +861,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'} - {truck.defaultDriver || 'Driver belum diset'}</option>)}</select></label>
               <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} placeholder="TCLU1234567" /></label>
               <label>Driver Otomatis<input name="driver" value={form.driver || 'Pilih truck terlebih dahulu'} readOnly /></label>
+              <label>Pembayaran UJ Driver<input value={form.driverBankAccount || 'Belum diisi di master driver'} readOnly /></label>
               <label>Detail Truck<input value={form.chassis} readOnly /></label>
             </div>
           </div>
