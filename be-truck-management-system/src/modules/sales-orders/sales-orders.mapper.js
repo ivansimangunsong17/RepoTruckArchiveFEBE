@@ -14,6 +14,20 @@ function normalizePaymentTermDays(paymentType, value) {
   return paymentType === 'tempo' ? Math.max(1, days || 30) : 0;
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toISOString().slice(0, 10);
+}
+
 function mapAttachmentFile(attachment) {
   return attachment
     ? {
@@ -230,6 +244,9 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     createdByUserId: row.created_by_user_id,
     updatedBy: row.updated_by_name,
     updatedByUserId: row.updated_by_user_id,
+    soDate: normalizeDateOnly(row.so_date),
+    tripDate: normalizeDateOnly(row.trip_date),
+    receivedAt: row.received_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     cancelledAt: row.cancelled_at,
@@ -260,8 +277,8 @@ export function toSalesOrderDb(form, customer) {
     finance_verified_by_name: form.financeVerifiedBy || null,
     finance_verified_at: form.financeVerifiedAt || null,
     do_number: form.doNumber || null,
-    so_date: form.soDate || new Date().toISOString().slice(0, 10),
-    trip_date: form.tripDate || form.plannedDate || form.soDate || new Date().toISOString().slice(0, 10),
+    so_date: normalizeDateOnly(form.soDate) || new Date().toISOString().slice(0, 10),
+    trip_date: normalizeDateOnly(form.tripDate || form.plannedDate || form.soDate) || new Date().toISOString().slice(0, 10),
     received_at: form.receivedAt || new Date().toISOString(),
     customer_id: customer?.id || form.customerId || null,
     customer_name: customer?.name || form.customer,

@@ -29,6 +29,17 @@ function normalizeDateTime(value) {
   return value ? value.slice(0, 16) : '';
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toISOString().slice(0, 10);
+}
+
 function createDocumentDraft(document = {}) {
   return {
     ...EMPTY_DOCUMENT,
@@ -168,8 +179,8 @@ function createInitialForm(order) {
   return {
     soNumber: order?.soNumber || '',
     doNumber: order?.doNumber || '',
-    soDate: order?.soDate || new Date().toISOString().slice(0, 10),
-    tripDate: order?.tripDate || order?.plannedDate || order?.soDate || new Date().toISOString().slice(0, 10),
+    soDate: normalizeDateOnly(order?.soDate) || new Date().toISOString().slice(0, 10),
+    tripDate: normalizeDateOnly(order?.tripDate || order?.plannedDate || order?.soDate) || new Date().toISOString().slice(0, 10),
     receivedAt: normalizeDateTime(order?.receivedAt),
     customer: order?.customer || '',
     customerPic: order?.customerPic || '',

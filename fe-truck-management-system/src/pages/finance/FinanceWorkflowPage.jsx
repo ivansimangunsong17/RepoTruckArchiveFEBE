@@ -561,7 +561,7 @@ function OrderDetailModal({ order, onClose }) {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Request Order</p>
             <h3 className="mt-0.5 text-lg font-black text-slate-950">{order.customer}</h3>
-            <p className="mt-0.5 text-xs text-slate-500">{order.salesName} - {order.orderDate} - {order.destination}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{order.destination} - {order.salesName} - {order.orderDate}</p>
           </div>
           <button className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" onClick={onClose} type="button">
             Tutup
@@ -609,7 +609,7 @@ function RpujDetailModal({ rpuj, onClose }) {
               <h3 className="text-lg font-black text-slate-950">{rpuj.soNumber}</h3>
               <StatusPill value={compactRpujStatus(rpuj.status)} />
             </div>
-            <p className="mt-0.5 text-xs text-slate-500">{rpuj.customer} - {rpuj.destination}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{rpuj.destination} - {rpuj.customer}</p>
           </div>
           <button className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" onClick={onClose} type="button">
             Tutup
@@ -670,7 +670,7 @@ function InvoiceDetailModal({ invoice, onClose }) {
               <h3 className="text-lg font-black text-slate-950">{invoice.soNumber}</h3>
               <StatusPill value={invoice.invoiceStatus} />
             </div>
-            <p className="mt-0.5 text-xs text-slate-500">{invoice.customer} - {invoice.destination}</p>
+            <p className="mt-0.5 text-xs text-slate-500">{invoice.destination} - {invoice.customer}</p>
           </div>
           <button className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" onClick={onClose} type="button">
             Tutup
@@ -983,9 +983,9 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                             <strong className="min-w-0 break-words text-xs font-black text-slate-950">{soNumber}</strong>
-                            <span className="min-w-0 truncate font-semibold text-slate-700">{firstRow.customer}</span>
+                            <span className="min-w-0 truncate font-semibold text-slate-700">{firstRow.destination}</span>
                             <span className="text-slate-300">|</span>
-                            <span className="min-w-0 truncate font-medium text-slate-500">{firstRow.destination}</span>
+                            <span className="min-w-0 truncate font-medium text-slate-500">{firstRow.customer}</span>
                           </div>
                           <div className="flex flex-wrap items-center gap-1">
                             <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600">{soRows.length} container</span>

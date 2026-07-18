@@ -294,7 +294,7 @@ function createSpkPdfBlob(documentData) {
   return buildPdfFile(commands.join('\n'));
 }
 
-function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDrivers, masterDestinations, activeJobs = [] }) {
+function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDrivers, masterDestinations, activeJobs = [], currentUser }) {
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
   const [fallbackDriverRows] = useState(() => getMasterData('tms-master-drivers-v2', fallbackDrivers));
   const fileInputRefs = useRef({});
@@ -353,8 +353,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     ? 'SPK bisa dibuat setelah Finance approve RPUJ.'
     : '';
   const rpujStatus = form.rpujStatus || 'pending';
+  const canReviseLockedFields = String(currentUser?.role || '').toLowerCase() === 'admin';
   const canSubmitRpujRequest = !['submitted', 'approved', 'paid'].includes(rpujStatus);
-  const canEditOtherCost = !['approved', 'paid'].includes(rpujStatus);
+  const canEditOtherCost = canReviseLockedFields || !['approved', 'paid'].includes(rpujStatus);
+  const canEditAssignment = canReviseLockedFields || (rpujStatus !== 'paid' && form.status !== 'completed');
+  const canEditContainerNumber = canReviseLockedFields || (!['running', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid');
+  const canEditOperationalDocuments = canReviseLockedFields || form.status !== 'completed';
   const rpujActionLabel = rpujStatus === 'submitted'
     ? 'Sudah Diajukan'
     : rpujStatus === 'approved'
@@ -363,6 +367,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         ? 'Sudah Dibayar'
         : 'Ajukan Uang Jalan';
   const canStartTrip = ['approved', 'paid'].includes(rpujStatus);
+  const availableStatusOptions = statusOptions.filter((option) => {
+    if (canReviseLockedFields) return true;
+    if (container.status === 'completed') return option.value === 'completed';
+    if (container.status === 'running') return option.value !== 'received';
+    return true;
+  });
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.';
   const hasRequiredOperationalDocuments = Boolean(
     form.eirNumber
@@ -418,6 +428,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const activeStatusOption = statusOptions.find((option) => option.value === form.status) || statusOptions[0];
 
   function updateTruck(event) {
+    if (!canEditAssignment) {
+      setError('Driver dan truck tidak bisa diubah lagi setelah UJ ditransfer atau pekerjaan selesai.');
+      return;
+    }
     const plateNumber = event.target.value;
     const truck = trucks.find((item) => item.plateNumber === plateNumber);
     if (truck && !isTruckCompatibleWithContainer(truck, containerSize)) {
@@ -733,7 +747,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     updateFile(fileField, file);
   }
 
-  function buildSubmitForm({ forceRpujStatus } = {}) {
+  function buildSubmitForm({ forceRpujStatus, includeRpujNotes = activePhase === 'rpuj' } = {}) {
     const otherCostAmount = Number(form.otherCostAmount || 0);
     if (otherCostAmount < 0) {
       return { error: 'Nominal biaya lainnya tidak boleh negatif.' };
@@ -748,11 +762,15 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const submitForm = {
       ...form,
       rpujStatus: nextRpujStatus,
-      rpujNotes: serializeOtherCost({
+    };
+    if (includeRpujNotes) {
+      submitForm.rpujNotes = serializeOtherCost({
         amount: otherCostAmount,
         notes: form.otherCostNotes,
-      }),
-    };
+      });
+    } else {
+      delete submitForm.rpujNotes;
+    }
     return { submitForm, hasRpujRequest, otherCostAmount };
   }
 
@@ -859,12 +877,18 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           <div className="form-section">
             <h3>Assignment</h3>
             <div className="order-form-grid">
-              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'} - {truck.defaultDriver || 'Driver belum diset'}</option>)}</select></label>
-              <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} placeholder="TCLU1234567" /></label>
+              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'} - {truck.defaultDriver || 'Driver belum diset'}</option>)}</select></label>
+              <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
               <label>Driver Otomatis<input name="driver" value={form.driver || 'Pilih truck terlebih dahulu'} readOnly /></label>
               <label>Pembayaran UJ Driver<input value={form.driverBankAccount || 'Belum diisi di master driver'} readOnly /></label>
               <label>Detail Truck<input value={form.chassis} readOnly /></label>
             </div>
+            {!canEditAssignment ? (
+              <p className="mt-2 text-[11px] font-medium text-amber-700">Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</p>
+            ) : null}
+            {!canEditContainerNumber ? (
+              <p className="mt-2 text-[11px] font-medium text-amber-700">No. Container terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.</p>
+            ) : null}
           </div>
           ) : null}
 
@@ -883,7 +907,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
                 {!canEditOtherCost ? (
                   <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    Biaya lainnya terkunci karena UJ sudah disetujui Finance.
+                    Biaya lainnya terkunci karena UJ sudah disetujui Finance. Admin dapat membuka revisi jika diperlukan.
                   </div>
                 ) : null}
 
@@ -1024,6 +1048,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       name="eirNumber"
                       value={form.eirNumber}
                       onChange={updateField}
+                      disabled={!canEditOperationalDocuments}
                       placeholder="EIR-2026-001"
                     />
                   </label>
@@ -1038,6 +1063,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       id="operational-eir-document"
                       type="file"
                       accept={OPERATIONAL_FILE_ACCEPT}
+                      disabled={!canEditOperationalDocuments}
                       onChange={(event) => {
                         const nextFile = event.target.files?.[0];
                         if (!nextFile) return;
@@ -1051,7 +1077,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                         event.target.value = '';
                       }}
                     />
-                    <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker('eirDocument')}>
+                    <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker('eirDocument')} disabled={!canEditOperationalDocuments}>
                       {form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
                     </button>
                     <span className="operational-file-name">
@@ -1068,6 +1094,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       name={field.valueField}
                       value={form[field.valueField]}
                       onChange={updateField}
+                      disabled={!canEditOperationalDocuments}
                     />
                     <div className="operational-document-upload-row">
                       <input
@@ -1080,6 +1107,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                         id={`operational-${field.fileField}`}
                         type="file"
                         accept={OPERATIONAL_FILE_ACCEPT}
+                        disabled={!canEditOperationalDocuments}
                         onChange={(event) => {
                           const nextFile = event.target.files?.[0];
                           if (!nextFile) return;
@@ -1093,7 +1121,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                           event.target.value = '';
                         }}
                       />
-                      <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)}>
+                      <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)} disabled={!canEditOperationalDocuments}>
                         Pilih File
                       </button>
                       <span className="operational-file-name">
@@ -1107,11 +1135,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <div className="other-document-section">
                 <div className="form-section-heading">
                   <div><h3>Other Documents</h3><p>Dokumen tambahan bersifat opsional.</p></div>
-                  <button className="secondary-button" type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: [...current.otherDocuments, { name: '', file: null }] }))}><Plus size={15} /> Tambah</button>
+                  <button className="secondary-button" type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: [...current.otherDocuments, { name: '', file: null }] }))} disabled={!canEditOperationalDocuments}><Plus size={15} /> Tambah</button>
                 </div>
+                {!canEditOperationalDocuments ? (
+                  <p className="mt-2 text-[11px] font-medium text-amber-700">Dokumen operasional terkunci setelah pekerjaan selesai. Hubungi admin untuk revisi.</p>
+                ) : null}
                 {form.otherDocuments.map((document, index) => (
                   <div className="other-document-row" key={`other-${index}`}>
-                    <input value={document.name} onChange={(event) => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} placeholder="Nama dokumen" />
+                    <input value={document.name} onChange={(event) => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} disabled={!canEditOperationalDocuments} placeholder="Nama dokumen" />
                     <AttachmentUploadField
                       id={`other-document-${index}`}
                       label="Dokumen tambahan"
@@ -1122,6 +1153,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       validationOptions={{
                         label: 'Dokumen tambahan',
                       }}
+                      disabled={!canEditOperationalDocuments}
                       onSelect={(file, validationError) => {
                         if (validationError) return setError(validationError);
                         setError('');
@@ -1140,7 +1172,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                         )),
                       }))}
                     />
-                    <button type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.filter((_, itemIndex) => itemIndex !== index) }))}><Trash2 size={15} /></button>
+                    <button type="button" onClick={() => setForm((current) => ({ ...current, otherDocuments: current.otherDocuments.filter((_, itemIndex) => itemIndex !== index) }))} disabled={!canEditOperationalDocuments}><Trash2 size={15} /></button>
                   </div>
                 ))}
               </div>
@@ -1159,8 +1191,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <div className="operational-timeline-grid">
                 <label className="operational-status-field">
                   Status Pekerjaan
-                  <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle}>
-                    {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle} disabled={!canReviseLockedFields && container.status === 'completed'}>
+                    {availableStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                   <span className={`mt-1 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${activeStatusOption.tone}`}>
                     {activeStatusOption.label}

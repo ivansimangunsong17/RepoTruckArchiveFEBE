@@ -38,18 +38,125 @@ function hasRpujNotesInput(payload = {}) {
   return Boolean(String(payload.rpujNotes || '').trim());
 }
 
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function hasAssignmentChange(currentJob, payload = {}) {
+  const nextDriverId = payload.driverId || null;
+  const nextVehicleId = payload.vehicleId || null;
+  const nextDriverName = String(payload.driver || '').trim();
+  const nextPlateNumber = String(payload.plateNumber || '').trim();
+  const currentDriverName = String(currentJob?.driver || currentJob?.assignment_snapshot?.driver || '').trim();
+  const currentPlateNumber = String(currentJob?.plateNumber || currentJob?.assignment_snapshot?.plateNumber || '').trim();
+
+  return Boolean(
+    (nextDriverId && String(nextDriverId) !== String(currentJob?.driverId || ''))
+    || (nextVehicleId && String(nextVehicleId) !== String(currentJob?.vehicleId || ''))
+    || (nextDriverName && nextDriverName !== currentDriverName)
+    || (nextPlateNumber && nextPlateNumber !== currentPlateNumber)
+  );
+}
+
+function hasContainerNumberChange(currentJob, payload = {}) {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'containerNumber')) return false;
+  return normalizeText(payload.containerNumber).toUpperCase() !== normalizeText(currentJob?.containerNumber).toUpperCase();
+}
+
+function hasOperationalDocumentChange(currentJob, payload = {}) {
+  const documentFields = [
+    ['eirNumber', 'eirNumber'],
+    ['loadingVoucher', 'loadingVoucher'],
+    ['tilaGatepassDocument', 'tilaGatepassDocument'],
+    ['travelDocument', 'travelDocument'],
+  ];
+
+  return documentFields.some(([payloadKey, jobKey]) => (
+    Object.prototype.hasOwnProperty.call(payload, payloadKey)
+    && normalizeText(payload[payloadKey]) !== normalizeText(currentJob?.[jobKey])
+  ));
+}
+
+function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
+  if (normalizeRole(actor) !== 'operational') return;
+  if (!payload.status || payload.status === job?.status) return;
+
+  if (job?.status === 'completed' || job?.status === 'cancelled') {
+    const error = new Error('Status pekerjaan yang sudah selesai atau dibatalkan tidak bisa diubah lagi.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_STATUS_LOCKED';
+    throw error;
+  }
+
+  if (job?.status === 'running' && payload.status === 'received') {
+    const error = new Error('Status pekerjaan yang sudah berjalan tidak bisa dikembalikan ke Belum Jalan.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_STATUS_REGRESSION';
+    throw error;
+  }
+}
+
+function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
+  if (normalizeRole(actor) !== 'operational') return;
+  if (!hasContainerNumberChange(job, payload)) return;
+  if (!['running', 'completed', 'cancelled'].includes(job?.status) && job?.rpujStatus !== 'paid') return;
+
+  const error = new Error('No. Container tidak bisa diubah setelah pekerjaan berjalan, selesai, dibatalkan, atau UJ ditransfer.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_CONTAINER_NUMBER_LOCKED';
+  throw error;
+}
+
+function ensureOperationalCanEditDocuments(actor, job, payload = {}) {
+  if (normalizeRole(actor) !== 'operational') return;
+  if (job?.status !== 'completed') return;
+  if (!hasOperationalDocumentChange(job, payload)) return;
+
+  const error = new Error('Dokumen operasional tidak bisa diubah lagi setelah pekerjaan selesai.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_DOCUMENTS_LOCKED';
+  throw error;
+}
+
 function ensureOperationalCanInputOtherCost(actor, job, payload) {
   if (normalizeRole(actor) !== 'operational') return;
   if (!hasRpujNotesInput(payload)) return;
 
   const lockedStatuses = new Set(['completed', 'cancelled']);
   const lockedRpujStatuses = new Set(['submitted', 'approved', 'paid']);
-  if (lockedStatuses.has(job?.status) || lockedRpujStatuses.has(job?.rpujStatus)) {
+  const currentNotes = normalizeText(job?.rpujNotes);
+  const nextNotes = normalizeText(payload?.rpujNotes);
+  const notesChanged = nextNotes !== currentNotes;
+  if ((lockedStatuses.has(job?.status) || lockedRpujStatuses.has(job?.rpujStatus)) && notesChanged) {
     const error = new Error('Biaya lainnya tidak bisa diinput lagi karena job sudah selesai/dibatalkan atau UJ sudah dikirimkan.');
     error.statusCode = 409;
     error.code = 'CONTAINER_JOB_OTHER_COST_LOCKED';
     throw error;
   }
+}
+
+function preserveLockedOtherCost(actor, job, payload) {
+  if (normalizeRole(actor) !== 'operational') return payload;
+
+  const lockedStatuses = new Set(['completed', 'cancelled']);
+  const lockedRpujStatuses = new Set(['submitted', 'approved', 'paid']);
+  if (!lockedStatuses.has(job?.status) && !lockedRpujStatuses.has(job?.rpujStatus)) return payload;
+
+  return {
+    ...payload,
+    rpujNotes: job?.rpujNotes || '',
+  };
+}
+
+function ensureOperationalCanEditAssignment(actor, job, payload) {
+  if (normalizeRole(actor) !== 'operational') return;
+  if (job?.rpujStatus !== 'paid' && job?.status !== 'completed') return;
+  if (!hasAssignmentChange(job, payload)) return;
+
+  const error = new Error('Driver dan truck tidak bisa diubah lagi setelah UJ ditransfer atau pekerjaan selesai.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_ASSIGNMENT_LOCKED';
+  throw error;
 }
 
 export async function getContainerJob(id) {
@@ -84,9 +191,14 @@ export async function saveContainerJob(id, payload, actor) {
   }
 
   const currentJob = await getContainerJob(id);
-  ensureOperationalCanInputOtherCost(actor, currentJob, normalizedPayload);
+  const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
+  ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
+  ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
+  ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
+  ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
+  ensureOperationalCanEditDocuments(actor, currentJob, payloadForUpdate);
 
-  return updateContainerJob(id, normalizedPayload);
+  return updateContainerJob(id, payloadForUpdate);
 }
 
 export function createContainerJobSpk(id, payload = {}) {

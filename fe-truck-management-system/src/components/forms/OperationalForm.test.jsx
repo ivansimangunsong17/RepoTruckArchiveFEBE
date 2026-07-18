@@ -379,6 +379,89 @@ describe('OperationalForm', () => {
     expect(await screen.findByText('SPK-PAID-001')).toBeInTheDocument();
   });
 
+  it('mengunci truck dan driver setelah UJ ditransfer', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'paid',
+          plateNumber: 'B 9243 BEL',
+          driver: 'IQBAL',
+          chassis: '19 - HINO FG8JF2B-PGJ',
+        }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Baru' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /persiapan job/i);
+
+    expect(screen.getByLabelText('Truck')).toBeDisabled();
+    expect(screen.getByText(/Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('IQBAL');
+  });
+
+  it('mengunci truck dan driver setelah pekerjaan selesai', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+          status: 'completed',
+          plateNumber: 'B 6102 WXA',
+          driver: 'Tono Wibowo',
+          chassis: '11 - Hino 500 Ranger',
+        }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Baru' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /persiapan job/i);
+
+    expect(screen.getByLabelText('Truck')).toBeDisabled();
+    expect(screen.getByText(/Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Tono Wibowo');
+  });
+
+  it('mengizinkan admin merevisi truck dan driver setelah pekerjaan selesai', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+          status: 'completed',
+          plateNumber: 'B 6102 WXA',
+          driver: 'Tono Wibowo',
+          chassis: '11 - Hino 500 Ranger',
+        }}
+        currentUser={{ role: 'admin' }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Baru' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /persiapan job/i);
+
+    expect(screen.getByLabelText('Truck')).not.toBeDisabled();
+    expect(screen.queryByText(/Hubungi admin untuk revisi/i)).not.toBeInTheDocument();
+  });
+
   it('mengunci biaya lainnya setelah RPUJ disetujui Finance', async () => {
     const user = userEvent.setup();
 

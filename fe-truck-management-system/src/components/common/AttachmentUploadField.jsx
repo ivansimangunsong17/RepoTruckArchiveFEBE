@@ -37,6 +37,7 @@ function AttachmentUploadField({
   accept = '.pdf,.jpg,.jpeg,.png',
   compact = false,
   validationOptions = {},
+  disabled = false,
   onSelect,
   onClear,
 }) {
@@ -73,6 +74,7 @@ function AttachmentUploadField({
   }, [value]);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
 
   function handleChange(event) {
+    if (disabled) return;
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -87,6 +89,7 @@ function AttachmentUploadField({
   }
 
   function handleClear() {
+    if (disabled) return;
     if (inputRef.current) inputRef.current.value = '';
     onClear?.();
   }
@@ -98,8 +101,8 @@ function AttachmentUploadField({
 
   return (
     <div className={`document-upload${compact ? ' compact' : ''}`}>
-      <input ref={inputRef} id={id} type="file" accept={accept} onChange={handleChange} />
-      <label className="document-upload-dropzone" htmlFor={id}>
+      <input ref={inputRef} id={id} type="file" accept={accept} onChange={handleChange} disabled={disabled} />
+      <label className="document-upload-dropzone" htmlFor={disabled ? undefined : id} aria-disabled={disabled}>
         <UploadCloud size={21} />
         <span>
           <strong>{title}</strong>
@@ -118,7 +121,7 @@ function AttachmentUploadField({
             <strong>{fileName}</strong>
             <small>{fileSize ? formatFileSize(fileSize) : isImage ? 'Gambar siap diunggah' : 'Dokumen siap diunggah'}</small>
           </span>
-          <button type="button" onClick={handleClear} aria-label={`${label} dihapus`}>
+          <button type="button" onClick={handleClear} aria-label={`${label} dihapus`} disabled={disabled}>
             <X size={15} />
           </button>
         </div>

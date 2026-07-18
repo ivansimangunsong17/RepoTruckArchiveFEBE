@@ -689,6 +689,7 @@ function OperationsPage() {
           masterDrivers={archive.masters.drivers}
           masterDestinations={archive.masters.destinations}
           activeJobs={archive.isDatabaseMode ? databaseJobs : demoJobs}
+          currentUser={user}
           onClose={() => setEditing(null)}
           onSubmit={updateOperational}
           onGenerateSpk={generateOperationalSpk}

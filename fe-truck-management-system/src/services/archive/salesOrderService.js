@@ -92,6 +92,17 @@ function normalizeContainerSize(size) {
   return String(size || '20FT').toUpperCase().replace(/\s/g, '') === '40FT' ? '40FT' : '20FT';
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toISOString().slice(0, 10);
+}
+
 function normalizeReferenceDocuments(referenceDocuments = []) {
   return referenceDocuments
     .filter((document) => document && (document.documentType || document.referenceNumber || document.documentDate || document.file || document.notes))
@@ -314,6 +325,8 @@ function prepareSalesOrderPayload(form, user, existing) {
     cargoType: uniqueContainerTypes.length === 1 ? uniqueContainerTypes[0] : payload.cargoType || null,
     containers,
     referenceDocuments: normalizeReferenceDocuments(payload.referenceDocuments),
+    soDate: normalizeDateOnly(payload.soDate) || new Date().toISOString().slice(0, 10),
+    tripDate: normalizeDateOnly(payload.tripDate || payload.plannedDate || payload.soDate) || new Date().toISOString().slice(0, 10),
   };
 }
 
