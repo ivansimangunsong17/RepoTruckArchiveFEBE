@@ -39,7 +39,7 @@ function hasActiveDriverJob(row, activeJobs) {
 }
 
 function getDriverBaseStatus(row) {
-  return ['Cuti', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
+  return ['Bertugas', 'Cuti', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
 }
 
 function getDriverStatus(row, activeJobs) {
@@ -527,7 +527,7 @@ function hasActiveTruckJob(row, activeJobs) {
 }
 
 function getTruckBaseStatus(row) {
-  return ['Maintenance', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
+  return ['Bertugas', 'Maintenance', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
 }
 
 function getTruckStatus(row, activeJobs) {
@@ -583,7 +583,7 @@ function TrucksPage() {
       resource="trucks"
       storageKey="tms-master-trucks-v2"
       uniqueKeys={['plateNumber', 'unitCode', 'vin', 'engineNumber', 'kirNumber', 'kirChassisNumber', 'stnkNumber']}
-      filters={[{ key: 'status', label: 'Semua Status Truck', options: ['Aktif', 'Maintenance', 'Tidak Aktif'] }]}
+      filters={[{ key: 'status', label: 'Semua Status Truck', options: ['Aktif', 'Bertugas', 'Maintenance', 'Tidak Aktif'] }]}
       pageClassName="driver-data-page truck-data-page"
       pageSize={20}
       showModeChip={false}

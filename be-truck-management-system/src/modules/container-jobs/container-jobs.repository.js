@@ -261,6 +261,87 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
   }
 }
 
+async function releaseDriverIfIdle(client, driverId) {
+  if (!driverId) return;
+  await client.query(
+    `
+      update drivers
+      set operational_status = 'Aktif',
+          updated_at = now()
+      where id = $1
+        and operational_status = 'Bertugas'
+        and not exists (
+          select 1
+          from container_jobs cj
+          where cj.driver_id = $1
+            and cj.status not in ('completed', 'cancelled')
+        )
+    `,
+    [driverId],
+  );
+}
+
+async function releaseVehicleIfIdle(client, vehicleId) {
+  if (!vehicleId) return;
+  await client.query(
+    `
+      update vehicles
+      set operational_status = 'Aktif',
+          updated_at = now()
+      where id = $1
+        and operational_status = 'Bertugas'
+        and not exists (
+          select 1
+          from container_jobs cj
+          where cj.vehicle_id = $1
+            and cj.status not in ('completed', 'cancelled')
+        )
+    `,
+    [vehicleId],
+  );
+}
+
+async function syncResourceAssignmentStatus(client, existing, nextAssignment = {}, nextStatus) {
+  const nextDriverId = nextAssignment.driverId || null;
+  const nextVehicleId = nextAssignment.vehicleId || null;
+  const previousDriverId = existing?.driver_id || null;
+  const previousVehicleId = existing?.vehicle_id || null;
+  const assignmentActive = !['completed', 'cancelled'].includes(nextStatus);
+
+  if (assignmentActive && nextDriverId) {
+    await client.query(
+      `
+        update drivers
+        set operational_status = 'Bertugas',
+            updated_at = now()
+        where id = $1
+          and archived_at is null
+          and operational_status not in ('Cuti', 'Tidak Aktif')
+      `,
+      [nextDriverId],
+    );
+  }
+
+  if (assignmentActive && nextVehicleId) {
+    await client.query(
+      `
+        update vehicles
+        set operational_status = 'Bertugas',
+            updated_at = now()
+        where id = $1
+          and archived_at is null
+          and operational_status not in ('Maintenance', 'Tidak Aktif')
+      `,
+      [nextVehicleId],
+    );
+  }
+
+  await releaseDriverIfIdle(client, previousDriverId);
+  await releaseVehicleIfIdle(client, previousVehicleId);
+  if (!assignmentActive || nextDriverId !== previousDriverId) await releaseDriverIfIdle(client, nextDriverId);
+  if (!assignmentActive || nextVehicleId !== previousVehicleId) await releaseVehicleIfIdle(client, nextVehicleId);
+}
+
 async function requireCompletedJobReady(client, id, form, existing) {
   if (!['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
     throw validationError(
@@ -520,6 +601,8 @@ export async function updateContainerJob(id, form) {
     const cancelledByName = nextStatus === 'cancelled'
       ? form.cancelledByName || form.updatedBy || existing.rows[0].cancelled_by_name || 'Operational'
       : existing.rows[0].cancelled_by_name || null;
+    const nextDriverId = driver?.id || form.driverId || null;
+    const nextVehicleId = vehicle?.id || form.vehicleId || null;
 
     await client.query(
       `
@@ -554,8 +637,8 @@ export async function updateContainerJob(id, form) {
       `,
       [
         nextContainerNumber,
-        driver?.id || form.driverId || null,
-        vehicle?.id || form.vehicleId || null,
+        nextDriverId,
+        nextVehicleId,
         JSON.stringify(toAssignmentSnapshot(form, driver, vehicle)),
         nextRpujStatus,
         form.rpujNotes || null,
@@ -578,6 +661,10 @@ export async function updateContainerJob(id, form) {
       ],
     );
 
+    await syncResourceAssignmentStatus(client, existing.rows[0], {
+      driverId: nextDriverId,
+      vehicleId: nextVehicleId,
+    }, nextStatus);
     await refreshOrderStatus(client, existing.rows[0].sales_order_id);
     const updated = await client.query(
       `
@@ -661,7 +748,7 @@ export async function requestContainerJobCancellation(id, form = {}) {
 export async function reviewContainerJobCancellation(id, form = {}) {
   return withTransaction(async (client) => {
     const existing = await client.query(
-      'select id, sales_order_id, status, cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at, cancel_reason, cancel_source from container_jobs where id = $1',
+      'select id, sales_order_id, driver_id, vehicle_id, status, cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at, cancel_reason, cancel_source from container_jobs where id = $1',
       [id],
     );
     if (!existing.rows[0]) {
@@ -717,6 +804,10 @@ export async function reviewContainerJobCancellation(id, form = {}) {
           cancelSource,
         ],
       );
+      await syncResourceAssignmentStatus(client, existing.rows[0], {
+        driverId: existing.rows[0].driver_id,
+        vehicleId: existing.rows[0].vehicle_id,
+      }, 'cancelled');
       return refreshOrderStatusAndMapJob(client, existing.rows[0].sales_order_id, id);
     }
 

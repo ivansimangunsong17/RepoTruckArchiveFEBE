@@ -30,6 +30,28 @@ export function listContainerJobs(query) {
   });
 }
 
+function normalizeRole(actor) {
+  return String(actor?.role || '').trim().toLowerCase();
+}
+
+function hasRpujNotesInput(payload = {}) {
+  return Boolean(String(payload.rpujNotes || '').trim());
+}
+
+function ensureOperationalCanInputOtherCost(actor, job, payload) {
+  if (normalizeRole(actor) !== 'operational') return;
+  if (!hasRpujNotesInput(payload)) return;
+
+  const lockedStatuses = new Set(['completed', 'cancelled']);
+  const lockedRpujStatuses = new Set(['submitted', 'approved', 'paid']);
+  if (lockedStatuses.has(job?.status) || lockedRpujStatuses.has(job?.rpujStatus)) {
+    const error = new Error('Biaya lainnya tidak bisa diinput lagi karena job sudah selesai/dibatalkan atau UJ sudah dikirimkan.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_OTHER_COST_LOCKED';
+    throw error;
+  }
+}
+
 export async function getContainerJob(id) {
   const job = await findContainerJobById(id);
   if (!job) {
@@ -41,7 +63,7 @@ export async function getContainerJob(id) {
   return job;
 }
 
-export function saveContainerJob(id, payload) {
+export async function saveContainerJob(id, payload, actor) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload Container Job harus berupa object.');
     error.statusCode = 400;
@@ -60,6 +82,9 @@ export function saveContainerJob(id, payload) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
+
+  const currentJob = await getContainerJob(id);
+  ensureOperationalCanInputOtherCost(actor, currentJob, normalizedPayload);
 
   return updateContainerJob(id, normalizedPayload);
 }

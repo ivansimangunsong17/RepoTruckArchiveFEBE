@@ -354,6 +354,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     : '';
   const rpujStatus = form.rpujStatus || 'pending';
   const canSubmitRpujRequest = !['submitted', 'approved', 'paid'].includes(rpujStatus);
+  const canEditOtherCost = !['approved', 'paid'].includes(rpujStatus);
   const rpujActionLabel = rpujStatus === 'submitted'
     ? 'Sudah Diajukan'
     : rpujStatus === 'approved'
@@ -880,6 +881,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                   <small>Tambahkan biaya operasional di luar UJ utama.</small>
                 </div>
 
+                {!canEditOtherCost ? (
+                  <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Biaya lainnya terkunci karena UJ sudah disetujui Finance.
+                  </div>
+                ) : null}
+
                 <div className="operational-cost-fields">
                   <label className="operational-inline-label">
                     Nominal Biaya
@@ -890,6 +897,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       step="1000"
                       value={form.otherCostAmount}
                       onChange={updateField}
+                      disabled={!canEditOtherCost}
                       placeholder="Contoh: 150000"
                     />
                   </label>
@@ -899,6 +907,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       name="otherCostNotes"
                       value={form.otherCostNotes}
                       onChange={updateField}
+                      disabled={!canEditOtherCost}
                       placeholder="Contoh: tol, parkir, bongkar"
                     />
                   </label>
@@ -930,14 +939,16 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       type="button"
                       className="primary-button operational-rpuj-submit"
                       onClick={handleSubmitRpujRequest}
-                      disabled={!canSubmitRpujRequest}
+                      disabled={!canSubmitRpujRequest || !canEditOtherCost}
                     >
                       <Send size={14} />
                       {rpujActionLabel}
                     </button>
                     <small>
-                      {canSubmitRpujRequest
+                      {canEditOtherCost && canSubmitRpujRequest
                         ? 'Kirim total UJ dan biaya lainnya ke Finance untuk approval.'
+                        : !canEditOtherCost
+                          ? 'Biaya lainnya tidak bisa diubah setelah UJ disetujui Finance.'
                         : 'Pengajuan uang jalan sudah masuk ke alur Finance.'}
                     </small>
                   </div>
@@ -950,6 +961,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       helper="PDF, JPG, PNG - Maks. 5 MB"
                       accept={OPERATIONAL_FILE_ACCEPT}
                       compact
+                      disabled={!canEditOtherCost}
                       validationOptions={{
                         label: 'Lampiran Biaya Lainnya',
                       }}
@@ -1015,24 +1027,38 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       placeholder="EIR-2026-001"
                     />
                   </label>
-                  <AttachmentUploadField
-                    id="operational-eir-document"
-                    label="Lampiran EIR"
-                    value={form.eirDocument}
-                    title={form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
-                    helper="PDF, JPG, PNG - Maks. 5 MB"
-                    accept={OPERATIONAL_FILE_ACCEPT}
-                    compact
-                    validationOptions={{
-                      label: 'Lampiran EIR',
-                    }}
-                    onSelect={(file, validationError) => {
-                      if (validationError) return setError(validationError);
-                      setError('');
-                      updateFile('eirDocument', file);
-                    }}
-                    onClear={() => setForm((current) => ({ ...current, eirDocument: null }))}
-                  />
+                  <div className="operational-document-upload-row">
+                    <input
+                      ref={(node) => {
+                        if (node) {
+                          fileInputRefs.current.eirDocument = node;
+                        }
+                      }}
+                      className="operational-document-hidden-input"
+                      id="operational-eir-document"
+                      type="file"
+                      accept={OPERATIONAL_FILE_ACCEPT}
+                      onChange={(event) => {
+                        const nextFile = event.target.files?.[0];
+                        if (!nextFile) return;
+                        const validationError = validateArchiveFile(nextFile, { label: 'Lampiran EIR' });
+                        if (validationError) {
+                          event.target.value = '';
+                          handleOperationalFileChange('eirDocument', 'Lampiran EIR', null, validationError);
+                          return;
+                        }
+                        handleOperationalFileChange('eirDocument', 'Lampiran EIR', nextFile, '');
+                        event.target.value = '';
+                      }}
+                    />
+                    <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker('eirDocument')}>
+                      {form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
+                    </button>
+                    <span className="operational-file-name">
+                      {form.eirDocument?.name || 'Belum ada file'}
+                    </span>
+                  </div>
+                  <small className="operational-document-helper">PDF, JPG, PNG - Maks. 5 MB</small>
                 </div>
                 {operationalDocumentFields.map((field) => (
                   <div className="operational-document-card" key={field.valueField}>

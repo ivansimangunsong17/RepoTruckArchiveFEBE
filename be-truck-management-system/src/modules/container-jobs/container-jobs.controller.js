@@ -21,7 +21,7 @@ export async function getContainerJobController(request, response) {
 
 export async function updateContainerJobController(request, response) {
   const before = await getContainerJob(request.params.id);
-  const saved = await saveContainerJob(request.params.id, request.body);
+  const saved = await saveContainerJob(request.params.id, request.body, request.user);
   await safeRecordActivityLog(request, {
     action: 'UPDATE_CONTAINER_JOB',
     module: 'container_jobs',

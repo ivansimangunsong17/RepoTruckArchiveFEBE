@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Clock3,
+  Eye,
   Info,
   FileText,
   ReceiptText,
@@ -452,9 +453,9 @@ function statusClass(value) {
   return 'border-slate-200 bg-slate-50 text-slate-600';
 }
 
-function StatusPill({ value }) {
+function StatusPill({ value, className = '' }) {
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${statusClass(value)}`}>
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${statusClass(value)} ${className}`}>
       <span className="h-1 w-1 rounded-full bg-current opacity-45" aria-hidden="true" />
       {value || '-'}
     </span>
@@ -496,18 +497,18 @@ function SearchBar({ query, onChange }) {
   );
 }
 
-function DetailField({ label, value }) {
+function DetailField({ label, value, className = '' }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
+    <div className={`rounded-md border border-slate-200 bg-white px-2.5 py-2 ${className}`}>
       <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
       <strong className="mt-0.5 block text-sm font-semibold text-slate-900">{value || '-'}</strong>
     </div>
   );
 }
 
-function AmountField({ label, value, highlight = false }) {
+function AmountField({ label, value, highlight = false, className = '' }) {
   return (
-    <div className={`rounded-md border px-2.5 py-2 ${highlight ? 'border-slate-200 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-950'}`}>
+    <div className={`rounded-md border px-2.5 py-2 ${highlight ? 'border-slate-200 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-950'} ${className}`}>
       <span className={`block text-[10px] font-bold uppercase tracking-wide ${highlight ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
       <strong className="mt-0.5 block text-sm font-black">{formatCurrency(value)}</strong>
     </div>
@@ -600,8 +601,8 @@ function RpujDetailModal({ rpuj, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="max-h-[88vh] w-full max-w-2xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+      <section className="finance-rpuj-detail-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="finance-rpuj-detail-header">
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Pengajuan RPUJ / SPK</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -615,39 +616,39 @@ function RpujDetailModal({ rpuj, onClose }) {
           </button>
         </header>
 
-        <div className="max-h-[calc(88vh-68px)] space-y-2 overflow-y-auto p-3">
-          <section className="rounded-md border border-slate-200 bg-white p-2.5">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-              <DetailField label="No. Job" value={rpuj.jobNumber} />
-              <DetailField label="No. SPK" value={rpuj.spkNumber} />
-              <DetailField label="Tanggal Jalan" value={rpuj.departureDate} />
-              <DetailField label="Container" value={rpuj.container} />
-              <DetailField label="Truck" value={rpuj.truck} />
-              <DetailField label="Jenis Order" value={rpuj.orderType} />
-              <DetailField label="Driver" value={rpuj.driver} />
-              <DetailField label="Rekening / E-Money Driver" value={rpuj.driverBankAccount} />
-              <DetailField label="Terminal" value={rpuj.terminal} />
-              <DetailField label="Depo" value={rpuj.depo} />
+        <div className="finance-rpuj-detail-body">
+          <section className="finance-rpuj-detail-card">
+            <div className="finance-rpuj-info-grid">
+              <DetailField className="finance-rpuj-detail-field span-2" label="No. Job" value={rpuj.jobNumber} />
+              <DetailField className="finance-rpuj-detail-field" label="No. SPK" value={rpuj.spkNumber} />
+              <DetailField className="finance-rpuj-detail-field" label="Tanggal Jalan" value={rpuj.departureDate} />
+              <DetailField className="finance-rpuj-detail-field span-2" label="Container" value={rpuj.container} />
+              <DetailField className="finance-rpuj-detail-field" label="Truck" value={rpuj.truck} />
+              <DetailField className="finance-rpuj-detail-field" label="Jenis Order" value={rpuj.orderType} />
+              <DetailField className="finance-rpuj-detail-field" label="Driver" value={rpuj.driver} />
+              <DetailField className="finance-rpuj-detail-field" label="Rekening / E-Money Driver" value={rpuj.driverBankAccount} />
+              <DetailField className="finance-rpuj-detail-field" label="Terminal" value={rpuj.terminal} />
+              <DetailField className="finance-rpuj-detail-field" label="Depo" value={rpuj.depo} />
             </div>
           </section>
 
-          <section className="rounded-md border border-slate-200 bg-slate-50 p-2.5">
-            <div className="mb-2 flex items-center justify-between gap-2">
+          <section className="finance-rpuj-detail-card is-subtle">
+            <div className="finance-rpuj-section-head">
               <h4 className="text-sm font-black text-slate-950">Rincian Pengajuan</h4>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-bold text-slate-500">{rpuj.transferProof || 'Bukti transfer belum ada'}</span>
+              <div>
+                <span>{rpuj.transferProof || 'Bukti transfer belum ada'}</span>
                 <button className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 disabled:opacity-40" disabled={!rpuj.transferProof} type="button">Preview</button>
                 <button className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 disabled:opacity-40" disabled={!rpuj.transferProof} type="button">Download</button>
               </div>
             </div>
-            <div className="grid gap-2 md:grid-cols-3">
-              <AmountField label="Total UJ" value={rpuj.totalUj} />
-              <AmountField label="Biaya Tambahan" value={rpuj.additionalCost} />
-              <AmountField highlight label="Total Pengajuan" value={totalRequest} />
+            <div className="finance-rpuj-amount-grid">
+              <AmountField className="finance-rpuj-amount-field" label="Total UJ" value={rpuj.totalUj} />
+              <AmountField className="finance-rpuj-amount-field" label="Biaya Tambahan" value={rpuj.additionalCost} />
+              <AmountField className="finance-rpuj-amount-field" highlight label="Total Pengajuan" value={totalRequest} />
             </div>
-            <div className="mt-2 grid gap-2 md:grid-cols-[1fr_1fr]">
-              <DetailField label="Rekomendasi UJ" value={rpuj.ujRecommendation} />
-              <DetailField label="Catatan Pengajuan" value={rpuj.notes} />
+            <div className="finance-rpuj-note-grid">
+              <DetailField className="finance-rpuj-detail-field" label="Rekomendasi UJ" value={rpuj.ujRecommendation} />
+              <DetailField className="finance-rpuj-detail-field" label="Catatan Pengajuan" value={rpuj.notes} />
             </div>
           </section>
         </div>
@@ -661,8 +662,8 @@ function InvoiceDetailModal({ invoice, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+      <section className="finance-invoice-detail-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="finance-invoice-detail-header">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Dasar Invoice</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -676,9 +677,9 @@ function InvoiceDetailModal({ invoice, onClose }) {
           </button>
         </header>
 
-        <div className="max-h-[calc(88vh-68px)] overflow-y-auto bg-slate-50 p-3">
-          <div className="grid gap-3 lg:grid-cols-[250px_1fr]">
-            <section className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="finance-invoice-detail-body">
+          <div className="finance-invoice-detail-grid">
+            <section className="finance-invoice-summary-card">
               <div className="rounded-md bg-slate-50 p-2.5">
                 <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Nilai Tagih</span>
                 <strong className="mt-1 block text-xl font-black text-slate-950">{formatCurrency(invoice.billingAmount)}</strong>
@@ -693,8 +694,8 @@ function InvoiceDetailModal({ invoice, onClose }) {
               </div>
             </section>
 
-            <section className="grid gap-2">
-              <div className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+            <section className="finance-invoice-detail-stack">
+              <div className="finance-invoice-detail-card">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <h4 className="text-sm font-black text-slate-950">Dokumen Dasar Tagih</h4>
                   <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Siap Invoice</span>
@@ -702,12 +703,12 @@ function InvoiceDetailModal({ invoice, onClose }) {
                 <CompactList items={invoice.documentChecklist} />
               </div>
 
-              <div className="grid gap-2 md:grid-cols-2">
-                <div className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="finance-invoice-detail-columns">
+                <div className="finance-invoice-detail-card">
                   <h4 className="mb-2 text-sm font-black text-slate-950">Rincian Tagihan</h4>
                   <CompactList items={invoice.billingItems} />
                 </div>
-                <div className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="finance-invoice-detail-card">
                   <h4 className="mb-2 text-sm font-black text-slate-950">Riwayat Finance</h4>
                   <ActivityLogList logs={invoice.activityLogs} />
                 </div>
@@ -1159,21 +1160,21 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table min-w-[1000px] table-fixed">
+        <table className="data-table master-table finance-master-table finance-invoice-table min-w-[1160px] table-fixed">
           <colgroup>
-            <col className="w-[12%]" />
-            <col className="w-[17%]" />
             <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[21%]" />
+            <col className="w-[16%]" />
+            <col className="w-[14%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[11%]" />
+            <col className="w-[13%]" />
+            <col className="w-[9%]" />
           </colgroup>
           <thead>
             <tr>
-              {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Nominal', 'No. Invoice', 'Aksi'].map((column) => (
+              {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Penagihan', 'No. Invoice', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -1185,19 +1186,19 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
 
               return (
                 <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
-                  <td className="whitespace-nowrap px-2.5 py-1.5 font-semibold text-slate-700">{row.soNumber}</td>
-                  <td className="px-2.5 py-1.5">
+                  <td className="finance-invoice-so font-semibold text-slate-700">{row.soNumber}</td>
+                  <td className="finance-invoice-customer">
                     <span className="block truncate font-semibold text-slate-900">{row.customer}</span>
                     <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-500">{row.destination}</span>
                   </td>
-                  <td className="whitespace-nowrap px-2.5 py-1.5">
-                    <StatusPill value={row.invoiceStatus} />
+                  <td className="finance-invoice-status">
+                    <StatusPill className="max-w-full overflow-hidden text-ellipsis" value={row.invoiceStatus} />
                   </td>
-                  <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-700">{row.completedAt}</td>
-                  <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-700">{row.invoiceDate}</td>
-                  <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-700">{row.dueDate}</td>
-                  <td className="whitespace-nowrap px-2.5 py-1.5 font-semibold text-slate-900">{formatCurrency(row.billingAmount)}</td>
-                  <td className="px-2.5 py-1.5">
+                  <td className="finance-invoice-date text-slate-700">{row.completedAt}</td>
+                  <td className="finance-invoice-date text-slate-700">{row.invoiceDate}</td>
+                  <td className="finance-invoice-date text-slate-700">{row.dueDate}</td>
+                  <td className="finance-invoice-total font-semibold text-slate-900">{formatCurrency(row.billingAmount)}</td>
+                  <td className="finance-invoice-number">
                     {needsInvoiceNumber ? (
                       <input
                         className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-400"
@@ -1206,16 +1207,23 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
                         value={row.invoiceNumber}
                       />
                     ) : (
-                      <span className="whitespace-nowrap font-semibold text-slate-900">{row.invoiceNumber}</span>
+                      <span className="block truncate font-semibold text-slate-900">{row.invoiceNumber}</span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-2.5 py-1.5">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectInvoice(row.id)} type="button">
-                        Detail
+                  <td className="finance-invoice-actions">
+                    <div className="finance-invoice-action-row">
+                      <button
+                        aria-label={`Lihat detail invoice ${row.soNumber}`}
+                        className="finance-table-action-button is-icon-only"
+                        onClick={() => onSelectInvoice(row.id)}
+                        title="Detail"
+                        type="button"
+                      >
+                        <Eye size={13} />
+                        <span className="sr-only">Detail</span>
                       </button>
                       {needsInvoiceNumber ? (
-                        <button className="inline-flex h-7 items-center rounded-md bg-slate-900 px-2 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40" disabled={!row.invoiceNumber || isBusy} onClick={() => onSaveInvoice(row.id)} type="button">
+                        <button className="finance-table-action-button is-primary" disabled={!row.invoiceNumber || isBusy} onClick={() => onSaveInvoice(row.id)} type="button">
                           {isBusy ? 'Menyimpan' : 'Simpan'}
                         </button>
                       ) : null}

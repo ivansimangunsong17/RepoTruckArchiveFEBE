@@ -616,7 +616,7 @@ function mapInvoiceOrderRow(row) {
     documentStatus,
     billingAmount: row.billing_amount == null ? 0 : Number(row.billing_amount),
     paymentTerms: row.payment_terms || '-',
-    dueDate: null,
+    dueDate: row.due_date,
     billingItems: billingItems.length ? billingItems : ['Rincian tagihan belum tersedia'],
     documentChecklist: [
       { label: 'Nomor SO', ready: Boolean(row.so_number) },
@@ -643,6 +643,12 @@ function invoiceOrdersCte() {
         so.invoice_number,
         coalesce(so.billing_status, 'belum_invoice') as billing_status,
         so.invoice_issued_at,
+        case
+          when so.invoice_issued_at is null then null
+          when lower(coalesce(so.payment_type, 'cash')) = 'tempo'
+            then so.invoice_issued_at + (greatest(coalesce(so.payment_term_days, 0), 1) * interval '1 day')
+          else so.invoice_issued_at
+        end as due_date,
         so.invoice_input_by_name,
         so.customer_name,
         so.destination,

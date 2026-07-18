@@ -54,7 +54,7 @@ function AttachmentUploadField({
     let active = true;
 
     if (file instanceof File) {
-      const objectUrl = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(file);      
       setPreviewUrl(objectUrl);
       return () => URL.revokeObjectURL(objectUrl);
     }

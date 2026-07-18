@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ClipboardCheck,
   Eye,
   FileText,
   X,
@@ -24,7 +23,6 @@ import { useArchiveData } from '../../hooks/useArchiveData';
 import { formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
-import FilterStatus from '../../components/common/FilterStatus';
 import UjRecommendationCard from '../../components/operations/UjRecommendationCard';
 import { parseOtherCost } from '../../utils/otherCost';
 import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } from '../../services/archive/containerJobService';
@@ -93,11 +91,30 @@ function getRpujStage(job) {
   return 'queue';
 }
 
-function rpujStageText(job) {
-  const stage = getRpujStage(job);
-  if (stage === 'paid') return 'UJ Dikirim';
-  if (stage === 'submitted') return job?.rpujStatus === 'approved' ? 'Approved Finance' : 'Sudah Diajukan';
-  return job?.rpujStatus === 'rejected' ? 'Perlu Diajukan Ulang' : 'Antri Pengajuan';
+function rpujDetail(job) {
+  if (job?.rpujStatus === 'paid') return { tone: 'paid', label: 'UJ Dikirim', helper: 'Bukti transfer masuk' };
+  if (job?.rpujStatus === 'approved') return { tone: 'approved', label: 'Disetujui Finance', helper: 'Siap transfer / SPK' };
+  if (job?.rpujStatus === 'submitted') return { tone: 'submitted', label: 'Menunggu Finance', helper: 'Pengajuan sudah masuk' };
+  if (job?.rpujStatus === 'rejected') return { tone: 'rejected', label: 'Ditolak Finance', helper: 'Ajukan ulang' };
+  return { tone: 'queue', label: 'Belum Diajukan', helper: 'Perlu ajukan UJ' };
+}
+
+function groupJobsBySo(rows = []) {
+  const groups = new Map();
+  rows.forEach((job) => {
+    const key = job.orderId || job.soNumber || `${job.customer || 'SO'}-${job.origin || ''}-${job.destination || ''}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        soNumber: job.soNumber || '-',
+        customer: job.customer || '-',
+        route: `${job.origin || '-'} ke ${job.destination || '-'}`,
+        jobs: [],
+      });
+    }
+    groups.get(key).jobs.push(job);
+  });
+  return Array.from(groups.values());
 }
 
 function flattenDemoJobs(orders) {
@@ -211,6 +228,7 @@ function OperationsPage() {
   const jobs = archive.isDatabaseMode
     ? sortOperationalJobs(databaseJobs)
     : filteredDemoJobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const groupedJobs = useMemo(() => groupJobsBySo(jobs), [jobs]);
   const counts = archive.isDatabaseMode ? statusCounts : {
     received: demoJobs.filter((job) => job.status === 'received').length,
     running: demoJobs.filter((job) => job.status === 'running').length,
@@ -301,6 +319,7 @@ function OperationsPage() {
           setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
         }
         setListVersion((value) => value + 1);
+        archive.refresh?.();
       }
       setEditing(null);
       notify({
@@ -411,33 +430,34 @@ function OperationsPage() {
       <PageHeader eyebrow="Operational" title="Container Job" description="Kelola assignment, dokumen operasional, status, dan timeline setiap container." />
 
       {canReviewCancel && pendingCancelJobs.length ? (
-        <section className="panel">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+        <section className="panel cancel-review-panel">
+          <header className="cancel-review-head">
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem' }}>Permintaan Pembatalan Container</h3>
-              <small style={{ color: 'var(--text-muted, #64748b)' }}>{pendingCancelJobs.length} menunggu approval</small>
+              <span>Approval Pembatalan</span>
+              <h3>Permintaan Pembatalan Container</h3>
             </div>
-          </div>
-          <div style={{ display: 'grid', gap: 10 }}>
+            <strong>{pendingCancelJobs.length} menunggu</strong>
+          </header>
+          <div className="cancel-review-list">
             {pendingCancelJobs.slice(0, 5).map((job) => (
-              <div key={job.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', padding: '12px 14px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <strong>{job.containerNumber || '-'}</strong>
+              <article className="cancel-review-item" key={job.id}>
+                <div className="cancel-review-main">
+                  <div className="cancel-review-title">
+                    <strong>{job.containerNumber || 'Container belum diisi'}</strong>
                     <StatusBadge status={job.cancelRequestStatus} />
                   </div>
-                  <div style={{ marginTop: 4, color: '#334155', fontSize: '.9rem' }}>{job.soNumber || '-'} - {job.customer || '-'}</div>
-                  <div style={{ marginTop: 3, color: '#64748b', fontSize: '.82rem' }}>{job.cancelRequestNote || 'Tidak ada catatan'}</div>
+                  <span>{job.soNumber || '-'} - {job.customer || '-'}</span>
+                  <small>{job.cancelRequestNote || 'Tidak ada catatan'}</small>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                <div className="cancel-review-actions">
                   <button className="secondary-button" type="button" onClick={() => rejectJobCancellation(job)}>
-                    <X size={16} /> Tolak
+                    <X size={15} /> Tolak
                   </button>
                   <button className="danger-button" type="button" onClick={() => approveJobCancellation(job)}>
-                    <CheckCircle2 size={16} /> Setujui
+                    <CheckCircle2 size={15} /> Setujui
                   </button>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         </section>
@@ -451,54 +471,53 @@ function OperationsPage() {
       </div>
 
       <section className="panel operational-workspace">
-        <div className="filter-bar">
+        <div className="operational-filter-strip">
           <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari SO, container, driver, atau truck..." /></label>
-        </div>
-        <div className="job-status-tabs" role="tablist" aria-label="Status Container Job">
-          {[
-            ['received', 'Belum Jalan', counts.received],
-            ['running', 'Sedang Jalan', counts.running],
-            ['completed', 'Selesai', counts.completed],
-            ['cancelled', 'Batal', counts.cancelled],
-            ['', 'Semua', totalJobs],
-          ].map(([value, label, count]) => (
-            <button key={label} type="button" role="tab" aria-selected={status === value} className={status === value ? 'active' : ''} onClick={() => setStatus(value)}>
-              {label}<span>{count}</span>
-            </button>
-          ))}
-        </div>
-        <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
-          {rpujStageOptions.map((option) => {
-            const active = rpujStage === option.value;
-            return (
-              <button
-                aria-selected={active}
-                className={active ? 'active' : ''}
-                key={option.value}
-                onClick={() => setRpujStage(active ? '' : option.value)}
-                role="tab"
-                title={option.description}
-                type="button"
-              >
-                <span>{option.label}</span>
-                <strong>{activeRpujCounts[option.value] || 0}</strong>
+          <div className="job-status-tabs" role="tablist" aria-label="Status Container Job">
+            {[
+              ['', 'Semua', totalJobs],
+              ['received', 'Belum Jalan', counts.received],
+              ['running', 'Sedang Jalan', counts.running],
+              ['completed', 'Selesai', counts.completed],
+              ['cancelled', 'Batal', counts.cancelled],
+            ].map(([value, label, count]) => (
+              <button key={label} type="button" role="tab" aria-selected={status === value} className={status === value ? 'active' : ''} onClick={() => setStatus(value)}>
+                {label}<span>{count}</span>
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
-        <FilterStatus
-          total={totalItems}
-          filtered={totalItems}
-          active={Boolean(query.trim() || status || rpujStage)}
-          label="container job"
-          onReset={() => {
-            setQuery('');
-            setStatus('');
-            setRpujStage('');
-          }}
-        />
+        <div className="operational-filter-substrip">
+          <span>RPUJ</span>
+          <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
+            {rpujStageOptions.map((option) => {
+              const active = rpujStage === option.value;
+              return (
+                <button
+                  aria-selected={active}
+                  className={active ? 'active' : ''}
+                  key={option.value}
+                  onClick={() => setRpujStage(active ? '' : option.value)}
+                  role="tab"
+                  title={option.description}
+                  type="button"
+                >
+                  {option.label}<strong>{activeRpujCounts[option.value] || 0}</strong>
+                </button>
+              );
+            })}
+          </div>
+          <small>Menampilkan {totalItems} dari {totalJobs} container job</small>
+          {query.trim() || status || rpujStage ? (
+            <button className="filter-reset-link" type="button" onClick={() => {
+              setQuery('');
+              setStatus('');
+              setRpujStage('');
+            }}>Reset</button>
+          ) : null}
+        </div>
 
-        <div className="operational-job-list">
+        <div className="operational-so-list">
           {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat Container Job...</p></div> : null}
           {!loading && error ? (
             <div className="archive-inline-state is-error">
@@ -507,59 +526,57 @@ function OperationsPage() {
               <button className="secondary-button" type="button" onClick={() => setListVersion((value) => value + 1)}>Muat Ulang</button>
             </div>
           ) : null}
-          {!loading && !error ? jobs.map((job) => {
-            const documents = documentState(job);
-            const shipmentLabel = formatShipmentLabel(job.shipment || job.jobType);
-            const hasContainerNumber = Boolean(job.containerNumber);
-            const routeLabel = `${job.origin || '-'} ke ${job.destination || '-'}`;
-            const sizeTypeLabel = [job.size, job.type].filter(Boolean).join(' / ') || '-';
-            return (
-              <article className="operational-job-card" key={job.id}>
-                <div className="job-heading">
-                  <div>
-                    <span>Nomor Container</span>
-                    <h3 className={hasContainerNumber ? 'job-container-number' : 'job-container-number is-empty'}>
-                      {containerLabel(job)}
-                    </h3>
-                    <div className="job-heading-meta">
-                      <span>SO: {job.soNumber || '-'}</span>
-                      <span>{shipmentLabel}</span>
-                      <span>{sizeTypeLabel}</span>
-                    </div>
-                    <span className={`job-rpuj-badge ${getRpujStage(job)}`}>{rpujStageText(job)}</span>
-                  </div>
-                  <StatusBadge status={job.status} />
+          {!loading && !error ? groupedJobs.map((group) => (
+            <section className="operational-so-group" key={group.key}>
+              <header className="operational-so-header">
+                <div>
+                  <span>Sales Order</span>
+                  <strong>{group.soNumber}</strong>
+                  <small>{group.customer} - {group.route}</small>
                 </div>
-                <div className="job-route">
-                  <ClipboardCheck size={17} />
-                  <div>
-                    <span>Rute Pengiriman</span>
-                    <strong>{routeLabel}</strong>
-                  </div>
-                </div>
-                <div className="job-assignment">
-                  <div className="job-assignment-item">
-                    <span><UserRound size={14} /> Sopir</span>
-                    <strong>{job.driver || 'Belum ditentukan'}</strong>
-                  </div>
-                  <div className="job-assignment-item">
-                    <span><Truck size={14} /> Truck</span>
-                    <strong>{job.plateNumber || 'Belum ditentukan'}</strong>
-                  </div>
-                </div>
-                <div className="job-document-progress">
-                  <span>Dokumen Operational</span><div><i style={{ width: `${(documents.completed / documents.total) * 100}%` }} /></div><strong>{documents.completed}/{documents.total}</strong>
-                </div>
-                <div className="job-footer">
-                  <span>Diperbarui {job.updatedBy || job.createdBy || '-'} - {formatDateTime(job.updatedAt || job.receivedAt)}</span>
-                  <div>
-                    <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={15} /> Detail</button>
-                    {canEdit && job.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>Update Proses</button> : null}
-                  </div>
-                </div>
-              </article>
-            );
-          }) : null}
+                <em>{group.jobs.length} container</em>
+              </header>
+              <div className="operational-container-list">
+                {group.jobs.map((job) => {
+                  const documents = documentState(job);
+                  const shipmentLabel = formatShipmentLabel(job.shipment || job.jobType);
+                  const hasContainerNumber = Boolean(job.containerNumber);
+                  const sizeTypeLabel = [job.size, job.type].filter(Boolean).join(' / ') || '-';
+                  const rpuj = rpujDetail(job);
+                  const documentPercent = (documents.completed / documents.total) * 100;
+                  return (
+                    <article className="operational-container-row" key={job.id}>
+                      <div className="container-row-main">
+                        <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
+                        <small>{shipmentLabel} - {sizeTypeLabel}</small>
+                      </div>
+                      <div className="container-row-status">
+                        <StatusBadge status={job.status} />
+                      </div>
+                      <div className={`container-rpuj-status ${rpuj.tone}`}>
+                        <span>RPUJ</span>
+                        <strong>{rpuj.label}</strong>
+                        <small>{rpuj.helper}</small>
+                      </div>
+                      <div className="container-row-assignment">
+                        <span><UserRound size={13} /> {job.driver || 'Driver belum ditentukan'}</span>
+                        <span><Truck size={13} /> {job.plateNumber || 'Truck belum ditentukan'}</span>
+                      </div>
+                      <div className="container-row-docs">
+                        <span>Dokumen</span>
+                        <div><i style={{ width: `${documentPercent}%` }} /></div>
+                        <strong>{documents.completed}/{documents.total}</strong>
+                      </div>
+                      <div className="container-row-actions">
+                        <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={14} /> Detail</button>
+                        {canEdit && job.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>Update</button> : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )) : null}
           {!loading && !error && !totalItems ? (
             <div className="archive-empty-wrapper">
               <EmptyState title="Belum ada Container Job" description="Pekerjaan akan tampil setelah tim Sales membuat Sales Order." />

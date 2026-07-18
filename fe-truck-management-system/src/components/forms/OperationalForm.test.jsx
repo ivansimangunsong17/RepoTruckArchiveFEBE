@@ -378,4 +378,30 @@ describe('OperationalForm', () => {
     expect(onGenerateSpk).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('SPK-PAID-001')).toBeInTheDocument();
   });
+
+  it('mengunci biaya lainnya setelah RPUJ disetujui Finance', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+          otherCostAmount: 200000,
+          otherCostNotes: 'Uang masuk tol',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+
+    expect(screen.getByLabelText(/nominal biaya/i)).toBeDisabled();
+    expect(screen.getByLabelText(/catatan biaya/i)).toBeDisabled();
+    expect(screen.getByRole('button', { name: /disetujui finance/i })).toBeDisabled();
+    expect(screen.getByText(/Biaya lainnya terkunci karena UJ sudah disetujui Finance/i)).toBeInTheDocument();
+    expect(screen.getByText(/Biaya lainnya tidak bisa diubah setelah UJ disetujui Finance/i)).toBeInTheDocument();
+  });
 });

@@ -85,7 +85,7 @@ function hasActiveDriverJob(row, activeJobs) {
 }
 
 function getDriverBaseStatus(row) {
-  return ['Cuti', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
+  return ['Bertugas', 'Cuti', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
 }
 
 function getDriverStatus(row, activeJobs) {
@@ -201,7 +201,7 @@ function DriversPage() {
       resource="drivers"
       storageKey="tms-master-drivers-v2"
       uniqueKeys={['phone']}
-      filters={[{ key: 'status', label: 'Semua Status Driver', options: ['Aktif', 'Cuti', 'Tidak Aktif'] }]}
+      filters={[{ key: 'status', label: 'Semua Status Driver', options: ['Aktif', 'Bertugas', 'Cuti', 'Tidak Aktif'] }]}
       pageClassName="driver-data-page"
       pageSize={20}
       showModeChip={false}

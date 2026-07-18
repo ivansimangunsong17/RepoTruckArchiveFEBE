@@ -456,6 +456,15 @@ if (!hasDatabase) {
 
       const plate20 = `B-${String(runId).slice(-4)}-20T`;
       const plate40 = `B-${String(runId).slice(-4)}-40T`;
+      const driverName = `Driver ${runId}`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman')
+          on conflict do nothing
+        `,
+        [driverName, `08${String(runId).slice(-10)}`],
+      );
       await query(
         `
           insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
@@ -474,7 +483,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: `Driver ${runId}`,
+          driver: driverName,
           plateNumber: plate40,
           status: 'running',
           runningAt: '2026-07-11T07:00:00.000Z',
@@ -489,7 +498,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: `Driver ${runId}`,
+          driver: driverName,
           plateNumber: plate20,
           status: 'running',
           runningAt: '2026-07-11T08:00:00.000Z',
@@ -505,7 +514,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: `Driver ${runId}`,
+          driver: driverName,
           plateNumber: plate20,
           status: 'received',
           rpujStatus: 'submitted',
@@ -547,7 +556,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: `Driver ${runId}`,
+          driver: driverName,
           plateNumber: plate20,
           status: 'running',
           runningAt: '2026-07-11T08:00:00.000Z',
@@ -556,6 +565,13 @@ if (!hasDatabase) {
       });
       assert.equal(updatedJob.status, 200);
       assert.equal(updatedJob.body.data.status, 'running');
+
+      const busyDriverMaster = await api(`/api/master/drivers?query=${encodeURIComponent(driverName)}`, { token: adminToken });
+      assert.equal(busyDriverMaster.status, 200);
+      assert.equal(busyDriverMaster.body.data.find((row) => row.name === driverName)?.status, 'Bertugas');
+      const busyTruckMaster = await api(`/api/master/trucks?query=${encodeURIComponent(plate20)}`, { token: adminToken });
+      assert.equal(busyTruckMaster.status, 200);
+      assert.equal(busyTruckMaster.body.data.find((row) => row.plateNumber === plate20)?.status, 'Bertugas');
 
       const busyAssignmentSoNumber = `SO-BUSY-${runId}`;
       const busyAssignmentOrder = await api('/api/sales-orders', {
@@ -577,7 +593,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           containerNumber: `${busyAssignmentSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: `Driver ${runId}`,
+          driver: driverName,
           plateNumber: plate20,
           status: 'received',
           updatedBy: 'Sprint2C Operational',
@@ -649,7 +665,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: `Driver ${runId}`,
+          driver: driverName,
           plateNumber: plate20,
           status: 'completed',
           runningAt: '2026-07-11T08:00:00.000Z',
@@ -665,6 +681,11 @@ if (!hasDatabase) {
       });
       assert.equal(completedJob.status, 200);
       assert.equal(completedJob.body.data.status, 'completed');
+
+      const releasedDriverMaster = await api(`/api/master/drivers?query=${encodeURIComponent(driverName)}`, { token: adminToken });
+      assert.equal(releasedDriverMaster.body.data.find((row) => row.name === driverName)?.status, 'Aktif');
+      const releasedTruckMaster = await api(`/api/master/trucks?query=${encodeURIComponent(plate20)}`, { token: adminToken });
+      assert.equal(releasedTruckMaster.body.data.find((row) => row.plateNumber === plate20)?.status, 'Aktif');
 
       const completedOrder = await api(`/api/sales-orders/${created.orderId}`, { token: adminToken });
       assert.equal(completedOrder.status, 200);
@@ -795,6 +816,12 @@ if (!hasDatabase) {
       assert.equal(financeInvoice.status, 200);
       assert.equal(financeInvoice.body.data.invoiceNumber, `INV-${runId}-001`);
       assert.equal(financeInvoice.body.data.invoiceStatus, 'Menunggu Update Status');
+      assert.ok(financeInvoice.body.data.invoiceDate);
+      assert.ok(financeInvoice.body.data.dueDate);
+      assert.equal(
+        Math.round((new Date(financeInvoice.body.data.dueDate) - new Date(financeInvoice.body.data.invoiceDate)) / 86400000),
+        14,
+      );
 
       const invoiceLog = await latestActivityForEntity('FINANCE_INPUT_INVOICE_NUMBER', created.orderId);
       assert.equal(invoiceLog.action, 'FINANCE_INPUT_INVOICE_NUMBER');

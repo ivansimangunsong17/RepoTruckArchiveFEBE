@@ -225,10 +225,10 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
               </section>
 
               <section>
-                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Revenue dan Uang Jalan</h3>
+                <h3 className="mb-2 text-xs font-black uppercase tracking-wide text-slate-700">Penagihan dan Uang Jalan</h3>
                 <div className="grid gap-2 md:grid-cols-4">
                   <ReadOnlyField label="Tarif" value={moneyValue(trip.tariff)} />
-                  <ReadOnlyField label="Total Revenue" value={moneyValue(trip.totalRevenue)} />
+                  <ReadOnlyField label="Total Penagihan" value={moneyValue(trip.totalRevenue)} />
                   <ReadOnlyField label="Uang Jalan" value={moneyValue(trip.journeyMoney)} />
                   <ReadOnlyField label="Biaya Tambahan" value={formatCurrency(trip.additionalCost || 0)} />
                   <ReadOnlyField label="Estimasi Margin" value={moneyValue(trip.estimatedMargin)} />
@@ -438,7 +438,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                 <strong className="mt-1 block text-sm text-slate-950">{summary.totalCompletedContainers || 0} ritase</strong>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Revenue</span>
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Total Penagihan</span>
                 <strong className="mt-1 block text-sm text-slate-950">{summary.missingRevenue && !summary.totalRevenue ? 'Data belum tersedia' : formatCurrency(summary.totalRevenue || 0)}</strong>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
@@ -452,7 +452,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
             </div>
             {summary.missingRevenue || summary.missingJourneyMoney ? (
               <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                {summary.missingRevenue || 0} perjalanan belum punya tarif, {summary.missingJourneyMoney || 0} perjalanan belum punya uang jalan.
+                {summary.missingRevenue || 0} perjalanan belum punya tarif penagihan, {summary.missingJourneyMoney || 0} perjalanan belum punya uang jalan.
               </p>
             ) : null}
           </section>
@@ -624,7 +624,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                     <td className="px-3 py-2">
                       <div className="grid min-w-[210px] grid-cols-2 gap-2">
                         <div className="rounded-md bg-emerald-50 px-2 py-1.5">
-                          <span className="block text-[10px] font-bold uppercase text-emerald-700">Revenue</span>
+                          <span className="block text-[10px] font-bold uppercase text-emerald-700">Penagihan</span>
                           <strong className="text-[11px] text-slate-950">{moneyValue(row.totalRevenue)}</strong>
                         </div>
                         <div className="rounded-md bg-blue-50 px-2 py-1.5">
