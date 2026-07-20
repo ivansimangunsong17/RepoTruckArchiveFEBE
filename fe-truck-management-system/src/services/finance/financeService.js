@@ -57,6 +57,10 @@ export function fetchFinanceInvoices(params = {}) {
   return httpClient.get(`/finance/invoices${buildQuery(params)}`);
 }
 
+export function fetchFinanceInvoiceDetail(id) {
+  return httpClient.get(`/finance/invoices/${encodeURIComponent(id)}`);
+}
+
 export function updateFinanceInvoiceNumber(id, invoiceNumber) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/number`, { invoiceNumber });
 }

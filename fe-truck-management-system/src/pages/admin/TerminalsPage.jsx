@@ -14,7 +14,13 @@ function TerminalsPage() {
         { key: 'portArea', section: 'Area', label: 'Area Pelabuhan', placeholder: 'Contoh: Tanjung Priok', full: true },
       ]}
       columns={[
-        { key: 'name', label: 'Nama Terminal', render: (value) => <TextCell value={value} strong /> },
+        {
+          key: 'name',
+          label: 'Nama Terminal',
+          headerClassName: '!text-left',
+          cellClassName: '!text-left',
+          render: (value) => <TextCell value={value} strong />,
+        },
         { key: 'code', label: 'Nama PT', render: (value) => <TextCell value={value} /> },
       ]}
       toolbarDescription="Cari nama terminal, nama PT, dan status."

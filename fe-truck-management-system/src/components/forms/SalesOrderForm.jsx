@@ -29,15 +29,26 @@ function normalizeDateTime(value) {
   return value ? value.slice(0, 16) : '';
 }
 
+function toLocalDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
 function normalizeDateOnly(value) {
   if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toLocalDateKey(value);
+  }
   const raw = String(value).trim();
   if (!raw) return '';
   const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   if (isoMatch) return isoMatch[1];
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
-  return parsed.toISOString().slice(0, 10);
+  return toLocalDateKey(parsed);
 }
 
 function createDocumentDraft(document = {}) {
@@ -146,7 +157,27 @@ function summarizeContainerType(items) {
   return types.length === 1 ? types[0] : '';
 }
 
-function buildContainersFromLineItems(lineItems, receivedAt) {
+function normalizeContainerSize(value) {
+  return String(value || '').replace(/\s+/g, '').toUpperCase() === '40FT' ? '40FT' : '20FT';
+}
+
+function findExistingContainer(plannedContainer, existingContainers, usedIndexes) {
+  const availableContainers = existingContainers
+    .map((container, index) => ({ container, index }))
+    .filter(({ index }) => !usedIndexes.has(index));
+  const desiredSize = normalizeContainerSize(plannedContainer.size);
+
+  return availableContainers.find(({ container }) => (
+    container.status !== 'cancelled' && normalizeContainerSize(container.size || container.containerSize) === desiredSize
+  ))
+    || availableContainers.find(({ container }) => container.status === 'received')
+    || availableContainers.find(({ container }) => (
+      container.status === 'cancelled' && normalizeContainerSize(container.size || container.containerSize) === desiredSize
+    ))
+    || null;
+}
+
+function buildContainersFromLineItems(lineItems, receivedAt, existingContainers = []) {
   const containers = [];
 
   lineItems.forEach((item) => {
@@ -166,7 +197,19 @@ function buildContainersFromLineItems(lineItems, receivedAt) {
     }
   });
 
-  return containers;
+  const usedIndexes = new Set();
+  return containers.map((plannedContainer) => {
+    const existingMatch = findExistingContainer(plannedContainer, existingContainers, usedIndexes);
+    if (!existingMatch) return plannedContainer;
+
+    usedIndexes.add(existingMatch.index);
+    return {
+      ...existingMatch.container,
+      size: plannedContainer.size,
+      type: plannedContainer.type,
+      notes: plannedContainer.notes,
+    };
+  });
 }
 
 function createInitialForm(order) {
@@ -186,6 +229,7 @@ function createInitialForm(order) {
     customerPic: order?.customerPic || '',
     customerPhone: order?.customerPhone || '',
     customerAddress: order?.customerAddress || '',
+    salesName: order?.salesName || '',
     shipment: order?.shipment || 'import',
     jobType: order?.jobType || 'Trucking Container',
     vesselName: order?.vesselName || order?.shipName || order?.namaKapal || '',
@@ -233,6 +277,11 @@ function SelectWithCurrentValue({
       {options.map((option) => <option key={option} value={option}>{option}</option>)}
     </select>
   );
+}
+
+function preventNumberWheelChange(event) {
+  event.preventDefault();
+  event.currentTarget.blur();
 }
 
 function SalesOrderForm({
@@ -344,6 +393,7 @@ function SalesOrderForm({
       customerPic: customer?.pic || '',
       customerPhone: customer?.phone || '',
       customerAddress: customer?.address || '',
+      salesName: customer?.salesName || '',
     }));
   }
 
@@ -423,12 +473,13 @@ function SalesOrderForm({
     const price = normalizedLineItems.length === 1 ? Number(normalizedLineItems[0].price || 0) : 0;
     const serviceSummary = summarizeLineItems(normalizedLineItems);
     const containerSummary = normalizedLineItems.map(formatLineItemLabel).join(' + ');
-    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt);
+    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt, order?.containers || []);
     onSubmit({
       ...form,
       soNumber,
       origin: form.origin.trim(),
       destination: form.destination.trim(),
+      salesName: selectedCustomer?.salesName || form.salesName || '',
       invoiceNumber: form.invoiceNumber.trim(),
       paymentType: form.paymentType === 'tempo' ? 'tempo' : 'cash',
       paymentTermDays: form.paymentType === 'tempo' ? Number(form.paymentTermDays || 0) : 0,
@@ -581,6 +632,7 @@ function SalesOrderForm({
                     min="1"
                     value={form.paymentTermDays}
                     onChange={updateField}
+                    onWheel={preventNumberWheelChange}
                     placeholder="30"
                   />
                 </label>
@@ -709,6 +761,7 @@ function SalesOrderForm({
                           min="1"
                           value={item.qty}
                           onChange={(event) => updateLineItem(index, 'qty', event.target.value)}
+                          onWheel={preventNumberWheelChange}
                           placeholder="0"
                         />
                       </div>
@@ -720,6 +773,7 @@ function SalesOrderForm({
                           min="0"
                           value={item.price}
                           onChange={(event) => updateLineItem(index, 'price', event.target.value)}
+                          onWheel={preventNumberWheelChange}
                           placeholder="0"
                         />
                       </div>

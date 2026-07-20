@@ -5,6 +5,11 @@ import MasterDataPage from './MasterDataPage';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { useFeedback } from '../../hooks/useFeedback';
 import { fetchMasterPage } from '../../services/master-data/masterDataService';
+import {
+  createAttachmentDownloadUrl,
+  deleteAttachmentFile,
+  uploadAttachmentFile,
+} from '../../services/files/fileService';
 
 vi.mock('../../hooks/useArchiveData', () => ({
   useArchiveData: vi.fn(),
@@ -18,6 +23,12 @@ vi.mock('../../services/master-data/masterDataService', () => ({
   fetchMasterPage: vi.fn(),
 }));
 
+vi.mock('../../services/files/fileService', () => ({
+  createAttachmentDownloadUrl: vi.fn(),
+  deleteAttachmentFile: vi.fn(),
+  uploadAttachmentFile: vi.fn(),
+}));
+
 const fields = [
   { key: 'name', label: 'Nama Data', placeholder: 'Masukkan nama', required: true },
   { key: 'status', label: 'Status', type: 'select', defaultValue: 'Aktif', options: [
@@ -28,7 +39,7 @@ const fields = [
 
 const rows = [{ id: 'row-1', name: 'Data Lama', status: 'Aktif' }];
 
-function renderPage({ pageFields = fields } = {}) {
+function renderPage({ pageFields = fields, resource = 'customers' } = {}) {
   return render(
     <MasterDataPage
       eyebrow="Master"
@@ -41,7 +52,7 @@ function renderPage({ pageFields = fields } = {}) {
         { key: 'status', label: 'Status' },
       ]}
       initialRows={[]}
-      resource="customers"
+      resource={resource}
       storageKey="test-master"
       uniqueKeys={['name']}
       filters={[]}
@@ -60,6 +71,9 @@ describe('MasterDataPage database mode', () => {
     vi.clearAllMocks();
     upsertMaster.mockResolvedValue(undefined);
     removeMaster.mockResolvedValue(undefined);
+    createAttachmentDownloadUrl.mockResolvedValue('http://localhost/document');
+    deleteAttachmentFile.mockResolvedValue({ id: 'deleted' });
+    uploadAttachmentFile.mockResolvedValue(null);
     confirmAction.mockResolvedValue(true);
     fetchMasterPage.mockResolvedValue({ rows, total: rows.length });
     if (!URL.createObjectURL) {
@@ -156,6 +170,34 @@ describe('MasterDataPage database mode', () => {
       query: '',
       filters: {},
     }));
+  });
+
+  it('menyediakan view dan download dokumen hanya dari modal detail', async () => {
+    const user = userEvent.setup();
+    const documentRows = [{
+      ...rows[0],
+      npwpDocument: { name: 'NPWP-Customer.pdf', path: 'npwp-document-id' },
+    }];
+    fetchMasterPage.mockResolvedValue({ rows: documentRows, total: documentRows.length });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { customers: documentRows },
+      upsertMaster,
+      removeMaster,
+    });
+
+    renderPage({
+      pageFields: [
+        ...fields,
+        { key: 'npwpDocument', label: 'Dokumen NPWP', type: 'file' },
+      ],
+    });
+
+    expect(screen.queryByRole('button', { name: 'Download NPWP-Customer.pdf' })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Lihat Data' }));
+
+    expect(await screen.findByRole('button', { name: 'View NPWP-Customer.pdf' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download NPWP-Customer.pdf' })).toBeInTheDocument();
   });
 
   it('mempertahankan data lama saat edit meski ada field yang disembunyikan', async () => {
@@ -313,5 +355,64 @@ describe('MasterDataPage database mode', () => {
 
     expect(await screen.findByAltText('foto.png')).toHaveAttribute('src', 'blob:preview-image');
     expect(screen.getByText('Pilih gambar')).toBeInTheDocument();
+  });
+
+  it('mengunggah isi dokumen master setelah record mendapatkan ID', async () => {
+    const user = userEvent.setup();
+    const driverId = 'a12b34cd-1111-4222-8333-1234567890ab';
+    const attachmentId = 'd34e56fa-2222-4333-8444-1234567890ab';
+    const savedDriver = { id: driverId, name: 'Sopir Baru', status: 'Aktif', licenseDocument: null };
+    upsertMaster
+      .mockResolvedValueOnce(savedDriver)
+      .mockResolvedValueOnce({
+        ...savedDriver,
+        licenseDocument: { name: 'SIM.pdf', path: attachmentId },
+      });
+    uploadAttachmentFile.mockResolvedValue({
+      id: attachmentId,
+      fileNameOriginal: 'SIM.pdf',
+      sizeBytes: 1024,
+      mimeType: 'application/pdf',
+    });
+
+    const { container } = renderPage({
+      resource: 'drivers',
+      pageFields: [
+        { key: 'name', label: 'Nama Data', placeholder: 'Masukkan nama', required: true },
+        { key: 'status', label: 'Status', type: 'select', defaultValue: 'Aktif', options: [
+          { value: 'Aktif', label: 'Aktif' },
+        ] },
+        { key: 'licenseDocument', label: 'Dokumen SIM', type: 'file' },
+      ],
+    });
+
+    await user.click(screen.getByRole('button', { name: /Input Data Baru/i }));
+    await user.type(screen.getByPlaceholderText('Masukkan nama'), 'Sopir Baru');
+    const file = new File(['sim'], 'SIM.pdf', { type: 'application/pdf' });
+    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [file] } });
+    await user.click(screen.getByRole('button', { name: 'Simpan Data' }));
+
+    await waitFor(() => expect(uploadAttachmentFile).toHaveBeenCalledWith({
+      path: '',
+      entityType: 'driver',
+      entityId: driverId,
+      category: 'licenseDocument',
+      file,
+    }));
+    expect(upsertMaster).toHaveBeenNthCalledWith(1, 'drivers', {
+      name: 'Sopir Baru',
+      status: 'Aktif',
+      licenseDocument: null,
+    }, null);
+    expect(upsertMaster).toHaveBeenNthCalledWith(2, 'drivers', expect.objectContaining({
+      id: driverId,
+      licenseDocument: {
+        name: 'SIM.pdf',
+        size: 1024,
+        type: 'application/pdf',
+        lastModified: null,
+        path: attachmentId,
+      },
+    }), driverId);
   });
 });

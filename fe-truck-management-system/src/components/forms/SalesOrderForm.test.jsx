@@ -9,6 +9,7 @@ const customers = [{
   address: 'Jakarta',
   pic: 'Budi',
   phone: '021-123456',
+  salesName: 'Sales Manual Admin',
   contract: 'Aktif',
 }];
 const locationMasters = {
@@ -192,6 +193,7 @@ describe('SalesOrderForm', () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       soNumber: '',
       customer: 'PT Armada Test',
+      salesName: 'Sales Manual Admin',
       paymentType: 'tempo',
       paymentTermDays: 14,
       serviceName: 'Campuran',
@@ -243,5 +245,72 @@ describe('SalesOrderForm', () => {
     expect(screen.getByLabelText('PIC Customer')).toHaveValue('Budi');
     expect(screen.getByLabelText('Kontak PIC')).toHaveValue('021-123456');
     expect(screen.getByLabelText('Alamat Customer')).toHaveValue('Jakarta');
+  });
+
+  it('menampilkan tanggal edit sesuai tanggal kalender dari DB', () => {
+    render(
+      <SalesOrderForm
+        order={{
+          id: 'so-date',
+          soNumber: 'SO-DATE-001',
+          customer: 'PT Armada Test',
+          origin: 'Jakarta',
+          destination: 'Bandung',
+          soDate: new Date('2026-07-16T17:00:00.000Z'),
+          tripDate: new Date('2026-07-16T17:00:00.000Z'),
+          lineItems: [{ serviceName: 'Bon Muat/Bongkar', qty: 1, price: 0 }],
+        }}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Tanggal Sales Order')).toHaveValue('2026-07-17');
+    expect(screen.getByLabelText('Tanggal Jalan')).toHaveValue('2026-07-17');
+  });
+
+  it('mempertahankan job cancelled saat SO disimpan ulang tanpa perubahan qty', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const order = {
+      id: 'so-1',
+      soNumber: 'SO-EDIT-001',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      lineItems: [{
+        serviceName: 'Jasa Angkut D20',
+        containerType: 'Dry',
+        qty: 2,
+        price: 150000,
+      }],
+      containers: [
+        { id: 'job-active', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' },
+        { id: 'job-cancelled', size: '20FT', type: 'Dry', status: 'cancelled', rpujStatus: 'pending' },
+      ],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      containers: [
+        expect.objectContaining({ id: 'job-active', status: 'received' }),
+        expect.objectContaining({ id: 'job-cancelled', status: 'cancelled' }),
+      ],
+    }));
   });
 });

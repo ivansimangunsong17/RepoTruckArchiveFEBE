@@ -3,6 +3,7 @@ import {
   getCompletedTripDetail,
   getCompletedTripsPage,
   getFinanceDashboard,
+  getInvoiceOrderDetail,
   getInvoiceOrdersPage,
   getOrderVerificationsPage,
   getRpujRequestsPage,
@@ -36,6 +37,8 @@ export function fetchOrderVerifications(query = {}) {
   return getOrderVerificationsPage({
     page: query.page,
     pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
     query: query.query || query.search || '',
     status: query.status || '',
   });
@@ -52,6 +55,8 @@ export function fetchRpujRequests(query = {}) {
   return getRpujRequestsPage({
     page: query.page,
     pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
     query: query.query || query.search || '',
     status: query.status || '',
   });
@@ -65,8 +70,21 @@ export function approveRpuj(id, payload = {}, actor) {
 }
 
 export function rejectRpuj(id, payload = {}, actor) {
+  const rejectionNote = String(payload.rejectionNote || payload.note || '').trim();
+  if (!rejectionNote) {
+    const error = new Error('Catatan reject RPUJ wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'RPUJ_REJECTION_NOTE_REQUIRED';
+    throw error;
+  }
+  if (rejectionNote.length > 500) {
+    const error = new Error('Catatan reject RPUJ maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'RPUJ_REJECTION_NOTE_TOO_LONG';
+    throw error;
+  }
   return rejectRpujRequest(id, {
-    rejectionNote: payload.rejectionNote || payload.note || '',
+    rejectionNote,
     actorName: actor?.name || actor?.email || 'Finance',
   });
 }
@@ -89,9 +107,22 @@ export function fetchInvoiceOrders(query = {}) {
   return getInvoiceOrdersPage({
     page: query.page,
     pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
     query: query.query || query.search || '',
     status: query.status || '',
   });
+}
+
+export async function fetchInvoiceOrderDetail(id) {
+  const invoice = await getInvoiceOrderDetail(id);
+  if (!invoice) {
+    const error = new Error('Detail invoice tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'FINANCE_INVOICE_NOT_FOUND';
+    throw error;
+  }
+  return invoice;
 }
 
 export function saveInvoiceNumber(id, payload = {}, actor) {

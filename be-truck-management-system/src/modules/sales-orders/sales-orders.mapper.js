@@ -14,10 +14,18 @@ function normalizePaymentTermDays(paymentType, value) {
   return paymentType === 'tempo' ? Math.max(1, days || 30) : 0;
 }
 
+function toLocalDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
 function normalizeDateOnly(value) {
   if (!value) return '';
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+    return toLocalDateKey(value);
   }
   const raw = String(value).trim();
   if (!raw) return '';
@@ -25,7 +33,7 @@ function normalizeDateOnly(value) {
   if (isoMatch) return isoMatch[1];
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
-  return parsed.toISOString().slice(0, 10);
+  return toLocalDateKey(parsed);
 }
 
 function mapAttachmentFile(attachment) {
@@ -307,7 +315,7 @@ export function toSalesOrderDb(form, customer) {
     origin: form.origin,
     destination: form.destination,
     status: form.status || 'waiting_operational',
-    sales_name: form.salesName || form.createdBy || 'Sales',
+    sales_name: customer?.sales_name || form.salesName || null,
     created_by_name: form.createdBy || form.salesName || 'Sales',
     created_by_user_id: form.createdByUserId || null,
     updated_by_name: form.updatedBy || form.createdBy || form.salesName || 'Sales',

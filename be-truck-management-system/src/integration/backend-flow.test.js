@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { rm } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
+import { dirname, resolve } from 'node:path';
 import test, { after } from 'node:test';
 
 process.env.NODE_ENV = 'test';
@@ -46,8 +48,14 @@ if (!hasDatabase) {
   const server = createApp();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const backupLockPath = resolve(
+    process.env.UPLOAD_DIR,
+    'File Sementara',
+    'backup-in-progress.lock',
+  );
 
   after(async () => {
+    await rm(backupLockPath, { force: true }).catch(() => {});
     await cleanupTestData().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
     await closePool();
@@ -78,8 +86,19 @@ if (!hasDatabase) {
       `,
       [`%${runId}%`, `B-${String(runId).slice(-4)}%`],
     );
+    const storageTrash = await query(
+      `
+        select id, trash_relative_path
+        from storage_trash
+        where record_data::text ilike $1
+           or coalesce(original_relative_path, '') ilike $1
+           or coalesce(trash_relative_path, '') ilike $1
+      `,
+      [`%${runId}%`],
+    );
 
     await query('delete from activity_logs where metadata::text ilike $1 or actor_name ilike $2 or target ilike $2', [`%${runId}%`, `%${runId}%`]);
+    await query('delete from storage_trash where record_data::text ilike $1 or coalesce(original_relative_path, \'\') ilike $1 or coalesce(trash_relative_path, \'\') ilike $1', [`%${runId}%`]);
     await query('delete from attachments where storage_path ilike $1 or entity_id in (select id from sales_orders where so_number ilike $2 or notes ilike $1 or customer_name ilike $1)', [`%${runId}%`, `SO-${runId}%`]);
     await query('delete from sales_orders where so_number ilike $1 or notes ilike $2 or customer_name ilike $2', [`SO-${runId}%`, `%${runId}%`]);
     await query('delete from vehicles where plate_number like $1', [`B-${String(runId).slice(-4)}%`]);
@@ -93,6 +112,11 @@ if (!hasDatabase) {
     await Promise.all(vehicleDocuments.rows.map((row) => (
       row.relative_path
         ? rm(`${process.env.UPLOAD_DIR}/${row.relative_path}`, { force: true }).catch(() => {})
+        : Promise.resolve()
+    )));
+    await Promise.all(storageTrash.rows.map((row) => (
+      row.trash_relative_path
+        ? rm(`${process.env.UPLOAD_DIR}/${row.trash_relative_path}`, { force: true }).catch(() => {})
         : Promise.resolve()
     )));
   }
@@ -316,6 +340,62 @@ if (!hasDatabase) {
       const financeSalesOrderList = await api('/api/sales-orders?pageSize=1', { token: financeToken });
       assert.equal(financeSalesOrderList.status, 403);
       assert.equal(financeSalesOrderList.body.error.code, 'FORBIDDEN');
+    });
+
+    await t.test('backup lokal: mutasi diblokir tetapi akses baca tetap tersedia', async () => {
+      await mkdir(dirname(backupLockPath), { recursive: true });
+      await writeFile(backupLockPath, JSON.stringify({
+        backupId: `TEST-${runId}`,
+        computerName: hostname(),
+        processId: process.pid,
+      }), { flag: 'wx' });
+      try {
+        const blockedMutation = await api('/api/master/trucks', {
+          method: 'POST',
+          token: adminToken,
+          body: {},
+        });
+        assert.equal(blockedMutation.status, 503);
+        assert.equal(blockedMutation.body.error.code, 'BACKUP_IN_PROGRESS');
+
+        const allowedRead = await api('/api/reports/dashboard', { token: observerToken });
+        assert.equal(allowedRead.status, 200);
+      } finally {
+        await rm(backupLockPath, { force: true });
+      }
+    });
+
+    await t.test('backup lokal: lock dari proses yang sudah mati diarsipkan', async () => {
+      const staleLockArchive = resolve(process.env.UPLOAD_DIR, 'File Karantina', 'Storage Audit');
+      await mkdir(dirname(backupLockPath), { recursive: true });
+      await writeFile(backupLockPath, JSON.stringify({
+        backupId: `STALE-${runId}`,
+        computerName: hostname(),
+        processId: 2147483647,
+      }), { flag: 'wx' });
+      try {
+        const mutationAfterStaleLock = await api('/api/master/trucks', {
+          method: 'POST',
+          token: adminToken,
+          body: {},
+        });
+        assert.notEqual(mutationAfterStaleLock.status, 503);
+        assert.equal(
+          await stat(backupLockPath).then(() => true, (error) => {
+            if (error.code === 'ENOENT') return false;
+            throw error;
+          }),
+          false,
+        );
+        const archivedLocks = await readdir(staleLockArchive);
+        assert.ok(archivedLocks.some((name) => name.startsWith('stale-backup-lock-')));
+      } finally {
+        await rm(backupLockPath, { force: true });
+        const archivedLocks = await readdir(staleLockArchive).catch(() => []);
+        await Promise.all(archivedLocks
+          .filter((name) => name.startsWith('stale-backup-lock-'))
+          .map((name) => rm(resolve(staleLockArchive, name), { force: true })));
+      }
     });
 
     await t.test('sales order: list, create, update, cancel', async () => {
@@ -879,9 +959,32 @@ if (!hasDatabase) {
           ],
         }),
       });
-      assert.equal(blockedInvoiceNumberMutation.status, 200);
-      assert.equal(blockedInvoiceNumberMutation.body.data.invoiceNumber, `INV-${runId}-001`);
-      assert.equal(blockedInvoiceNumberMutation.body.data.billingStatus, 'menunggu_pembayaran');
+      assert.equal(blockedInvoiceNumberMutation.status, 403);
+      assert.equal(blockedInvoiceNumberMutation.body.error.code, 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY');
+
+      const blockedCancellationAfterRpuj = await api(`/api/sales-orders/${created.orderId}/cancel-request`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { cancelRequestNote: 'Customer meminta pembatalan setelah RPUJ dikirim' },
+      });
+      assert.equal(blockedCancellationAfterRpuj.status, 403);
+      assert.equal(blockedCancellationAfterRpuj.body.error.code, 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY');
+
+      const blockedDirectCancellationAfterRpuj = await api(`/api/sales-orders/${created.orderId}/cancel`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: {},
+      });
+      assert.equal(blockedDirectCancellationAfterRpuj.status, 403);
+      assert.equal(blockedDirectCancellationAfterRpuj.body.error.code, 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY');
+
+      const blockedContainerCancellationAfterRpuj = await api(`/api/container-jobs/${created.jobId}/cancel-request`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { cancelRequestNote: 'Container dibatalkan setelah RPUJ dikirim' },
+      });
+      assert.equal(blockedContainerCancellationAfterRpuj.status, 403);
+      assert.equal(blockedContainerCancellationAfterRpuj.body.error.code, 'CONTAINER_JOB_RPUJ_LOCKED_ADMIN_ONLY');
     });
 
     await t.test('finance: dashboard dan perjalanan selesai read-only', async () => {
@@ -966,9 +1069,11 @@ if (!hasDatabase) {
       });
       assert.equal(upload.status, 201);
       assert.equal(upload.body.data.entityId, created.jobId);
-      assert.match(upload.body.data.storagePath, /^sales-orders[\\/]+2026[\\/]+Juli[\\/]+2026-07-\d{2}[\\/]+SO-/);
-      assert.match(upload.body.data.storagePath, /[\\/]+03-container-jobs[\\/]+[^\\/]+[\\/]+99-other-documents[\\/]+/);
+      assert.match(upload.body.data.storagePath, /^Sales Order[\\/]+\d{4}[\\/]+\d{2} - [^\\/]+[\\/]+SO-/);
+      assert.match(upload.body.data.storagePath, /[\\/]+02 - Dokumen Container[\\/]+JOB-[A-F0-9]{8}[\\/]+Dokumen Lainnya[\\/]+/);
       created.attachmentId = upload.body.data.id;
+      const temporaryFiles = await readdir(`${process.env.UPLOAD_DIR}/File Sementara/File yang sedang diproses`);
+      assert.equal(temporaryFiles.length, 0);
 
       const list = await api(`/api/attachments?entityType=container_job&entityId=${created.jobId}`, { token: adminToken });
       assert.equal(list.status, 200);
@@ -991,9 +1096,58 @@ if (!hasDatabase) {
       });
       assert.equal(deleted.status, 200);
       assert.equal(deleted.body.data.id, created.attachmentId);
+      assert.ok(deleted.body.data.trashId);
+
+      const deletedDownload = await fetch(`${baseUrl}/api/attachments/${created.attachmentId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(deletedDownload.status, 404);
+
+      const forbiddenTrash = await api('/api/storage/trash', { token: observerToken });
+      assert.equal(forbiddenTrash.status, 403);
+
+      const trashList = await api(`/api/storage/trash?sourceId=${created.attachmentId}`, { token: adminToken });
+      assert.equal(trashList.status, 200);
+      assert.equal(trashList.body.data.total, 1);
+      const trashId = trashList.body.data.rows[0].id;
+
+      const restored = await api(`/api/storage/trash/${trashId}/restore`, {
+        method: 'POST',
+        token: adminToken,
+      });
+      assert.equal(restored.status, 200);
+
+      const restoredDownload = await fetch(`${baseUrl}/api/attachments/${created.attachmentId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(restoredDownload.status, 200);
+
+      const deletedAgain = await api(`/api/attachments/${created.attachmentId}`, {
+        method: 'DELETE',
+        token: adminToken,
+      });
+      assert.equal(deletedAgain.status, 200);
+      const purged = await api(`/api/storage/trash/${deletedAgain.body.data.trashId}`, {
+        method: 'DELETE',
+        token: adminToken,
+      });
+      assert.equal(purged.status, 200);
+
+      const emptyTrash = await api(`/api/storage/trash?sourceId=${created.attachmentId}`, { token: adminToken });
+      assert.equal(emptyTrash.status, 200);
+      assert.equal(emptyTrash.body.data.total, 0);
     });
 
     await t.test('vehicle documents: create vehicles, upload KIR, list, download, safe path', async () => {
+      const dateFromToday = (offsetDays) => {
+        const date = new Date();
+        date.setHours(12, 0, 0, 0);
+        date.setDate(date.getDate() + offsetDays);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
       const head = await api('/api/master/trucks', {
         method: 'POST',
         token: adminToken,
@@ -1041,8 +1195,8 @@ if (!hasDatabase) {
         body: {
           documentType: 'KIR_HEAD',
           documentNumber: `KIR-H-${runId}`,
-          issuedDate: '2026-07-10',
-          expiredDate: '2026-08-10',
+          issuedDate: dateFromToday(-30),
+          expiredDate: dateFromToday(20),
           fileName: `kir-head-${runId}.pdf`,
           mimeType: 'application/pdf',
           fileBase64: pdfBase64,
@@ -1052,8 +1206,8 @@ if (!hasDatabase) {
       assert.equal(kirHead.status, 201);
       assert.equal(kirHead.body.data.documentType, 'KIR_HEAD');
       assert.equal(kirHead.body.data.status, 'Akan Habis');
-      assert.match(kirHead.body.data.relativePath, /^master-data[\\/]+vehicles[\\/]+HEAD-/);
-      assert.match(kirHead.body.data.relativePath, /[\\/]+kir-head[\\/]+KIR_HEAD_/);
+      assert.match(kirHead.body.data.relativePath, /^Master Data[\\/]+Truck[\\/]+[0-9a-f-]{36}[\\/]+KIR dan Uji Berkala[\\/]+/);
+      assert.equal(kirHead.body.data.relativePath.split(/[\\/]+/)[2], created.vehicleHeadId);
       assert.equal(kirHead.body.data.relativePath.includes('..'), false);
       created.kirHeadDocumentId = kirHead.body.data.id;
 
@@ -1063,8 +1217,8 @@ if (!hasDatabase) {
         body: {
           documentType: 'KIR_BUNTUT',
           documentNumber: `KIR-B-${runId}`,
-          issuedDate: '2026-07-10',
-          expiredDate: '2026-07-19',
+          issuedDate: dateFromToday(-30),
+          expiredDate: dateFromToday(7),
           fileName: `kir-buntut-${runId}.pdf`,
           mimeType: 'application/pdf',
           fileBase64: pdfBase64,
@@ -1074,6 +1228,7 @@ if (!hasDatabase) {
       assert.equal(kirBuntut.status, 201);
       assert.equal(kirBuntut.body.data.documentType, 'KIR_BUNTUT');
       assert.equal(kirBuntut.body.data.status, 'Segera Habis');
+      assert.match(kirBuntut.body.data.relativePath, /^Master Data[\\/]+Chassis[\\/]+[0-9a-f-]{36}[\\/]+KIR dan Uji Berkala[\\/]+/);
       created.kirBuntutDocumentId = kirBuntut.body.data.id;
 
       const list = await api(`/api/vehicles/${created.vehicleChassisId}/documents`, { token: adminToken });
@@ -1085,6 +1240,29 @@ if (!hasDatabase) {
       });
       assert.equal(downloaded.status, 200);
       assert.equal(downloaded.headers.get('content-type'), 'application/pdf');
+
+      const deletedDocument = await api(`/api/vehicles/${created.vehicleHeadId}/documents/${created.kirHeadDocumentId}`, {
+        method: 'DELETE',
+        token: adminToken,
+      });
+      assert.equal(deletedDocument.status, 200);
+      assert.ok(deletedDocument.body.data.trashId);
+
+      const deletedDocumentDownload = await fetch(`${baseUrl}/api/vehicles/${created.vehicleHeadId}/documents/${created.kirHeadDocumentId}/download`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(deletedDocumentDownload.status, 404);
+
+      const restoredDocument = await api(`/api/storage/trash/${deletedDocument.body.data.trashId}/restore`, {
+        method: 'POST',
+        token: adminToken,
+      });
+      assert.equal(restoredDocument.status, 200);
+
+      const restoredDocumentDownload = await fetch(`${baseUrl}/api/vehicles/${created.vehicleHeadId}/documents/${created.kirHeadDocumentId}/download`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(restoredDocumentDownload.status, 200);
 
       const createLog = await latestActivityForEntity('CREATE_VEHICLE_DOCUMENT', created.kirHeadDocumentId);
       assert.equal(createLog.action, 'CREATE_VEHICLE_DOCUMENT');

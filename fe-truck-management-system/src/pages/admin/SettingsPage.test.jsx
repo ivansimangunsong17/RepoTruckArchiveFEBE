@@ -33,6 +33,7 @@ describe('SettingsPage', () => {
     expect(screen.getByDisplayValue('Node.js API')).toBeInTheDocument();
     expect(screen.getByDisplayValue('PostgreSQL')).toBeInTheDocument();
     expect(screen.getByLabelText('Prefix Kode Truck')).toHaveValue('TRK');
+    expect(screen.getByLabelText('Target Utilisasi Truck (trip/hari)')).toHaveValue(1.8);
   });
 
   it('menyimpan perubahan konfigurasi ke localStorage', async () => {
@@ -41,6 +42,7 @@ describe('SettingsPage', () => {
     const companyInput = screen.getByLabelText('Nama Perusahaan');
     fireEvent.change(companyInput, { target: { value: 'PT Armada Baru' } });
     fireEvent.change(screen.getByLabelText('Prefix Sales Order'), { target: { value: 'ARM' } });
+    fireEvent.change(screen.getByLabelText('Target Utilisasi Truck (trip/hari)'), { target: { value: '2.2' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /Laporan/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Simpan Kebutuhan Sistem' }));
 
@@ -48,6 +50,7 @@ describe('SettingsPage', () => {
     expect(saved).toEqual(expect.objectContaining({
       companyName: 'PT Armada Baru',
       orderPrefix: 'ARM',
+      utilizationTargetTripsPerTruckPerDay: '2.2',
     }));
     expect(saved.modules.reports).toBe(false);
     await waitFor(() => {

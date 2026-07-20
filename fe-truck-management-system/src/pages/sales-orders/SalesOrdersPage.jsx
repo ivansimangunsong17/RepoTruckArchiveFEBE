@@ -21,7 +21,7 @@ import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
 import { useArchiveData } from '../../hooks/useArchiveData';
-import { formatDateTime } from '../../utils/formatDate';
+import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
@@ -30,10 +30,9 @@ import { fetchSalesOrdersPage, updateSalesOrderInvoiceDeliveryStatus } from '../
 const PAGE_SIZE = 8;
 const LOCAL_BILLING_STATUS_KEY = 'tms-sales-order-billing-status-v2';
 const BILLING_STATUS_OPTIONS = [
-  { value: 'belum_dikirim', label: 'Belum Dikirim' },
-  { value: 'belum_diterima', label: 'Dikirim ke Customer' },
-  { value: 'belum_dikonfirmasi', label: 'Diterima Customer' },
-  { value: 'menunggu_pembayaran', label: 'Follow Up' },
+  { value: 'belum_diterima', label: 'Belum Diterima' },
+  { value: 'belum_dikonfirmasi', label: 'Belum Dikonfirmasi' },
+  { value: 'menunggu_pembayaran', label: 'Belum Dibayar' },
   { value: 'revisi_dispute', label: 'Revisi / Dispute' },
   { value: 'lunas', label: 'Lunas' },
 ];
@@ -48,6 +47,7 @@ const STATUS_NAVIGATION = [
   { value: 'completed_invoiced', label: 'Proses Billing', tone: 'completed' },
   { value: '', label: 'Semua', tone: 'all' },
 ];
+const DEFAULT_STATUS_FILTER = 'waiting_operational';
 
 function valueOrDash(value) {
   return value || '-';
@@ -139,13 +139,14 @@ function normalizeBillingStatus(value, invoiceNumber = '') {
   const normalized = String(value || '').toLowerCase();
   const legacyMap = {
     pending_invoice: 'belum_invoice',
-    invoice_issued: 'belum_dikirim',
+    invoice_issued: 'belum_diterima',
+    belum_dikirim: 'belum_diterima',
     waiting_payment: 'menunggu_pembayaran',
     paid: 'lunas',
   };
   if (BILLING_STATUS_LABELS.some((option) => option.value === normalized)) return normalized;
   if (legacyMap[normalized]) return legacyMap[normalized];
-  return isInvoiced({ invoiceNumber }) ? 'belum_dikirim' : 'belum_invoice';
+  return isInvoiced({ invoiceNumber }) ? 'belum_diterima' : 'belum_invoice';
 }
 
 function getBillingStatusValue(order, overrideValue = '') {
@@ -181,6 +182,17 @@ function isWaitingStatus(value) {
 function canCancelOrderBeforeOperational(order) {
   if (!order || ['completed', 'cancelled'].includes(order.status)) return false;
   return getOrderContainers(order).every((container) => isWaitingStatus(container.status));
+}
+
+function hasSentRpuj(order) {
+  return getOrderContainers(order).some((container) => {
+    const rpujStatus = String(container.rpujStatus || container.rpuj_status || '').trim().toLowerCase();
+    return Boolean(
+      container.rpujRequestedAt
+      || container.rpuj_requested_at
+      || ['submitted', 'approved', 'paid', 'rejected'].includes(rpujStatus)
+    );
+  });
 }
 
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '') {
@@ -279,7 +291,7 @@ function SalesOrdersPage() {
     cancelledOrders: 0,
   });
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState(DEFAULT_STATUS_FILTER);
   const [page, setPage] = useState(1);
   const [listVersion, setListVersion] = useState(0);
   const [loading, setLoading] = useState(archive.isDatabaseMode);
@@ -298,15 +310,25 @@ function SalesOrdersPage() {
   const canCreateOrder = user?.role === USER_ROLES.SALES && hasPermission(user, 'orders.create');
   const canUpdateOrder = hasPermission(user, 'orders.update');
   const canViewCommercial = hasPermission(user, 'commercial.read');
-  const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder));
+  const selectedOrderLockedForSales = user?.role === USER_ROLES.SALES && hasSentRpuj(selectedOrder);
+  const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN
+    || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder) && !selectedOrderLockedForSales);
   const canModifyOrder = (order) => {
     if (!order || !canUpdateOrder) return false;
     if (user?.role === USER_ROLES.ADMIN) return true;
-    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order);
+    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && !hasSentRpuj(order);
     return false;
   };
-  const canEditCommercialOrder = (order) => canViewCommercial && canModifyOrder(order);
-  const canEditSelectedCommercial = canEditCommercialOrder(selectedOrder);
+  const canUpdateBillingOrder = (order) => canViewCommercial && canUpdateOrder && (
+    user?.role === USER_ROLES.ADMIN
+    || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, order))
+  );
+  const selectedBillingStatus = getBillingStatusValue(
+    selectedOrder,
+    archive.isDatabaseMode ? '' : billingStatusOverrides[selectedOrder?.id] || '',
+  );
+  const selectedBillingLockedForSales = user?.role === USER_ROLES.SALES && selectedBillingStatus === 'lunas';
+  const canEditSelectedCommercial = canUpdateBillingOrder(selectedOrder) && !selectedBillingLockedForSales;
   const canModifySelectedOrder = canModifyOrder(selectedOrder);
   const canCancelSelectedOrder = canModifySelectedOrder
     && hasPermission(user, 'orders.cancel')
@@ -628,7 +650,7 @@ function SalesOrdersPage() {
           label="sales order"
           onReset={() => {
             setQuery('');
-            setStatus('');
+            setStatus(DEFAULT_STATUS_FILTER);
           }}
         />
 
@@ -739,7 +761,7 @@ function SalesOrdersPage() {
             <div className="sales-order-detail-body">
               <div className="order-meta">
                 <div><PackageCheck size={17} /><p>Rute<strong>{selectedOrder.origin} - {selectedOrder.destination}</strong></p></div>
-                <div><Clock3 size={17} /><p>Waktu SO<strong>{formatDateTime(selectedOrder.receivedAt)}</strong></p></div>
+                <div><Clock3 size={17} /><p>Waktu Input Sistem<strong>{formatDateTime(selectedOrder.receivedAt)}</strong></p></div>
                 <div><Eye size={17} /><p>Sales<strong>{selectedOrder.salesName || '-'}</strong></p></div>
                 <div><Clock3 size={17} /><p>Terakhir diperbarui<strong>{selectedOrder.updatedBy || '-'} - {formatDateTime(selectedOrder.updatedAt)}</strong></p></div>
               </div>
@@ -753,7 +775,7 @@ function SalesOrdersPage() {
                 <div>
                   <span>Informasi Order</span><strong>{formatShipmentLabel(selectedOrder.shipment)}</strong>
                   <small>Nama Kapal: {selectedOrder.vesselName || '-'}</small>
-                  <small>Tanggal SO: {selectedOrder.soDate || '-'}</small>
+                  <small>Tanggal SO: {formatDate(selectedOrder.soDate)}</small>
                   <small>Pembayaran: {getPaymentTermLabel(selectedOrder)}</small>
                   <small>No. Invoice: {getOrderInvoiceNumber(selectedOrder) || '-'}</small>
                   <small>{selectedOrder.jobDescription || selectedOrder.notes || '-'}</small>
@@ -816,6 +838,8 @@ function SalesOrdersPage() {
                           Simpan Status
                         </button>
                       </div>
+                    ) : selectedBillingLockedForSales ? (
+                      <small className="order-billing-note">Invoice sudah lunas. Perubahan status hanya dapat dilakukan oleh Admin.</small>
                     ) : canEditSelectedCommercial ? (
                       <small className="order-billing-note">Finance perlu input nomor invoice sebelum Sales bisa update status pengiriman.</small>
                     ) : null}
@@ -851,6 +875,13 @@ function SalesOrdersPage() {
                   <small>Tidak dijalankan</small>
                 </div>
               </div>
+
+              {selectedOrderLockedForSales ? (
+                <div className="sales-order-cancelled-note">
+                  <Clock3 size={16} />
+                  <span>SO terkunci karena RPUJ sudah dikirim. Revisi dan pembatalan hanya dapat dilakukan oleh Admin.</span>
+                </div>
+              ) : null}
 
               {canModifySelectedOrder ? (
                 <div className="order-management-actions">

@@ -337,7 +337,7 @@ export function ArchiveDataProvider({ children }) {
           status: 'waiting_operational',
           runningAt: null,
           completedAt: null,
-          salesName: user?.fullName || 'Sales',
+          salesName: form.salesName || '',
           createdBy: user?.fullName || 'Sales',
           createdAt: receivedAt,
           updatedBy: user?.fullName || 'Sales',

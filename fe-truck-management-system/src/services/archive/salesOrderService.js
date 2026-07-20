@@ -88,19 +88,30 @@ function withActor(form, user, existing) {
   };
 }
 
+function toLocalDateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
 function normalizeContainerSize(size) {
   return String(size || '20FT').toUpperCase().replace(/\s/g, '') === '40FT' ? '40FT' : '20FT';
 }
 
 function normalizeDateOnly(value) {
   if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toLocalDateKey(value);
+  }
   const raw = String(value).trim();
   if (!raw) return '';
   const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   if (isoMatch) return isoMatch[1];
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
-  return parsed.toISOString().slice(0, 10);
+  return toLocalDateKey(parsed);
 }
 
 function normalizeReferenceDocuments(referenceDocuments = []) {

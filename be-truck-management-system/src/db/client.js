@@ -2,6 +2,9 @@ import pg from 'pg';
 import { env } from '../config/env.js';
 
 const { Pool } = pg;
+const DATE_OID = 1082;
+
+pg.types.setTypeParser(DATE_OID, (value) => value);
 
 export const isDatabaseEnabled = Boolean(env.databaseUrl);
 

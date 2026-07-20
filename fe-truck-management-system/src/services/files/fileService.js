@@ -2,12 +2,15 @@ import { httpClient } from '../api/httpClient';
 import { getAuthToken } from '../auth/authTokenStore';
 import { API_BASE_URL } from '../config/dataSource';
 
-export async function createAttachmentDownloadUrl(path) {
+export async function createAttachmentDownloadUrl(path, { download = false } = {}) {
   if (!path) return null;
 
   const token = getAuthToken();
-  const query = token ? `?access_token=${encodeURIComponent(token)}` : '';
-  return `${API_BASE_URL}/attachments/${encodeURIComponent(path)}${query}`;
+  const params = new URLSearchParams();
+  if (token) params.set('access_token', token);
+  if (download) params.set('download', '1');
+  const query = params.toString();
+  return `${API_BASE_URL}/attachments/${encodeURIComponent(path)}${query ? `?${query}` : ''}`;
 }
 
 function readFileAsDataUrl(file) {
@@ -53,4 +56,9 @@ export async function uploadAttachmentFile({
   return path
     ? httpClient.patch(`/attachments/${encodeURIComponent(path)}`, payload)
     : httpClient.post('/attachments/upload', payload);
+}
+
+export function deleteAttachmentFile(path) {
+  if (!path) return null;
+  return httpClient.delete(`/attachments/${encodeURIComponent(path)}`);
 }

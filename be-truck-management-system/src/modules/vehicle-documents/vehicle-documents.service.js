@@ -1,23 +1,31 @@
 import { createReadStream } from 'node:fs';
-import { stat, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { query } from '../../db/client.js';
 import { env } from '../../config/env.js';
 import {
-  ensureFileDirectory,
   resolveUploadPath,
   sanitizeFileName,
   sanitizePathSegment,
 } from '../attachments/attachment-storage.js';
+import {
+  archiveReplacedStorageFile,
+  quarantineStorageFile,
+  writeStorageBufferAtomic,
+} from '../storage/storage-files.js';
+import { softDeleteStorageRecord } from '../storage/storage-trash.service.js';
 
-const DOCUMENT_TYPES = ['KIR_HEAD', 'KIR_BUNTUT', 'STNK', 'PAJAK', 'ASURANSI', 'OTHER'];
+const DOCUMENT_TYPES = ['KIR_HEAD', 'KIR_BUNTUT', 'STNK', 'PAJAK', 'ASURANSI', 'KEPEMILIKAN', 'FOTO', 'OTHER'];
 const DOCUMENT_FOLDERS = {
-  KIR_HEAD: 'kir-head',
-  KIR_BUNTUT: 'kir-buntut',
-  STNK: 'stnk',
-  PAJAK: 'pajak',
-  ASURANSI: 'asuransi',
-  OTHER: 'other',
+  KIR_HEAD: 'KIR dan Uji Berkala',
+  KIR_BUNTUT: 'KIR dan Uji Berkala',
+  STNK: 'STNK',
+  PAJAK: 'STNK',
+  ASURANSI: 'Asuransi',
+  KEPEMILIKAN: 'Dokumen Kepemilikan',
+  FOTO: 'Foto',
+  OTHER: 'Dokumen Lainnya',
 };
 const allowedExtensionsByMimeType = {
   'application/pdf': ['.pdf'],
@@ -105,7 +113,7 @@ function mapDocument(row) {
 }
 
 async function getVehicle(vehicleId) {
-  const result = await query('select id, unit_code from vehicles where id = $1 and archived_at is null', [vehicleId]);
+  const result = await query('select id, unit_code, unit_kind from vehicles where id = $1 and archived_at is null', [vehicleId]);
   if (!result.rows[0]) {
     const error = new Error('Kendaraan tidak ditemukan.');
     error.statusCode = 404;
@@ -120,13 +128,18 @@ function validatePayload(payload = {}, requireFile = false) {
   if (requireFile && !payload.fileBase64) throw validationError('File dokumen wajib diunggah.');
 }
 
-function buildVehicleDocumentPath(vehicle, payload, sanitizedFileName) {
-  const extension = extname(sanitizedFileName) || '.bin';
+export function buildVehicleDocumentPath(vehicle, payload, sanitizedFileName) {
   const dateKey = String(payload.issuedDate || payload.expiredDate || new Date().toISOString().slice(0, 10)).replace(/[^0-9]/g, '') || new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const unitCode = sanitizePathSegment(vehicle.unit_code || vehicle.id);
   const documentType = payload.documentType;
-  const storedFileName = sanitizeFileName(`${documentType}_${unitCode}_${dateKey}${extension}`);
-  return join('master-data', 'vehicles', unitCode, DOCUMENT_FOLDERS[documentType] || 'other', storedFileName);
+  const storedFileName = sanitizeFileName(`${dateKey}-${randomUUID().slice(0, 8)}-${sanitizedFileName}`);
+  const entityFolder = ['CHASSIS', 'TRAILER'].includes(vehicle.unit_kind) ? 'Chassis' : 'Truck';
+  return join(
+    'Master Data',
+    entityFolder,
+    sanitizePathSegment(vehicle.id).toLowerCase(),
+    DOCUMENT_FOLDERS[documentType] || 'Dokumen Lainnya',
+    storedFileName,
+  );
 }
 
 async function writeVehicleDocumentFile(vehicle, payload, existingPath = '') {
@@ -144,8 +157,7 @@ async function writeVehicleDocumentFile(vehicle, payload, existingPath = '') {
   const mimeType = payload.mimeType || decoded.mimeType || 'application/octet-stream';
   validateFile({ fileName: sanitizedFileName, mimeType, buffer: decoded.buffer });
   const relativePath = buildVehicleDocumentPath(vehicle, payload, sanitizedFileName);
-  await ensureFileDirectory(relativePath);
-  await writeFile(resolveUploadPath(relativePath), decoded.buffer);
+  await writeStorageBufferAtomic(relativePath, decoded.buffer);
   return {
     relativePath,
     fileNameStored: String(relativePath).split(/[\\/]/).pop(),
@@ -165,31 +177,37 @@ export async function createVehicleDocument(vehicleId, payload, actorName = '') 
   validatePayload(payload, true);
   const vehicle = await getVehicle(vehicleId);
   const file = await writeVehicleDocumentFile(vehicle, payload);
-  const result = await query(
-    `
-      insert into vehicle_documents (
-        vehicle_id, document_type, document_number, issued_date, expired_date,
-        file_name_original, file_name_stored, relative_path, mime_type, size_bytes,
-        notes, created_by
-      )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      returning *
-    `,
-    [
-      vehicleId,
-      payload.documentType,
-      payload.documentNumber || null,
-      payload.issuedDate || null,
-      payload.expiredDate || null,
-      file.fileNameOriginal,
-      file.fileNameStored,
-      file.relativePath,
-      file.mimeType,
-      file.sizeBytes,
-      payload.notes || null,
-      actorName || payload.createdBy || null,
-    ],
-  );
+  let result;
+  try {
+    result = await query(
+      `
+        insert into vehicle_documents (
+          vehicle_id, document_type, document_number, issued_date, expired_date,
+          file_name_original, file_name_stored, relative_path, mime_type, size_bytes,
+          notes, created_by
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        returning *
+      `,
+      [
+        vehicleId,
+        payload.documentType,
+        payload.documentNumber || null,
+        payload.issuedDate || null,
+        payload.expiredDate || null,
+        file.fileNameOriginal,
+        file.fileNameStored,
+        file.relativePath,
+        file.mimeType,
+        file.sizeBytes,
+        payload.notes || null,
+        actorName || payload.createdBy || null,
+      ],
+    );
+  } catch (error) {
+    await quarantineStorageFile(file.relativePath, 'Database dokumen kendaraan gagal').catch(() => {});
+    throw error;
+  }
   return mapDocument(result.rows[0]);
 }
 
@@ -209,56 +227,71 @@ export async function updateVehicleDocument(vehicleId, documentId, payload) {
     throw error;
   }
   const file = await writeVehicleDocumentFile(vehicle, payload, existing.relativePath);
-  const result = await query(
-    `
-      update vehicle_documents
-      set document_type = $1,
-          document_number = $2,
-          issued_date = $3,
-          expired_date = $4,
-          file_name_original = coalesce($5, file_name_original),
-          file_name_stored = coalesce($6, file_name_stored),
-          relative_path = coalesce($7, relative_path),
-          mime_type = coalesce($8, mime_type),
-          size_bytes = coalesce($9, size_bytes),
-          notes = $10,
-          updated_at = now()
-      where vehicle_id = $11 and id = $12
-      returning *
-    `,
-    [
-      payload.documentType,
-      payload.documentNumber || null,
-      payload.issuedDate || null,
-      payload.expiredDate || null,
-      file.fileNameOriginal || null,
-      file.fileNameStored || null,
-      file.relativePath || null,
-      file.mimeType || null,
-      file.sizeBytes,
-      payload.notes || null,
-      vehicleId,
-      documentId,
-    ],
-  );
+  let result;
+  try {
+    result = await query(
+      `
+        update vehicle_documents
+        set document_type = $1,
+            document_number = $2,
+            issued_date = $3,
+            expired_date = $4,
+            file_name_original = coalesce($5, file_name_original),
+            file_name_stored = coalesce($6, file_name_stored),
+            relative_path = coalesce($7, relative_path),
+            mime_type = coalesce($8, mime_type),
+            size_bytes = coalesce($9, size_bytes),
+            notes = $10,
+            updated_at = now()
+        where vehicle_id = $11 and id = $12
+        returning *
+      `,
+      [
+        payload.documentType,
+        payload.documentNumber || null,
+        payload.issuedDate || null,
+        payload.expiredDate || null,
+        file.fileNameOriginal || null,
+        file.fileNameStored || null,
+        file.relativePath || null,
+        file.mimeType || null,
+        file.sizeBytes,
+        payload.notes || null,
+        vehicleId,
+        documentId,
+      ],
+    );
+  } catch (error) {
+    if (file.relativePath && file.relativePath !== existing.relativePath) {
+      await quarantineStorageFile(file.relativePath, 'Update dokumen kendaraan gagal').catch(() => {});
+    }
+    throw error;
+  }
+  if (file.relativePath && file.relativePath !== existing.relativePath) {
+    await archiveReplacedStorageFile({
+      sourceTable: 'vehicle_documents',
+      sourceId: documentId,
+      originalRelativePath: existing.relativePath,
+    }).catch((error) => {
+      console.error(`File dokumen kendaraan lama gagal diarsipkan: ${error.message}`);
+    });
+  }
   return mapDocument(result.rows[0]);
 }
 
-export async function deleteVehicleDocument(vehicleId, documentId) {
-  const result = await query('delete from vehicle_documents where vehicle_id = $1 and id = $2 returning *', [vehicleId, documentId]);
-  const row = result.rows[0];
-  if (!row) {
-    const error = new Error('Dokumen kendaraan tidak ditemukan.');
-    error.statusCode = 404;
-    error.code = 'VEHICLE_DOCUMENT_NOT_FOUND';
-    throw error;
-  }
-  if (row.relative_path) {
-    await unlink(resolveUploadPath(row.relative_path)).catch((error) => {
-      if (error.code !== 'ENOENT') throw error;
-    });
-  }
-  return mapDocument(row);
+export async function deleteVehicleDocument(vehicleId, documentId, actor = {}, reason = '') {
+  const deleted = await softDeleteStorageRecord({
+    sourceTable: 'vehicle_documents',
+    sourceId: documentId,
+    vehicleId,
+    actor,
+    reason,
+  });
+  return {
+    ...mapDocument(deleted.row),
+    trashId: deleted.trash.id,
+    deletedAt: deleted.trash.deletedAt,
+  };
 }
 
 export async function resolveVehicleDocumentFile(document) {

@@ -130,16 +130,12 @@ cross join (
     ('TCLU1234567', '20FT', 'SPK-2607-001-01', 'BM-2607-001-01', '{"driver":"Andi Pratama","plateNumber":"B 1234 XYZ","vehicleDetail":"TRK-001 - Hino 500 Ranger"}'),
     ('MSCU7742108', '40FT', 'SPK-2607-001-02', 'BM-2607-001-02', '{"driver":"Bambang Wijaya","plateNumber":"B 2190 UYK","vehicleDetail":"TRK-002 - Mitsubishi Fuso Fighter FM 65"}')
 ) as item(container_number, container_size, spk_number, loading_voucher_number, assignment_snapshot)
-on conflict (container_number) do update
-set container_size = excluded.container_size,
-    rpuj_status = excluded.rpuj_status,
-    spk_number = excluded.spk_number,
-    loading_voucher_number = excluded.loading_voucher_number,
-    assignment_snapshot = excluded.assignment_snapshot,
-    status = excluded.status,
-    running_at = excluded.running_at,
-    updated_by_name = excluded.updated_by_name,
-    updated_at = now();
+where not exists (
+  select 1
+  from container_jobs existing_job
+  where existing_job.sales_order_id = so.id
+    and existing_job.container_number = item.container_number
+);
 
 insert into activity_logs (actor_name, actor_role, action, target)
 values

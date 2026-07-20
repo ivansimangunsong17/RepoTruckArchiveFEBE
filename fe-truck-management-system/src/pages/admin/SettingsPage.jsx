@@ -16,9 +16,10 @@ import {
 } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import { useFeedback } from '../../hooks/useFeedback';
+import { SETTINGS_STORAGE_KEY } from '../../services/settings/adapters/localSettingsStore';
 import { fetchSystemSettings, isSettingsDatabaseEnabled, saveSystemSettings } from '../../services/settings/settingsService';
 
-const storageKey = 'tms-admin-settings';
+const storageKey = SETTINGS_STORAGE_KEY;
 
 const defaultSettings = {
   companyName: 'PT Citra Prima Logistik',
@@ -28,6 +29,7 @@ const defaultSettings = {
   clientPrefix: 'CL',
   orderPrefix: 'SO',
   jobPrefix: 'JOB',
+  utilizationTargetTripsPerTruckPerDay: '1.8',
   sessionTimeout: '60',
   passwordPolicy: 'standard',
   frontendHost: 'React.js / Vite',
@@ -217,6 +219,7 @@ function SettingsPage() {
         <section className="panel settings-card">
           <div className="settings-title"><ShieldCheck size={19} /><div><h2>Role & Akses</h2><p>Kontrol dasar akses pengguna untuk archive perjalanan.</p></div></div>
           <label>Durasi Sesi (menit)<input type="number" min="15" value={settings.sessionTimeout} onChange={(event) => update('sessionTimeout', event.target.value)} /></label>
+          <label>Target Utilisasi Truck (trip/hari)<input type="number" min="0.1" step="0.1" value={settings.utilizationTargetTripsPerTruckPerDay} onChange={(event) => update('utilizationTargetTripsPerTruckPerDay', event.target.value)} /></label>
           <label>Kebijakan Password<select value={settings.passwordPolicy} onChange={(event) => update('passwordPolicy', event.target.value)}><option value="standard">Standard</option><option value="strict">Strict</option><option value="sso_ready">SSO Ready</option></select></label>
           <div className="settings-role-list">
             {roleMatrix.map(([role, access]) => <p key={role}><strong>{role}</strong><span>{access}</span></p>)}

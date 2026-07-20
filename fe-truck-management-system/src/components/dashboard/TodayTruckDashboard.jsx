@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { FileText, History, Truck, X } from 'lucide-react';
+import { Download, FileText, History, Truck, X } from 'lucide-react';
 import { formatShortDate, normalizeSize, todayKey } from '../../data/operationalDashboard';
 import { fetchDashboardReport } from '../../services/reports/reportService';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 
 function formatShipment(value) {
   const shipmentMap = {
@@ -42,6 +43,13 @@ function getTruckSortKey(unitCode) {
   return Number.isFinite(numeric) ? numeric : Number.MAX_SAFE_INTEGER;
 }
 
+function getTruckSizeSortKey(truck) {
+  const size = normalizeSize(truck?.capacity || truck?.chassisSize);
+  if (size === '20FT') return 0;
+  if (size === '40FT') return 1;
+  return 2;
+}
+
 function chassisSizeLabel(truck) {
   return truck?.chassisSize || truck?.capacity || '-';
 }
@@ -76,6 +84,8 @@ function buildTruckRows(trucks, jobs) {
       job: activeJob || null,
     };
   }).sort((a, b) => {
+    const sizeDiff = getTruckSizeSortKey(a.truck) - getTruckSizeSortKey(b.truck);
+    if (sizeDiff) return sizeDiff;
     const left = getTruckSortKey(a.truck.unitCode);
     const right = getTruckSortKey(b.truck.unitCode);
     if (left !== right) return left - right;
@@ -137,6 +147,9 @@ function availabilityNumberClass(item) {
   return 'text-emerald-700';
 }
 
+function reportDateKey(value) {
+  return String(value || '').replace(/[^0-9]/g, '') || 'report';
+}
 
 function TodayTruckDashboard() {
   const [selectedRow, setSelectedRow] = useState(null);
@@ -178,6 +191,31 @@ function TodayTruckDashboard() {
   const rows = buildTruckRows(truckRows, sourceJobs);
   const availability = getAvailability(truckRows, sourceJobs);
 
+  function handleDownloadReport() {
+    downloadPdfReport({
+      title: 'Dashboard Truck Harian',
+      subtitle: `Tanggal ${formatShortDate(currentDateKey)}`,
+      filename: `dashboard-truck-harian-${reportDateKey(currentDateKey)}.pdf`,
+      meta: [
+        { label: 'Total Truck', value: rows.length },
+        { label: 'Assign', value: rows.filter((row) => row.job).length },
+        { label: 'Unassign', value: rows.filter((row) => !row.job).length },
+      ],
+      columns: [
+        { label: 'No', width: 0.55, value: (row) => row.reportNumber },
+        { label: 'No Lambung', width: 1, value: (row) => formatTruckNumber(row.truck.unitCode), bold: true },
+        { label: 'Plat', width: 1.25, value: (row) => row.truck.plateNumber },
+        { label: 'Sopir', width: 1.45, value: (row) => row.job?.driver || row.truck.driver || '-' },
+        { label: 'Container', width: 1.35, value: (row) => row.job?.containerNumber || '-' },
+        { label: 'Order', width: 1.05, value: (row) => formatShipment(row.job?.shipment) },
+        { label: 'Size', width: 0.8, value: (row) => chassisSizeLabel(row.truck) },
+        { label: 'Tujuan', width: 1.55, value: (row) => destinationText(row.job) },
+        { label: 'Status', width: 0.95, value: (row) => (row.job ? 'Assign' : 'Unassign') },
+      ],
+      rows: rows.map((row, index) => ({ ...row, reportNumber: index + 1 })),
+    });
+  }
+
   return (
     <div className="page -mt-1 space-y-2">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -187,9 +225,19 @@ function TodayTruckDashboard() {
           </div>
           <p className="m-0 mt-1 text-[12px] font-semibold leading-none text-slate-500">Data truck yang berjalan dan belum selesai.</p>
         </div>
-        <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] shadow-sm">
-          <span className="font-extrabold text-slate-500">Tanggal</span>
-          <strong className="font-black text-slate-950">{formatShortDate(currentDateKey)}</strong>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="inline-flex min-h-[34px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-[12px] font-black text-slate-900 shadow-sm hover:border-red-700 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            onClick={handleDownloadReport}
+            disabled={loading || Boolean(error)}
+          >
+            <Download size={15} /> Download PDF
+          </button>
+          <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] shadow-sm">
+            <span className="font-extrabold text-slate-500">Tanggal</span>
+            <strong className="font-black text-slate-950">{formatShortDate(currentDateKey)}</strong>
+          </div>
         </div>
       </header>
       {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat dashboard truck...</p></div> : null}
@@ -220,19 +268,21 @@ function TodayTruckDashboard() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-[11px]">
             <colgroup>
-              <col className="w-[6%]" />
-              <col className="w-[16%]" />
-              <col className="w-[15%]" />
+              <col className="w-[5%]" />
+              <col className="w-[10%]" />
               <col className="w-[14%]" />
+              <col className="w-[14%]" />
+              <col className="w-[13%]" />
+              <col className="w-[11%]" />
               <col className="w-[12%]" />
               <col className="w-[13%]" />
-              <col className="w-[15%]" />
-              <col className="w-[8%]" />
+              <col className="w-[7%]" />
               <col className="w-[7%]" />
             </colgroup>
             <thead className="bg-slate-100">
               <tr>
-                <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">No</th>
+                <th className="px-2.5 py-1 text-center text-[10px] font-black uppercase text-slate-500">No</th>
+                <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">No Lambung</th>
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Plat</th>
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">Nama Sopir</th>
                 <th className="px-2.5 py-1 text-[10px] font-black uppercase text-slate-500">No Container</th>
@@ -244,9 +294,12 @@ function TodayTruckDashboard() {
               </tr>
             </thead>
             <tbody>
-              {!loading && !error && rows.map((row) => (
+              {!loading && !error && rows.map((row, index) => (
                 <tr className="border-t border-slate-200 odd:bg-white even:bg-slate-50/45 hover:bg-red-50/40" key={row.id}>
-                  <td className="truncate px-2.5 py-0.5 font-black text-slate-800" data-label="No" title={row.truck.unitCode || '-'}>
+                  <td className="px-2.5 py-0.5 text-center font-black text-slate-800" data-label="No">
+                    {index + 1}
+                  </td>
+                  <td className="truncate px-2.5 py-0.5 font-black text-slate-800" data-label="No Lambung" title={row.truck.unitCode || '-'}>
                     {formatTruckNumber(row.truck.unitCode)}
                   </td>
                   <td className="px-2.5 py-0.5" data-label="Plat">
@@ -301,7 +354,7 @@ function TodayTruckDashboard() {
 
             <div className="today-truck-detail-body">
               <div className="today-truck-detail-grid">
-                <div><span>No</span><strong>{selectedRow.truck.unitCode || '-'}</strong></div>
+                <div><span>No Lambung</span><strong>{selectedRow.truck.unitCode || '-'}</strong></div>
                 <div><span>Plat</span><strong>{selectedRow.truck.plateNumber || '-'}</strong></div>
                 <div><span>Nama Sopir</span><strong>{selectedRow.job?.driver || selectedRow.truck.driver || '-'}</strong></div>
                 <div><span>Status</span><strong>{selectedRow.job ? 'Assign' : 'Unassign'}</strong></div>

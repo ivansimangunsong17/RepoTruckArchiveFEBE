@@ -1,44 +1,53 @@
+import { useMemo } from 'react';
+import { Eye } from 'lucide-react';
+import DocumentLink from '../../components/common/DocumentLink';
 import MasterDataPage from '../../components/master/MasterDataPage';
-import { fallbackCustomers } from '../../data/masterData';
+import { USER_ROLES } from '../../constants/roles';
+import { fallbackCustomers, fallbackUsers } from '../../data/masterData';
+import { useArchiveData } from '../../hooks/useArchiveData';
 
-function CustomerName({ row, rowNumber }) {
+function CustomerValue({ value, emphasis = false }) {
+  const displayValue = String(value || '-');
+  if (emphasis) {
+    return <strong className="customer-table-value is-emphasis" title={displayValue}>{displayValue}</strong>;
+  }
+  return <span className="customer-table-value" title={displayValue}>{displayValue}</span>;
+}
+
+function CustomerName({ row }) {
   return (
     <div className="customer-name-cell">
-      <span className="customer-row-number">{rowNumber}</span>
-      <strong>{row.name}</strong>
+      <CustomerValue value={row.name} emphasis />
     </div>
   );
 }
 
-function CustomerPic({ row }) {
-  return (
-    <div className="customer-pic-cell">
-      <strong>{row.pic || '-'}</strong>
-    </div>
-  );
+function CustomerDocumentView({ file, documentName }) {
+  if (!file) {
+    return (
+      <button
+        aria-label={`View ${documentName}`}
+        className="customer-document-button"
+        type="button"
+        disabled
+        title={`${documentName} belum tersedia`}
+      >
+        <Eye size={13} /> View
+      </button>
+    );
+  }
+
+  return <DocumentLink file={file} className="customer-document-button" label="View" />;
 }
 
-function CustomerContract({ value }) {
-  const statusClass = value === 'Aktif' ? 'available' : value === 'Review' ? 'in_use' : 'maintenance';
-  return <span className={`master-status-dot ${statusClass}`}><i />{value || '-'}</span>;
-}
-
-function CustomerDocumentSummary({ row }) {
-  const complete = [row.npwpDocument, row.contractDocument].filter(Boolean).length;
-  return (
-    <div className="master-doc-count">
-      <strong>{complete}/2</strong>
-    </div>
-  );
-}
-
-const fields = [
+const baseFields = [
   { key: 'name', section: 'Identitas Customer', label: 'Nama Customer', placeholder: 'Contoh: PT Armada Logistik', required: true },
   { key: 'npwp', section: 'Identitas Customer', label: 'NPWP', placeholder: '00.000.000.0-000.000', required: true, hint: 'Gunakan format NPWP perusahaan.' },
   { key: 'address', section: 'Identitas Customer', label: 'Alamat Customer', type: 'textarea', placeholder: 'Masukkan alamat lengkap customer', required: true, full: true },
   { key: 'pic', section: 'PIC & Informasi Kontak', label: 'Nama PIC', placeholder: 'Nama penanggung jawab', required: true },
   { key: 'phone', section: 'PIC & Informasi Kontak', label: 'Nomor Kontak', placeholder: '021 / 08xx', required: true },
   { key: 'email', section: 'PIC & Informasi Kontak', label: 'Email PIC', type: 'email', placeholder: 'pic@customer.com' },
+  { key: 'salesName', section: 'PIC & Informasi Kontak', label: 'Nama Sales', type: 'select', defaultValue: '' },
   { key: 'contractNumber', section: 'Umbrella Contract', label: 'Nomor Contract', placeholder: 'UC/CLIENT/2026/001', required: true },
   { key: 'contractStart', section: 'Umbrella Contract', label: 'Tanggal Mulai', type: 'date', required: true },
   {
@@ -47,6 +56,7 @@ const fields = [
     label: 'Tanggal Berakhir',
     type: 'date',
     required: true,
+    expiryAlert: { label: 'Umbrella Contract' },
     validate: (form) => form.contractStart && form.contractEnd < form.contractStart
       ? 'Tanggal berakhir contract tidak boleh lebih awal dari tanggal mulai.'
       : '',
@@ -61,6 +71,32 @@ const fields = [
 ];
 
 function ClientsPage() {
+  const archive = useArchiveData();
+  const userRows = archive.masters?.users?.length ? archive.masters.users : fallbackUsers;
+  const activeSalesUsers = useMemo(() => (
+    userRows
+      .filter((user) => user.role === USER_ROLES.SALES && (!user.status || user.status === 'Aktif'))
+      .map((user) => String(user.name || user.fullName || '').trim())
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, 'id'))
+  ), [userRows]);
+  const fields = useMemo(() => baseFields.map((field) => {
+    if (field.key !== 'salesName') return field;
+    return {
+      ...field,
+      options: (form) => {
+        const currentValue = String(form.salesName || '').trim();
+        const names = activeSalesUsers.includes(currentValue) || !currentValue
+          ? activeSalesUsers
+          : [currentValue, ...activeSalesUsers];
+        return [
+          { value: '', label: 'Pilih sales' },
+          ...names.map((name) => ({ value: name, label: name })),
+        ];
+      },
+    };
+  }), [activeSalesUsers]);
+
   return (
     <MasterDataPage
       eyebrow="Master Data"
@@ -69,10 +105,22 @@ function ClientsPage() {
       description="Kelola identitas customer, alamat, PIC, informasi kontak, NPWP, dan umbrella contract."
       fields={fields}
       columns={[
-        { key: 'name', label: 'Customer', render: (_, row, meta) => <CustomerName row={row} rowNumber={meta.rowNumber} /> },
-        { key: 'pic', label: 'PIC', render: (_, row) => <CustomerPic row={row} /> },
-        { key: 'contract', label: 'Contract', render: (value) => <CustomerContract value={value} /> },
-        { key: 'contractDocument', label: 'Dokumen', render: (_, row) => <CustomerDocumentSummary row={row} /> },
+        { key: 'rowNumber', label: 'No', render: (_, __, meta) => <span className="customer-number-cell">{meta.rowNumber}</span> },
+        { key: 'name', label: 'Customer', render: (_, row) => <CustomerName row={row} /> },
+        { key: 'npwp', label: 'NPWP', render: (value) => <CustomerValue value={value} /> },
+        { key: 'pic', label: 'PIC', render: (value) => <CustomerValue value={value} emphasis /> },
+        { key: 'phone', label: 'Kontak', render: (value) => <CustomerValue value={value} /> },
+        {
+          key: 'npwpDocument',
+          label: 'Copy NPWP',
+          render: (value) => <CustomerDocumentView file={value} documentName="dokumen NPWP" />,
+        },
+        {
+          key: 'contractDocument',
+          label: 'UB',
+          render: (value) => <CustomerDocumentView file={value} documentName="dokumen Umbrella Contract" />,
+        },
+        { key: 'salesName', label: 'Sales', render: (value) => <CustomerValue value={value} emphasis /> },
       ]}
       initialRows={fallbackCustomers}
       resource="customers"
@@ -83,7 +131,7 @@ function ClientsPage() {
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Customer"
-      toolbarDescription="Cari customer, PIC, dan status contract."
+      toolbarDescription="Cari customer, NPWP, PIC, kontak, UB, atau nama sales."
       stats={(data) => [
         { label: 'Total Customer', value: data.length, detail: 'Terdaftar' },
         { label: 'Aktif', value: data.filter((item) => item.contract === 'Aktif').length, detail: 'Bisa order' },

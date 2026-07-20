@@ -39,4 +39,39 @@ describe('TodayTruckDashboard', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent('20FT');
     expect(screen.queryByText('CH-001')).not.toBeInTheDocument();
   });
+
+  it('menampilkan No dan No Lambung serta mengurutkan truck 20FT di atas 40FT', async () => {
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [
+        {
+          id: 'truck-40',
+          plateNumber: 'B 4000 XYZ',
+          unitCode: 'TRK-001',
+          capacity: '40FT',
+          chassisSize: '40FT',
+          defaultDriver: 'Budi',
+        },
+        {
+          id: 'truck-20',
+          plateNumber: 'B 2000 XYZ',
+          unitCode: 'TRK-099',
+          capacity: '20FT',
+          chassisSize: '20FT',
+          defaultDriver: 'Andi',
+        },
+      ],
+      activeJobs: [],
+    });
+
+    render(<TodayTruckDashboard />);
+
+    expect(await screen.findByRole('columnheader', { name: 'No Lambung' })).toBeInTheDocument();
+    const rows = await screen.findAllByRole('row');
+    expect(rows[1]).toHaveTextContent('1');
+    expect(rows[1]).toHaveTextContent('99');
+    expect(rows[1]).toHaveTextContent('20FT');
+    expect(rows[2]).toHaveTextContent('2');
+    expect(rows[2]).toHaveTextContent('1');
+    expect(rows[2]).toHaveTextContent('40FT');
+  });
 });

@@ -1,13 +1,19 @@
 import { extname } from 'node:path';
-import { stat, unlink, writeFile } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { query } from '../../db/client.js';
 import { env } from '../../config/env.js';
 import {
   buildAttachmentStoragePath,
-  ensureFileDirectory,
+  parseSalesOrderStorageRoot,
   resolveUploadPath,
   sanitizeFileName,
 } from './attachment-storage.js';
+import {
+  archiveReplacedStorageFile,
+  quarantineStorageFile,
+  writeStorageBufferAtomic,
+} from '../storage/storage-files.js';
+import { softDeleteStorageRecord } from '../storage/storage-trash.service.js';
 
 const allowedExtensionsByMimeType = {
   'application/pdf': ['.pdf'],
@@ -101,25 +107,71 @@ async function filterAttachmentPayload(payload) {
   );
 }
 
+async function findSalesOrderStorageRoot(salesOrderId) {
+  if (!salesOrderId) return null;
+
+  const result = await query(
+    `
+      select attachment.storage_path
+      from attachments attachment
+      where attachment.storage_path is not null
+        and (
+          (attachment.entity_type = 'sales_order' and attachment.entity_id = $1)
+          or (
+            attachment.entity_type = 'container_job'
+            and exists (
+              select 1
+              from container_jobs container_job
+              where container_job.id = attachment.entity_id
+                and container_job.sales_order_id = $1
+            )
+          )
+        )
+      order by attachment.created_at asc
+    `,
+    [salesOrderId],
+  );
+
+  return result.rows
+    .map((row) => parseSalesOrderStorageRoot(row.storage_path))
+    .find(Boolean) || null;
+}
+
 async function readAttachmentContext(entityType, entityId) {
   if (entityType === 'sales_order') {
     const result = await query(
-      'select so_number, do_number, received_at, trip_date, so_date from sales_orders where id = $1',
+      `
+        select id as sales_order_id, so_number, do_number, received_at, trip_date, so_date, created_at
+        from sales_orders
+        where id = $1
+      `,
       [entityId],
     );
     const row = result.rows[0] || {};
     return {
+      salesOrderId: row.sales_order_id,
       soNumber: row.so_number,
       doNumber: row.do_number,
       receivedAt: row.received_at,
       tripDate: row.trip_date,
       soDate: row.so_date,
+      createdAt: row.created_at,
+      storageRootParts: await findSalesOrderStorageRoot(row.sales_order_id),
     };
   }
   if (entityType === 'container_job') {
     const result = await query(
       `
-        select so.so_number, so.do_number, so.received_at, so.trip_date, so.so_date, cj.container_number
+        select
+          so.id as sales_order_id,
+          so.so_number,
+          so.do_number,
+          so.received_at,
+          so.trip_date,
+          so.so_date,
+          so.created_at,
+          cj.id as container_job_id,
+          cj.container_number
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         where cj.id = $1
@@ -128,12 +180,16 @@ async function readAttachmentContext(entityType, entityId) {
     );
     const row = result.rows[0] || {};
     return {
+      salesOrderId: row.sales_order_id,
+      containerJobId: row.container_job_id,
       soNumber: row.so_number,
       doNumber: row.do_number,
       receivedAt: row.received_at,
       tripDate: row.trip_date,
       soDate: row.so_date,
+      createdAt: row.created_at,
       containerNumber: row.container_number,
+      storageRootParts: await findSalesOrderStorageRoot(row.sales_order_id),
     };
   }
   return {};
@@ -216,10 +272,7 @@ export async function createAttachment(payload) {
   validateAttachmentFile({ fileName: sanitizedFileName, mimeType, buffer });
   const context = await readAttachmentContext(payload.entityType, payload.entityId);
   const storagePath = buildAttachmentStoragePath({ ...payload, fileName: sanitizedFileName }, context);
-  await ensureFileDirectory(storagePath);
-
-  const filePath = resolveUploadPath(storagePath);
-  await writeFile(filePath, buffer);
+  await writeStorageBufferAtomic(storagePath, buffer);
   const data = await filterAttachmentPayload(buildAttachmentDbPayload(
     { ...payload, fileName: sanitizedFileName },
     context,
@@ -229,14 +282,20 @@ export async function createAttachment(payload) {
   ));
   const entries = Object.entries(data);
 
-  const result = await query(
-    `
-      insert into attachments (${entries.map(([key]) => key).join(', ')})
-      values (${entries.map((_, index) => `$${index + 1}`).join(', ')})
-      returning *
-    `,
-    entries.map(([, value]) => value),
-  );
+  let result;
+  try {
+    result = await query(
+      `
+        insert into attachments (${entries.map(([key]) => key).join(', ')})
+        values (${entries.map((_, index) => `$${index + 1}`).join(', ')})
+        returning *
+      `,
+      entries.map(([, value]) => value),
+    );
+  } catch (error) {
+    await quarantineStorageFile(storagePath, 'Database attachment gagal').catch(() => {});
+    throw error;
+  }
 
   return mapAttachmentRow(result.rows[0]);
 }
@@ -270,11 +329,17 @@ export async function updateAttachment(id, payload) {
 
   if (payload?.fileBase64) {
     const { buffer, mimeType: derivedMimeType } = decodeBase64Payload(payload.fileBase64);
-    const resolvedMimeType = nextMimeType || derivedMimeType || 'application/octet-stream';
+    const resolvedMimeType = payload?.mimeType
+      || derivedMimeType
+      || existing.mime_type
+      || 'application/octet-stream';
+    const resolvedFileSize = payload?.fileSize == null
+      ? buffer.length
+      : Number(payload.fileSize);
     const sanitizedFileName = sanitizeFileName(nextFileName);
     validateAttachmentFile({ fileName: sanitizedFileName, mimeType: resolvedMimeType, buffer });
     const context = await readAttachmentContext(existing.entity_type, existing.entity_id);
-    nextStoragePath = existing.storage_path || buildAttachmentStoragePath({
+    nextStoragePath = buildAttachmentStoragePath({
       entityType: existing.entity_type,
       entityId: existing.entity_id,
       category: nextCategory,
@@ -282,8 +347,7 @@ export async function updateAttachment(id, payload) {
       doNumber: payload?.doNumber || existing.do_number,
       fileName: sanitizedFileName,
     }, context);
-    await ensureFileDirectory(nextStoragePath);
-    await writeFile(resolveUploadPath(nextStoragePath), buffer);
+    await writeStorageBufferAtomic(nextStoragePath, buffer);
     const storedFileName = nextStoragePath.split(/[\\/]/).pop();
     const data = await filterAttachmentPayload({
       category: nextCategory,
@@ -292,25 +356,41 @@ export async function updateAttachment(id, payload) {
       file_name: sanitizedFileName,
       storage_path: nextStoragePath,
       mime_type: resolvedMimeType,
-      file_size: nextFileSize == null ? buffer.length : nextFileSize,
+      file_size: resolvedFileSize,
       notes: nextNotes || null,
       uploaded_by_name: nextUploadedByName || null,
       file_name_original: sanitizedFileName,
       file_name_stored: storedFileName,
       relative_path: nextStoragePath,
-      size_bytes: nextFileSize == null ? buffer.length : nextFileSize,
+      size_bytes: resolvedFileSize,
       uploaded_by: payload?.uploadedBy || nextUploadedByName || null,
     });
     const entries = Object.entries(data);
-    return query(
-      `
-        update attachments
-        set ${entries.map(([key], index) => `${key} = $${index + 1}`).join(', ')}
-        where id = $${entries.length + 1}
-        returning *
-      `,
-      [...entries.map(([, value]) => value), id],
-    ).then((result) => mapAttachmentRow(result.rows[0]));
+    let result;
+    try {
+      result = await query(
+        `
+          update attachments
+          set ${entries.map(([key], index) => `${key} = $${index + 1}`).join(', ')}
+          where id = $${entries.length + 1}
+          returning *
+        `,
+        [...entries.map(([, value]) => value), id],
+      );
+    } catch (error) {
+      await quarantineStorageFile(nextStoragePath, 'Update attachment gagal').catch(() => {});
+      throw error;
+    }
+    if (existing.storage_path && existing.storage_path !== nextStoragePath) {
+      await archiveReplacedStorageFile({
+        sourceTable: 'attachments',
+        sourceId: id,
+        originalRelativePath: existing.storage_path,
+      }).catch((error) => {
+        console.error(`File attachment lama gagal diarsipkan: ${error.message}`);
+      });
+    }
+    return mapAttachmentRow(result.rows[0]);
   }
 
   const result = await query(
@@ -364,23 +444,18 @@ export async function getAttachmentById(id) {
   return result.rows[0] ? mapAttachmentRow(result.rows[0]) : null;
 }
 
-export async function deleteAttachment(id) {
-  const result = await query('delete from attachments where id = $1 returning *', [id]);
-  const row = result.rows[0];
-  if (!row) {
-    const error = new Error('Attachment tidak ditemukan.');
-    error.statusCode = 404;
-    error.code = 'ATTACHMENT_NOT_FOUND';
-    throw error;
-  }
-
-  if (row.storage_path) {
-    await unlink(resolveUploadPath(row.storage_path)).catch((error) => {
-      if (error.code !== 'ENOENT') throw error;
-    });
-  }
-
-  return mapAttachmentRow(row);
+export async function deleteAttachment(id, actor = {}, reason = '') {
+  const deleted = await softDeleteStorageRecord({
+    sourceTable: 'attachments',
+    sourceId: id,
+    actor,
+    reason,
+  });
+  return {
+    ...mapAttachmentRow(deleted.row),
+    trashId: deleted.trash.id,
+    deletedAt: deleted.trash.deletedAt,
+  };
 }
 
 export async function resolveAttachmentFilePath(attachment) {

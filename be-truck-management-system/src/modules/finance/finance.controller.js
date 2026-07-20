@@ -5,6 +5,7 @@ import {
   fetchCompletedTripDetail,
   fetchCompletedTrips,
   fetchFinanceDashboard,
+  fetchInvoiceOrderDetail,
   fetchInvoiceOrders,
   fetchOrderVerifications,
   fetchRpujRequests,
@@ -91,6 +92,11 @@ export async function uploadRpujTransferProofController(request, response) {
 
 export async function invoiceOrdersController(request, response) {
   const result = await fetchInvoiceOrders(request.query);
+  sendSuccess(response, result);
+}
+
+export async function invoiceOrderDetailController(request, response) {
+  const result = await fetchInvoiceOrderDetail(request.params.id);
   sendSuccess(response, result);
 }
 

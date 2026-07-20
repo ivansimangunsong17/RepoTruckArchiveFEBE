@@ -50,7 +50,12 @@ export async function updateVehicleDocumentController(request, response) {
 
 export async function deleteVehicleDocumentController(request, response) {
   const before = await getVehicleDocument(request.params.vehicleId, request.params.documentId);
-  const deleted = await deleteVehicleDocument(request.params.vehicleId, request.params.documentId);
+  const deleted = await deleteVehicleDocument(
+    request.params.vehicleId,
+    request.params.documentId,
+    request.user,
+    request.query?.reason,
+  );
   await safeRecordActivityLog(request, {
     action: 'DELETE_VEHICLE_DOCUMENT',
     module: 'vehicle_documents',
@@ -61,9 +66,10 @@ export async function deleteVehicleDocumentController(request, response) {
     metadata: {
       vehicleId: request.params.vehicleId,
       documentType: deleted.documentType,
+      trashId: deleted.trashId,
     },
   });
-  sendSuccess(response, deleted, 'Dokumen kendaraan berhasil dihapus.');
+  sendSuccess(response, deleted, 'Dokumen kendaraan dipindahkan ke recycle bin.');
 }
 
 export async function downloadVehicleDocumentController(request, response) {

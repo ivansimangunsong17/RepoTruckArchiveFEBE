@@ -7,6 +7,7 @@ import {
   updateContainerJob,
 } from './container-jobs.repository.js';
 import { findSalesOrderById } from '../sales-orders/sales-orders.repository.js';
+import { hasContainerSentRpuj } from '../sales-orders/sales-orders.rpuj-lock.js';
 
 function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
@@ -27,6 +28,7 @@ export function listContainerJobs(query) {
     status: query.status || '',
     requestStatus: query.requestStatus || '',
     rpujStage: query.rpujStage || '',
+    documentStatus: query.documentStatus || '',
   });
 }
 
@@ -63,7 +65,12 @@ function hasContainerNumberChange(currentJob, payload = {}) {
   return normalizeText(payload.containerNumber).toUpperCase() !== normalizeText(currentJob?.containerNumber).toUpperCase();
 }
 
-function hasOperationalDocumentChange(currentJob, payload = {}) {
+export function isInitialContainerNumberInput(currentJob, payload = {}) {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'containerNumber')) return false;
+  return !normalizeText(currentJob?.containerNumber) && Boolean(normalizeText(payload.containerNumber));
+}
+
+export function hasOperationalDocumentChange(currentJob, payload = {}) {
   const documentFields = [
     ['eirNumber', 'eirNumber'],
     ['loadingVoucher', 'loadingVoucher'],
@@ -73,6 +80,7 @@ function hasOperationalDocumentChange(currentJob, payload = {}) {
 
   return documentFields.some(([payloadKey, jobKey]) => (
     Object.prototype.hasOwnProperty.call(payload, payloadKey)
+    && Boolean(normalizeText(currentJob?.[jobKey]))
     && normalizeText(payload[payloadKey]) !== normalizeText(currentJob?.[jobKey])
   ));
 }
@@ -99,9 +107,10 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
 function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
   if (normalizeRole(actor) !== 'operational') return;
   if (!hasContainerNumberChange(job, payload)) return;
+  if (isInitialContainerNumberInput(job, payload) && !['completed', 'cancelled'].includes(job?.status)) return;
   if (!['running', 'completed', 'cancelled'].includes(job?.status) && job?.rpujStatus !== 'paid') return;
 
-  const error = new Error('No. Container tidak bisa diubah setelah pekerjaan berjalan, selesai, dibatalkan, atau UJ ditransfer.');
+  const error = new Error('No. Container yang sudah terisi tidak bisa diubah setelah pekerjaan berjalan, selesai, dibatalkan, atau UJ ditransfer.');
   error.statusCode = 409;
   error.code = 'CONTAINER_JOB_CONTAINER_NUMBER_LOCKED';
   throw error;
@@ -212,6 +221,12 @@ export async function requestContainerJobCancellation(id, actor, payload = {}) {
     const error = new Error('Container Job ini bukan milik akun sales Anda.');
     error.statusCode = 403;
     error.code = 'CONTAINER_JOB_OWNER_FORBIDDEN';
+    throw error;
+  }
+  if (actor?.role === 'sales' && hasContainerSentRpuj(job)) {
+    const error = new Error('Pembatalan tidak dapat diajukan Sales karena RPUJ sudah dikirim. Hubungi Admin untuk melakukan pembatalan.');
+    error.statusCode = 403;
+    error.code = 'CONTAINER_JOB_RPUJ_LOCKED_ADMIN_ONLY';
     throw error;
   }
 

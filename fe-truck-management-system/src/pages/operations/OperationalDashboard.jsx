@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import {
+  AlertTriangle,
   ArrowRight,
   CalendarDays,
+  Clock3,
   ClipboardCheck,
+  Play,
   Truck,
+  UserRound,
   X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -27,6 +31,75 @@ function containerLabel(job) {
   return job?.containerNumber || 'Container belum diisi';
 }
 
+function rpujLabel(job) {
+  if (job?.rpujStatus === 'paid') return 'UJ dikirim';
+  if (job?.rpujStatus === 'approved') return 'UJ disetujui';
+  if (job?.rpujStatus === 'submitted') return 'UJ menunggu Finance';
+  if (job?.rpujStatus === 'rejected') return 'UJ perlu revisi';
+  return 'UJ belum diajukan';
+}
+
+function workHelper(job, stage) {
+  if (stage === 'assignment') return 'Pilih truck dan driver';
+  if (stage === 'ready') return 'UJ dan SPK siap, mulai saat berangkat';
+  if (stage === 'running') return 'Perbarui perjalanan dan dokumen';
+  if (!['approved', 'paid'].includes(job?.rpujStatus)) return rpujLabel(job);
+  return 'SPK belum tersedia';
+}
+
+const workColumns = [
+  { id: 'assignment', title: 'Perlu Assignment', description: 'Truck dan driver belum dipilih', icon: UserRound, tone: 'assignment' },
+  { id: 'ready', title: 'Siap Jalan', description: 'Menunggu keberangkatan aktual', icon: Clock3, tone: 'ready' },
+  { id: 'running', title: 'Sedang Jalan', description: 'Perjalanan sedang berlangsung', icon: Play, tone: 'running' },
+  { id: 'attention', title: 'Perlu Dilengkapi', description: 'Ada syarat yang masih tertahan', icon: AlertTriangle, tone: 'attention' },
+];
+
+function WorkQueueColumn({ column, jobs, onDetail }) {
+  const Icon = column.icon;
+  return (
+    <section className={`ops-work-column is-${column.tone}`} aria-labelledby={`ops-work-${column.id}`}>
+      <header>
+        <span className="ops-work-column-icon"><Icon size={17} /></span>
+        <div>
+          <h2 id={`ops-work-${column.id}`}>{column.title}</h2>
+          <p>{column.description}</p>
+        </div>
+        <strong>{jobs.length}</strong>
+      </header>
+      <div className="ops-work-cards">
+        {jobs.length ? jobs.map((job) => (
+          <article className="ops-work-card" key={job.id}>
+            <div className="ops-work-card-topline">
+              <span>{job.soNumber || 'Tanpa nomor SO'}</span>
+              <small>{formatShortDate(job.tripDate)}</small>
+            </div>
+            <h3>{containerLabel(job)}</h3>
+            <p>{job.customer || '-'}</p>
+            <div className="ops-work-route">{routeView(job)}</div>
+            <div className="ops-work-assignment">
+              <Truck size={14} />
+              <span>{job.plateNumber || 'Truck belum dipilih'}</span>
+              <small>{job.driver || 'Driver belum ada'}</small>
+            </div>
+            <div className="ops-work-next">
+              <span>{workHelper(job, column.id)}</span>
+              {column.id !== 'assignment' ? <small>{rpujLabel(job)}{job.spkNumber || job.spkDocument ? ' | SPK ada' : ''}</small> : null}
+            </div>
+            <div className="ops-work-actions">
+              <button className="secondary-button" type="button" onClick={() => onDetail(job)}>Detail</button>
+              <Link className="primary-button" to="/operations">
+                {column.id === 'running' ? 'Update' : 'Proses'}
+              </Link>
+            </div>
+          </article>
+        )) : (
+          <div className="ops-work-empty">Tidak ada job pada tahap ini.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function OperationalDashboard() {
   const [activeDashboard, setActiveDashboard] = useState('existing');
   const [selectedProspectGroup, setSelectedProspectGroup] = useState(null);
@@ -35,10 +108,10 @@ function OperationalDashboard() {
   const hasLiveOrders = archive.isDatabaseMode && archive.orders.length > 0;
   const salesOrders = archive.isDatabaseMode ? archive.orders : initialSalesOrders;
   const {
-    activeJobs,
+    dueJobs,
+    workQueues,
     visibleFutureJobs,
     prospectSchedule,
-    assignedActiveJobs,
     prospectTwentyFt,
     prospectFortyFt,
     nextSchedule,
@@ -71,50 +144,24 @@ function OperationalDashboard() {
 
       {activeDashboard === 'existing' ? (
         <section className="ops-dashboard-shell" aria-label="Dashboard Eksisting">
-          <div className="operational-overview operational-overview-tight ops-kpi-grid ops-existing-kpi-grid">
-            <div className="operational-kpi">
-              <span className="kpi-icon"><Truck size={20} /></span>
-              <div><span>Container Aktif</span><strong>{activeJobs.length}</strong><small>Truck/container belum selesai</small></div>
+          <div className="ops-work-summary">
+            <div>
+              <span>Fokus kerja hari ini</span>
+              <strong>{dueJobs.length} container perlu dipantau</strong>
+              <small>Setiap job ditempatkan berdasarkan tindakan berikutnya, bukan hanya berdasarkan assignment.</small>
             </div>
-            <div className="operational-kpi">
-              <span className="kpi-icon"><ClipboardCheck size={20} /></span>
-              <div><span>Sudah Assign</span><strong>{assignedActiveJobs}</strong><small>Truck sudah dipilih</small></div>
-            </div>
+            <Link className="secondary-button" to="/operations">Lihat Semua Job</Link>
           </div>
-
-          <section className="panel ops-today-panel">
-            <div className="panel-header ops-panel-header">
-              <div><h2>Eksisting Aktif</h2><p>Fokus operator: container, truck, driver, rute, dan status yang belum selesai.</p></div>
-            </div>
-            <div className="ops-today-list">
-              {activeJobs.length ? activeJobs.map((job) => (
-                <article className="ops-job-row" key={job.id}>
-                  <div className="ops-job-main">
-                    <span>Customer</span>
-                    <strong>{job.customer || '-'}</strong>
-                    <small>Sales: {job.salesName || job.createdBy || '-'}</small>
-                  </div>
-                  <div className="ops-job-main">
-                    <span>Container</span>
-                    <strong>{containerLabel(job)}</strong>
-                    <small>{normalizeSize(job.size) || '-'}</small>
-                  </div>
-                  <div className="ops-job-truck">
-                    <span><Truck size={14} /> Truck</span>
-                    <strong>{job.plateNumber || 'Belum dipilih'}</strong>
-                    <small>{job.driver || 'Driver otomatis belum ada'}</small>
-                  </div>
-                  <div className="ops-job-route">
-                    <span>{formatShortDate(job.tripDate)}</span>
-                    {routeView(job)}
-                  </div>
-                  <button className="secondary-button ops-detail-button" type="button" onClick={() => setSelectedExistingJob(job)}>Detail</button>
-                </article>
-              )) : (
-                <div className="empty-state compact-empty">Belum ada truck/container aktif.</div>
-              )}
-            </div>
-          </section>
+          <div className="ops-work-board">
+            {workColumns.map((column) => (
+              <WorkQueueColumn
+                column={column}
+                jobs={workQueues[column.id]}
+                key={column.id}
+                onDetail={setSelectedExistingJob}
+              />
+            ))}
+          </div>
         </section>
       ) : (
         <section className="ops-dashboard-shell" aria-label="Dashboard Prospek">

@@ -46,7 +46,7 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
-function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', includeRpujStage = true } = {}) {
+function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', includeRpujStage = true } = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
     "so.finance_verification_status = 'verified'",
@@ -84,6 +84,35 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
     } else if (rpujStage === 'paid') {
       clauses.push("cj.rpuj_status = 'paid'");
     }
+  }
+
+  if (documentStatus === 'incomplete') {
+    clauses.push(`(
+      not exists (
+        select 1 from attachments attachment
+        where attachment.entity_type = 'container_job'
+          and attachment.entity_id = cj.id
+          and attachment.category = 'eirDocument'
+      )
+      or not exists (
+        select 1 from attachments attachment
+        where attachment.entity_type = 'container_job'
+          and attachment.entity_id = cj.id
+          and attachment.category = 'loadingVoucherDocument'
+      )
+      or not exists (
+        select 1 from attachments attachment
+        where attachment.entity_type = 'container_job'
+          and attachment.entity_id = cj.id
+          and attachment.category in ('tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile')
+      )
+      or not exists (
+        select 1 from attachments attachment
+        where attachment.entity_type = 'container_job'
+          and attachment.entity_id = cj.id
+          and attachment.category = 'travelDocumentFile'
+      )
+    )`);
   }
 
   return {
@@ -157,6 +186,17 @@ function assertVehicleMatchesContainer(vehicle, containerSize) {
   }
 }
 
+function assertVehicleAssignable(vehicle, existingVehicleId) {
+  if (!vehicle) return;
+  if (existingVehicleId && String(vehicle.id) === String(existingVehicleId)) return;
+  if (['Maintenance', 'Tidak Aktif'].includes(vehicle.operational_status)) {
+    const error = new Error(`Truck ${vehicle.plate_number} sedang ${vehicle.operational_status} dan tidak bisa di-assign.`);
+    error.statusCode = 409;
+    error.code = 'VEHICLE_NOT_ASSIGNABLE';
+    throw error;
+  }
+}
+
 async function refreshOrderStatus(client, salesOrderId) {
   const result = await client.query(
     `
@@ -221,10 +261,6 @@ function requireTripStartAllowed(nextStatus, rpujStatus) {
     'TRIP_WAITING_RPUJ_APPROVAL',
     409,
   );
-}
-
-function pickFormValue(form, key, fallback = null) {
-  return Object.prototype.hasOwnProperty.call(form, key) ? form[key] : fallback;
 }
 
 async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus) {
@@ -362,14 +398,11 @@ async function requireCompletedJobReady(client, id, form, existing) {
   }
 
   const requiredValues = [
+    ['nomor container', String(form.containerNumber || existing.container_number || '').trim()],
     ['driver', form.driver || form.driverId || existing.driver_id],
     ['truck', form.plateNumber || form.vehicleId || existing.vehicle_id],
     ['waktu mulai', runningAt],
     ['waktu selesai', completedAt],
-    ['No. EIR', pickFormValue(form, 'eirNumber', existing.eir_number)],
-    ['No. Bon Muat / Bon Bongkar', pickFormValue(form, 'loadingVoucher', existing.loading_voucher_number)],
-    ['No. TILA / Delivery Card / Gatepass / SP2', pickFormValue(form, 'tilaGatepassDocument', existing.tila_gatepass_document_number)],
-    ['No. Surat Jalan', pickFormValue(form, 'travelDocument', existing.travel_document_number)],
   ];
   const missingValue = requiredValues.find(([, value]) => !value);
   if (missingValue) {
@@ -386,28 +419,14 @@ async function requireCompletedJobReady(client, id, form, existing) {
       from attachments
       where entity_type = 'container_job'
         and entity_id = $1
-        and category = any($2::text[])
+        and category = 'spkDocument'
     `,
-    [id, ['spkDocument', 'eirDocument', 'loadingVoucherDocument', 'tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'travelDocumentFile']],
+    [id],
   );
   const categories = new Set(attachmentResult.rows.map((row) => row.category));
   if (!(form.spkNumber || existing.spk_number || categories.has('spkDocument'))) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. Lengkapi SPK terlebih dahulu.',
-      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
-      409,
-    );
-  }
-  const requiredAttachments = [
-    ['Lampiran EIR', ['eirDocument']],
-    ['Lampiran Bon Muat / Bon Bongkar', ['loadingVoucherDocument']],
-    ['Lampiran TILA / Delivery Card / Gatepass / SP2', ['tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile']],
-    ['Lampiran Surat Jalan', ['travelDocumentFile']],
-  ];
-  const missingAttachment = requiredAttachments.find(([, alternatives]) => !alternatives.some((category) => categories.has(category)));
-  if (missingAttachment) {
-    throw validationError(
-      `Pekerjaan belum dapat diselesaikan. Lengkapi ${missingAttachment[0]} terlebih dahulu.`,
       'CONTAINER_JOB_COMPLETION_INCOMPLETE',
       409,
     );
@@ -565,6 +584,7 @@ export async function updateContainerJob(id, form) {
 
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
+    assertVehicleAssignable(vehicle, existing.rows[0].vehicle_id);
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
     const nextStatus = form.status || existing.rows[0].status || 'received';
     if (nextStatus === 'cancelled' && existing.rows[0].status === 'completed') {

@@ -1,5 +1,5 @@
 import MasterDataPage from '../../components/master/MasterDataPage';
-import { formatDate } from '../../utils/formatDate';
+import MasterExpiryDate from '../../components/master/MasterExpiryDate';
 
 const emptyRows = [];
 
@@ -12,7 +12,7 @@ const fields = [
   { key: 'unitCode', section: 'Identitas Truck', label: 'Kode Truck', placeholder: 'Contoh: HEAD-001', required: true },
   { key: 'plateNumber', section: 'Identitas Truck', label: 'Nomor Polisi Truck', placeholder: 'Contoh: B 1234 XYZ', required: true },
   { key: 'kirNumber', section: 'Dokumen KIR', label: 'Nomor Uji KIR', placeholder: 'Contoh: KIR-H-2026-001' },
-  { key: 'kirExpiryDate', section: 'Dokumen KIR', label: 'Tanggal KIR OFF', type: 'date' },
+  { key: 'kirExpiryDate', section: 'Dokumen KIR', label: 'Tanggal KIR OFF', type: 'date', expiryAlert: { label: 'KIR Truck' } },
   {
     key: 'status',
     section: 'Status',
@@ -41,7 +41,7 @@ function KirHeadsPage() {
         { key: 'unitCode', label: 'Kode Truck', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'plateNumber', label: 'Plat Truck', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'kirNumber', label: 'No KIR', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
-        { key: 'kirExpiryDate', label: 'Tanggal KIR OFF', render: (value) => <span className="master-plain-cell strong">{formatDate(value)}</span> },
+        { key: 'kirExpiryDate', label: 'Tanggal KIR OFF', render: (value) => <MasterExpiryDate value={value} /> },
         { key: 'status', label: 'Status', render: (value) => <KirStatus value={value} /> },
       ]}
       initialRows={emptyRows}

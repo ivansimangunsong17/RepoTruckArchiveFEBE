@@ -1,44 +1,37 @@
 import MasterDataPage from '../../components/master/MasterDataPage';
+import MasterExpiryDate from '../../components/master/MasterExpiryDate';
+import { useArchiveData } from '../../hooks/useArchiveData';
 
 const emptyRows = [];
-
-function parseDateAsLocal(value) {
-  if (!value) return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) {
-    return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
-  }
-
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-}
-
-function formatDate(value) {
-  const parsed = parseDateAsLocal(value);
-  if (!parsed) return value || '-';
-  return parsed.toLocaleDateString('id-ID', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
 
 function ChassisStatus({ value }) {
   const statusClass = value === 'Aktif' ? 'available' : value === 'Perlu Perpanjang' ? 'in_use' : 'maintenance';
   return <span className={`master-status-dot ${statusClass}`}><i />{value || '-'}</span>;
 }
 
+function normalizeName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getChassisCandidates(row = {}) {
+  return [row.id, row.chassisCode, row.kirNumber, row.plateNumber]
+    .filter(Boolean)
+    .map(normalizeName);
+}
+
+function findConnectedTruck(chassis, trucks = []) {
+  const candidates = getChassisCandidates(chassis);
+  if (!candidates.length) return null;
+  return (trucks || []).find((truck) => candidates.includes(normalizeName(truck.kirChassisNumber))) || null;
+}
+
+function ConnectedTruckPlate({ row, trucks }) {
+  const truck = findConnectedTruck(row, trucks);
+  return <span className="master-plain-cell strong">{truck?.plateNumber || '-'}</span>;
+}
+
 const fields = [
   { key: 'chassisCode', section: 'Identitas Chassis', label: 'Kode Chassis', placeholder: 'Contoh: CHS-001', required: true },
-  { key: 'plateNumber', section: 'Identitas Chassis', label: 'Nomor Polisi / Identitas', placeholder: 'Contoh: B 1234 XYZ' },
   {
     key: 'capacity',
     section: 'Identitas Chassis',
@@ -52,7 +45,7 @@ const fields = [
     ],
   },
   { key: 'kirNumber', section: 'Dokumen Chassis', label: 'Nomor Chassis', placeholder: 'Contoh: CHS-DOC-2026-001' },
-  { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'KIR OFF', type: 'date' },
+  { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'KIR OFF', type: 'date', expiryAlert: { label: 'KIR Chassis' } },
   {
     key: 'status',
     section: 'Status',
@@ -66,10 +59,28 @@ const fields = [
     ],
   },
   { key: 'notes', section: 'Catatan', label: 'Catatan', type: 'textarea', placeholder: 'Catatan tambahan', full: true },
-  { key: 'kirDocument', section: 'Dokumen Chassis', label: 'Dokumen Chassis', type: 'file' },
+  { key: 'photoDocument', section: 'Dokumen Chassis', label: 'Foto Chassis', type: 'file', accept: '.jpg,.jpeg,.png', full: true },
 ];
 
 function KirChassisPage() {
+  const archive = useArchiveData();
+  const truckRows = archive.masters?.trucks || [];
+  const detailFields = fields.map((field) => {
+    if (field.key === 'kirExpiryDate') {
+      return {
+        ...field,
+        renderDetail: (value) => <MasterExpiryDate value={value} label="KIR Chassis" />,
+      };
+    }
+    if (field.key === 'status') {
+      return {
+        ...field,
+        renderDetail: (value) => <ChassisStatus value={value} />,
+      };
+    }
+    return field;
+  });
+
   return (
     <MasterDataPage
       eyebrow="Master Data"
@@ -77,27 +88,28 @@ function KirChassisPage() {
       singular="Data Chassis"
       description="Kelola data chassis, kapasitas container, masa berlaku chassis, dan dokumen pendukung."
       fields={fields}
+      detailFields={detailFields}
       columns={[
         { key: 'chassisCode', label: 'Kode Chassis', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'plateNumber', label: 'Plat / Identitas', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'plateNumber', label: 'Plat / Identitas', render: (_, row) => <ConnectedTruckPlate row={row} trucks={truckRows} /> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'kirNumber', label: 'Nomor Chassis', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
-        { key: 'kirExpiryDate', label: 'KIR OFF', render: (value) => <span className="master-plain-cell strong">{formatDate(value)}</span> },
+        { key: 'kirExpiryDate', label: 'KIR OFF', render: (value) => <MasterExpiryDate value={value} /> },
         { key: 'status', label: 'Status', render: (value) => <ChassisStatus value={value} /> },
       ]}
       initialRows={emptyRows}
       resource="kir-chassis"
       storageKey="tms-master-kir-chassis-v1"
-      uniqueKeys={['chassisCode', 'plateNumber', 'kirNumber']}
+      uniqueKeys={['chassisCode', 'kirNumber']}
       filters={[
         { key: 'status', label: 'Semua Status Chassis', options: ['Aktif', 'Perlu Perpanjang', 'Tidak Aktif'] },
         { key: 'size', label: 'Semua Size', options: ['20FT', '40FT', 'COMBO'] },
       ]}
-      pageClassName="driver-data-page truck-data-page"
+      pageClassName="driver-data-page truck-data-page chassis-data-page"
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Data Chassis"
-      toolbarDescription="Cari kode chassis, plat/identitas, size, nomor chassis, dan status dokumen."
+      toolbarDescription="Cari kode chassis, size, nomor chassis, dan status dokumen."
       stats={(data) => [
         { label: 'Total Chassis', value: data.length, detail: 'Data chassis terdaftar' },
         { label: 'Aktif', value: data.filter((item) => item.status === 'Aktif').length, detail: 'Dokumen aman' },

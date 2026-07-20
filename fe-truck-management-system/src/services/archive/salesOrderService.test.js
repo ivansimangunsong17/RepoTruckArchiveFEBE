@@ -111,6 +111,22 @@ describe('salesOrderService', () => {
     }));
   });
 
+  it('mengirim tanggal kalender tanpa mundur saat nilai berasal dari Date DB', async () => {
+    httpClient.patch.mockResolvedValue({ id: 'order-1', soNumber: 'SO-001' });
+
+    await saveSalesOrder({
+      soNumber: 'SO-001',
+      soDate: new Date('2026-07-16T17:00:00.000Z'),
+      tripDate: new Date('2026-07-16T17:00:00.000Z'),
+      lineItems: [{ serviceName: 'Tila/Gatepass', qty: 1, price: 100000 }],
+    }, { fullName: 'Sinta' }, { id: 'order-1' });
+
+    expect(httpClient.patch).toHaveBeenCalledWith('/sales-orders/order-1', expect.objectContaining({
+      soDate: '2026-07-17',
+      tripDate: '2026-07-17',
+    }));
+  });
+
   it('membatalkan Sales Order lewat backend API', async () => {
     httpClient.patch.mockResolvedValue({ id: 'order-1' });
 

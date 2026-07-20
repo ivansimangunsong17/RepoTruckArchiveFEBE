@@ -9,7 +9,15 @@
     "check": "node --check src/server.js",
     "test": "node --test",
     "db:migrate": "node src/db/runMigrations.js",
-    "db:seed": "node src/db/runSeeds.js"
+    "db:seed": "node src/db/runSeeds.js",
+    "storage:migrate:phase3": "node scripts/migrate-storage-phase3.js",
+    "storage:migrate:phase3:apply": "node scripts/migrate-storage-phase3.js --apply",
+    "storage:init:phase4": "node scripts/initialize-storage-phase4.js",
+    "storage:audit": "node scripts/storage-audit.js",
+    "storage:audit:apply": "node scripts/storage-audit.js --apply",
+    "backup:local": "powershell -ExecutionPolicy Bypass -File scripts/backup-local.ps1",
+    "backup:storage": "powershell -ExecutionPolicy Bypass -File scripts/backup-storage.ps1",
+    "backup:database": "powershell -ExecutionPolicy Bypass -File scripts/backup-database.ps1"
   },
   "engines": {
     "node": ">=20"

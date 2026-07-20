@@ -1,5 +1,6 @@
 import { query, withTransaction } from '../../db/client.js';
 import { mapContainerJob, mapSalesOrder, toContainerJobDb, toSalesOrderDb } from './sales-orders.mapper.js';
+import { reconcileSalesOrderContainers } from './sales-orders.container-sync.js';
 
 const salesOrderColumnCandidates = [
   'id',
@@ -501,20 +502,26 @@ export async function updateSalesOrder(id, form) {
       [...entries.map(([, value]) => value), id],
     );
 
-    const currentJobs = await client.query('select id, status from container_jobs where sales_order_id = $1', [id]);
-    const retainedIds = (form.containers || []).map((container) => container.id).filter(Boolean);
-    const removableIds = currentJobs.rows
-      .filter((job) => !retainedIds.includes(job.id) && job.status === 'received')
-      .map((job) => job.id);
+    const currentJobs = await client.query(
+      'select id, status, container_size from container_jobs where sales_order_id = $1 order by created_at asc',
+      [id],
+    );
+    const { assignments, removableIds } = reconcileSalesOrderContainers(form.containers || [], currentJobs.rows);
     if (removableIds.length) {
       await client.query('delete from container_jobs where id = any($1::uuid[])', [removableIds]);
     }
 
-    for (const container of form.containers || []) {
+    for (const { container, currentJob } of assignments) {
       ensureContainerTripGate(container);
       const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
-      const jobEntries = Object.entries(jobPayload);
-      if (container.id && currentJobs.rows.some((job) => job.id === container.id)) {
+      if (currentJob) {
+        const salesJobPayload = {
+          container_size: jobPayload.container_size,
+          container_type: jobPayload.container_type,
+          container_notes: jobPayload.container_notes,
+          updated_by_name: jobPayload.updated_by_name,
+        };
+        const jobEntries = Object.entries(salesJobPayload);
         await client.query(
           `
             update container_jobs
@@ -522,9 +529,10 @@ export async function updateSalesOrder(id, form) {
                 updated_at = now()
             where id = $${jobEntries.length + 1}
           `,
-          [...jobEntries.map(([, value]) => value), container.id],
+          [...jobEntries.map(([, value]) => value), currentJob.id],
         );
       } else {
+        const jobEntries = Object.entries(jobPayload);
         await client.query(
           `
             insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})

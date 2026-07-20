@@ -13,6 +13,8 @@ import { masterRoutes } from './modules/master/master.routes.js';
 import { reportRoutes } from './modules/reports/reports.routes.js';
 import { salesOrderRoutes } from './modules/sales-orders/sales-orders.routes.js';
 import { settingsRoutes } from './modules/settings/settings.routes.js';
+import { storageRoutes } from './modules/storage/storage.routes.js';
+import { isStorageBackupInProgress } from './modules/storage/storage-files.js';
 import { userRoutes } from './modules/users/users.routes.js';
 import { vehicleDocumentRoutes } from './modules/vehicle-documents/vehicle-documents.routes.js';
 import { sendSuccess, sendError } from './utils/apiResponse.js';
@@ -52,8 +54,10 @@ const routes = [
   ...masterRoutes,
   ...vehicleDocumentRoutes,
   ...reportRoutes,
+  ...storageRoutes,
   ...settingsRoutes,
 ];
+const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function applyCors(response) {
   response.setHeader('Access-Control-Allow-Origin', env.corsOrigin);
@@ -122,6 +126,13 @@ export function createApp() {
       request.query = Object.fromEntries(url.searchParams.entries());
       request.params = route.params || {};
       authorizeRoute(route, request);
+      if (mutationMethods.has(request.method) && await isStorageBackupInProgress()) {
+        const error = new Error('Backup lokal sedang berjalan. Perubahan data dibuka kembali setelah backup selesai.');
+        error.statusCode = 503;
+        error.code = 'BACKUP_IN_PROGRESS';
+        response.setHeader('Retry-After', '120');
+        throw error;
+      }
       request.body = await parseBody(request);
       await route.handler(request, response);
     } catch (error) {

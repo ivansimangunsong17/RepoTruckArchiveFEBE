@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
+import { Download, X } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import WeeklyOrderSummary from '../../components/dashboard/WeeklyOrderSummary';
 import { buildOperationalJobs, formatShortDate, isCompleted, todayKey, toDateKey } from '../../data/operationalDashboard';
 import { fetchSalesOrders } from '../../services/archive/salesOrderService';
 import { fetchDashboardReport } from '../../services/reports/reportService';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 import { buildWeeklyOrderDays } from '../../utils/weeklyOrderDays';
 
 const orderTargets = {
@@ -89,6 +90,10 @@ function shortageText(item) {
   ].filter(Boolean).join(' | ');
 }
 
+function reportDateKey(value) {
+  return String(value || '').replace(/[^0-9]/g, '') || 'report';
+}
+
 function WeeklyOrdersPage() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [dashboard, setDashboard] = useState({ upcomingJobs: [] });
@@ -145,6 +150,31 @@ function WeeklyOrdersPage() {
   const selectedJobs = selectedDay ? jobsByDate[selectedDay.dateKey] || [] : [];
   const selectedSummary = summarizeSelectedJobs(selectedJobs);
 
+  function handleDownloadReport() {
+    const totalOrders = days.reduce((total, item) => total + item.orderCount, 0);
+    const totalTwentyFt = days.reduce((total, item) => total + item.twentyFt, 0);
+    const totalFortyFt = days.reduce((total, item) => total + item.fortyFt, 0);
+    downloadPdfReport({
+      title: 'Dashboard Order Mingguan',
+      subtitle: `Mulai ${formatShortDate(currentDateKey)}`,
+      filename: `dashboard-order-mingguan-${reportDateKey(currentDateKey)}.pdf`,
+      meta: [
+        { label: 'Total Order', value: totalOrders },
+        { label: '20FT', value: totalTwentyFt },
+        { label: '40FT', value: totalFortyFt },
+      ],
+      columns: [
+        { label: 'No', width: 0.5, value: (row) => row.reportNumber },
+        { label: 'Tanggal Jalan', width: 1.4, value: (row) => formatShortDate(row.dateKey), bold: true },
+        { label: 'Order', width: 0.8, value: (row) => row.orderCount },
+        { label: '20FT', width: 0.75, value: (row) => row.twentyFt },
+        { label: '40FT', width: 0.75, value: (row) => row.fortyFt },
+        { label: 'Catatan', width: 2.1, value: (row) => shortageText(row) },
+      ],
+      rows: days.map((item, index) => ({ ...item, reportNumber: index + 1 })),
+    });
+  }
+
   return (
     <div className="page weekly-orders-page">
       <PageHeader
@@ -152,6 +182,17 @@ function WeeklyOrdersPage() {
         title="Order Mingguan"
         description="Ringkasan jumlah order tujuh hari ke depan berdasarkan tanggal jalan."
       />
+
+      <div className="mb-3 flex justify-end">
+        <button
+          className="inline-flex min-h-[34px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-[12px] font-black text-slate-900 shadow-sm hover:border-red-700 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          onClick={handleDownloadReport}
+          disabled={loading || Boolean(error)}
+        >
+          <Download size={15} /> Download PDF
+        </button>
+      </div>
 
       <div className="weekly-orders-summary-wrap">
         <WeeklyOrderSummary jobs={visibleFutureJobs} currentDateKey={currentDateKey} orderTargets={orderTargets} />

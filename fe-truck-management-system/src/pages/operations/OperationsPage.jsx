@@ -65,11 +65,16 @@ function sortOperationalJobs(rows) {
 
 function documentState(job) {
   const required = [
-    job.loadingVoucherDocument,
-    job.tilaGatepassDocumentFile || job.unloadingVoucherDocument || job.weighingDocumentFile,
-    job.travelDocumentFile,
+    { label: 'EIR', file: job.eirDocument },
+    { label: 'Bon Muat / Bon Bongkar', file: job.loadingVoucherDocument },
+    { label: 'TILA / Delivery Card / Gatepass / SP2', file: job.tilaGatepassDocumentFile || job.unloadingVoucherDocument || job.weighingDocumentFile },
+    { label: 'Surat Jalan', file: job.travelDocumentFile },
   ];
-  return { completed: required.filter(Boolean).length, total: required.length || 1 };
+  return {
+    completed: required.filter((document) => Boolean(document.file)).length,
+    total: required.length,
+    missing: required.filter((document) => !document.file).map((document) => document.label),
+  };
 }
 
 function containerLabel(job) {
@@ -159,7 +164,7 @@ function flattenPendingCancelJobs(orders) {
   })));
 }
 
-function OperationsPage() {
+function OperationsPage({ documentFollowUp = false }) {
   const { user } = useAuth();
   const { notify, confirmAction } = useFeedback();
   const archive = useArchiveData();
@@ -222,8 +227,10 @@ function OperationsPage() {
       job.soNumber, job.doNumber, job.customer, job.containerNumber, job.driver, job.plateNumber,
     ].some((value) => value?.toLowerCase().includes(query.toLowerCase()));
     const matchesRpujStage = !rpujStage || getRpujStage(job) === rpujStage;
-    return matchesQuery && (!status || job.status === status) && matchesRpujStage;
-  })), [demoJobs, query, rpujStage, status]);
+    const matchesDocumentFollowUp = !documentFollowUp
+      || (job.status === 'completed' && documentState(job).completed < documentState(job).total);
+    return matchesQuery && (!status || job.status === status) && matchesRpujStage && matchesDocumentFollowUp;
+  })), [demoJobs, documentFollowUp, query, rpujStage, status]);
 
   const jobs = archive.isDatabaseMode
     ? sortOperationalJobs(databaseJobs)
@@ -261,7 +268,14 @@ function OperationsPage() {
       setLoading(true);
       setError('');
       try {
-        const result = await fetchContainerJobsPage({ page, pageSize: PAGE_SIZE, query, status, rpujStage });
+        const result = await fetchContainerJobsPage({
+          page,
+          pageSize: PAGE_SIZE,
+          query,
+          status: documentFollowUp ? 'completed' : status,
+          rpujStage: documentFollowUp ? '' : rpujStage,
+          documentStatus: documentFollowUp ? 'incomplete' : '',
+        });
         if (!active) return;
         setDatabaseJobs(result.rows);
         setServerTotal(result.total);
@@ -283,7 +297,7 @@ function OperationsPage() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive.isDatabaseMode, listVersion, page, query, rpujStage, status]);
+  }, [archive.isDatabaseMode, documentFollowUp, listVersion, page, query, rpujStage, status]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -426,8 +440,14 @@ function OperationsPage() {
   }
 
   return (
-    <div className="page">
-      <PageHeader eyebrow="Operational" title="Container Job" description="Kelola assignment, dokumen operasional, status, dan timeline setiap container." />
+    <div className={`page ${documentFollowUp ? 'operational-document-followup-page' : ''}`.trim()}>
+      <PageHeader
+        eyebrow="Operational"
+        title={documentFollowUp ? 'Dokumen Container Belum Lengkap' : 'Container Job'}
+        description={documentFollowUp
+          ? 'Tindak lanjuti container selesai yang masih membutuhkan dokumen operasional.'
+          : 'Kelola assignment, dokumen operasional, status, dan timeline setiap container.'}
+      />
 
       {canReviewCancel && pendingCancelJobs.length ? (
         <section className="panel cancel-review-panel">
@@ -463,17 +483,17 @@ function OperationsPage() {
         </section>
       ) : null}
 
-      <div className="quick-stats operational-stats">
+      {!documentFollowUp ? <div className="quick-stats operational-stats">
         <div><span>Belum Jalan</span><strong>{counts.received}</strong><small>Menunggu truck dan driver</small></div>
         <div><span>Sedang Jalan</span><strong>{counts.running}</strong><small>Dalam perjalanan</small></div>
         <div><span>Selesai</span><strong>{counts.completed}</strong><small>Proses telah lengkap</small></div>
         <div><span>Total Job</span><strong>{totalJobs}</strong><small>Container dalam daftar</small></div>
-      </div>
+      </div> : null}
 
       <section className="panel operational-workspace">
         <div className="operational-filter-strip">
           <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari SO, container, driver, atau truck..." /></label>
-          <div className="job-status-tabs" role="tablist" aria-label="Status Container Job">
+          {!documentFollowUp ? <div className="job-status-tabs" role="tablist" aria-label="Status Container Job">
             {[
               ['', 'Semua', totalJobs],
               ['received', 'Belum Jalan', counts.received],
@@ -485,9 +505,9 @@ function OperationsPage() {
                 {label}<span>{count}</span>
               </button>
             ))}
-          </div>
+          </div> : <div className="operational-document-followup-summary"><FileText size={17} /><strong>{totalItems}</strong><span>container perlu dilengkapi</span></div>}
         </div>
-        <div className="operational-filter-substrip">
+        {!documentFollowUp ? <div className="operational-filter-substrip">
           <span>RPUJ</span>
           <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
             {rpujStageOptions.map((option) => {
@@ -515,7 +535,7 @@ function OperationsPage() {
               setRpujStage('');
             }}>Reset</button>
           ) : null}
-        </div>
+        </div> : null}
 
         <div className="operational-so-list">
           {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat Container Job...</p></div> : null}
@@ -565,11 +585,12 @@ function OperationsPage() {
                       <div className="container-row-docs">
                         <span>Dokumen</span>
                         <div><i style={{ width: `${documentPercent}%` }} /></div>
-                        <strong>{documents.completed}/{documents.total}</strong>
+                        <strong title={documents.missing.length ? `Belum ada: ${documents.missing.join(', ')}` : 'Lengkap'}>{documents.completed}/{documents.total}</strong>
+                        {documentFollowUp ? <small title={documents.missing.join(', ')}>Kurang: {documents.missing.join(', ')}</small> : null}
                       </div>
                       <div className="container-row-actions">
                         <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={14} /> Detail</button>
-                        {canEdit && job.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>Update</button> : null}
+                        {canEdit && job.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
                     </article>
                   );
@@ -579,7 +600,12 @@ function OperationsPage() {
           )) : null}
           {!loading && !error && !totalItems ? (
             <div className="archive-empty-wrapper">
-              <EmptyState title="Belum ada Container Job" description="Pekerjaan akan tampil setelah tim Sales membuat Sales Order." />
+              <EmptyState
+                title={documentFollowUp ? 'Semua dokumen sudah lengkap' : 'Belum ada Container Job'}
+                description={documentFollowUp
+                  ? 'Tidak ada container selesai yang membutuhkan tindak lanjut dokumen.'
+                  : 'Pekerjaan akan tampil setelah tim Sales membuat Sales Order.'}
+              />
             </div>
           ) : null}
         </div>
@@ -690,6 +716,7 @@ function OperationsPage() {
           masterDestinations={archive.masters.destinations}
           activeJobs={archive.isDatabaseMode ? databaseJobs : demoJobs}
           currentUser={user}
+          initialPhase={documentFollowUp ? 'closing' : 'preparation'}
           onClose={() => setEditing(null)}
           onSubmit={updateOperational}
           onGenerateSpk={generateOperationalSpk}

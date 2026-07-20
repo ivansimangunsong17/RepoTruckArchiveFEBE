@@ -56,7 +56,7 @@ function mapOrderVerificationRow(row) {
   return {
     id: row.id,
     orderDate: row.so_date,
-    salesName: row.created_by_name || row.sales_name || 'Sales',
+    salesName: row.sales_name || row.created_by_name || 'Sales',
     customer: row.customer_name,
     customerPic: row.customer_pic,
     customerPhone: row.customer_phone,
@@ -265,6 +265,15 @@ function buildOrderVerificationFilters(options = {}) {
   const clauses = ["so.status not in ('completed', 'cancelled')"];
   const params = [];
 
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`coalesce(so.so_date, so.created_at::date) >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`coalesce(so.so_date, so.created_at::date) <= $${params.length}`);
+  }
+
   if (options.status === 'pending_so') {
     clauses.push("(so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null)");
   } else if (options.status === 'verified') {
@@ -298,6 +307,19 @@ function buildRpujFilters(options = {}) {
     "cj.rpuj_status <> 'pending'",
   ];
   const params = [];
+  const periodStatus = options.periodBasis || options.status;
+  const periodDateExpression = periodStatus === 'paid'
+    ? 'coalesce(cj.rpuj_transfer_uploaded_at::date, cj.rpuj_reviewed_at::date, cj.rpuj_requested_at::date)'
+    : 'coalesce(cj.rpuj_requested_at::date, cj.received_at::date, so.trip_date, cj.created_at::date)';
+
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`${periodDateExpression} >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`${periodDateExpression} <= $${params.length}`);
+  }
 
   if (options.status) {
     params.push(String(options.status).trim());
@@ -324,6 +346,21 @@ function buildRpujFilters(options = {}) {
 function buildInvoiceFilters(options = {}) {
   const clauses = [];
   const params = [];
+  const periodStatus = options.periodBasis || options.status;
+  const periodDateExpression = periodStatus === 'paid'
+    ? 'coalesce(updated_at::date, invoice_issued_at::date, completed_at::date)'
+    : periodStatus === 'in-progress'
+      ? 'coalesce(invoice_issued_at::date, completed_at::date)'
+      : 'completed_at::date';
+
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`${periodDateExpression} >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`${periodDateExpression} <= $${params.length}`);
+  }
 
   if (options.status === 'need-number') {
     clauses.push("nullif(btrim(invoice_number), '') is null");
@@ -538,6 +575,8 @@ function mapRpujRequestRow(row) {
     orderId: row.sales_order_id,
     soNumber: row.so_number,
     jobNumber: row.container_number || `JOB-${String(row.id || '').slice(0, 8).toUpperCase()}`,
+    containerNumber: row.container_number || '',
+    containerSize: row.container_size || '',
     customer: row.customer_name,
     destination: row.destination,
     driver: row.assignment_snapshot?.driver || null,
@@ -579,10 +618,10 @@ function mapInvoiceStatusLabel(row) {
 function mapPaymentStatusLabel(status) {
   const labels = {
     belum_invoice: '-',
-    belum_dikirim: 'Menunggu Sales',
-    belum_diterima: 'Dikirim ke Customer',
-    belum_dikonfirmasi: 'Diterima Customer',
-    menunggu_pembayaran: 'Follow Up',
+    belum_dikirim: 'Belum Diterima',
+    belum_diterima: 'Belum Diterima',
+    belum_dikonfirmasi: 'Belum Dikonfirmasi',
+    menunggu_pembayaran: 'Belum Dibayar',
     revisi_dispute: 'Revisi / Dispute',
     lunas: 'Lunas',
   };
@@ -633,6 +672,116 @@ function mapInvoiceOrderRow(row) {
   };
 }
 
+const invoiceDocumentLabels = {
+  spkDocument: 'SPK / Lampiran Biaya',
+  eirDocument: 'EIR',
+  loadingVoucherDocument: 'Bon Muat / Bon Bongkar',
+  tilaGatepassDocumentFile: 'TILA / Delivery Card / Gatepass / SP2',
+  unloadingVoucherDocument: 'Bon Bongkar',
+  weighingDocumentFile: 'Dokumen Timbang / Gatepass',
+  travelDocumentFile: 'Surat Jalan',
+  otherDocument: 'Dokumen Tambahan',
+};
+
+const operationalInvoiceDocumentSlots = [
+  { category: 'eirDocument', label: 'EIR', acceptedCategories: ['eirDocument'] },
+  { category: 'travelDocumentFile', label: 'Surat Jalan', acceptedCategories: ['travelDocumentFile'] },
+  {
+    category: 'loadingVoucherDocument',
+    label: 'Bon Muat / Bon Bongkar',
+    acceptedCategories: ['loadingVoucherDocument', 'unloadingVoucherDocument'],
+  },
+  {
+    category: 'tilaGatepassDocumentFile',
+    label: 'TILA / Delivery Card / Gatepass / SP2',
+    acceptedCategories: ['tilaGatepassDocumentFile'],
+  },
+];
+
+function mapInvoiceDocument(row) {
+  return {
+    id: row.id,
+    source: row.source,
+    jobId: row.job_id,
+    containerNumber: row.container_number || '',
+    category: row.category,
+    label: invoiceDocumentLabels[row.category] || row.category || 'Dokumen',
+    referenceNumber: row.reference_number || '',
+    documentDate: row.document_date,
+    notes: row.notes || '',
+    uploadedByName: row.uploaded_by_name || '',
+    uploadedAt: row.created_at,
+    file: {
+      name: row.file_name || invoiceDocumentLabels[row.category] || 'Dokumen',
+      size: row.file_size == null ? 0 : Number(row.file_size),
+      type: row.mime_type || '',
+      path: row.id,
+      storagePath: row.storage_path || '',
+    },
+  };
+}
+
+export function mapInvoiceDocuments(rows = []) {
+  const containerJobs = new Map();
+  const jobSequences = new Map();
+  const salesDocuments = [];
+
+  rows.forEach((row) => {
+    if (row.source === 'Sales') {
+      if (row.id) salesDocuments.push({ ...mapInvoiceDocument(row), ready: true });
+      return;
+    }
+
+    if (!row.job_id) return;
+    if (!jobSequences.has(row.job_id)) jobSequences.set(row.job_id, jobSequences.size + 1);
+    const job = containerJobs.get(row.job_id) || {
+      id: row.job_id,
+      containerNumber: row.container_number || '',
+      jobReference: `Container ${jobSequences.get(row.job_id)} (nomor belum diisi)`,
+      attachments: new Map(),
+    };
+    if (row.id && row.category) job.attachments.set(row.category, row);
+    containerJobs.set(row.job_id, job);
+  });
+
+  const operationalDocuments = [...containerJobs.values()].flatMap((job) => (
+    operationalInvoiceDocumentSlots.map((slot) => {
+      const attachment = slot.acceptedCategories
+        .map((category) => job.attachments.get(category))
+        .find(Boolean);
+
+      if (attachment) {
+        return {
+          ...mapInvoiceDocument(attachment),
+          category: slot.category,
+          label: slot.label,
+          jobReference: job.jobReference,
+          ready: true,
+        };
+      }
+
+      return {
+        id: `${job.id}-${slot.category}`,
+        source: 'Operational',
+        jobId: job.id,
+        containerNumber: job.containerNumber,
+        jobReference: job.jobReference,
+        category: slot.category,
+        label: slot.label,
+        referenceNumber: '',
+        documentDate: null,
+        notes: '',
+        uploadedByName: '',
+        uploadedAt: null,
+        ready: false,
+        file: null,
+      };
+    })
+  ));
+
+  return [...operationalDocuments, ...salesDocuments];
+}
+
 function invoiceOrdersCte() {
   return `
     ${financeRowsCte()},
@@ -662,7 +811,21 @@ function invoiceOrdersCte() {
         bool_and(fr.has_loading_document) as has_loading_document,
         bool_and(fr.has_tila_gatepass_document) as has_tila_gatepass_document,
         bool_and(fr.has_travel_document) as has_travel_document,
-        array_remove(array_agg(distinct concat(coalesce(fr.service_name, 'Jasa Angkut'), ' ', coalesce(fr.container_size, ''), ' - ', fr.trip_quantity, ' ritase')), null) as billing_items
+        (
+          select array_agg(
+            concat(grouped.service_name, ' ', grouped.container_size, ' - ', grouped.trip_quantity, ' ritase')
+            order by grouped.container_size, grouped.service_name
+          )
+          from (
+            select
+              coalesce(item.service_name, 'Jasa Angkut') as service_name,
+              coalesce(item.container_size, '') as container_size,
+              sum(item.trip_quantity)::int as trip_quantity
+            from finance_rows item
+            where item.sales_order_id = so.id
+            group by coalesce(item.service_name, 'Jasa Angkut'), coalesce(item.container_size, '')
+          ) grouped
+        ) as billing_items
       from sales_orders so
       join finance_rows fr on fr.sales_order_id = so.id
       where so.status = 'completed'
@@ -786,6 +949,10 @@ export async function getFinanceDashboard(options = {}) {
 export async function getOrderVerificationsPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildOrderVerificationFilters(options);
+  const { whereSql: summaryWhereSql, params: summaryParams } = buildOrderVerificationFilters({
+    dateFrom: options.dateFrom,
+    dateTo: options.dateTo,
+  });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
@@ -851,7 +1018,9 @@ export async function getOrderVerificationsPage(options = {}) {
           count(*) filter (where so.status not in ('completed', 'cancelled') and (so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null))::int as pending_so,
           count(*) filter (where so.status not in ('completed', 'cancelled') and so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null)::int as verified
         from sales_orders so
+        ${summaryWhereSql}
       `,
+      summaryParams,
     ),
   ]);
 
@@ -977,6 +1146,11 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
 export async function getRpujRequestsPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildRpujFilters(options);
+  const { whereSql: summaryWhereSql, params: summaryParams } = buildRpujFilters({
+    dateFrom: options.dateFrom,
+    dateTo: options.dateTo,
+    periodBasis: options.status,
+  });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
@@ -1018,11 +1192,9 @@ export async function getRpujRequestsPage(options = {}) {
           count(*) filter (where cj.rpuj_status = 'rejected')::int as rejected
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
-        where so.status <> 'cancelled'
-          and so.finance_verification_status = 'verified'
-          and nullif(btrim(so.so_number), '') is not null
-          and cj.rpuj_status <> 'pending'
+        ${summaryWhereSql}
       `,
+      summaryParams,
     ),
   ]);
 
@@ -1157,6 +1329,11 @@ export async function markRpujTransferUploaded(id, payload = {}) {
 export async function getInvoiceOrdersPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildInvoiceFilters(options);
+  const { whereSql: summaryWhereSql, params: summaryParams } = buildInvoiceFilters({
+    dateFrom: options.dateFrom,
+    dateTo: options.dateTo,
+    periodBasis: options.status,
+  });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
@@ -1196,7 +1373,9 @@ export async function getInvoiceOrdersPage(options = {}) {
           count(*) filter (where nullif(btrim(invoice_number), '') is not null and billing_status <> 'lunas')::int as in_progress,
           count(*) filter (where billing_status = 'lunas')::int as paid
         from invoice_orders
+        ${summaryWhereSql}
       `,
+      summaryParams,
     ),
   ]);
 
@@ -1211,6 +1390,62 @@ export async function getInvoiceOrdersPage(options = {}) {
       inProgress: Number(summary.rows[0]?.in_progress || 0),
       paid: Number(summary.rows[0]?.paid || 0),
     },
+  };
+}
+
+export async function getInvoiceOrderDetail(id) {
+  const [invoice, documents] = await Promise.all([
+    query(
+      `
+        ${invoiceOrdersCte()}
+        select *
+        from invoice_orders
+        where id = $1
+        limit 1
+      `,
+      [id],
+    ),
+    query(
+      `
+        select
+          a.id, a.category, a.reference_number, a.document_date, a.file_name,
+          a.storage_path, a.mime_type, a.file_size, a.notes, a.uploaded_by_name,
+          a.created_at, 'Sales'::text as source, null::uuid as job_id,
+          null::text as container_number
+        from attachments a
+        where a.entity_type = 'sales_order'
+          and a.entity_id = $1
+
+        union all
+
+        select
+          a.id, a.category, a.reference_number, a.document_date, a.file_name,
+          a.storage_path, a.mime_type, a.file_size, a.notes, a.uploaded_by_name,
+          a.created_at, 'Operational'::text as source, cj.id as job_id,
+          cj.container_number
+        from container_jobs cj
+        left join attachments a
+          on a.entity_type = 'container_job'
+         and a.entity_id = cj.id
+         and a.category in (
+           'eirDocument',
+           'travelDocumentFile',
+           'loadingVoucherDocument',
+           'unloadingVoucherDocument',
+           'tilaGatepassDocumentFile'
+         )
+        where cj.sales_order_id = $1
+
+        order by source, job_id, created_at asc
+      `,
+      [id],
+    ),
+  ]);
+
+  if (!invoice.rows[0]) return null;
+  return {
+    ...mapInvoiceOrderRow(invoice.rows[0]),
+    documents: mapInvoiceDocuments(documents.rows),
   };
 }
 

@@ -45,6 +45,14 @@ export function isCompleted(job) {
   return ['completed', 'Selesai'].includes(job.status);
 }
 
+export function isCancelled(job) {
+  return ['cancelled', 'Dibatalkan', 'Batal'].includes(job.status);
+}
+
+export function isTerminal(job) {
+  return isCompleted(job) || isCancelled(job);
+}
+
 export function isAssigned(job) {
   return Boolean(job.plateNumber || job.truck || job.driver);
 }
@@ -54,13 +62,23 @@ export function isRunning(job) {
 }
 
 export function isActiveOperationalJob(job, currentDateKey = todayKey()) {
-  if (!job || isCompleted(job) || !isAssigned(job)) return false;
+  if (!job || isTerminal(job) || !isAssigned(job)) return false;
   if (!job.tripDateKey) return true;
   return job.tripDateKey <= currentDateKey;
 }
 
 export function getActiveOperationalJobs(jobs = [], currentDateKey = todayKey()) {
   return jobs.filter((job) => isActiveOperationalJob(job, currentDateKey));
+}
+
+export function getOperationalWorkStage(job) {
+  if (!job || isTerminal(job)) return 'terminal';
+  if (isRunning(job)) return 'running';
+  if (!isAssigned(job)) return 'assignment';
+
+  const rpujReady = ['approved', 'paid'].includes(job.rpujStatus);
+  const spkReady = Boolean(job.spkNumber || job.spkDocument);
+  return rpujReady && spkReady ? 'ready' : 'attention';
 }
 
 function getContainerTripDate(container, orderTripDate) {
@@ -166,24 +184,34 @@ export function getOperationalDashboardData(orders, options = {}) {
   const hasLiveOrders = Boolean(options.hasLiveOrders);
   const allowDemoFallback = options.allowDemoFallback !== false;
   let jobs = buildOperationalJobs(orders, currentDateKey, !hasLiveOrders);
-  const hasVisibleDashboardJobs = jobs.some((job) =>
-    job && !isCompleted(job) && (job.tripDateKey >= currentDateKey || isActiveOperationalJob(job, currentDateKey)));
+  const hasVisibleDashboardJobs = jobs.some((job) => job && !isTerminal(job));
 
   if (allowDemoFallback && !hasVisibleDashboardJobs) {
     jobs = buildOperationalJobs(initialSalesOrders, currentDateKey, true);
   }
 
-  const todayJobs = jobs.filter((job) => job && job.tripDateKey === currentDateKey && !isCompleted(job));
+  const todayJobs = jobs.filter((job) => job && job.tripDateKey === currentDateKey && !isTerminal(job));
+  const dueJobs = jobs.filter((job) => job
+    && !isTerminal(job)
+    && (!job.tripDateKey || job.tripDateKey <= currentDateKey));
   const activeJobs = getActiveOperationalJobs(jobs, currentDateKey);
-  const futureJobs = jobs.filter((job) => job && job.tripDateKey > currentDateKey && !isCompleted(job));
+  const futureJobs = jobs.filter((job) => job && job.tripDateKey > currentDateKey && !isTerminal(job));
   const visibleFutureJobs = allowDemoFallback && !hasLiveOrders && futureJobs.length < 4 ? [...futureJobs, ...createDemoProspectJobs()] : futureJobs;
   const prospectSchedule = groupFutureJobsByDate(visibleFutureJobs);
+  const workQueues = {
+    assignment: dueJobs.filter((job) => getOperationalWorkStage(job) === 'assignment'),
+    ready: dueJobs.filter((job) => getOperationalWorkStage(job) === 'ready'),
+    running: dueJobs.filter((job) => getOperationalWorkStage(job) === 'running'),
+    attention: dueJobs.filter((job) => getOperationalWorkStage(job) === 'attention'),
+  };
 
   return {
     currentDateKey,
     jobs,
     todayJobs,
+    dueJobs,
     activeJobs,
+    workQueues,
     futureJobs,
     visibleFutureJobs,
     prospectSchedule,

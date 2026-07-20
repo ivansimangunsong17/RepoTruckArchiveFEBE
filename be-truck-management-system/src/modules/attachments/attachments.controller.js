@@ -34,7 +34,11 @@ export async function updateAttachmentController(request, response) {
 
 export async function deleteAttachmentController(request, response) {
   const before = await getAttachmentById(request.params.id);
-  const deleted = await deleteAttachment(request.params.id);
+  const deleted = await deleteAttachment(
+    request.params.id,
+    request.user,
+    request.query?.reason,
+  );
   await safeRecordActivityLog(request, {
     action: 'DELETE_ATTACHMENT',
     module: 'attachments',
@@ -46,9 +50,10 @@ export async function deleteAttachmentController(request, response) {
       attachedEntityType: deleted.entityType,
       attachedEntityId: deleted.entityId,
       category: deleted.category,
+      trashId: deleted.trashId,
     },
   });
-  sendSuccess(response, deleted, 'Dokumen berhasil dihapus.');
+  sendSuccess(response, deleted, 'Dokumen dipindahkan ke recycle bin.');
 }
 
 export async function listAttachmentsController(request, response) {
@@ -86,7 +91,7 @@ export async function downloadAttachmentController(request, response) {
 
   response.writeHead(200, {
     'Content-Type': attachment.mimeType || 'application/octet-stream',
-    'Content-Disposition': `inline; filename="${String(attachment.fileName || 'document').replace(/"/g, '\\"')}"`,
+    'Content-Disposition': `${request.query?.download === '1' ? 'attachment' : 'inline'}; filename="${String(attachment.fileName || 'document').replace(/"/g, '\\"')}"`,
   });
 
   createReadStream(filePath).pipe(response);

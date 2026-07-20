@@ -3,6 +3,7 @@ import {
   completedTripDetailController,
   completedTripsController,
   financeDashboardController,
+  invoiceOrderDetailController,
   invoiceOrdersController,
   orderVerificationsController,
   rejectRpujController,
@@ -60,6 +61,12 @@ export const financeRoutes = [
     path: '/api/finance/invoices',
     permission: 'finance.invoice.read',
     handler: invoiceOrdersController,
+  },
+  {
+    method: 'GET',
+    path: '/api/finance/invoices/:id',
+    permission: 'finance.invoice.read',
+    handler: invoiceOrderDetailController,
   },
   {
     method: 'PATCH',

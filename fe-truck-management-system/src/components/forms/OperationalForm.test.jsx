@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import OperationalForm from './OperationalForm';
@@ -59,12 +59,21 @@ describe('OperationalForm', () => {
     expect(screen.getByLabelText('Truck')).toHaveValue('');
   });
 
-  it('menolak status selesai jika assignment dan dokumen wajib belum lengkap', async () => {
+  it('mengizinkan status selesai tanpa dokumen penyelesaian', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(
       <OperationalForm
-        container={{ ...container, rpujStatus: 'approved' }}
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+          spkNumber: 'SPK-TEST-001',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
+          chassis: 'TRK-001 - Hino FG',
+          status: 'running',
+          runningAt: '2026-07-19T08:00:00.000Z',
+        }}
         masterDrivers={[]}
         masterTrucks={[]}
         onClose={vi.fn()}
@@ -76,8 +85,11 @@ describe('OperationalForm', () => {
     await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
-    expect(screen.getByText(/Pekerjaan belum dapat diselesaikan/i)).toBeInTheDocument();
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'completed',
+      eirNumber: '',
+      eirDocument: null,
+    }));
   });
 
   it('mewajibkan truck dan driver otomatis untuk status sedang jalan', async () => {
@@ -120,7 +132,7 @@ describe('OperationalForm', () => {
     expect(screen.getByText('Waktu mulai dan selesai ada')).toBeInTheDocument();
     expect(screen.getByText('UJ sudah disetujui/dikirim')).toBeInTheDocument();
     expect(screen.getByText('SPK ada')).toBeInTheDocument();
-    expect(screen.getByText('Dokumen wajib lengkap')).toBeInTheDocument();
+    expect(screen.getByText('Dokumen penyelesaian lengkap (opsional)')).toBeInTheDocument();
   });
 
   it('menolak status sedang jalan sebelum UJ disetujui Finance', async () => {
@@ -172,6 +184,121 @@ describe('OperationalForm', () => {
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
 
     expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Driver Aktif');
+  });
+
+  it('tidak otomatis memulai perjalanan ketika truck baru di-assign', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, rpujStatus: 'approved', spkNumber: 'SPK-TEST-001' }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      plateNumber: 'B 1000 AA',
+      status: 'received',
+      runningAt: '',
+    }));
+  });
+
+  it('menolak status selesai ketika nomor container belum diisi', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          containerNumber: '',
+          rpujStatus: 'approved',
+          spkNumber: 'SPK-TEST-001',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
+          chassis: 'TRK-001 - Hino FG',
+          status: 'running',
+          runningAt: '2026-07-19T08:00:00.000Z',
+        }}
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await openOperationalPhase(user, /dokumen & closing/i);
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(screen.getByText(/Lengkapi nomor container/i)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await openOperationalPhase(user, /persiapan job/i);
+    expect(screen.getByLabelText('No. Container')).toBeEnabled();
+  });
+
+  it('mengizinkan Operational melengkapi dokumen kosong tanpa membuka revisi dokumen tersimpan', () => {
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'completed',
+          rpujStatus: 'paid',
+          eirNumber: 'EIR-TERSIMPAN',
+          eirDocument: null,
+          spkNumber: 'SPK-TEST-001',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
+          runningAt: '2026-07-19T08:00:00.000Z',
+          completedAt: '2026-07-19T12:00:00.000Z',
+        }}
+        currentUser={{ role: 'operational' }}
+        initialPhase="closing"
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('No. EIR')).toBeDisabled();
+    expect(document.getElementById('operational-eir-document')).toBeEnabled();
+    expect(screen.getByText(/hanya dapat melengkapi data atau file yang masih kosong/i)).toBeInTheDocument();
+  });
+
+  it('memulai perjalanan secara eksplisit dari tahap closing ketika UJ dan SPK siap', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'paid',
+          spkNumber: 'SPK-TEST-001',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await openOperationalPhase(user, /dokumen & closing/i);
+    expect(screen.getByRole('button', { name: /mulai jalan/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /mulai jalan/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'running',
+      runningAt: expect.any(String),
+    }));
   });
 
   it('tidak menampilkan truck jika driver atau truck masih aktif di job lain', () => {
@@ -277,10 +404,22 @@ describe('OperationalForm', () => {
     await user.click(screen.getByRole('button', { name: /preview spk/i }));
 
     const html = write.mock.calls.map(([value]) => value).join('');
-    expect(html).toContain('No. SO');
-    expect(html).toContain('No. DO');
-    expect(html).toContain('No. Job / Container');
-    expect(html).toContain('JOB-TEST-001 / MSCU-123456-7');
+    expect(html.indexOf('Tujuan')).toBeLessThan(html.indexOf('No. SPK'));
+    expect(html).toContain('No. Container');
+    expect(html).toContain('MSCU-123456-7');
+    expect(html).not.toContain('JOB-TEST-001');
+    expect(html).not.toContain('No. SO');
+    expect(html).not.toContain('No. DO');
+    expect(html).not.toContain('Chassis');
+    expect(html).not.toContain('Rute Operasional');
+    expect(html).not.toContain('Catatan Operasional');
+    expect(html).toContain('BGLogoArmada.png');
+    expect(html).toContain('alt="Logo Armada"');
+    expect(html).toContain('Jl. Perjuangan No.11F, RT.1/RW.7, Kb. Jeruk, Kec. Kb. Jeruk, Kota Jakarta Barat, Daerah Khusus Ibukota Jakarta 11530');
+    expect(html).not.toContain('Telp.');
+    expect(html).not.toContain('ops@armada-logistik.co.id');
+    expect(html).not.toContain('www.armada-logistik.co.id');
+    expect(html).toContain('SPK ini di-generate secara otomatis oleh sistem dan tidak memerlukan tanda tangan.');
     expect(html).toContain('UJ');
     expect(html).toContain('Uang Jalan');
     expect(html).toContain('Biaya Lainnya');
@@ -293,6 +432,100 @@ describe('OperationalForm', () => {
     expect(html).not.toContain('DRIVER');
 
     open.mockRestore();
+  });
+
+  it('membiarkan nomor container SPK kosong agar dapat diisi manual', async () => {
+    const user = userEvent.setup();
+    const write = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue({
+      document: { write, close: vi.fn() },
+    });
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          containerNumber: '',
+          jobNumber: 'JOB-TIDAK-BOLEH-TAMPIL',
+          spkNumber: 'SPK-TEST-EMPTY',
+          rpujStatus: 'approved',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    await user.click(screen.getByRole('button', { name: /preview spk/i }));
+
+    const html = write.mock.calls.map(([value]) => value).join('');
+    expect(html).toMatch(/<th>No\. Container<\/th>[\s\S]*?<td><\/td>/);
+    expect(html).not.toContain('JOB-TIDAK-BOLEH-TAMPIL');
+
+    open.mockRestore();
+  });
+
+  it('menanamkan logo Armada ke PDF SPK yang didownload', async () => {
+    const user = userEvent.setup();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn(() => 'blob:spk-logo-test');
+    const revokeObjectURL = vi.fn();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+
+    class MockLogoImage {
+      naturalWidth = 612;
+
+      naturalHeight = 408;
+
+      set src(value) {
+        this.source = value;
+        Promise.resolve().then(() => this.onload?.());
+      }
+    }
+
+    vi.stubGlobal('Image', MockLogoImage);
+    const context = {
+      drawImage: vi.fn(),
+      fillRect: vi.fn(),
+      fillStyle: '',
+    };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context);
+    const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/jpeg;base64,/9j/2Q==');
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    try {
+      render(
+        <OperationalForm
+          container={{ ...container, spkNumber: 'SPK-LOGO-001', rpujStatus: 'approved' }}
+          masterTrucks={[]}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+        />,
+      );
+
+      await openOperationalPhase(user, /uang jalan & spk/i);
+      await user.click(screen.getByRole('button', { name: /download spk/i }));
+      await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+
+      const pdfBlob = createObjectURL.mock.calls[0][0];
+      const pdfText = new TextDecoder('latin1').decode(await pdfBlob.arrayBuffer());
+      expect(pdfText).toContain('/Subtype /Image');
+      expect(pdfText).toContain('/Logo Do');
+      expect(pdfText).not.toContain('Td (A)');
+    } finally {
+      getContext.mockRestore();
+      toDataURL.mockRestore();
+      click.mockRestore();
+      vi.unstubAllGlobals();
+      if (originalCreateObjectURL) URL.createObjectURL = originalCreateObjectURL;
+      else delete URL.createObjectURL;
+      if (originalRevokeObjectURL) URL.revokeObjectURL = originalRevokeObjectURL;
+      else delete URL.revokeObjectURL;
+    }
   });
 
   it('mengajukan uang jalan ke Finance dari tombol RPUJ', async () => {
@@ -404,6 +637,49 @@ describe('OperationalForm', () => {
     expect(screen.getByLabelText('Truck')).toBeDisabled();
     expect(screen.getByText(/Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai/i)).toBeInTheDocument();
     expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('IQBAL');
+  });
+
+  it('tetap mengizinkan nomor container diisi pertama kali setelah UJ ditransfer', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          containerNumber: '',
+          rpujStatus: 'paid',
+          plateNumber: 'B 9243 BEL',
+          driver: 'IQBAL',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const containerNumberInput = screen.getByLabelText('No. Container');
+    expect(containerNumberInput).not.toBeDisabled();
+    expect(screen.getByText(/Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim/i)).toBeInTheDocument();
+
+    await user.type(containerNumberInput, 'TCLU1234567');
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ containerNumber: 'TCLU1234567' }));
+  });
+
+  it('tetap mengunci revisi nomor container yang sudah tersimpan setelah UJ ditransfer', () => {
+    render(
+      <OperationalForm
+        container={{ ...container, rpujStatus: 'paid' }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('No. Container')).toBeDisabled();
+    expect(screen.getByText(/No. Container yang sudah tersimpan terkunci/i)).toBeInTheDocument();
   });
 
   it('mengunci truck dan driver setelah pekerjaan selesai', async () => {

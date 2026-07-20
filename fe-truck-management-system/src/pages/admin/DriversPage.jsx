@@ -1,49 +1,13 @@
-import MasterDataPage from '../../components/master/MasterDataPage';
+import MasterDataPage, { DetailDocumentActions } from '../../components/master/MasterDataPage';
+import MasterExpiryDate from '../../components/master/MasterExpiryDate';
 import { buildOperationalJobs, getActiveOperationalJobs } from '../../data/operationalDashboard';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { useArchiveData } from '../../hooks/useArchiveData';
-
-function parseDateAsLocal(value) {
-  if (!value) return null;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) {
-    return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
-  }
-
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-}
-
-function formatLicenseDate(value) {
-  const parsed = parseDateAsLocal(value);
-  if (!parsed) return '-';
-  return parsed.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 function formatTruckNumber(unitCode) {
   const value = String(unitCode || '-').trim();
   if (!value || value === '-') return '-';
   return value.replace(/^TRK-?/i, '') || value;
-}
-
-function getLicenseState(value) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const expiry = parseDateAsLocal(value);
-  if (!expiry) return { label: '-', tone: 'muted' };
-  const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-  if (Number.isNaN(daysLeft)) return { label: '-', tone: 'muted' };
-  if (daysLeft < 0) return { label: 'Expired', tone: 'danger' };
-  if (daysLeft <= 30) return { label: `${daysLeft} hari`, tone: 'warning' };
-  return { label: 'Aman', tone: 'ok' };
 }
 
 function getTruckRows() {
@@ -115,13 +79,7 @@ function DriverPlate({ row, trucks }) {
 }
 
 function DriverLicense({ row }) {
-  const state = getLicenseState(row.licenseExpiry);
-  return (
-    <div className="driver-license-cell">
-      <strong>{formatLicenseDate(row.licenseExpiry)}</strong>
-      {state.tone !== 'ok' ? <em className={state.tone}>{state.label}</em> : null}
-    </div>
-  );
+  return <MasterExpiryDate value={row.licenseExpiry} />;
 }
 
 function getDriverPaymentLabel(row) {
@@ -140,10 +98,47 @@ function DriverPayment({ row }) {
 }
 
 function DriverDocumentSummary({ row }) {
-  const complete = [row.identityDocument, row.licenseDocument, row.partnershipLetter].filter(Boolean).length;
+  const documents = [
+    row.driverPhoto,
+    row.identityDocument,
+    row.licenseDocument,
+    row.partnershipLetter,
+  ];
+  const complete = documents.filter(Boolean).length;
   return (
     <div className="driver-doc-cell">
-      <strong>{complete}/3</strong>
+      <strong>{complete}/{documents.length}</strong>
+    </div>
+  );
+}
+
+const DRIVER_DOCUMENT_FIELD_KEYS = new Set([
+  'driverPhoto',
+  'identityDocument',
+  'licenseDocument',
+  'partnershipLetter',
+]);
+
+function DriverDocumentDetail({ row }) {
+  const documents = [
+    { label: 'Foto Sopir', file: row.driverPhoto },
+    { label: 'KTP Driver', file: row.identityDocument },
+    { label: 'Dokumen SIM', file: row.licenseDocument },
+    { label: 'Surat Kemitraan', file: row.partnershipLetter },
+  ];
+
+  return (
+    <div className="driver-document-detail-table">
+      <div className="driver-document-detail-head">
+        <strong>Jenis Dokumen</strong>
+        <strong>View dan Download</strong>
+      </div>
+      {documents.map((document) => (
+        <div className="driver-document-detail-row" key={document.label}>
+          <strong>{document.label}</strong>
+          <DetailDocumentActions file={document.file} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -162,7 +157,7 @@ const fields = [
   { key: 'licenseType', section: 'Informasi SIM', label: 'Jenis SIM', type: 'select', defaultValue: 'SIM B2 Umum', options: [
     { value: 'SIM B1 Umum', label: 'SIM B1 Umum' }, { value: 'SIM B2 Umum', label: 'SIM B2 Umum' },
   ] },
-  { key: 'licenseExpiry', section: 'Informasi SIM', label: 'Masa Berlaku SIM', type: 'date', required: true, hint: 'Sistem akan menandai SIM yang mendekati kedaluwarsa.' },
+  { key: 'licenseExpiry', section: 'Informasi SIM', label: 'Masa Berlaku SIM', type: 'date', required: true, hint: 'Sistem akan menandai SIM yang mendekati kedaluwarsa.', expiryAlert: { label: 'SIM' } },
   { key: 'status', section: 'Status Ketersediaan', label: 'Status Driver', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
     { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Cuti', label: 'Cuti' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
   ] },
@@ -180,6 +175,25 @@ function DriversPage() {
   const archive = useArchiveData();
   const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : getTruckRows();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
+  const detailFields = [
+    ...fields
+      .filter((field) => !DRIVER_DOCUMENT_FIELD_KEYS.has(field.key))
+      .map((field) => {
+        if (field.key === 'licenseExpiry') {
+          return {
+            ...field,
+            renderDetail: (value) => <MasterExpiryDate value={value} label="SIM" />,
+          };
+        }
+        return field;
+      }),
+    {
+      key: 'driverDocumentDetail',
+      label: 'Dokumen Sopir',
+      full: true,
+      renderDetail: (_, row) => <DriverDocumentDetail row={row} />,
+    },
+  ];
 
   return (
     <MasterDataPage
@@ -188,6 +202,7 @@ function DriversPage() {
       singular="Sopir"
       description="Daftar sopir untuk assignment truck dan perjalanan harian."
       fields={fields}
+      detailFields={detailFields}
       columns={[
         { key: 'truckNumber', label: 'No', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
         { key: 'name', label: 'Nama Sopir', render: (_, row) => <DriverIdentity row={row} /> },

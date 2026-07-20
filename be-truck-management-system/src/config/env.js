@@ -38,6 +38,14 @@ function readMaxUploadBytes() {
   return bytes;
 }
 
+function readPositiveInteger(name, fallback) {
+  const value = Number(process.env[name] || fallback);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} harus berupa integer positif.`);
+  }
+  return value;
+}
+
 export const env = {
   nodeEnv,
   port: Number(process.env.PORT || 3000),
@@ -47,6 +55,8 @@ export const env = {
   authTokenSecret: readAuthTokenSecret(),
   passwordHashCost: readPasswordHashCost(),
   maxUploadBytes: readMaxUploadBytes(),
+  fileTrashRetentionDays: readPositiveInteger('FILE_TRASH_RETENTION_DAYS', 30),
+  storageTemporaryMaxHours: readPositiveInteger('STORAGE_TEMP_MAX_HOURS', 24),
   allowedUploadMimeTypes: (process.env.ALLOWED_UPLOAD_MIME_TYPES || 'application/pdf,image/jpeg,image/png')
     .split(',')
     .map((value) => value.trim())

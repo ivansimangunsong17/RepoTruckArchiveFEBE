@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Truck, Users } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
+import { SETTINGS_STORAGE_KEY } from '../../services/settings/adapters/localSettingsStore';
 import { fetchDriverPerformanceReport, fetchMonthlyRevenueReport, fetchOperationReport } from '../../services/reports/reportService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
@@ -28,7 +29,17 @@ const DEFAULT_REVENUE_SUMMARY = {
   totalTrucks: 0,
   totalTrips: 0,
 };
-const TARGET_TRIPS_PER_TRUCK_PER_DAY = 1.8;
+const DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY = 1.8;
+
+function readUtilizationTargetTripsPerDay() {
+  try {
+    const savedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
+    const target = Number(savedSettings?.utilizationTargetTripsPerTruckPerDay);
+    return Number.isFinite(target) && target > 0 ? target : DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY;
+  } catch {
+    return DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY;
+  }
+}
 
 function currentPeriod() {
   const now = new Date();
@@ -176,7 +187,19 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
   });
 }
 
-function SummaryToggleCard({ icon: Icon, label, value, helper, secondaryLabel, secondaryValue, expanded, onClick, tone = 'slate' }) {
+function SummaryToggleCard({
+  icon: Icon,
+  label,
+  value,
+  helper,
+  secondaryLabel,
+  secondaryValue,
+  tertiaryLabel,
+  tertiaryValue,
+  expanded,
+  onClick,
+  tone = 'slate',
+}) {
   const toneClass = {
     slate: 'border-slate-200 bg-slate-50 text-slate-600',
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -207,6 +230,12 @@ function SummaryToggleCard({ icon: Icon, label, value, helper, secondaryLabel, s
           <span className="mt-3 grid max-w-md gap-1 border-t border-white/70 pt-3 sm:grid-cols-[auto_1fr] sm:items-baseline sm:gap-x-3">
             <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{secondaryLabel}</span>
             <strong className="text-base font-semibold text-slate-900">{secondaryValue}</strong>
+          </span>
+        ) : null}
+        {tertiaryLabel ? (
+          <span className="mt-1 grid max-w-md gap-1 sm:grid-cols-[auto_1fr] sm:items-baseline sm:gap-x-3">
+            <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{tertiaryLabel}</span>
+            <strong className="text-base font-semibold text-slate-900">{tertiaryValue}</strong>
           </span>
         ) : null}
       </div>
@@ -254,6 +283,7 @@ function ReportsPage() {
   const [driverPerformanceLoading, setDriverPerformanceLoading] = useState(true);
   const [driverPerformanceError, setDriverPerformanceError] = useState('');
   const [selectedReport, setSelectedReport] = useState('revenue');
+  const utilizationTargetTripsPerDay = readUtilizationTargetTripsPerDay();
   const yearOptions = useMemo(() => {
     const baseYear = currentPeriod().year;
     return Array.from({ length: 7 }, (_, index) => baseYear - 3 + index);
@@ -350,7 +380,7 @@ function ReportsPage() {
   const utilizationSourceRows = utilizationRows.length ? utilizationRows : revenueRows;
   const utilizationTruckRows = useMemo(() => buildUtilizationTruckRows(masterTruckRows || [], utilizationSourceRows), [masterTruckRows, utilizationSourceRows]);
   const activeDays = daysInMonth(month, year);
-  const utilizationTargetPerTruck = activeDays * TARGET_TRIPS_PER_TRUCK_PER_DAY;
+  const utilizationTargetPerTruck = activeDays * utilizationTargetTripsPerDay;
   const utilizationRowsWithTarget = useMemo(() => utilizationTruckRows.map((truck) => ({
     ...truck,
     targetTrips: utilizationTargetPerTruck,
@@ -370,6 +400,9 @@ function ReportsPage() {
     totalTrips: driverRows.reduce((total, driver) => total + driver.totalTrips, 0),
     activeDrivers: driverRows.filter((driver) => driver.totalTrips > 0).length,
     totalDrivers: driverRows.length,
+    averageTripsPerActiveDriver: driverRows.filter((driver) => driver.totalTrips > 0).length
+      ? driverRows.reduce((total, driver) => total + driver.totalTrips, 0) / driverRows.filter((driver) => driver.totalTrips > 0).length
+      : 0,
   }), [driverRows]);
 
   return (
@@ -428,6 +461,8 @@ function ReportsPage() {
           helper={`Target ${formatDecimal(utilizationSummary.totalTargetTrips)} trip dari ${utilizationSummary.totalTrucks} truck`}
           secondaryLabel="Utilisasi"
           secondaryValue={`${utilizationPercent.toFixed(1)}%`}
+          tertiaryLabel="Target Harian"
+          tertiaryValue={`${formatDecimal(utilizationTargetTripsPerDay)} Trip/Truck`}
           tone="sky"
           expanded={selectedReport === 'utilization'}
           onClick={() => setSelectedReport('utilization')}
@@ -437,8 +472,10 @@ function ReportsPage() {
           label="Driver Performance"
           value={`${driverSummary.totalTrips} Trip`}
           helper={`${driverSummary.activeDrivers} sopir menjalankan trip`}
-          secondaryLabel="Total Sopir"
-          secondaryValue={`${driverSummary.totalDrivers} Sopir`}
+          secondaryLabel="Rata-rata Trip/Sopir"
+          secondaryValue={`${formatDecimal(driverSummary.averageTripsPerActiveDriver)} Trip`}
+          tertiaryLabel="Total Sopir"
+          tertiaryValue={`${driverSummary.totalDrivers} Sopir`}
           tone="amber"
           expanded={selectedReport === 'driver'}
           onClick={() => setSelectedReport('driver')}

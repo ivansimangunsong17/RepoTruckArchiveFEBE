@@ -20,7 +20,11 @@ import PageHeader from '../common/PageHeader';
 import DocumentLink from '../common/DocumentLink';
 import FilterStatus from '../common/FilterStatus';
 import { fetchMasterPage } from '../../services/master-data/masterDataService';
-import { createAttachmentDownloadUrl } from '../../services/files/fileService';
+import {
+  createAttachmentDownloadUrl,
+  deleteAttachmentFile,
+  uploadAttachmentFile,
+} from '../../services/files/fileService';
 import { validateArchiveFile } from '../../utils/fileValidation';
 
 const FILE_TYPE_BY_EXTENSION = {
@@ -31,6 +35,13 @@ const FILE_TYPE_BY_EXTENSION = {
 };
 
 const EMPTY_ROWS = [];
+const ATTACHMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MASTER_ATTACHMENT_ENTITY_TYPES = {
+  trucks: 'truck',
+  'kir-chassis': 'chassis',
+  drivers: 'driver',
+  customers: 'customer',
+};
 
 function normalizeRows(value) {
   return Array.isArray(value) ? value : EMPTY_ROWS;
@@ -52,6 +63,10 @@ function resolveFieldDisabled(field, form) {
   return typeof field.disabled === 'function' ? Boolean(field.disabled(form)) : Boolean(field.disabled);
 }
 
+function resolveFieldWarning(field, form, context = {}) {
+  return typeof field.warning === 'function' ? field.warning(form, context) : field.warning;
+}
+
 function createFileMetadata(file) {
   if (!file) return null;
   return {
@@ -63,6 +78,15 @@ function createFileMetadata(file) {
   };
 }
 
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('File gagal dibaca.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function serializeFileMetadata(file) {
   if (!file) return null;
   return {
@@ -71,7 +95,65 @@ function serializeFileMetadata(file) {
     type: file.type || 'Dokumen',
     lastModified: file.lastModified || null,
     path: file.path || '',
+    dataUrl: file.dataUrl || '',
   };
+}
+
+function isStoredAttachment(file) {
+  return Boolean(file?.path && ATTACHMENT_ID_PATTERN.test(String(file.path)));
+}
+
+export function DetailDocumentActions({ file }) {
+  if (!file) return <span className="master-detail-document-empty">Belum ada dokumen</span>;
+
+  return (
+    <div className="master-detail-document-actions">
+      <DocumentLink file={file} label="View" />
+      <DocumentLink file={file} label="Download" download />
+    </div>
+  );
+}
+
+function toAttachmentFileMetadata(attachment) {
+  return {
+    name: attachment.fileNameOriginal || attachment.fileName || 'Dokumen',
+    size: attachment.sizeBytes ?? attachment.fileSize ?? 0,
+    type: attachment.mimeType || 'Dokumen',
+    lastModified: null,
+    path: attachment.id,
+  };
+}
+
+async function syncMasterAttachmentFields({ resource, entityId, fields, form, existingRow }) {
+  const entityType = MASTER_ATTACHMENT_ENTITY_TYPES[resource];
+  if (!entityType || !entityId) return null;
+
+  const updates = {};
+  for (const field of fields.filter((item) => item.type === 'file')) {
+    const selectedFile = form[field.key];
+    const existingFile = existingRow?.[field.key] || null;
+
+    if (selectedFile instanceof File) {
+      const attachment = await uploadAttachmentFile({
+        path: isStoredAttachment(existingFile) ? existingFile.path : '',
+        entityType,
+        entityId,
+        category: field.attachmentCategory || field.key,
+        file: selectedFile,
+      });
+      updates[field.key] = toAttachmentFileMetadata(attachment);
+      continue;
+    }
+
+    if (!selectedFile && existingFile) {
+      if (isStoredAttachment(existingFile)) {
+        await deleteAttachmentFile(existingFile.path);
+      }
+      updates[field.key] = null;
+    }
+  }
+
+  return Object.keys(updates).length ? updates : null;
 }
 
 function normalizeDateForInput(value) {
@@ -161,6 +243,11 @@ function AttachmentThumbnail({ file }) {
       const objectUrl = URL.createObjectURL(rawFile);
       setPreviewUrl(objectUrl);
       return () => URL.revokeObjectURL(objectUrl);
+    }
+
+    if (file.dataUrl) {
+      setPreviewUrl(file.dataUrl);
+      return undefined;
     }
 
     if (file.path) {
@@ -419,6 +506,15 @@ function MasterDataPage({
       return;
     }
 
+    const localFileDataUrls = {};
+    if (!masterDatabaseMode) {
+      for (const field of activeFields.filter((item) => item.type === 'file')) {
+        if (form[field.key] instanceof File) {
+          localFileDataUrls[field.key] = await readFileAsDataUrl(form[field.key]);
+        }
+      }
+    }
+
     const payload = activeFields.reduce((result, field) => {
       const rawValue = form[field.key];
       const value = field.normalize ? field.normalize(rawValue, form) : rawValue;
@@ -426,7 +522,11 @@ function MasterDataPage({
         return result;
       }
       if (field.type === 'file') {
-        result[field.key] = serializeFileMetadata(value instanceof File ? createFileMetadata(value) : value);
+        result[field.key] = masterDatabaseMode && MASTER_ATTACHMENT_ENTITY_TYPES[resource]
+          ? serializeFileMetadata(currentEditingRow?.[field.key])
+          : serializeFileMetadata(value instanceof File
+            ? { ...createFileMetadata(value), dataUrl: localFileDataUrls[field.key] || '' }
+            : value);
       } else if (field.sensitive) {
         if (value) result[field.key] = '••••••••';
         else if (editingId) result[field.key] = safeRows.find((row) => row.id === editingId)?.[field.key] || null;
@@ -455,7 +555,18 @@ function MasterDataPage({
 
     try {
       if (masterDatabaseMode && resource) {
-        await upsertMaster(resource, savePayload, editingId);
+        let saved = await upsertMaster(resource, savePayload, editingId);
+        const attachmentUpdates = await syncMasterAttachmentFields({
+          resource,
+          entityId: saved?.id || editingId,
+          fields: activeFields,
+          form,
+          existingRow: currentEditingRow,
+        });
+        if (attachmentUpdates && (saved?.id || editingId)) {
+          const savedId = saved?.id || editingId;
+          saved = await upsertMaster(resource, { ...(saved || savePayload), ...attachmentUpdates }, savedId);
+        }
         for (const related of relatedRows) {
           await upsertMaster(resource, related.row, related.id);
         }
@@ -699,8 +810,8 @@ function MasterDataPage({
                     {field.renderDetail
                       ? field.renderDetail(value, detailRow)
                       : field.type === 'file'
-                        ? <DocumentLink file={value} />
-                        : <strong>{value || '-'}</strong>}
+                        ? <DetailDocumentActions file={value} />
+                        : <strong className={value ? '' : 'is-empty-value'}>{value || '-'}</strong>}
                   </div>
                 );
               })}
@@ -748,6 +859,7 @@ function MasterDataPage({
                         if (field.showIf && !field.showIf(form)) return null;
                         const fieldOptions = resolveFieldOptions(field, form);
                         const fieldDisabled = resolveFieldDisabled(field, form);
+                        const fieldWarning = resolveFieldWarning(field, form, { editingId, editingRow });
                         return (
                         <div key={field.key} className={`master-field ${field.full ? 'span-full' : ''} ${field.className || ''}`.trim()}>
                           <span>{field.label}</span>
@@ -833,6 +945,7 @@ function MasterDataPage({
                             />
                           )}
                           {field.hint ? <small>{field.hint}</small> : null}
+                          {fieldWarning ? <small className="master-field-warning">{fieldWarning}</small> : null}
                         </div>
                       );})}
                     </div>

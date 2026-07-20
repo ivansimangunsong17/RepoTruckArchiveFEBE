@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   Clock3,
   Eye,
@@ -9,9 +10,13 @@ import {
   RotateCcw,
   Search,
   Upload,
+  X,
 } from 'lucide-react';
+import FinancePeriodFilter from '../../components/finance/FinancePeriodFilter';
+import DocumentLink from '../../components/common/DocumentLink';
 import {
   approveFinanceRpuj,
+  fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
@@ -20,6 +25,7 @@ import {
   updateFinanceOrderSoNumber,
   uploadFinanceRpujTransferProof,
 } from '../../services/finance/financeService';
+import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
 import { validateArchiveFile } from '../../utils/fileValidation';
 
 const financeTabs = [
@@ -386,10 +392,13 @@ function normalizeRpujStatus(row = {}) {
 
 function normalizeFinanceRpujRow(row = {}) {
   const rpujStatus = normalizeRpujStatus(row);
+  const containerParts = String(row.container || '').split('/').map((value) => value.trim()).filter(Boolean);
   return {
     id: row.id,
     soNumber: row.soNumber || '-',
     jobNumber: row.jobNumber || '-',
+    containerNumber: row.containerNumber || (containerParts.length > 1 ? containerParts.at(-1) : ''),
+    containerSize: row.containerSize || containerParts[0] || '',
     customer: row.customer || '-',
     destination: row.destination || '-',
     driver: row.driver || '-',
@@ -407,6 +416,11 @@ function normalizeFinanceRpujRow(row = {}) {
     additionalCost: Number(row.additionalCost || 0),
     status: row.status || 'Belum Diajukan',
     rpujStatus,
+    requestedBy: row.requestedBy || '',
+    requestedAt: row.requestedAt || '',
+    reviewedBy: row.reviewedBy || '',
+    reviewedAt: row.reviewedAt || '',
+    rejectionNote: row.rejectionNote || '',
     transferProof: row.transferProof || row.transferProofFile?.name || '',
     transferProofFile: row.transferProofFile || null,
   };
@@ -426,6 +440,7 @@ function normalizeFinanceInvoiceRow(row = {}) {
     dueDate: formatDisplayDate(row.dueDate),
     billingItems: Array.isArray(row.billingItems) && row.billingItems.length ? row.billingItems : ['Rincian tagihan belum tersedia'],
     documentChecklist: Array.isArray(row.documentChecklist) ? row.documentChecklist : [],
+    documents: Array.isArray(row.documents) ? row.documents : [],
     activityLogs: Array.isArray(row.activityLogs) ? row.activityLogs.map((log) => {
       const [timestamp, ...rest] = String(log).split(' - ');
       return `${formatDisplayDate(timestamp)} - ${rest.join(' - ') || timestamp}`;
@@ -508,8 +523,8 @@ function DetailField({ label, value, className = '' }) {
 
 function AmountField({ label, value, highlight = false, className = '' }) {
   return (
-    <div className={`rounded-md border px-2.5 py-2 ${highlight ? 'border-slate-200 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-950'} ${className}`}>
-      <span className={`block text-[10px] font-bold uppercase tracking-wide ${highlight ? 'text-slate-300' : 'text-slate-500'}`}>{label}</span>
+    <div className={`rounded-md border px-2.5 py-2 ${highlight ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : 'border-slate-200 bg-white text-slate-950'} ${className}`}>
+      <span className={`block text-[10px] font-bold uppercase tracking-wide ${highlight ? 'text-emerald-700' : 'text-slate-500'}`}>{label}</span>
       <strong className="mt-0.5 block text-sm font-black">{formatCurrency(value)}</strong>
     </div>
   );
@@ -542,12 +557,222 @@ function ActivityLogList({ logs }) {
   );
 }
 
-function InfoRow({ label, value }) {
+function FinanceActionModal({ children, title, description, tone = 'neutral', busy, confirmDisabled = false, confirmLabel, onClose, onConfirm }) {
+  const toneClasses = tone === 'approve'
+    ? 'bg-emerald-600 hover:bg-emerald-700'
+    : tone === 'reject'
+      ? 'bg-rose-600 hover:bg-rose-700'
+      : tone === 'upload'
+        ? 'bg-amber-600 hover:bg-amber-700'
+      : 'bg-slate-900 hover:bg-slate-800';
+
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
-      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-      <strong className="text-right text-xs font-semibold text-slate-900">{value || '-'}</strong>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={busy ? undefined : onClose}>
+      <section className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="finance-action-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <form onSubmit={onConfirm}>
+          <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+            <div>
+              <h2 className="text-base font-black text-slate-950" id="finance-action-modal-title">{title}</h2>
+              <p className="mt-1 text-xs font-medium leading-relaxed text-slate-500">{description}</p>
+            </div>
+            <button aria-label="Tutup modal" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40" disabled={busy} onClick={onClose} type="button">
+              <X size={16} />
+            </button>
+          </header>
+          <div className="grid gap-4 px-5 py-4">{children}</div>
+          <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+            <button className="h-9 rounded-lg border border-slate-300 bg-white px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40" disabled={busy} onClick={onClose} type="button">Batal</button>
+            <button className={`h-9 rounded-lg px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 ${toneClasses}`} disabled={busy || confirmDisabled} type="submit">
+              {busy ? 'Memproses...' : confirmLabel}
+            </button>
+          </footer>
+        </form>
+      </section>
     </div>
+  );
+}
+
+function SoNumberInputModal({ order, value, error, busy, onChange, onClose, onConfirm }) {
+  if (!order) return null;
+  return (
+    <FinanceActionModal
+      busy={busy}
+      confirmLabel="Simpan Nomor SO"
+      description="Masukkan nomor Sales Order resmi yang sudah dibuat di Accurate."
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title="Input Nomor SO Accurate"
+    >
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div><span className="block text-[10px] font-bold uppercase text-slate-400">Customer</span><strong className="mt-0.5 block text-xs text-slate-900">{order.customer || '-'}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase text-slate-400">Tujuan</span><strong className="mt-0.5 block text-xs text-slate-900">{order.destination || '-'}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase text-slate-400">Sales</span><strong className="mt-0.5 block text-xs text-slate-900">{order.salesName || '-'}</strong></div>
+        <div><span className="block text-[10px] font-bold uppercase text-slate-400">Tanggal Jalan</span><strong className="mt-0.5 block text-xs text-slate-900">{order.runningDate || '-'}</strong></div>
+      </div>
+      <label className="grid gap-1.5 text-xs font-bold text-slate-700">
+        Nomor SO Accurate
+        <input
+          autoFocus
+          className="h-10 rounded-lg border border-slate-300 px-3 text-sm font-bold uppercase text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
+          maxLength={80}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Contoh: SO-202607-019"
+          value={value}
+        />
+      </label>
+      {error ? <p className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
+    </FinanceActionModal>
+  );
+}
+
+function RpujDecisionModal({ decision, row, note, error, busy, onNoteChange, onClose, onConfirm }) {
+  if (!decision || !row) return null;
+  const isReject = decision === 'reject';
+  const totalRequest = Number(row.totalUj || 0) + Number(row.additionalCost || 0);
+
+  return (
+    <FinanceActionModal
+      busy={busy}
+      confirmLabel={isReject ? 'Ya, Reject RPUJ' : 'Ya, Approve RPUJ'}
+      description={isReject ? 'RPUJ akan dikembalikan ke Operational untuk diperbaiki.' : 'Pastikan nominal, driver, dan rekening tujuan sudah sesuai.'}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title={isReject ? 'Validasi Reject RPUJ' : 'Validasi Approval RPUJ'}
+      tone={isReject ? 'reject' : 'approve'}
+    >
+      <div className={`flex gap-3 rounded-lg border p-3 ${isReject ? 'border-rose-100 bg-rose-50' : 'border-emerald-100 bg-emerald-50'}`}>
+        {isReject ? <AlertTriangle className="mt-0.5 shrink-0 text-rose-600" size={18} /> : <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={18} />}
+        <div className="min-w-0">
+          <strong className="block text-sm text-slate-950">{row.soNumber} / {row.jobNumber}</strong>
+          <span className="mt-0.5 block text-xs font-medium text-slate-600">{row.customer} - {row.destination}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <DetailField label="Driver" value={row.driver} />
+        <DetailField label="Rekening Tujuan" value={row.driverBankAccount} />
+        <DetailField label="Truck" value={row.truck} />
+        <AmountField highlight label="Total Pengajuan" value={totalRequest} />
+      </div>
+      {isReject ? (
+        <label className="grid gap-1.5 text-xs font-bold text-slate-700">
+          Catatan Reject <span className="font-semibold text-rose-600">Wajib diisi</span>
+          <textarea
+            autoFocus
+            className="min-h-24 resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-950 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+            maxLength={500}
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder="Jelaskan bagian yang harus diperbaiki oleh Operational..."
+            value={note}
+          />
+          <small className="justify-self-end font-medium text-slate-400">{note.length}/500</small>
+        </label>
+      ) : null}
+      {error ? <p className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
+    </FinanceActionModal>
+  );
+}
+
+function RpujTransferUploadModal({ row, file, error, busy, onFileChange, onClose, onConfirm }) {
+  if (!row) return null;
+  const totalRequest = Number(row.totalUj || 0) + Number(row.additionalCost || 0);
+  const fileSize = file ? `${(file.size / 1024).toLocaleString('id-ID', { maximumFractionDigits: 1 })} KB` : '';
+
+  return (
+    <FinanceActionModal
+      busy={busy}
+      confirmDisabled={!file}
+      confirmLabel="Konfirmasi & Upload"
+      description="Periksa kembali tujuan transfer dan file sebelum bukti dikirim."
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title="Validasi Bukti Transfer UJ"
+      tone="upload"
+    >
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+        <div className="flex gap-2.5">
+          <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={18} />
+          <div>
+            <strong className="block text-xs text-amber-900">Pastikan file sesuai dengan transfer untuk job ini.</strong>
+            <p className="mt-1 text-[11px] font-medium leading-relaxed text-amber-800">Setelah dikonfirmasi, status berubah menjadi UJ Dikirim dan data biaya serta assignment Operational akan terkunci.</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <DetailField label="Nomor SO / Job" value={`${row.soNumber} / ${row.jobNumber}`} />
+        <AmountField highlight label="Total Transfer" value={totalRequest} />
+        <DetailField label="Driver" value={row.driver} />
+        <DetailField label="Rekening Tujuan" value={row.driverBankAccount} />
+        <DetailField label="Truck" value={row.truck} />
+        <DetailField label="Container" value={row.container} />
+      </div>
+      <div className="grid gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <strong className="block text-xs text-slate-900">File Bukti Transfer</strong>
+            <span className="mt-0.5 block text-[10px] font-medium text-slate-500">PDF, JPG, atau PNG. Maksimal 5 MB.</span>
+          </div>
+          <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 hover:bg-slate-100">
+            <Upload size={13} /> {file ? 'Ganti File' : 'Pilih File'}
+            <input
+              accept=".pdf,.jpg,.jpeg,.png"
+              aria-label="File bukti transfer UJ"
+              className="sr-only"
+              disabled={busy}
+              onChange={(event) => {
+                const selectedFile = event.target.files?.[0] || null;
+                event.target.value = '';
+                onFileChange(selectedFile);
+              }}
+              type="file"
+            />
+          </label>
+        </div>
+        {file ? (
+          <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2">
+            <div className="min-w-0">
+              <strong className="block truncate text-xs text-emerald-900">{file.name}</strong>
+              <span className="mt-0.5 block text-[10px] font-semibold text-emerald-700">{fileSize} - Siap dikonfirmasi</span>
+            </div>
+            <CheckCircle2 className="shrink-0 text-emerald-600" size={17} />
+          </div>
+        ) : null}
+      </div>
+      {error ? <p className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
+    </FinanceActionModal>
+  );
+}
+
+function InvoiceNumberConfirmModal({ row, error, busy, onClose, onConfirm }) {
+  if (!row) return null;
+  const invoiceNumber = String(row.invoiceNumber || '').trim().toUpperCase();
+
+  return (
+    <FinanceActionModal
+      busy={busy}
+      confirmLabel="Ya, Kirim Nomor Invoice"
+      description="Cek lagi nomor invoice sebelum dikirim. Setelah dikonfirmasi, status akan lanjut menunggu update dari Sales."
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title="Validasi Nomor Invoice"
+      tone="upload"
+    >
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+        <div className="flex gap-2.5">
+          <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={18} />
+          <div>
+            <strong className="block text-xs text-amber-900">Pastikan nomor invoice sudah sama dengan dokumen invoice.</strong>
+            <p className="mt-1 text-[11px] font-medium leading-relaxed text-amber-800">Jika nomor salah, Sales akan menerima informasi invoice yang keliru.</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <DetailField label="Nomor SO" value={row.soNumber} />
+        <DetailField label="Customer" value={row.customer} />
+        <DetailField label="Tujuan" value={row.destination} />
+        <DetailField label="Nomor Invoice" value={invoiceNumber} />
+      </div>
+      {error ? <p className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
+    </FinanceActionModal>
   );
 }
 
@@ -609,7 +834,7 @@ function RpujDetailModal({ rpuj, onClose }) {
               <h3 className="text-lg font-black text-slate-950">{rpuj.soNumber}</h3>
               <StatusPill value={compactRpujStatus(rpuj.status)} />
             </div>
-            <p className="mt-0.5 text-xs text-slate-500">{rpuj.destination} - {rpuj.customer}</p>
+            <p className="mt-1 text-sm font-bold text-slate-700">{rpuj.customer}</p>
           </div>
           <button className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" onClick={onClose} type="button">
             Tutup
@@ -618,17 +843,46 @@ function RpujDetailModal({ rpuj, onClose }) {
 
         <div className="finance-rpuj-detail-body">
           <section className="finance-rpuj-detail-card">
-            <div className="finance-rpuj-info-grid">
-              <DetailField className="finance-rpuj-detail-field span-2" label="No. Job" value={rpuj.jobNumber} />
-              <DetailField className="finance-rpuj-detail-field" label="No. SPK" value={rpuj.spkNumber} />
-              <DetailField className="finance-rpuj-detail-field" label="Tanggal Jalan" value={rpuj.departureDate} />
-              <DetailField className="finance-rpuj-detail-field span-2" label="Container" value={rpuj.container} />
+            <div className="finance-rpuj-card-title">
+              <div>
+                <span>Informasi Utama</span>
+                <h4>Perjalanan & Container</h4>
+              </div>
+              <small>Informasi yang perlu diperiksa sebelum memproses RPUJ.</small>
+            </div>
+            <div className="finance-rpuj-focus-grid">
+              <div className="finance-rpuj-focus-field is-destination">
+                <span>Tujuan</span>
+                <strong>{rpuj.destination || '-'}</strong>
+                <small>Dari {rpuj.depo || '-'}</small>
+              </div>
+              <div className="finance-rpuj-focus-field is-container">
+                <span>Nomor Container</span>
+                <strong>{rpuj.containerNumber || 'Belum diisi'}</strong>
+                <small>{rpuj.containerSize || 'Ukuran belum tersedia'}</small>
+              </div>
+              <div className="finance-rpuj-focus-field is-date">
+                <span>Tanggal Jalan</span>
+                <strong>{rpuj.departureDate || '-'}</strong>
+                <small>{rpuj.orderType || 'Jenis order belum tersedia'}</small>
+              </div>
+            </div>
+
+            <div className="finance-rpuj-subsection-head">
+              <h4>Assignment & Pembayaran Driver</h4>
+              <span>Pastikan driver dan rekening tujuan sudah benar.</span>
+            </div>
+            <div className="finance-rpuj-assignment-grid">
               <DetailField className="finance-rpuj-detail-field" label="Truck" value={rpuj.truck} />
-              <DetailField className="finance-rpuj-detail-field" label="Jenis Order" value={rpuj.orderType} />
               <DetailField className="finance-rpuj-detail-field" label="Driver" value={rpuj.driver} />
-              <DetailField className="finance-rpuj-detail-field" label="Rekening / E-Money Driver" value={rpuj.driverBankAccount} />
+              <DetailField className="finance-rpuj-detail-field span-2 is-account" label="Rekening / E-Money Driver" value={rpuj.driverBankAccount} />
+            </div>
+
+            <div className="finance-rpuj-support-grid">
+              <DetailField className="finance-rpuj-detail-field" label="Nomor SPK" value={rpuj.spkNumber} />
+              <DetailField className="finance-rpuj-detail-field" label="Jenis Order" value={rpuj.orderType} />
               <DetailField className="finance-rpuj-detail-field" label="Terminal" value={rpuj.terminal} />
-              <DetailField className="finance-rpuj-detail-field" label="Depo" value={rpuj.depo} />
+              <DetailField className="finance-rpuj-detail-field" label="Depo / Asal" value={rpuj.depo} />
             </div>
           </section>
 
@@ -636,9 +890,23 @@ function RpujDetailModal({ rpuj, onClose }) {
             <div className="finance-rpuj-section-head">
               <h4 className="text-sm font-black text-slate-950">Rincian Pengajuan</h4>
               <div>
-                <span>{rpuj.transferProof || 'Bukti transfer belum ada'}</span>
-                <button className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 disabled:opacity-40" disabled={!rpuj.transferProof} type="button">Preview</button>
-                <button className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 disabled:opacity-40" disabled={!rpuj.transferProof} type="button">Download</button>
+                {rpuj.transferProofFile ? (
+                  <div className="flex items-center gap-1.5">
+                    <DocumentLink
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                      file={rpuj.transferProofFile}
+                      label="View"
+                    />
+                    <DocumentLink
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100"
+                      download
+                      file={rpuj.transferProofFile}
+                      label="Download"
+                    />
+                  </div>
+                ) : (
+                  <span>Bukti transfer belum ada</span>
+                )}
               </div>
             </div>
             <div className="finance-rpuj-amount-grid">
@@ -650,6 +918,12 @@ function RpujDetailModal({ rpuj, onClose }) {
               <DetailField className="finance-rpuj-detail-field" label="Rekomendasi UJ" value={rpuj.ujRecommendation} />
               <DetailField className="finance-rpuj-detail-field" label="Catatan Pengajuan" value={rpuj.notes} />
             </div>
+            {rpuj.rejectionNote ? (
+              <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-rose-600">Catatan Reject Finance</span>
+                <strong className="mt-1 block text-xs font-semibold leading-relaxed text-rose-900">{rpuj.rejectionNote}</strong>
+              </div>
+            ) : null}
           </section>
         </div>
       </section>
@@ -657,8 +931,31 @@ function RpujDetailModal({ rpuj, onClose }) {
   );
 }
 
-function InvoiceDetailModal({ invoice, onClose }) {
+function InvoiceDetailModal({ invoice, loading = false, error = '', onClose }) {
   if (!invoice) return null;
+  const documents = Array.isArray(invoice.documents) ? invoice.documents : [];
+  const availableDocumentCount = documents.filter((document) => document.ready !== false && document.file?.path).length;
+  const documentGroups = Array.from(documents.reduce((groups, document) => {
+    const isSalesDocument = document.source === 'Sales';
+    const groupId = isSalesDocument
+      ? 'sales-order'
+      : `container-${document.jobId || document.containerNumber || document.jobReference || 'unknown'}`;
+    const currentGroup = groups.get(groupId) || {
+      id: groupId,
+      eyebrow: isSalesDocument ? 'Dokumen Sales / SO' : 'Nomor Container',
+      title: isSalesDocument
+        ? invoice.soNumber
+        : document.containerNumber || document.jobReference || 'Nomor belum diisi',
+      documents: [],
+    };
+
+    currentGroup.documents.push(document);
+    groups.set(groupId, currentGroup);
+    return groups;
+  }, new Map()).values()).map((group) => ({
+    ...group,
+    readyCount: group.documents.filter((document) => document.ready !== false && document.file?.path).length,
+  }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
@@ -678,41 +975,119 @@ function InvoiceDetailModal({ invoice, onClose }) {
         </header>
 
         <div className="finance-invoice-detail-body">
-          <div className="finance-invoice-detail-grid">
-            <section className="finance-invoice-summary-card">
-              <div className="rounded-md bg-slate-50 p-2.5">
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Nilai Tagih</span>
-                <strong className="mt-1 block text-xl font-black text-slate-950">{formatCurrency(invoice.billingAmount)}</strong>
+          {loading ? (
+            <div className="mb-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+              Memuat dokumen Sales dan Operational...
+            </div>
+          ) : null}
+          {error ? (
+            <div className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
+          <div className="finance-invoice-detail-layout">
+            <section className="finance-invoice-summary-strip">
+              <div className="finance-invoice-summary-primary">
+                <span>Nilai Tagih</span>
+                <strong>{formatCurrency(invoice.billingAmount)}</strong>
               </div>
-              <div className="mt-2.5">
-                <InfoRow label="Terms" value={invoice.paymentTerms} />
-                <InfoRow label="Jatuh Tempo" value={invoice.dueDate} />
-                <InfoRow label="Tgl Selesai" value={invoice.completedAt} />
-                <InfoRow label="Tgl Invoice" value={invoice.invoiceDate} />
-                <InfoRow label="No. Invoice" value={invoice.invoiceNumber || 'Belum ada'} />
-                <InfoRow label="Dokumen" value={invoice.documentStatus} />
-              </div>
+              {[
+                ['Terms', invoice.paymentTerms],
+                ['Jatuh Tempo', invoice.dueDate],
+                ['Tgl Selesai', invoice.completedAt],
+                ['Tgl Invoice', invoice.invoiceDate],
+                ['No. Invoice', invoice.invoiceNumber || 'Belum ada'],
+                ['Dokumen', invoice.documentStatus],
+              ].map(([label, value]) => (
+                <div className="finance-invoice-summary-item" key={label}>
+                  <span>{label}</span>
+                  <strong>{value || '-'}</strong>
+                </div>
+              ))}
             </section>
 
-            <section className="finance-invoice-detail-stack">
+            <section className="finance-invoice-support-grid">
               <div className="finance-invoice-detail-card">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <h4 className="text-sm font-black text-slate-950">Dokumen Dasar Tagih</h4>
-                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">Siap Invoice</span>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <h4 className="text-xs font-black text-slate-950">Dokumen Dasar Tagih</h4>
+                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-700">Siap Invoice</span>
                 </div>
                 <CompactList items={invoice.documentChecklist} />
               </div>
-
-              <div className="finance-invoice-detail-columns">
+              <div className="finance-invoice-support-stack">
                 <div className="finance-invoice-detail-card">
-                  <h4 className="mb-2 text-sm font-black text-slate-950">Rincian Tagihan</h4>
+                  <h4 className="mb-1.5 text-xs font-black text-slate-950">Rincian Tagihan</h4>
                   <CompactList items={invoice.billingItems} />
                 </div>
                 <div className="finance-invoice-detail-card">
-                  <h4 className="mb-2 text-sm font-black text-slate-950">Riwayat Finance</h4>
+                  <h4 className="mb-1.5 text-xs font-black text-slate-950">Riwayat Finance</h4>
                   <ActivityLogList logs={invoice.activityLogs} />
                 </div>
               </div>
+            </section>
+
+            <section className="finance-invoice-detail-card">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h4 className="text-xs font-black text-slate-950">File Sales & Operational</h4>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">{availableDocumentCount} file tersedia</span>
+              </div>
+              {documents.length ? (
+                <div className="finance-invoice-container-grid">
+                  {documentGroups.map((group) => (
+                    <section className="finance-invoice-container-card" key={group.id}>
+                      <header className="finance-invoice-container-header">
+                        <div className="min-w-0">
+                          <span>{group.eyebrow}</span>
+                          <strong className="truncate" title={group.title}>{group.title}</strong>
+                        </div>
+                        <span className="finance-invoice-container-count">
+                          {group.id === 'sales-order' ? `${group.readyCount} file` : `${group.readyCount}/${group.documents.length} lengkap`}
+                        </span>
+                      </header>
+                      <div className="finance-invoice-container-files">
+                        {group.documents.map((document) => {
+                          const isReady = document.ready !== false && Boolean(document.file?.path);
+                          return (
+                            <div className={`finance-invoice-document-row ${isReady ? '' : 'is-missing'}`} key={document.id}>
+                              <div className="min-w-0 flex-1">
+                                <strong className="block truncate text-[11px] text-slate-900" title={document.label}>
+                                  {document.label}
+                                </strong>
+                                <p className="mt-0.5 truncate text-[9px] font-medium text-slate-500">
+                                  {isReady
+                                    ? document.referenceNumber || 'File tersedia untuk view atau download.'
+                                    : 'Belum dilengkapi oleh Operational.'}
+                                </p>
+                              </div>
+                              {isReady ? (
+                                <div className="grid shrink-0 grid-cols-2 gap-1">
+                                  <DocumentLink
+                                    className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[9px] font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                                    file={document.file}
+                                    label="View"
+                                  />
+                                  <DocumentLink
+                                    className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[9px] font-bold text-sky-700 hover:bg-sky-100 disabled:opacity-40"
+                                    download
+                                    file={document.file}
+                                    label="Download"
+                                  />
+                                </div>
+                              ) : (
+                                <span className="finance-invoice-document-missing">Belum dilengkapi</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-center text-xs font-medium text-slate-500">
+                  Belum ada file Sales atau Operational yang dapat didownload.
+                </p>
+              )}
             </section>
           </div>
         </div>
@@ -721,7 +1096,7 @@ function InvoiceDetailModal({ invoice, onClose }) {
   );
 }
 
-function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onSoChange, onSaveSoNumber, savingSoId }) {
+function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onOpenSoModal, savingSoId }) {
   const isVerifiedOrder = (row) => row.verificationStatus === 'verified' || Boolean(row.soNumber);
   const orderTabs = [
     { id: 'need-so', label: 'Belum Ada Nomor SO', icon: Clock3, match: (row) => !isVerifiedOrder(row) },
@@ -825,22 +1200,14 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onS
                       <td className="px-2 py-1 font-semibold text-slate-800">{row.runningDate}</td>
                       <td className="px-2 py-1">
                         {activeOrderTab === 'need-so' ? (
-                          <div className="flex min-w-[190px] items-center gap-1">
-                            <input
-                              className="h-6 w-32 rounded-lg border border-slate-300 px-2 text-[11px] font-semibold text-slate-900 outline-none focus:border-slate-400"
-                              onChange={(event) => onSoChange(row.id, event.target.value)}
-                              placeholder="SO Accurate"
-                              value={row.soNumberDraft || ''}
-                            />
-                            <button
-                              className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                              disabled={!String(row.soNumberDraft || '').trim() || savingSoId === row.id}
-                              onClick={() => onSaveSoNumber(row.id)}
-                              type="button"
-                            >
-                              {savingSoId === row.id ? 'Menyimpan' : 'Simpan'}
-                            </button>
-                          </div>
+                          <button
+                            className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40"
+                            disabled={savingSoId === row.id}
+                            onClick={() => onOpenSoModal(row.id)}
+                            type="button"
+                          >
+                            {savingSoId === row.id ? 'Menyimpan...' : 'Input Nomor SO'}
+                          </button>
                         ) : (
                           <div>
                             <span className="block text-[11px] font-black text-slate-900">{row.soNumber}</span>
@@ -871,9 +1238,21 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onS
   );
 }
 
-function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelectRpuj, rpujBusyId }) {
-  const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
-
+function RpujApprovalTable({
+  rows,
+  query,
+  activeRpujTab,
+  onActiveRpujTabChange,
+  periodMonth,
+  periodYear,
+  onPeriodMonthChange,
+  onPeriodYearChange,
+  onApprove,
+  onReject,
+  onOpenUploadModal,
+  onSelectRpuj,
+  rpujBusyId,
+}) {
   const searchableRows = rows.filter((row) =>
     `${row.soNumber} ${row.jobNumber} ${row.customer} ${row.destination} ${row.container} ${row.driver} ${row.truck} ${row.status}`.toLowerCase().includes(query.toLowerCase()));
 
@@ -900,7 +1279,7 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
+      <div className="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
         <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter RPUJ Finance">
           {tabs.map((tab) => {
             const active = tab.id === activeRpujTab;
@@ -933,7 +1312,7 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                 aria-selected={active}
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveRpujTab(tab.id)}
+                onClick={() => onActiveRpujTabChange(tab.id)}
                 role="tab"
                 className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${
                   active
@@ -950,6 +1329,14 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
             );
           })}
         </div>
+        {activeRpujTab === 'paid' ? (
+          <FinancePeriodFilter
+            month={periodMonth}
+            onMonthChange={onPeriodMonthChange}
+            onYearChange={onPeriodYearChange}
+            year={periodYear}
+          />
+        ) : null}
       </div>
 
       <div className="table-wrap">
@@ -964,7 +1351,7 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
             <thead>
               <tr>
                 {['Job / Container', 'Pengajuan', 'Status', 'Driver / Rekening', 'Aksi'].map((column) => (
-                  <th key={column}>{column}</th>
+                  <th className={column === 'Aksi' ? 'finance-rpuj-actions-header' : ''} key={column}>{column}</th>
                 ))}
               </tr>
             </thead>
@@ -1023,8 +1410,8 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-600">{row.driverBankAccount}</span>
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-400">{row.truck}</span>
                             </td>
-                            <td className="px-2 py-2">
-                              <div className="grid min-w-[230px] grid-cols-3 gap-1.5">
+                            <td className="finance-rpuj-actions-cell px-2 py-2">
+                              <div className="finance-rpuj-action-grid grid min-w-[230px] grid-cols-3 gap-1.5">
                                 <button className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectRpuj(row.id)} type="button">Detail</button>
                                 {activeRpujTab === 'need-approval' ? (
                                   <>
@@ -1033,25 +1420,35 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
                                   </>
                                 ) : null}
                                 {activeRpujTab === 'ready-transfer' ? (
-                                  <label className={`col-span-2 inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 ${canUploadTransfer && !busy ? 'cursor-pointer hover:bg-slate-50' : 'pointer-events-none opacity-40'}`}>
-                                    <Upload size={11} /> {busy ? 'Proses' : 'Upload'}
-                                    <input
-                                      accept=".pdf,.jpg,.jpeg,.png"
-                                      className="hidden"
-                                      disabled={!canUploadTransfer || busy}
-                                      onChange={(event) => {
-                                        const file = event.target.files?.[0];
-                                        event.target.value = '';
-                                        if (file) onUpload(row.id, file);
-                                      }}
-                                      type="file"
-                                    />
-                                  </label>
+                                  <button
+                                    className="col-span-2 inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                                    disabled={!canUploadTransfer || busy}
+                                    onClick={() => onOpenUploadModal(row.id)}
+                                    type="button"
+                                  >
+                                    <Upload size={11} /> {busy ? 'Proses' : 'Upload Bukti'}
+                                  </button>
                                 ) : null}
                                 {activeRpujTab === 'paid' ? (
-                                  <span className="col-span-2 min-w-0 truncate rounded-md border border-emerald-100 bg-emerald-50 px-2 py-2 text-[10px] font-semibold text-emerald-700" title={row.transferProof || 'Bukti transfer sudah dikirim'}>
-                                    {row.transferProof || 'Bukti transfer sudah dikirim'}
-                                  </span>
+                                  row.transferProofFile ? (
+                                    <div className="col-span-2 grid grid-cols-2 gap-1.5">
+                                      <DocumentLink
+                                        className="inline-flex h-8 min-w-0 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                                        file={row.transferProofFile}
+                                        label="View"
+                                      />
+                                      <DocumentLink
+                                        className="inline-flex h-8 min-w-0 items-center justify-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                        download
+                                        file={row.transferProofFile}
+                                        label="Download"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="col-span-2 min-w-0 truncate rounded-md border border-amber-200 bg-amber-50 px-2 py-2 text-center text-[10px] font-semibold text-amber-700">
+                                      Bukti transfer tidak tersedia
+                                    </span>
+                                  )
                                 ) : null}
                               </div>
                             </td>
@@ -1077,7 +1474,20 @@ function RpujApprovalTable({ rows, query, onApprove, onReject, onUpload, onSelec
   );
 }
 
-function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSaveInvoice, onSelectInvoice }) {
+function InvoiceTable({
+  rows,
+  query,
+  activeInvoiceTab,
+  onActiveInvoiceTabChange,
+  periodMonth,
+  periodYear,
+  onPeriodMonthChange,
+  onPeriodYearChange,
+  invoiceBusyId = '',
+  onInvoiceChange,
+  onSaveInvoice,
+  onSelectInvoice,
+}) {
   const invoiceTabs = [
     {
       id: 'need-number',
@@ -1101,7 +1511,6 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
       match: (row) => row.invoiceStatus === 'Lunas',
     },
   ];
-  const [activeInvoiceTab, setActiveInvoiceTab] = useState(invoiceTabs[0].id);
   const currentTab = invoiceTabs.find((tab) => tab.id === activeInvoiceTab) || invoiceTabs[0];
   const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${row.invoiceNumber} ${row.invoiceStatus}`.toLowerCase().includes(query.toLowerCase()));
   const filteredRows = searchedRows.filter((row) => currentTab.match(row));
@@ -1109,11 +1518,13 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-200 bg-white px-4 py-3">
-        <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-          <Info size={12} />
-          <span>Keterangan</span>
-        </div>
-        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter invoice Finance">
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              <Info size={12} />
+              <span>Keterangan</span>
+            </div>
+            <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter invoice Finance">
           {invoiceTabs.map((tab) => {
           const count = searchedRows.filter((row) => tab.match(row)).length;
           const active = tab.id === activeInvoiceTab;
@@ -1144,7 +1555,7 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
                   : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-800'
               }`}
               key={tab.id}
-              onClick={() => setActiveInvoiceTab(tab.id)}
+              onClick={() => onActiveInvoiceTabChange(tab.id)}
               role="tab"
               type="button"
             >
@@ -1155,7 +1566,17 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
               <span className={`grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] leading-none ${active ? toneClass.count : 'bg-white text-slate-500'}`}>{count}</span>
             </button>
           );
-        })}
+            })}
+            </div>
+          </div>
+          {activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid' ? (
+            <FinancePeriodFilter
+              month={periodMonth}
+              onMonthChange={onPeriodMonthChange}
+              onYearChange={onPeriodYearChange}
+              year={periodYear}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -1246,6 +1667,14 @@ function InvoiceTable({ rows, query, invoiceBusyId = '', onInvoiceChange, onSave
 
 function FinanceTable({
   activeTab,
+  activeRpujTab,
+  activeInvoiceTab,
+  onActiveRpujTabChange,
+  onActiveInvoiceTabChange,
+  periodMonth,
+  periodYear,
+  onPeriodMonthChange,
+  onPeriodYearChange,
   query,
   onQueryChange,
   onReset,
@@ -1331,16 +1760,43 @@ function FinanceTable({
         <OrderVerificationTable rows={orderRows} query={query} onQueryChange={onQueryChange} savingSoId={savingSoId} {...handlers} />
       ) : null}
       {activeTab.id === 'rpuj-approval' ? (
-        <RpujApprovalTable rows={rpujRows} query={query} rpujBusyId={rpujBusyId} {...handlers} />
+        <RpujApprovalTable
+          activeRpujTab={activeRpujTab}
+          onActiveRpujTabChange={onActiveRpujTabChange}
+          onPeriodMonthChange={onPeriodMonthChange}
+          onPeriodYearChange={onPeriodYearChange}
+          periodMonth={periodMonth}
+          periodYear={periodYear}
+          query={query}
+          rows={rpujRows}
+          rpujBusyId={rpujBusyId}
+          {...handlers}
+        />
       ) : null}
       {activeTab.id === 'invoice-number' ? (
-        <InvoiceTable rows={invoiceRows} query={query} invoiceBusyId={invoiceBusyId} {...handlers} />
+        <InvoiceTable
+          activeInvoiceTab={activeInvoiceTab}
+          invoiceBusyId={invoiceBusyId}
+          onActiveInvoiceTabChange={onActiveInvoiceTabChange}
+          onPeriodMonthChange={onPeriodMonthChange}
+          onPeriodYearChange={onPeriodYearChange}
+          periodMonth={periodMonth}
+          periodYear={periodYear}
+          query={query}
+          rows={invoiceRows}
+          {...handlers}
+        />
       ) : null}
     </section>
   );
 }
 
 function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
+  const currentPeriod = useMemo(() => getCurrentFinancePeriod(), []);
+  const [periodMonth, setPeriodMonth] = useState(currentPeriod.month);
+  const [periodYear, setPeriodYear] = useState(currentPeriod.year);
+  const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
+  const [activeInvoiceTab, setActiveInvoiceTab] = useState('need-number');
   const [query, setQuery] = useState('');
   const [orderRows, setOrderRows] = useState(initialOrderRows);
   const [rpujRows, setRpujRows] = useState(initialRpujRows);
@@ -1354,16 +1810,39 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState('');
   const [invoiceBusyId, setInvoiceBusyId] = useState('');
+  const [invoiceDetail, setInvoiceDetail] = useState(null);
+  const [invoiceDetailLoading, setInvoiceDetailLoading] = useState(false);
+  const [invoiceDetailError, setInvoiceDetailError] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [selectedRpujId, setSelectedRpujId] = useState('');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [soModalId, setSoModalId] = useState('');
+  const [soModalValue, setSoModalValue] = useState('');
+  const [soModalError, setSoModalError] = useState('');
+  const [rpujDecision, setRpujDecision] = useState(null);
+  const [rpujDecisionNote, setRpujDecisionNote] = useState('');
+  const [rpujDecisionError, setRpujDecisionError] = useState('');
+  const [transferModalId, setTransferModalId] = useState('');
+  const [transferFile, setTransferFile] = useState(null);
+  const [transferModalError, setTransferModalError] = useState('');
+  const [invoiceConfirmId, setInvoiceConfirmId] = useState('');
+  const [invoiceConfirmError, setInvoiceConfirmError] = useState('');
   const activeTab = useMemo(
     () => financeTabs.find((tab) => tab.id === initialTabId) || financeTabs[0],
     [initialTabId],
   );
   const selectedOrder = orderRows.find((row) => row.id === selectedOrderId);
   const selectedRpuj = rpujRows.find((row) => row.id === selectedRpujId);
-  const selectedInvoice = invoiceRows.find((row) => row.id === selectedInvoiceId);
+  const selectedInvoiceSummary = invoiceRows.find((row) => row.id === selectedInvoiceId);
+  const selectedInvoice = invoiceDetail || selectedInvoiceSummary;
+  const soModalOrder = orderRows.find((row) => row.id === soModalId);
+  const rpujDecisionRow = rpujRows.find((row) => row.id === rpujDecision?.id);
+  const transferModalRow = rpujRows.find((row) => row.id === transferModalId);
+  const invoiceConfirmRow = invoiceRows.find((row) => row.id === invoiceConfirmId);
+  const periodRange = useMemo(
+    () => getFinancePeriodRange(periodMonth, periodYear),
+    [periodMonth, periodYear],
+  );
 
   const loadOrderVerifications = useCallback(async () => {
     if (activeTab.id !== 'order-verification') return;
@@ -1389,7 +1868,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setRpujLoading(true);
     setRpujError('');
     try {
-      const result = await fetchFinanceRpujRequests({ page: 1, pageSize: 100 });
+      const result = await fetchFinanceRpujRequests({
+        page: 1,
+        pageSize: 100,
+        ...(activeRpujTab === 'paid' ? { status: 'paid', ...periodRange } : {}),
+      });
       setRpujRows((result.rows || []).map(normalizeFinanceRpujRow));
     } catch (error) {
       setRpujError(error.message || 'Data pengajuan RPUJ gagal dimuat.');
@@ -1397,7 +1880,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     } finally {
       setRpujLoading(false);
     }
-  }, [activeTab.id]);
+  }, [activeRpujTab, activeTab.id, periodRange]);
 
   useEffect(() => {
     loadRpujRequests();
@@ -1408,7 +1891,13 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setInvoiceLoading(true);
     setInvoiceError('');
     try {
-      const result = await fetchFinanceInvoices({ page: 1, pageSize: 100 });
+      const result = await fetchFinanceInvoices({
+        page: 1,
+        pageSize: 100,
+        ...(activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid'
+          ? { status: activeInvoiceTab, ...periodRange }
+          : {}),
+      });
       setInvoiceRows((result.rows || []).map(normalizeFinanceInvoiceRow));
     } catch (error) {
       setInvoiceError(error.message || 'Daftar invoice gagal dimuat.');
@@ -1416,11 +1905,34 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     } finally {
       setInvoiceLoading(false);
     }
-  }, [activeTab.id]);
+  }, [activeInvoiceTab, activeTab.id, periodRange]);
 
   useEffect(() => {
     loadInvoiceOrders();
   }, [loadInvoiceOrders]);
+
+  useEffect(() => {
+    if (!selectedInvoiceId) return undefined;
+    let active = true;
+    setInvoiceDetail(null);
+    setInvoiceDetailLoading(true);
+    setInvoiceDetailError('');
+
+    fetchFinanceInvoiceDetail(selectedInvoiceId)
+      .then((result) => {
+        if (active) setInvoiceDetail(normalizeFinanceInvoiceRow(result));
+      })
+      .catch((error) => {
+        if (active) setInvoiceDetailError(error.message || 'Dokumen detail invoice gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setInvoiceDetailLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedInvoiceId]);
 
   function resetSimulation() {
     if (activeTab.id === 'order-verification') {
@@ -1443,107 +1955,212 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setQuery('');
   }
 
-  const handlers = {
-    onSaveSoNumber: async (id) => {
-      const row = orderRows.find((item) => item.id === id);
-      const soNumber = String(row?.soNumberDraft || row?.soNumber || '').trim();
-      if (!soNumber) return;
+  function closeSoModal() {
+    if (savingSoId) return;
+    setSoModalId('');
+    setSoModalValue('');
+    setSoModalError('');
+  }
 
-      setSavingSoId(id);
-      setOrderError('');
-      try {
-        const saved = await updateFinanceOrderSoNumber(id, soNumber);
-        const normalized = normalizeFinanceOrderRow(saved);
-        setOrderRows((rows) => rows.map((item) => (
-          item.id === id ? normalized : item
-        )));
-      } catch (error) {
-        setOrderError(error.message || 'Nomor SO Accurate gagal disimpan.');
-      } finally {
-        setSavingSoId('');
-      }
+  async function saveSoNumberFromModal(event) {
+    event.preventDefault();
+    const soNumber = String(soModalValue || '').trim().toUpperCase();
+    if (!soNumber) {
+      setSoModalError('Nomor SO Accurate wajib diisi.');
+      return;
+    }
+
+    setSavingSoId(soModalId);
+    setSoModalError('');
+    setOrderError('');
+    try {
+      const saved = await updateFinanceOrderSoNumber(soModalId, soNumber);
+      const normalized = normalizeFinanceOrderRow(saved);
+      setOrderRows((rows) => rows.map((item) => (item.id === soModalId ? normalized : item)));
+      setSoModalId('');
+      setSoModalValue('');
+    } catch (error) {
+      setSoModalError(error.message || 'Nomor SO Accurate gagal disimpan.');
+    } finally {
+      setSavingSoId('');
+    }
+  }
+
+  function closeRpujDecisionModal() {
+    if (rpujBusyId) return;
+    setRpujDecision(null);
+    setRpujDecisionNote('');
+    setRpujDecisionError('');
+  }
+
+  async function submitRpujDecision(event) {
+    event.preventDefault();
+    if (!rpujDecision?.id) return;
+    const rejectionNote = rpujDecisionNote.trim();
+    if (rpujDecision.type === 'reject' && !rejectionNote) {
+      setRpujDecisionError('Catatan reject wajib diisi agar Operational mengetahui bagian yang harus diperbaiki.');
+      return;
+    }
+
+    setRpujBusyId(rpujDecision.id);
+    setRpujDecisionError('');
+    setRpujError('');
+    try {
+      const saved = rpujDecision.type === 'reject'
+        ? await rejectFinanceRpuj(rpujDecision.id, rejectionNote)
+        : await approveFinanceRpuj(rpujDecision.id);
+      const normalized = normalizeFinanceRpujRow(saved);
+      setRpujRows((rows) => rows.map((row) => (row.id === rpujDecision.id ? normalized : row)));
+      setRpujDecision(null);
+      setRpujDecisionNote('');
+    } catch (error) {
+      setRpujDecisionError(error.message || (rpujDecision.type === 'reject' ? 'RPUJ gagal ditolak.' : 'RPUJ gagal disetujui.'));
+    } finally {
+      setRpujBusyId('');
+    }
+  }
+
+  function closeTransferModal() {
+    if (rpujBusyId) return;
+    setTransferModalId('');
+    setTransferFile(null);
+    setTransferModalError('');
+  }
+
+  function selectTransferFile(file) {
+    if (!file) return;
+    const validationError = validateArchiveFile(file, { label: 'Bukti transfer UJ' });
+    if (validationError) {
+      setTransferFile(null);
+      setTransferModalError(validationError);
+      return;
+    }
+    setTransferFile(file);
+    setTransferModalError('');
+  }
+
+  async function submitTransferProof(event) {
+    event.preventDefault();
+    if (!transferModalId || !transferFile) {
+      setTransferModalError('Pilih file bukti transfer terlebih dahulu.');
+      return;
+    }
+
+    setRpujBusyId(transferModalId);
+    setTransferModalError('');
+    setRpujError('');
+    try {
+      const saved = await uploadFinanceRpujTransferProof(transferModalId, transferFile);
+      const normalized = normalizeFinanceRpujRow(saved);
+      setRpujRows((rows) => rows.map((row) => (row.id === transferModalId ? normalized : row)));
+      setTransferModalId('');
+      setTransferFile(null);
+    } catch (error) {
+      setTransferModalError(error.message || 'Bukti transfer gagal diupload.');
+    } finally {
+      setRpujBusyId('');
+    }
+  }
+
+  function closeInvoiceConfirmModal() {
+    if (invoiceBusyId) return;
+    setInvoiceConfirmId('');
+    setInvoiceConfirmError('');
+  }
+
+  async function submitInvoiceNumber(event) {
+    event.preventDefault();
+    const row = invoiceRows.find((item) => item.id === invoiceConfirmId);
+    const invoiceNumber = String(row?.invoiceNumber || '').trim().toUpperCase();
+    if (!invoiceNumber) {
+      setInvoiceConfirmError('Nomor invoice wajib diisi sebelum dikirim.');
+      return;
+    }
+    if (invoiceNumber.length < 4) {
+      setInvoiceConfirmError('Nomor invoice terlalu pendek. Cek kembali nomor dari dokumen invoice.');
+      return;
+    }
+
+    setInvoiceBusyId(invoiceConfirmId);
+    setInvoiceConfirmError('');
+    setInvoiceError('');
+    try {
+      const saved = await updateFinanceInvoiceNumber(invoiceConfirmId, invoiceNumber);
+      const normalized = normalizeFinanceInvoiceRow(saved);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === invoiceConfirmId ? normalized : item)));
+      setInvoiceConfirmId('');
+    } catch (error) {
+      setInvoiceConfirmError(error.message || 'Nomor invoice gagal disimpan.');
+    } finally {
+      setInvoiceBusyId('');
+    }
+  }
+
+  const handlers = {
+    onOpenSoModal: (id) => {
+      const row = orderRows.find((item) => item.id === id);
+      setSoModalId(id);
+      setSoModalValue(row?.soNumberDraft || row?.soNumber || '');
+      setSoModalError('');
     },
     onSelectOrder: (id) => setSelectedOrderId(id),
     onSelectRpuj: (id) => setSelectedRpujId(id),
-    onSelectInvoice: (id) => setSelectedInvoiceId(id),
-    onReject: async (id) => {
-      setRpujBusyId(id);
-      setRpujError('');
-      try {
-        const saved = await rejectFinanceRpuj(id);
-        const normalized = normalizeFinanceRpujRow(saved);
-        setRpujRows((rows) => rows.map((row) => (row.id === id ? normalized : row)));
-      } catch (error) {
-        setRpujError(error.message || 'RPUJ gagal ditolak.');
-      } finally {
-        setRpujBusyId('');
-      }
+    onSelectInvoice: (id) => {
+      setSelectedInvoiceId(id);
+      setInvoiceDetail(null);
+      setInvoiceDetailError('');
     },
-    onApprove: async (id) => {
-      setRpujBusyId(id);
-      setRpujError('');
-      try {
-        const saved = await approveFinanceRpuj(id);
-        const normalized = normalizeFinanceRpujRow(saved);
-        setRpujRows((rows) => rows.map((row) => (row.id === id ? normalized : row)));
-      } catch (error) {
-        setRpujError(error.message || 'RPUJ gagal disetujui.');
-      } finally {
-        setRpujBusyId('');
-      }
+    onReject: (id) => {
+      setRpujDecision({ id, type: 'reject' });
+      setRpujDecisionNote('');
+      setRpujDecisionError('');
     },
-    onSoChange: (id, value) => {
-      setOrderRows((rows) => rows.map((row) => (row.id === id ? { ...row, soNumberDraft: value } : row)));
+    onApprove: (id) => {
+      setRpujDecision({ id, type: 'approve' });
+      setRpujDecisionNote('');
+      setRpujDecisionError('');
     },
-    onUpload: async (id, file) => {
-      const validationError = validateArchiveFile(file, { label: 'Bukti transfer UJ' });
-      if (validationError) {
-        setRpujError(validationError);
-        return;
-      }
-      setRpujBusyId(id);
-      setRpujError('');
-      try {
-        const saved = await uploadFinanceRpujTransferProof(id, file);
-        const normalized = normalizeFinanceRpujRow(saved);
-        setRpujRows((rows) => rows.map((row) => (row.id === id ? normalized : row)));
-      } catch (error) {
-        setRpujError(error.message || 'Bukti transfer gagal diupload.');
-      } finally {
-        setRpujBusyId('');
-      }
+    onOpenUploadModal: (id) => {
+      setTransferModalId(id);
+      setTransferFile(null);
+      setTransferModalError('');
     },
     onInvoiceChange: (id, value) => {
       setInvoiceRows((rows) => rows.map((row) => (row.id === id ? { ...row, invoiceNumber: value } : row)));
     },
-    onSaveInvoice: async (id) => {
+    onSaveInvoice: (id) => {
       const row = invoiceRows.find((item) => item.id === id);
-      const invoiceNumber = String(row?.invoiceNumber || '').trim();
-      if (!invoiceNumber) return;
-
-      setInvoiceBusyId(id);
+      const invoiceNumber = String(row?.invoiceNumber || '').trim().toUpperCase();
       setInvoiceError('');
-      try {
-        const saved = await updateFinanceInvoiceNumber(id, invoiceNumber);
-        const normalized = normalizeFinanceInvoiceRow(saved);
-        setInvoiceRows((rows) => rows.map((item) => (item.id === id ? normalized : item)));
-      } catch (error) {
-        setInvoiceError(error.message || 'Nomor invoice gagal disimpan.');
-      } finally {
-        setInvoiceBusyId('');
+      setInvoiceConfirmError('');
+      if (!invoiceNumber) {
+        setInvoiceError('Nomor invoice wajib diisi sebelum dikirim.');
+        return;
       }
+      if (invoiceNumber.length < 4) {
+        setInvoiceError('Nomor invoice terlalu pendek. Cek kembali nomor dari dokumen invoice.');
+        return;
+      }
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, invoiceNumber } : item)));
+      setInvoiceConfirmId(id);
     },
   };
 
   return (
     <main className="min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
       <FinanceTable
+        activeInvoiceTab={activeInvoiceTab}
+        activeRpujTab={activeRpujTab}
         activeTab={activeTab}
         handlers={handlers}
         invoiceBusyId={invoiceBusyId}
         invoiceError={invoiceError}
         invoiceLoading={invoiceLoading}
         invoiceRows={invoiceRows}
+        onActiveInvoiceTabChange={setActiveInvoiceTab}
+        onActiveRpujTabChange={setActiveRpujTab}
+        onPeriodMonthChange={setPeriodMonth}
+        onPeriodYearChange={setPeriodYear}
         onReset={resetSimulation}
         onQueryChange={setQuery}
         orderError={orderError}
@@ -1552,6 +2169,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         rpujError={rpujError}
         rpujLoading={rpujLoading}
         orderRows={orderRows}
+        periodMonth={periodMonth}
+        periodYear={periodYear}
         query={query}
         rpujRows={rpujRows}
         savingSoId={savingSoId}
@@ -1566,8 +2185,55 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         rpuj={selectedRpuj}
       />
       <InvoiceDetailModal
+        error={invoiceDetailError}
         invoice={selectedInvoice}
-        onClose={() => setSelectedInvoiceId('')}
+        loading={invoiceDetailLoading}
+        onClose={() => {
+          setSelectedInvoiceId('');
+          setInvoiceDetail(null);
+          setInvoiceDetailError('');
+        }}
+      />
+      <SoNumberInputModal
+        busy={savingSoId === soModalId}
+        error={soModalError}
+        onChange={(value) => {
+          setSoModalValue(value);
+          setSoModalError('');
+        }}
+        onClose={closeSoModal}
+        onConfirm={saveSoNumberFromModal}
+        order={soModalOrder}
+        value={soModalValue}
+      />
+      <RpujDecisionModal
+        busy={rpujBusyId === rpujDecision?.id}
+        decision={rpujDecision?.type}
+        error={rpujDecisionError}
+        note={rpujDecisionNote}
+        onClose={closeRpujDecisionModal}
+        onConfirm={submitRpujDecision}
+        onNoteChange={(value) => {
+          setRpujDecisionNote(value);
+          setRpujDecisionError('');
+        }}
+        row={rpujDecisionRow}
+      />
+      <RpujTransferUploadModal
+        busy={rpujBusyId === transferModalId}
+        error={transferModalError}
+        file={transferFile}
+        onClose={closeTransferModal}
+        onConfirm={submitTransferProof}
+        onFileChange={selectTransferFile}
+        row={transferModalRow}
+      />
+      <InvoiceNumberConfirmModal
+        busy={invoiceBusyId === invoiceConfirmId}
+        error={invoiceConfirmError}
+        onClose={closeInvoiceConfirmModal}
+        onConfirm={submitInvoiceNumber}
+        row={invoiceConfirmRow}
       />
     </main>
   );

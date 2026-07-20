@@ -25,6 +25,7 @@ export const ROLE_PERMISSIONS = {
     'document.read',
     'document.upload',
     'document.delete',
+    'storage.manage',
     'settings.read',
     'settings.update',
     'user.read',

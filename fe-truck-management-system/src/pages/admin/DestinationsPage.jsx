@@ -21,7 +21,13 @@ function DestinationsPage() {
         { key: 'ujNotes', section: 'Uang Jalan', label: 'Catatan UJ', type: 'textarea', placeholder: 'Catatan dasar uang jalan', full: true },
       ]}
       columns={[
-        { key: 'name', label: 'Nama Tujuan', render: (value) => <TextCell value={value} strong /> },
+        {
+          key: 'name',
+          label: 'Nama Tujuan',
+          headerClassName: '!text-left',
+          cellClassName: '!text-left',
+          render: (value) => <TextCell value={value} strong />,
+        },
         { key: 'uj20ft', label: 'UJ 20FT', render: (value) => <CurrencyCell value={value} /> },
         { key: 'uj40ft', label: 'UJ 40FT', render: (value) => <CurrencyCell value={value} /> },
       ]}

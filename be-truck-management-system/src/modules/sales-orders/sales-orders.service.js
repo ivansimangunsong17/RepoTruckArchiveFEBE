@@ -12,6 +12,7 @@ import {
   billingStatusRequiresInvoice,
   normalizeSalesOrderBillingStatus,
 } from './sales-orders.billing-status.js';
+import { isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
 
 const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
@@ -256,6 +257,14 @@ function ensureCanAccessSalesOrder(actor, order) {
   throw error;
 }
 
+function ensureSalesOrderUnlockedForSales(actor, order) {
+  if (actor?.role !== 'sales' || !isSalesOrderLockedByRpuj(order)) return;
+  const error = new Error('Sales Order terkunci karena RPUJ sudah dikirim. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.');
+  error.statusCode = 403;
+  error.code = 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY';
+  throw error;
+}
+
 function applyActorToPayload(payload, actor, currentOrder = null) {
   const actorName = getActorName(actor);
   if (currentOrder) {
@@ -332,17 +341,6 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
     }
   }
 
-  const containersWithNumber = payload.containers.filter((container) => container.containerNumber);
-  const duplicatedContainer = containersWithNumber.some((container, index) =>
-    containersWithNumber.findIndex((item) => item.containerNumber === container.containerNumber) !== index,
-  );
-  if (duplicatedContainer) {
-    const error = new Error('Nomor container wajib unik di dalam Sales Order.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-
   const paymentType = String(payload.paymentType || 'cash').trim().toLowerCase();
   if (!['cash', 'tempo'].includes(paymentType)) {
     const error = new Error('Jenis pembayaran harus Cash atau Tempo.');
@@ -404,7 +402,10 @@ export async function saveSalesOrder(payload, id, actor) {
     error.code = 'SALES_ORDER_NOT_FOUND';
     throw error;
   }
-  if (id) ensureCanAccessSalesOrder(actor, currentOrder);
+  if (id) {
+    ensureCanAccessSalesOrder(actor, currentOrder);
+    ensureSalesOrderUnlockedForSales(actor, currentOrder);
+  }
   const payloadWithActor = applyActorToPayload(normalizedPayload, actor, currentOrder);
   validateSalesOrderPayload(payloadWithActor, currentOrder);
   return id ? updateSalesOrder(id, payloadWithActor) : createSalesOrder(payloadWithActor);
@@ -426,6 +427,13 @@ export async function updateInvoiceDeliveryStatus(id, payload = {}, actor) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
+
+  if (actor.role === 'sales' && normalizeSalesOrderBillingStatus(order.billingStatus) === 'lunas') {
+    const error = new Error('Invoice yang sudah lunas hanya dapat direvisi oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'INVOICE_DELIVERY_STATUS_PAID_ADMIN_ONLY';
+    throw error;
+  }
 
   if (order.status !== 'completed') {
     const error = new Error('Status pengiriman invoice hanya dapat diubah setelah order selesai.');
@@ -464,6 +472,7 @@ export async function removeSalesOrder(id, actor) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
+  ensureSalesOrderUnlockedForSales(actor, order);
   return cancelSalesOrder(id);
 }
 
@@ -476,6 +485,7 @@ export async function requestSalesOrderCancellation(id, actor, payload = {}) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
+  ensureSalesOrderUnlockedForSales(actor, order);
   return requestSalesOrderCancellationRepository(id, {
     cancelRequestNote: payload.cancelRequestNote || '',
     cancelRequestedByName: getActorName(actor),
