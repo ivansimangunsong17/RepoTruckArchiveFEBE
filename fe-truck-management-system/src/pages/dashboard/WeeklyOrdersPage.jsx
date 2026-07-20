@@ -166,10 +166,11 @@ function WeeklyOrdersPage() {
       columns: [
         { label: 'No', width: 0.5, value: (row) => row.reportNumber },
         { label: 'Tanggal Jalan', width: 1.4, value: (row) => formatShortDate(row.dateKey), bold: true },
+        { label: 'Customer', width: 1.8, value: (row) => row.fullCustomerSummary || row.customerSummary || '-' },
         { label: 'Order', width: 0.8, value: (row) => row.orderCount },
         { label: '20FT', width: 0.75, value: (row) => row.twentyFt },
         { label: '40FT', width: 0.75, value: (row) => row.fortyFt },
-        { label: 'Catatan', width: 2.1, value: (row) => shortageText(row) },
+        { label: 'Catatan', width: 1.7, value: (row) => shortageText(row) },
       ],
       rows: days.map((item, index) => ({ ...item, reportNumber: index + 1 })),
     });
@@ -214,6 +215,7 @@ function WeeklyOrdersPage() {
               <tr>
                 <th>No.</th>
                 <th>Tanggal Jalan</th>
+                <th>Customer</th>
                 <th>Order</th>
                 <th>20FT</th>
                 <th>40FT</th>
@@ -226,6 +228,11 @@ function WeeklyOrdersPage() {
                 <tr className={item.orderCount ? 'has-order' : 'empty'} key={item.dateKey}>
                   <td><strong>{index + 1}.</strong></td>
                   <td><strong>{formatShortDate(item.dateKey)}</strong></td>
+                  <td>
+                    <span className="weekly-customer-front" title={item.fullCustomerSummary || item.customerSummary}>
+                      {item.shortCustomerSummary || item.customerSummary || '-'}
+                    </span>
+                  </td>
                   <td>{item.orderCount}</td>
                   <td>{item.twentyFt}</td>
                   <td>{item.fortyFt}</td>

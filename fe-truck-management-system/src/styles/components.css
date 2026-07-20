@@ -760,7 +760,7 @@
 }
 
 .weekly-orders-table {
-  min-width: 680px;
+  min-width: 760px;
 }
 
 .weekly-orders-table th {
@@ -795,16 +795,28 @@
 }
 
 .weekly-orders-table th:nth-child(2),
-.weekly-orders-table th:nth-child(3),
 .weekly-orders-table th:nth-child(4),
 .weekly-orders-table th:nth-child(5),
 .weekly-orders-table th:nth-child(6),
+.weekly-orders-table th:nth-child(7),
 .weekly-orders-table td:nth-child(2),
-.weekly-orders-table td:nth-child(3),
 .weekly-orders-table td:nth-child(4),
 .weekly-orders-table td:nth-child(5),
-.weekly-orders-table td:nth-child(6) {
+.weekly-orders-table td:nth-child(6),
+.weekly-orders-table td:nth-child(7) {
   text-align: center;
+}
+
+.weekly-customer-front {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  color: #101828;
+  font-weight: 900;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
 .weekly-shortage-note,

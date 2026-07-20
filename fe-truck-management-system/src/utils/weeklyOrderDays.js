@@ -41,6 +41,8 @@ export function buildWeeklyOrderDays(jobs = [], currentDateKey) {
       panjang: group.panjang || 0,
       pendek: group.pendek || 0,
       customerSummary: group.shortCustomerSummary || group.customerSummary || '-',
+      shortCustomerSummary: group.shortCustomerSummary || group.customerSummary || '-',
+      fullCustomerSummary: group.customerSummary || '-',
       salesSummary: group.salesSummary || '-',
     };
   });
