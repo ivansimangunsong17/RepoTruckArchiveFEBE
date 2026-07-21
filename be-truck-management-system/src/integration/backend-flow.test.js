@@ -338,8 +338,8 @@ if (!hasDatabase) {
       assert.equal(forbidden.body.error.code, 'FORBIDDEN');
 
       const financeSalesOrderList = await api('/api/sales-orders?pageSize=1', { token: financeToken });
-      assert.equal(financeSalesOrderList.status, 403);
-      assert.equal(financeSalesOrderList.body.error.code, 'FORBIDDEN');
+      assert.equal(financeSalesOrderList.status, 200);
+      assert.ok(Array.isArray(financeSalesOrderList.body.data.rows));
     });
 
     await t.test('backup lokal: mutasi diblokir tetapi akses baca tetap tersedia', async () => {
