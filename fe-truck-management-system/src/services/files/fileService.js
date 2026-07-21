@@ -13,6 +13,19 @@ export async function createAttachmentDownloadUrl(path, { download = false } = {
   return `${API_BASE_URL}/attachments/${encodeURIComponent(path)}${query ? `?${query}` : ''}`;
 }
 
+export async function downloadAttachmentFile(path, fileName = 'Dokumen') {
+  const url = await createAttachmentDownloadUrl(path, { download: true });
+  if (!url) return;
+
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName || 'Dokumen';
+  anchor.rel = 'noreferrer';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

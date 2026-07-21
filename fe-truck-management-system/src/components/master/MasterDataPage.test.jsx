@@ -8,6 +8,7 @@ import { fetchMasterPage } from '../../services/master-data/masterDataService';
 import {
   createAttachmentDownloadUrl,
   deleteAttachmentFile,
+  downloadAttachmentFile,
   uploadAttachmentFile,
 } from '../../services/files/fileService';
 
@@ -26,6 +27,7 @@ vi.mock('../../services/master-data/masterDataService', () => ({
 vi.mock('../../services/files/fileService', () => ({
   createAttachmentDownloadUrl: vi.fn(),
   deleteAttachmentFile: vi.fn(),
+  downloadAttachmentFile: vi.fn(),
   uploadAttachmentFile: vi.fn(),
 }));
 
@@ -73,6 +75,7 @@ describe('MasterDataPage database mode', () => {
     removeMaster.mockResolvedValue(undefined);
     createAttachmentDownloadUrl.mockResolvedValue('http://localhost/document');
     deleteAttachmentFile.mockResolvedValue({ id: 'deleted' });
+    downloadAttachmentFile.mockResolvedValue(undefined);
     uploadAttachmentFile.mockResolvedValue(null);
     confirmAction.mockResolvedValue(true);
     fetchMasterPage.mockResolvedValue({ rows, total: rows.length });
@@ -198,6 +201,33 @@ describe('MasterDataPage database mode', () => {
 
     expect(await screen.findByRole('button', { name: 'View NPWP-Customer.pdf' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download NPWP-Customer.pdf' })).toBeInTheDocument();
+  });
+
+  it('mendownload dokumen tersimpan dari tombol detail', async () => {
+    const user = userEvent.setup();
+    const documentRows = [{
+      ...rows[0],
+      npwpDocument: { name: 'NPWP-Customer.pdf', path: 'npwp-document-id' },
+    }];
+    fetchMasterPage.mockResolvedValue({ rows: documentRows, total: documentRows.length });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { customers: documentRows },
+      upsertMaster,
+      removeMaster,
+    });
+
+    renderPage({
+      pageFields: [
+        ...fields,
+        { key: 'npwpDocument', label: 'Dokumen NPWP', type: 'file' },
+      ],
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Lihat Data' }));
+    await user.click(await screen.findByRole('button', { name: 'Download NPWP-Customer.pdf' }));
+
+    await waitFor(() => expect(downloadAttachmentFile).toHaveBeenCalledWith('npwp-document-id', 'NPWP-Customer.pdf'));
   });
 
   it('mempertahankan data lama saat edit meski ada field yang disembunyikan', async () => {

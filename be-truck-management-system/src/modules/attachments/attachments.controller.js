@@ -89,9 +89,11 @@ export async function downloadAttachmentController(request, response) {
     return;
   }
 
+  const fileName = attachment.fileNameOriginal || attachment.fileName || 'document';
+
   response.writeHead(200, {
     'Content-Type': attachment.mimeType || 'application/octet-stream',
-    'Content-Disposition': `${request.query?.download === '1' ? 'attachment' : 'inline'}; filename="${String(attachment.fileName || 'document').replace(/"/g, '\\"')}"`,
+    'Content-Disposition': `${request.query?.download === '1' ? 'attachment' : 'inline'}; filename="${String(fileName).replace(/"/g, '\\"')}"`,
   });
 
   createReadStream(filePath).pipe(response);
