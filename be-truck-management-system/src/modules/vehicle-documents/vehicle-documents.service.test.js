@@ -29,7 +29,7 @@ test('vehicle document baru disimpan dalam struktur Master Data Truck', () => {
   assert.deepEqual(parts.slice(0, 4), [
     'Master Data',
     'Truck',
-    vehicleId,
+    'TRK-001__a12b34cd',
     'KIR dan Uji Berkala',
   ]);
   assert.match(parts.at(-1), /^20260720-[a-f0-9]{8}-dokumen-kir\.pdf$/);
@@ -46,7 +46,7 @@ test('unit chassis disimpan terpisah dari dokumen truck', () => {
   assert.deepEqual(relativePath.split(/[\\/]+/).slice(0, 4), [
     'Master Data',
     'Chassis',
-    vehicleId,
+    'CHS-001__b23c45de',
     'Asuransi',
   ]);
 });

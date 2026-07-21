@@ -195,7 +195,22 @@ function getContainerJobFolder(payload, context) {
   return toShortReference('JOB', containerJobId);
 }
 
-function getMasterStorageParts(payload) {
+function shortId(value) {
+  return String(value || '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 8)
+    .toLowerCase() || 'unknown';
+}
+
+function getMasterRecordFolder(payload, context = {}) {
+  const readableName = context.masterRecordLabel || payload.entityLabel || payload.referenceNumber || '';
+  const readablePart = sanitizePathSegment(readableName);
+  const idPart = shortId(payload.entityId);
+  if (readablePart === 'unknown') return idPart;
+  return `${readablePart}__${idPart}`;
+}
+
+function getMasterStorageParts(payload, context = {}) {
   const entityType = String(payload.entityType || '').toLowerCase();
   const masterFolder = masterEntityFolders[entityType];
   if (!masterFolder) return null;
@@ -206,7 +221,7 @@ function getMasterStorageParts(payload) {
   return [
     MASTER_DATA_ROOT,
     masterFolder,
-    sanitizePathSegment(payload.entityId).toLowerCase(),
+    getMasterRecordFolder(payload, context),
     categoryFolder,
   ];
 }
@@ -256,7 +271,7 @@ export async function ensureFileDirectory(relativePath) {
 }
 
 export function buildAttachmentStorageDirectory(payload = {}, context = {}) {
-  const masterStorageParts = getMasterStorageParts(payload);
+  const masterStorageParts = getMasterStorageParts(payload, context);
   const isTransactionEntity = ['sales_order', 'container_job'].includes(payload.entityType);
 
   if (masterStorageParts) {

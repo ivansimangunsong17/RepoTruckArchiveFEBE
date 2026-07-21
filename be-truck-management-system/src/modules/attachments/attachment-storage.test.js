@@ -155,24 +155,27 @@ test('continues to resolve legacy paths stored in the database', () => {
 
 test('stores master data documents in folders separated by entity and category', () => {
   const cases = [
-    ['truck', 'stnkDocument', 'Truck', 'STNK'],
-    ['chassis', 'ownershipDocument', 'Chassis', 'Dokumen Kepemilikan'],
-    ['driver', 'licenseDocument', 'Sopir', 'SIM'],
-    ['customer', 'companyProfileDocument', 'Customer', 'Company Profile'],
+    ['truck', 'stnkDocument', 'Truck', 'STNK', 'TRK-020-B-1234-ABC-20FT__a12b34cd', 'TRK-020 B 1234 ABC 20FT'],
+    ['chassis', 'ownershipDocument', 'Chassis', 'Dokumen Kepemilikan', 'CHS-040-40FT__a12b34cd', 'CHS-040 40FT'],
+    ['driver', 'licenseDocument', 'Sopir', 'SIM', 'Budi-Santoso__a12b34cd', 'Budi Santoso'],
+    ['customer', 'companyProfileDocument', 'Customer', 'Company Profile', 'PT-Alpha-Logistik__a12b34cd', 'PT Alpha Logistik'],
   ];
 
-  cases.forEach(([entityType, category, entityFolder, categoryFolder]) => {
-    const storagePath = buildAttachmentStoragePath({
-      entityType,
-      entityId: salesOrderId,
-      category,
-      fileName: `${category}.pdf`,
-    });
+  cases.forEach(([entityType, category, entityFolder, categoryFolder, recordFolder, masterRecordLabel]) => {
+    const storagePath = buildAttachmentStoragePath(
+      {
+        entityType,
+        entityId: salesOrderId,
+        category,
+        fileName: `${category}.pdf`,
+      },
+      { masterRecordLabel },
+    );
 
     assert.deepEqual(pathParts(storagePath).slice(0, 4), [
       'Master Data',
       entityFolder,
-      salesOrderId,
+      recordFolder,
       categoryFolder,
     ]);
   });

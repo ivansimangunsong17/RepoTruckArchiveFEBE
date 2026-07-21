@@ -133,10 +133,11 @@ export function buildVehicleDocumentPath(vehicle, payload, sanitizedFileName) {
   const documentType = payload.documentType;
   const storedFileName = sanitizeFileName(`${dateKey}-${randomUUID().slice(0, 8)}-${sanitizedFileName}`);
   const entityFolder = ['CHASSIS', 'TRAILER'].includes(vehicle.unit_kind) ? 'Chassis' : 'Truck';
+  const readableFolder = `${sanitizePathSegment(vehicle.unit_code || entityFolder)}__${String(vehicle.id || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toLowerCase() || 'unknown'}`;
   return join(
     'Master Data',
     entityFolder,
-    sanitizePathSegment(vehicle.id).toLowerCase(),
+    readableFolder,
     DOCUMENT_FOLDERS[documentType] || 'Dokumen Lainnya',
     storedFileName,
   );

@@ -159,6 +159,62 @@ async function readAttachmentContext(entityType, entityId) {
       storageRootParts: await findSalesOrderStorageRoot(row.sales_order_id),
     };
   }
+  if (['truck', 'vehicle'].includes(entityType)) {
+    const result = await query(
+      `
+        select unit_code, plate_number, container_size
+        from vehicles
+        where id = $1
+      `,
+      [entityId],
+    );
+    const row = result.rows[0] || {};
+    const label = [
+      row.unit_code,
+      row.plate_number,
+      row.container_size,
+    ].filter(Boolean).join('-');
+    return { masterRecordLabel: label };
+  }
+  if (entityType === 'chassis') {
+    const result = await query(
+      `
+        select chassis_code, plate_number, container_size
+        from kir_chassis
+        where id = $1
+      `,
+      [entityId],
+    );
+    const row = result.rows[0] || {};
+    const label = [
+      row.chassis_code,
+      row.container_size,
+      row.plate_number,
+    ].filter(Boolean).join('-');
+    return { masterRecordLabel: label };
+  }
+  if (entityType === 'driver') {
+    const result = await query(
+      `
+        select name
+        from drivers
+        where id = $1
+      `,
+      [entityId],
+    );
+    return { masterRecordLabel: result.rows[0]?.name || '' };
+  }
+  if (entityType === 'customer') {
+    const result = await query(
+      `
+        select name
+        from customers
+        where id = $1
+      `,
+      [entityId],
+    );
+    return { masterRecordLabel: result.rows[0]?.name || '' };
+  }
   if (entityType === 'container_job') {
     const result = await query(
       `
