@@ -166,8 +166,7 @@ function WeeklyOrdersPage() {
       columns: [
         { label: 'No', width: 0.5, value: (row) => row.reportNumber },
         { label: 'Tanggal Jalan', width: 1.4, value: (row) => formatShortDate(row.dateKey), bold: true },
-        { label: 'Customer', width: 1.8, value: (row) => row.fullCustomerSummary || row.customerSummary || '-' },
-        { label: 'Order', width: 0.8, value: (row) => row.orderCount },
+        { label: 'Customer', width: 2.6, value: (row) => (row.customerBreakdown?.length ? row.customerBreakdown.map((item) => `${item.customer}: 20FT ${item.twentyFt}, 40FT ${item.fortyFt}`).join('; ') : '-') },
         { label: '20FT', width: 0.75, value: (row) => row.twentyFt },
         { label: '40FT', width: 0.75, value: (row) => row.fortyFt },
         { label: 'Catatan', width: 1.7, value: (row) => shortageText(row) },
@@ -216,7 +215,6 @@ function WeeklyOrdersPage() {
                 <th>No.</th>
                 <th>Tanggal Jalan</th>
                 <th>Customer</th>
-                <th>Order</th>
                 <th>20FT</th>
                 <th>40FT</th>
                 <th>Catatan</th>
@@ -230,12 +228,29 @@ function WeeklyOrdersPage() {
                   <td><strong>{formatShortDate(item.dateKey)}</strong></td>
                   <td>
                     <span className="weekly-customer-front" title={item.fullCustomerSummary || item.customerSummary}>
-                      {item.shortCustomerSummary || item.customerSummary || '-'}
+                      {item.customerBreakdown?.length ? (
+                        item.customerBreakdown.map((customer) => (
+                          <span className="weekly-customer-line" key={customer.customer}>{customer.customer}</span>
+                        ))
+                      ) : (
+                        <span className="weekly-customer-empty">-</span>
+                      )}
                     </span>
                   </td>
-                  <td>{item.orderCount}</td>
-                  <td>{item.twentyFt}</td>
-                  <td>{item.fortyFt}</td>
+                  <td>
+                    <span className="weekly-size-stack">
+                      {item.customerBreakdown?.length ? item.customerBreakdown.map((customer) => (
+                        <span key={customer.customer}>{customer.twentyFt}</span>
+                      )) : <span>0</span>}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="weekly-size-stack">
+                      {item.customerBreakdown?.length ? item.customerBreakdown.map((customer) => (
+                        <span key={customer.customer}>{customer.fortyFt}</span>
+                      )) : <span>0</span>}
+                    </span>
+                  </td>
                   <td>
                     {shortageText(item) !== 'Cukup' ? (
                       <span className="weekly-target-stack table-note">

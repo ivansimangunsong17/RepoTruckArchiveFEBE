@@ -2711,7 +2711,7 @@
 }
 
 .weekly-orders-table {
-  min-width: 720px;
+  min-width: 860px;
   table-layout: fixed;
 }
 
@@ -2730,10 +2730,6 @@
   color: #344054;
   font-size: .65rem;
   font-weight: 650;
-}
-
-.weekly-orders-table tbody tr:nth-child(even) {
-  background: #fcfdff;
 }
 
 .weekly-orders-table tbody tr.has-order td:first-child {
@@ -2756,7 +2752,11 @@
   width: 140px;
 }
 
-.weekly-orders-table td:nth-child(3),
+.weekly-orders-table td:nth-child(3) {
+  width: 380px;
+  font-weight: 850;
+}
+
 .weekly-orders-table td:nth-child(4),
 .weekly-orders-table td:nth-child(5) {
   width: 70px;

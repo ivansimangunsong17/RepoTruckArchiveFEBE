@@ -39,4 +39,21 @@ describe('buildWeeklyOrderDays', () => {
       totalContainers: 0,
     });
   });
+
+  it('keeps full customer list for crowded daily rows', () => {
+    const days = buildWeeklyOrderDays([
+      { id: 'job-1', soNumber: 'SO-1', containerNumber: 'CONT-1', size: '20FT', tripDateKey: '2026-07-12', customer: 'PT Alpha' },
+      { id: 'job-2', soNumber: 'SO-2', containerNumber: 'CONT-2', size: '40FT', tripDateKey: '2026-07-12', customer: 'PT Beta' },
+      { id: 'job-3', soNumber: 'SO-3', containerNumber: 'CONT-3', size: '40FT', tripDateKey: '2026-07-12', customer: 'PT Gamma' },
+    ], '2026-07-11');
+
+    expect(days[0].customerList).toEqual(['PT Alpha', 'PT Beta', 'PT Gamma']);
+    expect(days[0].customerBreakdown).toEqual([
+      { customer: 'PT Alpha', totalContainers: 1, twentyFt: 1, fortyFt: 0 },
+      { customer: 'PT Beta', totalContainers: 1, twentyFt: 0, fortyFt: 1 },
+      { customer: 'PT Gamma', totalContainers: 1, twentyFt: 0, fortyFt: 1 },
+    ]);
+    expect(days[0].shortCustomerSummary).toBe('PT Alpha +2');
+    expect(days[0].fullCustomerSummary).toBe('PT Alpha, PT Beta, PT Gamma');
+  });
 });
