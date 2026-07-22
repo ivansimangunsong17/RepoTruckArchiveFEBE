@@ -20,6 +20,15 @@ function buildDateWhere(column, { dateFrom = '', dateTo = '' } = {}, startIndex 
   return { clauses, params };
 }
 
+export function calculateCompletedJobRevenue(row = {}) {
+  const unitPrice = Number(row.price || 0);
+  if (unitPrice > 0) return unitPrice;
+
+  const totalAmount = Number(row.total_amount || row.totalAmount || 0);
+  const totalContainers = Math.max(1, Number(row.total_containers || row.totalContainers || 1));
+  return totalAmount / totalContainers;
+}
+
 export async function getDashboardReport() {
   const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs] = await Promise.all([
     query(`
@@ -346,7 +355,6 @@ export async function getMonthlyRevenueReport(options = {}) {
       with order_job_totals as (
         select sales_order_id, count(*)::int as total_jobs
         from container_jobs
-        where status <> 'cancelled'
         group by sales_order_id
       ),
       completed_jobs as (
@@ -356,13 +364,14 @@ export async function getMonthlyRevenueReport(options = {}) {
           so.so_number,
           so.customer_name,
           so.destination,
+          so.price,
           so.total_amount,
           cj.container_number,
           cj.container_size,
           cj.completed_at::date as completed_date,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
           nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
-          greatest(1, coalesce(nullif(ojt.total_jobs, 0), nullif(so.quantity, 0), 1))::int as total_containers
+          greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
         left join order_job_totals ojt on ojt.sales_order_id = so.id
@@ -390,7 +399,7 @@ export async function getMonthlyRevenueReport(options = {}) {
     driver: row.driver || '',
     plateNumber: row.plate_number || '',
     totalContainers: Number(row.total_containers || 0),
-    revenue: Number(row.total_amount || 0) / Math.max(1, Number(row.total_containers || 0)),
+    revenue: calculateCompletedJobRevenue(row),
   }));
 
   return {
