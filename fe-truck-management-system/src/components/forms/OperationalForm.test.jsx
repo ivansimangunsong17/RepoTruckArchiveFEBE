@@ -59,7 +59,7 @@ describe('OperationalForm', () => {
     expect(screen.getByLabelText('Truck')).toHaveValue('');
   });
 
-  it('mengizinkan status selesai tanpa dokumen penyelesaian', async () => {
+  it('menolak status selesai tanpa lampiran EIR', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(
@@ -85,11 +85,8 @@ describe('OperationalForm', () => {
     await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'completed',
-      eirNumber: '',
-      eirDocument: null,
-    }));
+    expect(screen.getByText(/upload lampiran EIR/i)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('mewajibkan truck dan driver otomatis untuk status sedang jalan', async () => {
@@ -107,9 +104,9 @@ describe('OperationalForm', () => {
 
     await openOperationalPhase(user, /dokumen & closing/i);
     await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'running');
-    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
-    expect(screen.getByText(/Truck, driver otomatis, dan waktu mulai wajib diisi/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/status pekerjaan/i)).toHaveValue('received');
+    expect(screen.getByText(/Truck dan driver wajib lengkap sebelum perjalanan berjalan/i)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -132,7 +129,7 @@ describe('OperationalForm', () => {
     expect(screen.getByText('Waktu mulai dan selesai ada')).toBeInTheDocument();
     expect(screen.getByText('UJ sudah disetujui/dikirim')).toBeInTheDocument();
     expect(screen.getByText('SPK ada')).toBeInTheDocument();
-    expect(screen.getByText('Dokumen penyelesaian lengkap (opsional)')).toBeInTheDocument();
+    expect(screen.getByText('Lampiran EIR sudah diupload')).toBeInTheDocument();
   });
 
   it('menolak status sedang jalan sebelum UJ disetujui Finance', async () => {
@@ -536,12 +533,15 @@ describe('OperationalForm', () => {
       <OperationalForm
         container={container}
         masterDestinations={[{ name: 'Bandung', uj20ft: 500000 }]}
-        masterTrucks={[]}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
         onClose={vi.fn()}
         onSubmit={onSubmit}
       />,
     );
 
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     await openOperationalPhase(user, /uang jalan & spk/i);
     await user.type(screen.getByLabelText(/nominal biaya/i), '150000');
     await user.type(screen.getByLabelText(/catatan biaya/i), 'Tol dan parkir');
@@ -566,6 +566,8 @@ describe('OperationalForm', () => {
         container={{
           ...container,
           rpujStatus: 'submitted',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
         }}
         masterTrucks={[]}
         onClose={vi.fn()}
@@ -597,6 +599,8 @@ describe('OperationalForm', () => {
         container={{
           ...container,
           rpujStatus: 'approved',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
         }}
         masterTrucks={[]}
         onClose={vi.fn()}

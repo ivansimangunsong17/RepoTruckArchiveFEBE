@@ -144,6 +144,12 @@ function ensureOperationalCanInputOtherCost(actor, job, payload) {
   }
 }
 
+function isCompletingMissingAssignment(job, payload = {}) {
+  const currentComplete = Boolean(normalizeText(job?.driver) && normalizeText(job?.plateNumber));
+  const nextComplete = Boolean(normalizeText(payload.driver) && normalizeText(payload.plateNumber));
+  return !currentComplete && nextComplete;
+}
+
 function preserveLockedOtherCost(actor, job, payload) {
   if (normalizeRole(actor) !== 'operational') return payload;
 
@@ -161,6 +167,7 @@ function ensureOperationalCanEditAssignment(actor, job, payload) {
   if (normalizeRole(actor) !== 'operational') return;
   if (job?.rpujStatus !== 'paid' && job?.status !== 'completed') return;
   if (!hasAssignmentChange(job, payload)) return;
+  if (job?.status !== 'completed' && isCompletingMissingAssignment(job, payload)) return;
 
   const error = new Error('Driver dan truck tidak bisa diubah lagi setelah UJ ditransfer atau pekerjaan selesai.');
   error.statusCode = 409;

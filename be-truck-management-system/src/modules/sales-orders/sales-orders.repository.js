@@ -487,6 +487,18 @@ export async function updateSalesOrder(id, form) {
       error.code = 'SALES_ORDER_NOT_FOUND';
       throw error;
     }
+    if (existing.rows[0].status === 'cancelled') {
+      const error = new Error('Sales Order yang sudah dibatalkan tidak bisa diedit.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_CANCELLED_LOCKED';
+      throw error;
+    }
+    if (existing.rows[0].status === 'completed') {
+      const error = new Error('Sales Order yang sudah selesai tidak bisa diedit.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_COMPLETED_LOCKED';
+      throw error;
+    }
 
     const customer = await findCustomer(client, form);
     const payload = toSalesOrderDb(form, customer);

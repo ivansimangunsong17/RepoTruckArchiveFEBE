@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Truck, Users } from 'lucide-react';
+import { BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
 import { SETTINGS_STORAGE_KEY } from '../../services/settings/adapters/localSettingsStore';
@@ -64,7 +65,7 @@ function getTruckPlate(row = {}) {
 }
 
 function getDriverName(row = {}) {
-  return String(row.driver || row.name || 'Sopir belum diisi').trim() || 'Sopir belum diisi';
+  return String(row.driver || row.defaultDriver || row.defaultDriverName || row.name || 'Sopir belum diisi').trim() || 'Sopir belum diisi';
 }
 
 function monthKey(month, year) {
@@ -73,6 +74,19 @@ function monthKey(month, year) {
 
 function daysInMonth(month, year) {
   return new Date(Number(year), Number(month), 0).getDate();
+}
+
+function buildMonthDays(month, year) {
+  const totalDays = daysInMonth(month, year);
+  return Array.from({ length: totalDays }, (_, index) => {
+    const day = index + 1;
+    return {
+      day,
+      key: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      label: String(day).padStart(2, '0'),
+      fullLabel: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+    };
+  });
 }
 
 function formatDecimal(value) {
@@ -154,6 +168,98 @@ function buildUtilizationTruckRows(masterTrucks = [], rows = []) {
     if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
     return left.plateNumber.localeCompare(right.plateNumber);
   });
+}
+
+function toDateKey(value) {
+  if (!value) return '';
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return [
+      value.getFullYear(),
+      String(value.getMonth() + 1).padStart(2, '0'),
+      String(value.getDate()).padStart(2, '0'),
+    ].join('-');
+  }
+
+  const raw = String(value).trim();
+  const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDate) return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, '0'),
+    String(parsed.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function getUtilizationDateKey(row = {}) {
+  return toDateKey(row.completedDate || row.completedAt || row.tripDate || row.updatedAt);
+}
+
+function compactCellLabel(row = {}) {
+  const destination = String(row.destination || '').trim();
+  const origin = String(row.origin || '').trim();
+  const status = String(row.status || '').replace(/_/g, ' ').trim();
+  const label = destination || origin || status || '';
+  return label.toUpperCase();
+}
+
+export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month, year) {
+  const days = buildMonthDays(month, year);
+  const dayKeys = new Set(days.map((day) => day.key));
+  const trucks = new Map();
+
+  masterTrucks.forEach((truck) => {
+    const plateNumber = getTruckPlate(truck);
+    if (!trucks.has(plateNumber)) {
+      trucks.set(plateNumber, {
+        plateNumber,
+        driver: getDriverName(truck),
+        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
+        totalTrips: 0,
+      });
+    }
+  });
+
+  rows.forEach((row) => {
+    const dateKey = getUtilizationDateKey(row);
+    if (!dayKeys.has(dateKey)) return;
+
+    const plateNumber = getTruckPlate(row);
+    if (!trucks.has(plateNumber)) {
+      trucks.set(plateNumber, {
+        plateNumber,
+        driver: getDriverName(row),
+        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
+        totalTrips: 0,
+      });
+    }
+
+    const truck = trucks.get(plateNumber);
+    const cell = truck.cells[dateKey];
+    cell.count += 1;
+    const label = compactCellLabel(row);
+    if (label && !cell.labels.includes(label)) cell.labels.push(label);
+    if (row.driver) truck.driver = getDriverName(row);
+    truck.totalTrips += 1;
+  });
+
+  const rowsByTruck = Array.from(trucks.values()).sort((left, right) => {
+    if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+    return left.plateNumber.localeCompare(right.plateNumber);
+  });
+
+  return {
+    days,
+    rows: rowsByTruck,
+    totalsByDay: days.reduce((totals, day) => ({
+      ...totals,
+      [day.key]: rowsByTruck.reduce((total, truck) => total + truck.cells[day.key].count, 0),
+    }), {}),
+    grandTotal: rowsByTruck.reduce((total, truck) => total + truck.totalTrips, 0),
+  };
 }
 
 export function buildDriverPerformanceRows(masterDrivers = [], performanceRows = []) {
@@ -267,8 +373,159 @@ function DetailTable({ columns, rows, rowRenderer }) {
   );
 }
 
+function normalizeReportTab(tab) {
+  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue') return tab;
+  return 'revenue';
+}
+
+function getReportHeader(selectedReport) {
+  if (selectedReport === 'utilization') {
+    return {
+      title: 'Utilisasi Bulanan',
+      description: 'Rekap harian per unit truck dalam format pivot bulanan.',
+    };
+  }
+
+  if (selectedReport === 'driver') {
+    return {
+      title: 'Driver Performance',
+      description: 'Ringkasan performa sopir pada periode yang dipilih.',
+    };
+  }
+
+  return {
+    title: 'Revenue Report',
+    description: 'Ringkasan revenue dan detail revenue per truck pada periode yang dipilih.',
+  };
+}
+
+function PivotCell({ cell }) {
+  if (!cell?.count) return <span className="text-[8px] text-slate-300">-</span>;
+
+  const title = cell.labels?.length
+    ? `${cell.count} trip - ${cell.labels.join(', ')}`
+    : `${cell.count} trip`;
+
+  return (
+    <span
+      className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-sky-100 px-1 text-[9px] font-black leading-none text-sky-900"
+      title={title}
+    >
+      {cell.count}
+    </span>
+  );
+}
+
+function MonthlyUtilizationModal({
+  open,
+  onClose,
+  pivot,
+  activeMonthLabel,
+  year,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[220] bg-white" role="dialog" aria-modal="true" aria-labelledby="monthly-utilization-title">
+      <div className="flex h-screen flex-col">
+        <header className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <span className="block text-[9px] font-black uppercase text-sky-700">Utilisasi Bulanan</span>
+            <h2 id="monthly-utilization-title" className="mt-0.5 text-sm font-black leading-tight text-slate-950">
+              Pivot Utilisasi Truck {activeMonthLabel} {year}
+            </h2>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
+              {pivot.rows.length} Unit
+            </span>
+            <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
+              {pivot.grandTotal} Trip
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+              aria-label="Tutup utilisasi bulanan"
+              title="Tutup"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </header>
+
+        {pivot.rows.length ? (
+          <div className="min-h-0 flex-1 overflow-auto bg-white">
+            <table className="min-w-max border-collapse text-[9px]">
+              <thead>
+                <tr className="bg-slate-100 text-slate-700">
+                  <th className="sticky left-0 top-0 z-30 min-w-[112px] border border-slate-200 bg-slate-100 px-1.5 py-1 text-left font-black">
+                    Row Labels
+                  </th>
+                  {pivot.days.map((day) => (
+                    <th
+                      key={day.key}
+                      className="sticky top-0 z-20 min-w-[38px] border border-slate-200 bg-slate-100 px-1 py-1 text-center font-black"
+                      title={day.fullLabel}
+                    >
+                      {day.label}
+                    </th>
+                  ))}
+                  <th className="sticky right-0 top-0 z-30 min-w-[48px] border border-slate-200 bg-slate-100 px-1 py-1 text-center font-black">
+                    Total
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {pivot.rows.map((truck) => (
+                  <tr key={truck.plateNumber} className="odd:bg-white even:bg-slate-50/80">
+                    <th className="sticky left-0 z-10 border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-left font-black text-slate-900 shadow-[inset_0_-1px_0_#94a3b8]">
+                      <span className="block truncate">{truck.plateNumber}</span>
+                    </th>
+                    {pivot.days.map((day) => (
+                      <td key={day.key} className="h-6 max-w-[38px] border-x border-slate-200 border-b border-b-slate-400 px-0.5 py-0 text-center align-middle shadow-[inset_0_-1px_0_#94a3b8]">
+                        <PivotCell cell={truck.cells[day.key]} />
+                      </td>
+                    ))}
+                    <td className="sticky right-0 z-10 border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-950 shadow-[inset_0_-1px_0_#94a3b8]">
+                      {truck.totalTrips}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-900 text-white">
+                  <th className="sticky bottom-0 left-0 z-30 border border-slate-700 bg-slate-900 px-1.5 py-1 text-left font-black">
+                    Grand Total
+                  </th>
+                  {pivot.days.map((day) => (
+                    <td key={day.key} className="sticky bottom-0 z-20 border border-slate-700 bg-slate-900 px-1 py-1 text-center font-black">
+                      {pivot.totalsByDay[day.key] || ''}
+                    </td>
+                  ))}
+                  <td className="sticky bottom-0 right-0 z-30 border border-slate-700 bg-slate-900 px-1 py-1 text-center font-black">
+                    {pivot.grandTotal}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : (
+          <div className="grid flex-1 place-items-center p-6 text-center">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Belum ada trip selesai</h3>
+              <p className="mt-1 text-xs text-slate-500">Tidak ada utilisasi truck pada {activeMonthLabel} {year}.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReportsPage() {
   const archive = useArchiveData();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialPeriod = useMemo(() => currentPeriod(), []);
   const [month, setMonth] = useState(initialPeriod.month);
   const [year, setYear] = useState(initialPeriod.year);
@@ -282,13 +539,33 @@ function ReportsPage() {
   const [driverPerformanceRows, setDriverPerformanceRows] = useState([]);
   const [driverPerformanceLoading, setDriverPerformanceLoading] = useState(true);
   const [driverPerformanceError, setDriverPerformanceError] = useState('');
-  const [selectedReport, setSelectedReport] = useState('revenue');
+  const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab')));
+  const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
   const utilizationTargetTripsPerDay = readUtilizationTargetTripsPerDay();
   const yearOptions = useMemo(() => {
     const baseYear = currentPeriod().year;
     return Array.from({ length: 7 }, (_, index) => baseYear - 3 + index);
   }, []);
   const activeMonthLabel = MONTHS.find((item) => Number(item.value) === Number(month))?.label || '-';
+
+  useEffect(() => {
+    setSelectedReport(normalizeReportTab(searchParams.get('tab')));
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (selectedReport !== 'utilization') setUtilizationModalOpen(false);
+  }, [selectedReport]);
+
+  function selectReport(report) {
+    const normalized = normalizeReportTab(report);
+    setSelectedReport(normalized);
+    setSearchParams((currentParams) => {
+      const nextParams = new URLSearchParams(currentParams);
+      if (normalized === 'revenue') nextParams.delete('tab');
+      else nextParams.set('tab', normalized);
+      return nextParams;
+    }, { replace: true });
+  }
 
   useEffect(() => {
     let active = true;
@@ -395,6 +672,10 @@ function ReportsPage() {
   const utilizationPercent = utilizationSummary.totalTargetTrips
     ? (utilizationSummary.totalTrips / utilizationSummary.totalTargetTrips) * 100
     : 0;
+  const utilizationPivot = useMemo(
+    () => buildMonthlyUtilizationPivot(masterTruckRows || [], utilizationSourceRows, month, year),
+    [masterTruckRows, month, utilizationSourceRows, year],
+  );
   const driverRows = useMemo(() => buildDriverPerformanceRows(masterDriverRows || [], driverPerformanceRows), [masterDriverRows, driverPerformanceRows]);
   const driverSummary = useMemo(() => ({
     totalTrips: driverRows.reduce((total, driver) => total + driver.totalTrips, 0),
@@ -404,13 +685,14 @@ function ReportsPage() {
       ? driverRows.reduce((total, driver) => total + driver.totalTrips, 0) / driverRows.filter((driver) => driver.totalTrips > 0).length
       : 0,
   }), [driverRows]);
+  const reportHeader = getReportHeader(selectedReport);
 
   return (
     <div className="page">
       <PageHeader
         eyebrow="Laporan"
-        title="Revenue Report"
-        description="Ringkasan revenue dan detail revenue per truck pada periode yang dipilih."
+        title={reportHeader.title}
+        description={reportHeader.description}
       />
 
       <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
@@ -452,7 +734,7 @@ function ReportsPage() {
           secondaryValue={formatCurrency(averageRevenuePerTruck)}
           tone="emerald"
           expanded={selectedReport === 'revenue'}
-          onClick={() => setSelectedReport('revenue')}
+          onClick={() => selectReport('revenue')}
         />
         <SummaryToggleCard
           icon={Truck}
@@ -465,7 +747,7 @@ function ReportsPage() {
           tertiaryValue={`${formatDecimal(utilizationTargetTripsPerDay)} Trip/Truck`}
           tone="sky"
           expanded={selectedReport === 'utilization'}
-          onClick={() => setSelectedReport('utilization')}
+          onClick={() => selectReport('utilization')}
         />
         <SummaryToggleCard
           icon={Users}
@@ -478,7 +760,7 @@ function ReportsPage() {
           tertiaryValue={`${driverSummary.totalDrivers} Sopir`}
           tone="amber"
           expanded={selectedReport === 'driver'}
-          onClick={() => setSelectedReport('driver')}
+          onClick={() => selectReport('driver')}
         />
       </section>
 
@@ -527,9 +809,20 @@ function ReportsPage() {
 
       {selectedReport === 'utilization' ? (
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-3 py-2.5">
-            <h2 className="text-sm font-bold text-slate-950">Utilisasi Truck</h2>
-            <p className="text-xs text-slate-500">Daftar trip selesai per truck pada periode yang dipilih.</p>
+          <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-950">Utilisasi Truck</h2>
+              <p className="text-xs text-slate-500">Ringkasan jumlah trip per truck pada periode yang dipilih.</p>
+            </div>
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 text-xs font-black text-sky-800 hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => setUtilizationModalOpen(true)}
+              disabled={utilizationLoading || Boolean(utilizationError)}
+            >
+              <Maximize2 size={15} />
+              Lihat Utilisasi Bulanan
+            </button>
           </div>
 
           {utilizationLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan utilisasi...</div> : null}
@@ -571,6 +864,14 @@ function ReportsPage() {
           ) : null}
         </section>
       ) : null}
+
+      <MonthlyUtilizationModal
+        open={utilizationModalOpen}
+        onClose={() => setUtilizationModalOpen(false)}
+        pivot={utilizationPivot}
+        activeMonthLabel={activeMonthLabel}
+        year={year}
+      />
 
       {selectedReport === 'driver' ? (
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">

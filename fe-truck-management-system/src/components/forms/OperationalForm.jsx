@@ -415,15 +415,21 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const otherCostAmountValue = Number(form.otherCostAmount || 0);
   const totalJourneyCost = ujAmount + otherCostAmountValue;
   const requiresFinanceApprovalForSpk = Boolean(onGenerateSpk);
-  const canGenerateSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
-  const spkRequirementMessage = requiresFinanceApprovalForSpk && !form.spkNumber && !canGenerateSpk
-    ? 'SPK bisa dibuat setelah Finance approve RPUJ.'
-    : '';
+  const hasCompleteAssignment = Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
+  const financeApprovedForSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
+  const canGenerateSpk = financeApprovedForSpk && hasCompleteAssignment;
+  const assignmentRequirementMessage = 'Lengkapi truck dan driver terlebih dahulu.';
+  const spkRequirementMessage = !form.spkNumber && !hasCompleteAssignment
+    ? 'SPK bisa dibuat setelah truck dan driver lengkap.'
+    : requiresFinanceApprovalForSpk && !form.spkNumber && !financeApprovedForSpk
+      ? 'SPK bisa dibuat setelah Finance approve RPUJ.'
+      : '';
   const rpujStatus = form.rpujStatus || 'pending';
   const canReviseLockedFields = String(currentUser?.role || '').toLowerCase() === 'admin';
   const canSubmitRpujRequest = !['submitted', 'approved', 'paid'].includes(rpujStatus);
   const canEditOtherCost = canReviseLockedFields || !['approved', 'paid'].includes(rpujStatus);
-  const canEditAssignment = canReviseLockedFields || (rpujStatus !== 'paid' && form.status !== 'completed');
+  const canFillMissingAssignment = !hasCompleteAssignment && form.status !== 'completed';
+  const canEditAssignment = canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed');
   const hasSavedContainerNumber = Boolean(String(container.containerNumber || '').trim());
   const canFillInitialContainerNumber = !hasSavedContainerNumber && !['completed', 'cancelled'].includes(container.status);
   const canEditContainerNumber = canReviseLockedFields
@@ -448,14 +454,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     return true;
   });
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.';
-  const hasRequiredOperationalDocuments = Boolean(
-    form.eirNumber
-      && form.eirDocument
-      && operationalDocumentFields.every((field) => form[field.valueField] && form[field.fileField]),
-  );
+  const hasEirDocument = Boolean(form.eirDocument);
   const hasSpkDocument = Boolean(form.spkNumber || form.spkDocument);
   const isReadyToStart = form.status === 'received'
-    && Boolean(form.plateNumber && form.driver)
+    && hasCompleteAssignment
     && canStartTrip
     && hasSpkDocument;
   const primaryActionLabel = activePhase === 'preparation'
@@ -471,11 +473,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             : 'Simpan Dokumen & Status';
   const closingChecklist = [
     { label: 'Nomor container ada', ready: Boolean(String(form.containerNumber || '').trim()) },
-    { label: 'Truck dan driver ada', ready: Boolean(form.plateNumber && form.driver) },
+    { label: 'Truck dan driver ada', ready: hasCompleteAssignment },
     { label: 'Waktu mulai dan selesai ada', ready: Boolean(form.runningAt && form.completedAt) },
     { label: 'UJ sudah disetujui/dikirim', ready: canStartTrip },
     { label: 'SPK ada', ready: hasSpkDocument },
-    { label: 'Dokumen penyelesaian lengkap (opsional)', ready: hasRequiredOperationalDocuments },
+    { label: 'Lampiran EIR sudah diupload', ready: hasEirDocument },
   ];
 
   useEffect(() => {
@@ -508,6 +510,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
   function updateStatusValue(status) {
     const now = nowForDateTimeInput();
+    if (['running', 'completed'].includes(status) && !hasCompleteAssignment) {
+      setError(assignmentRequirementMessage);
+      return;
+    }
     if (['running', 'completed'].includes(status) && !canStartTrip) {
       setError(tripStartRequirementMessage);
     } else {
@@ -578,6 +584,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
   async function handleGenerateSpk() {
     if (form.spkNumber) return;
+    if (!hasCompleteAssignment) {
+      setError(assignmentRequirementMessage);
+      return;
+    }
     if (!canGenerateSpk) {
       setError(spkRequirementMessage || 'SPK belum bisa dibuat.');
       return;
@@ -880,6 +890,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
   async function handleSubmitRpujRequest() {
     if (!canSubmitRpujRequest) return;
+    if (!hasCompleteAssignment) {
+      showSubmitNotification('RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.');
+      return;
+    }
     const { submitForm, hasRpujRequest, error: submitError } = buildSubmitForm({ forceRpujStatus: 'submitted' });
     if (submitError) {
       showSubmitNotification(submitError);
@@ -906,8 +920,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       return;
     }
     const shouldStartTrip = activePhase === 'closing'
-      && submitForm.plateNumber
-      && submitForm.driver
+      && hasCompleteAssignment
       && submitForm.status === 'received'
       && canStartTrip
       && Boolean(submitForm.spkNumber || submitForm.spkDocument);
@@ -928,16 +941,21 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       showSubmitNotification(tripStartRequirementMessage);
       return;
     }
+    if (['running', 'completed'].includes(submitForm.status) && !hasCompleteAssignment) {
+      showSubmitNotification('Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.');
+      return;
+    }
     if (submitForm.status === 'running' && (!submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt)) {
       showSubmitNotification('Truck, driver otomatis, dan waktu mulai wajib diisi untuk status Sedang Jalan.');
       return;
     }
     if (submitForm.status === 'completed') {
       const missingContainerNumber = !String(submitForm.containerNumber || '').trim();
-      const missingAssignment = !submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt || !submitForm.completedAt;
+      const missingAssignment = !hasCompleteAssignment || !submitForm.runningAt || !submitForm.completedAt;
       const missingSpk = !submitForm.spkNumber && !submitForm.spkDocument;
-      if (missingContainerNumber || missingAssignment || missingSpk) {
-        showSubmitNotification('Pekerjaan belum dapat diselesaikan. Lengkapi nomor container, truck/driver, waktu jalan, waktu selesai, dan SPK.');
+      const missingEirDocument = !submitForm.eirDocument;
+      if (missingContainerNumber || missingAssignment || missingSpk || missingEirDocument) {
+        showSubmitNotification('Pekerjaan belum dapat diselesaikan. Lengkapi nomor container, truck/driver, waktu jalan, waktu selesai, SPK, dan upload lampiran EIR.');
         return;
       }
       if (submitForm.completedAt && submitForm.runningAt && new Date(submitForm.completedAt) < new Date(submitForm.runningAt)) {
@@ -1130,7 +1148,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       onClick={handleGenerateSpk}
                       disabled={!canGenerateSpk}
                     >
-                      {canGenerateSpk ? 'Generate SPK' : 'Menunggu Finance'}
+                      {canGenerateSpk ? 'Generate SPK' : !hasCompleteAssignment ? 'Lengkapi Truck' : 'Menunggu Finance'}
                     </button>
                   ) : (
                     <>
@@ -1320,7 +1338,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     {activeStatusOption.label}
                   </span>
                   <small className="text-[11px] font-semibold leading-snug text-slate-500">{activeStatusOption.description}</small>
-                  {!canStartTrip ? (
+                  {!hasCompleteAssignment ? (
+                    <small className="text-[11px] font-semibold leading-snug text-amber-700">
+                      Truck dan driver wajib lengkap sebelum perjalanan berjalan.
+                    </small>
+                  ) : !canStartTrip ? (
                     <small className="text-[11px] font-semibold leading-snug text-amber-700">
                       UJ harus disetujui Finance sebelum perjalanan berjalan.
                     </small>

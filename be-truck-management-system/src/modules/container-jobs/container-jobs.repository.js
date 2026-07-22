@@ -263,6 +263,26 @@ function requireTripStartAllowed(nextStatus, rpujStatus) {
   );
 }
 
+function assignmentValue(...values) {
+  return values.map((value) => String(value || '').trim()).find(Boolean) || '';
+}
+
+export function hasCompleteOperationalAssignment(form = {}, driver = null, vehicle = null, existing = {}) {
+  const assignment = existing?.assignment_snapshot || {};
+  const driverName = assignmentValue(form.driver, driver?.name, assignment.driver);
+  const plateNumber = assignmentValue(form.plateNumber, vehicle?.plate_number, assignment.plateNumber);
+  return Boolean(driverName && plateNumber);
+}
+
+function requireCompleteOperationalAssignment(form, driver, vehicle, existing, message) {
+  if (hasCompleteOperationalAssignment(form, driver, vehicle, existing)) return;
+  throw validationError(
+    message || 'Lengkapi truck dan driver terlebih dahulu.',
+    'CONTAINER_JOB_ASSIGNMENT_REQUIRED',
+    409,
+  );
+}
+
 async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus) {
   if (['completed', 'cancelled'].includes(nextStatus)) return;
   const driverName = String(form.driver || driver?.name || '').trim();
@@ -419,7 +439,7 @@ async function requireCompletedJobReady(client, id, form, existing) {
       from attachments
       where entity_type = 'container_job'
         and entity_id = $1
-        and category = 'spkDocument'
+        and category in ('spkDocument', 'eirDocument')
     `,
     [id],
   );
@@ -427,6 +447,13 @@ async function requireCompletedJobReady(client, id, form, existing) {
   if (!(form.spkNumber || existing.spk_number || categories.has('spkDocument'))) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. Lengkapi SPK terlebih dahulu.',
+      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
+      409,
+    );
+  }
+  if (!categories.has('eirDocument')) {
+    throw validationError(
+      'Pekerjaan belum dapat diselesaikan. Upload lampiran EIR terlebih dahulu.',
       'CONTAINER_JOB_COMPLETION_INCOMPLETE',
       409,
     );
@@ -565,6 +592,7 @@ export async function updateContainerJob(id, form) {
       `
         select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.cancelled_at,
                cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.status, cj.eir_number,
+               cj.assignment_snapshot,
                cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
                cj.spk_number, cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
                so.so_number, so.finance_verification_status
@@ -595,7 +623,25 @@ export async function updateContainerJob(id, form) {
       );
     }
     const nextRpujStatus = normalizeRpujStatusForOperational(existing.rows[0], form.rpujStatus);
+    if (nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(existing.rows[0].rpuj_status)) {
+      requireCompleteOperationalAssignment(
+        form,
+        driver,
+        vehicle,
+        existing.rows[0],
+        'RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.',
+      );
+    }
     requireTripStartAllowed(nextStatus, nextRpujStatus);
+    if (['running', 'completed'].includes(nextStatus)) {
+      requireCompleteOperationalAssignment(
+        form,
+        driver,
+        vehicle,
+        existing.rows[0],
+        'Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.',
+      );
+    }
     await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus);
     if (nextStatus === 'completed') {
       await requireCompletedJobReady(client, id, form, existing.rows[0]);
@@ -955,6 +1001,15 @@ export async function generateContainerJobSpk(id, form = {}) {
       error.code = 'SPK_WAITING_FINANCE_APPROVAL';
       throw error;
     }
+    const driver = await findDriver(client, form);
+    const vehicle = await findVehicle(client, form);
+    requireCompleteOperationalAssignment(
+      form,
+      driver,
+      vehicle,
+      existing.rows[0],
+      'SPK belum bisa terbit. Lengkapi truck dan driver terlebih dahulu.',
+    );
 
     const nextSpkNumber = String(form.spkNumber || '').trim() || existing.rows[0].spk_number || buildGeneratedSpkNumber(existing.rows[0]);
 

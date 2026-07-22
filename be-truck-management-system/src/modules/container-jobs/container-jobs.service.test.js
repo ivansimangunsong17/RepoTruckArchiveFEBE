@@ -4,6 +4,7 @@ import test from 'node:test';
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
 const { hasOperationalDocumentChange, isInitialContainerNumberInput } = await import('./container-jobs.service.js');
+const { hasCompleteOperationalAssignment } = await import('./container-jobs.repository.js');
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
   assert.equal(isInitialContainerNumberInput(
@@ -31,4 +32,19 @@ test('mengenali revisi dokumen yang sudah tersimpan', () => {
     { eirNumber: 'EIR-001' },
     { eirNumber: 'EIR-REVISI' },
   ), true);
+});
+
+test('assignment operational belum lengkap jika truck atau driver kosong', () => {
+  assert.equal(hasCompleteOperationalAssignment({ plateNumber: 'B 1234 XYZ', driver: '' }), false);
+  assert.equal(hasCompleteOperationalAssignment({ plateNumber: '', driver: 'Budi' }), false);
+});
+
+test('assignment operational lengkap dari payload atau snapshot tersimpan', () => {
+  assert.equal(hasCompleteOperationalAssignment({ plateNumber: 'B 1234 XYZ', driver: 'Budi' }), true);
+  assert.equal(hasCompleteOperationalAssignment({}, null, null, {
+    assignment_snapshot: {
+      plateNumber: 'B 1234 XYZ',
+      driver: 'Budi',
+    },
+  }), true);
 });
