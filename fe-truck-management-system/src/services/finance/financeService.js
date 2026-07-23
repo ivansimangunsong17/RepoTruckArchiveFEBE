@@ -22,6 +22,14 @@ export function updateFinanceOrderSoNumber(id, soNumber) {
   return httpClient.patch(`/finance/order-verifications/${encodeURIComponent(id)}/so-number`, { soNumber });
 }
 
+export function fetchFinanceOrderCorrections(id) {
+  return httpClient.get(`/finance/order-verifications/${encodeURIComponent(id)}/corrections`);
+}
+
+export function requestFinanceOrderSoCorrection(id, payload = {}) {
+  return httpClient.post(`/finance/order-verifications/${encodeURIComponent(id)}/corrections`, payload);
+}
+
 export function fetchFinanceRpujRequests(params = {}) {
   return httpClient.get(`/finance/rpuj-requests${buildQuery(params)}`);
 }
@@ -63,6 +71,26 @@ export function fetchFinanceInvoiceDetail(id) {
 
 export function updateFinanceInvoiceNumber(id, invoiceNumber) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/number`, { invoiceNumber });
+}
+
+export function fetchFinanceInvoiceCorrections(id) {
+  return httpClient.get(`/finance/invoices/${encodeURIComponent(id)}/corrections`);
+}
+
+export function requestFinanceInvoiceCorrection(id, payload = {}) {
+  return httpClient.post(`/finance/invoices/${encodeURIComponent(id)}/corrections`, payload);
+}
+
+export function fetchFinanceCorrections(params = {}) {
+  return httpClient.get(`/finance/corrections${buildQuery(params)}`);
+}
+
+export function approveFinanceCorrection(id, reviewNote = '') {
+  return httpClient.patch(`/finance/corrections/${encodeURIComponent(id)}/approve`, { reviewNote });
+}
+
+export function rejectFinanceCorrection(id, reviewNote = '') {
+  return httpClient.patch(`/finance/corrections/${encodeURIComponent(id)}/reject`, { reviewNote });
 }
 
 export function fetchFinanceCompletedTrips(params = {}) {

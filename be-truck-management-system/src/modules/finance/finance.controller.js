@@ -1,15 +1,20 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
+  approveFinanceCorrection,
   approveRpuj,
   fetchCompletedTripDetail,
   fetchCompletedTrips,
+  fetchFinanceCorrectionHistory,
+  fetchFinanceCorrections,
   fetchFinanceDashboard,
   fetchInvoiceOrderDetail,
   fetchInvoiceOrders,
   fetchOrderVerifications,
   fetchRpujRequests,
+  rejectFinanceCorrection,
   rejectRpuj,
+  requestFinanceCorrection,
   saveInvoiceNumber,
   saveOrderVerificationSoNumber,
   uploadRpujTransferProof,
@@ -111,6 +116,100 @@ export async function updateInvoiceNumberController(request, response) {
     metadata: { soNumber: result?.soNumber, invoiceNumber: result?.invoiceNumber },
   });
   sendSuccess(response, result, 'Nomor invoice berhasil disimpan.');
+}
+
+export async function financeCorrectionsController(request, response) {
+  const result = await fetchFinanceCorrections(request.query);
+  sendSuccess(response, result);
+}
+
+export async function financeCorrectionHistoryController(request, response) {
+  const result = await fetchFinanceCorrectionHistory(request.params.id);
+  sendSuccess(response, result);
+}
+
+export async function requestOrderSoCorrectionController(request, response) {
+  const result = await requestFinanceCorrection(
+    request.params.id,
+    { ...request.body, correctionType: 'so_number' },
+    request.user,
+  );
+  await safeRecordActivityLog(request, {
+    action: result.status === 'applied' ? 'FINANCE_CORRECTION_APPLIED' : 'FINANCE_CORRECTION_REQUESTED',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      correctionType: result.correctionType,
+      currentValue: result.currentValue,
+      requestedValue: result.requestedValue,
+      status: result.status,
+      requiresAdminApproval: result.requiresAdminApproval,
+    },
+  });
+  sendSuccess(response, result, result.status === 'applied' ? 'Koreksi nomor SO berhasil diterapkan.' : 'Request koreksi nomor SO dikirim ke Admin.');
+}
+
+export async function requestInvoiceCorrectionController(request, response) {
+  const result = await requestFinanceCorrection(
+    request.params.id,
+    { ...request.body, correctionType: 'invoice_number' },
+    request.user,
+  );
+  await safeRecordActivityLog(request, {
+    action: result.status === 'applied' ? 'FINANCE_CORRECTION_APPLIED' : 'FINANCE_CORRECTION_REQUESTED',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      correctionType: result.correctionType,
+      currentValue: result.currentValue,
+      requestedValue: result.requestedValue,
+      status: result.status,
+      requiresAdminApproval: result.requiresAdminApproval,
+    },
+  });
+  sendSuccess(response, result, result.status === 'applied' ? 'Koreksi nomor invoice berhasil diterapkan.' : 'Request koreksi nomor invoice dikirim ke Admin.');
+}
+
+export async function approveFinanceCorrectionController(request, response) {
+  const result = await approveFinanceCorrection(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_CORRECTION_APPROVED',
+    module: 'finance',
+    entityType: 'finance_correction_request',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      salesOrderId: result.salesOrderId,
+      correctionType: result.correctionType,
+      currentValue: result.currentValue,
+      requestedValue: result.requestedValue,
+      reviewNote: result.reviewNote,
+    },
+  });
+  sendSuccess(response, result, 'Koreksi Finance disetujui dan diterapkan.');
+}
+
+export async function rejectFinanceCorrectionController(request, response) {
+  const result = await rejectFinanceCorrection(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_CORRECTION_REJECTED',
+    module: 'finance',
+    entityType: 'finance_correction_request',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      salesOrderId: result.salesOrderId,
+      correctionType: result.correctionType,
+      currentValue: result.currentValue,
+      requestedValue: result.requestedValue,
+      reviewNote: result.reviewNote,
+    },
+  });
+  sendSuccess(response, result, 'Koreksi Finance ditolak.');
 }
 
 export async function completedTripsController(request, response) {

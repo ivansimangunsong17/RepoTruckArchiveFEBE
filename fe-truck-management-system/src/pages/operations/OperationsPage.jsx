@@ -122,7 +122,11 @@ function rpujDetail(job) {
   if (job?.rpujStatus === 'paid') return { tone: 'paid', label: 'UJ Dikirim', helper: 'Bukti transfer masuk' };
   if (job?.rpujStatus === 'approved') return { tone: 'approved', label: 'Disetujui Finance', helper: 'Siap transfer / SPK' };
   if (job?.rpujStatus === 'submitted') return { tone: 'submitted', label: 'Menunggu Finance', helper: 'Pengajuan sudah masuk' };
-  if (job?.rpujStatus === 'rejected') return { tone: 'rejected', label: 'Ditolak Finance', helper: 'Ajukan ulang' };
+  if (job?.rpujStatus === 'rejected') return {
+    tone: 'rejected',
+    label: 'Ditolak Finance',
+    helper: job.rpujRejectionNote || 'Ajukan ulang',
+  };
   return { tone: 'queue', label: 'Belum Diajukan', helper: 'Perlu ajukan UJ' };
 }
 
@@ -731,7 +735,7 @@ function OperationsPage({ documentFollowUp = false }) {
             </header>
             <div className="container-job-detail-body">
               <section><h3>Penugasan</h3><div><span>No. Container<strong>{detail.containerNumber || '-'}</strong></span><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
-              <section><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
+              <section><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>Status RPUJ<strong>{rpujDetail(detail).label}</strong><small>{detail.rpujRejectionNote || rpujDetail(detail).helper}</small></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
               <section><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>

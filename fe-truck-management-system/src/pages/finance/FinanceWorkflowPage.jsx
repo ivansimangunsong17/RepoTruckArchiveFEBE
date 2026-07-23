@@ -16,11 +16,15 @@ import FinancePeriodFilter from '../../components/finance/FinancePeriodFilter';
 import DocumentLink from '../../components/common/DocumentLink';
 import {
   approveFinanceRpuj,
+  fetchFinanceInvoiceCorrections,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
+  fetchFinanceOrderCorrections,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
   rejectFinanceRpuj,
+  requestFinanceInvoiceCorrection,
+  requestFinanceOrderSoCorrection,
   updateFinanceInvoiceNumber,
   updateFinanceOrderSoNumber,
   uploadFinanceRpujTransferProof,
@@ -472,6 +476,34 @@ function normalizeFinanceInvoiceRow(row = {}) {
   };
 }
 
+function normalizeFinanceCorrection(row = {}) {
+  return {
+    id: row.id,
+    salesOrderId: row.salesOrderId || row.sales_order_id || '',
+    correctionType: row.correctionType || row.correction_type || '',
+    currentValue: row.currentValue || row.current_value || '-',
+    requestedValue: row.requestedValue || row.requested_value || '-',
+    reason: row.reason || '-',
+    status: row.status || 'pending',
+    requiresAdminApproval: Boolean(row.requiresAdminApproval ?? row.requires_admin_approval),
+    requestedByName: row.requestedByName || row.requested_by_name || '-',
+    requestedAt: formatDisplayDate(row.requestedAt || row.requested_at),
+    reviewedByName: row.reviewedByName || row.reviewed_by_name || '',
+    reviewedAt: formatDisplayDate(row.reviewedAt || row.reviewed_at),
+    reviewNote: row.reviewNote || row.review_note || '',
+  };
+}
+
+function correctionStatusLabel(status) {
+  const labels = {
+    pending: 'Menunggu Admin',
+    applied: 'Sudah Diterapkan',
+    approved: 'Disetujui',
+    rejected: 'Ditolak',
+  };
+  return labels[status] || status || '-';
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -797,7 +829,90 @@ function InvoiceNumberConfirmModal({ row, error, busy, onClose, onConfirm }) {
   );
 }
 
-function OrderDetailModal({ order, onClose }) {
+function CorrectionHistoryList({ corrections = [], loading = false, error = '' }) {
+  if (loading) return <p className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">Memuat riwayat koreksi...</p>;
+  if (error) return <p className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p>;
+  if (!corrections.length) return <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-400">Belum ada riwayat koreksi.</p>;
+
+  return (
+    <div className="grid gap-1.5">
+      {corrections.map((item) => (
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2" key={item.id}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <strong className="text-xs text-slate-950">{item.currentValue || '-'} {'>'} {item.requestedValue || '-'}</strong>
+            <StatusPill value={correctionStatusLabel(item.status)} />
+          </div>
+          <p className="mt-1 text-[11px] font-medium leading-relaxed text-slate-600">{item.reason}</p>
+          <p className="mt-1 text-[10px] font-semibold text-slate-400">
+            {item.requestedByName} - {item.requestedAt}
+            {item.reviewedByName ? ` | ${item.reviewedByName} - ${item.reviewedAt}` : ''}
+          </p>
+          {item.reviewNote ? <p className="mt-1 text-[10px] font-semibold text-slate-500">Catatan Admin: {item.reviewNote}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FinanceCorrectionModal({ context, value, reason, error, busy, onValueChange, onReasonChange, onClose, onConfirm }) {
+  if (!context) return null;
+  const isInvoice = context.type === 'invoice_number';
+  const currentValue = isInvoice ? context.invoiceNumber : context.soNumber;
+  const targetLabel = isInvoice ? 'Nomor Invoice Baru' : 'Nomor SO Baru';
+
+  return (
+    <FinanceActionModal
+      busy={busy}
+      confirmLabel="Ajukan Koreksi"
+      description={isInvoice ? 'Nomor invoice resmi akan masuk approval Admin.' : 'Jika order sudah sensitif, koreksi nomor SO akan masuk approval Admin.'}
+      onClose={onClose}
+      onConfirm={onConfirm}
+      title={isInvoice ? 'Koreksi Nomor Invoice' : 'Koreksi Nomor SO'}
+      tone="upload"
+    >
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+        <div className="flex gap-2.5">
+          <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={18} />
+          <div>
+            <strong className="block text-xs text-amber-900">Koreksi harus punya alasan yang jelas.</strong>
+            <p className="mt-1 text-[11px] font-medium leading-relaxed text-amber-800">Nomor lama, nomor baru, user, waktu, dan alasan akan masuk riwayat koreksi.</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <DetailField label="Nomor SO" value={context.soNumber} />
+        <DetailField label="Customer" value={context.customer} />
+        <DetailField label={isInvoice ? 'Invoice Saat Ini' : 'SO Saat Ini'} value={currentValue || '-'} />
+        <DetailField label="Tujuan" value={context.destination} />
+      </div>
+      <label className="grid gap-1.5 text-xs font-bold text-slate-700">
+        {targetLabel}
+        <input
+          autoFocus
+          className="h-10 rounded-lg border border-slate-300 px-3 text-sm font-bold uppercase text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
+          maxLength={80}
+          onChange={(event) => onValueChange(event.target.value)}
+          placeholder={isInvoice ? 'Contoh: INV-202607-001' : 'Contoh: SO-202607-019'}
+          value={value}
+        />
+      </label>
+      <label className="grid gap-1.5 text-xs font-bold text-slate-700">
+        Alasan Koreksi <span className="font-semibold text-rose-600">Wajib diisi</span>
+        <textarea
+          className="min-h-24 resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
+          maxLength={500}
+          onChange={(event) => onReasonChange(event.target.value)}
+          placeholder="Jelaskan kenapa nomor perlu dikoreksi..."
+          value={reason}
+        />
+        <small className="justify-self-end font-medium text-slate-400">{reason.length}/500</small>
+      </label>
+      {error ? <p className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
+    </FinanceActionModal>
+  );
+}
+
+function OrderDetailModal({ order, corrections = [], correctionsLoading = false, correctionsError = '', onClose, onOpenCorrection }) {
   if (!order) return null;
 
   const isCancelled = isCancelledFinanceOrder(order);
@@ -837,6 +952,22 @@ function OrderDetailModal({ order, onClose }) {
             <DetailField label="Catatan Order" value={order.notes} />
             <DetailField label="Nomor SO Accurate" value={order.soNumber} />
           </div>
+          {!isCancelled && order.soNumber ? (
+            <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-slate-950">Koreksi Nomor SO</h4>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Gunakan alur koreksi jika nomor SO sudah pernah diinput.</p>
+                </div>
+                <button className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800" onClick={() => onOpenCorrection(order, 'so_number')} type="button">
+                  Ajukan Koreksi
+                </button>
+              </div>
+              <div className="mt-2">
+                <CorrectionHistoryList corrections={corrections} error={correctionsError} loading={correctionsLoading} />
+              </div>
+            </div>
+          ) : null}
           {isCancelled ? (
             <div className="mt-2 grid gap-2 xl:grid-cols-[1fr_240px_240px]">
               <DetailField label="Alasan Batal" value={order.cancelReason || '-'} />
@@ -962,7 +1093,16 @@ function RpujDetailModal({ rpuj, onClose }) {
   );
 }
 
-function InvoiceDetailModal({ invoice, loading = false, error = '', onClose }) {
+function InvoiceDetailModal({
+  invoice,
+  loading = false,
+  error = '',
+  corrections = [],
+  correctionsLoading = false,
+  correctionsError = '',
+  onClose,
+  onOpenCorrection,
+}) {
   if (!invoice) return null;
   const documents = Array.isArray(invoice.documents) ? invoice.documents : [];
   const availableDocumentCount = documents.filter((document) => document.ready !== false && document.file?.path).length;
@@ -1125,6 +1265,24 @@ function InvoiceDetailModal({ invoice, loading = false, error = '', onClose }) {
                   Belum ada file Sales atau Operational yang dapat didownload.
                 </p>
               )}
+            </section>
+
+            <section className="finance-invoice-detail-card">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-slate-950">Koreksi Nomor Invoice</h4>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Koreksi nomor invoice masuk approval Admin.</p>
+                </div>
+                <button
+                  className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
+                  disabled={!invoice.invoiceNumber}
+                  onClick={() => onOpenCorrection(invoice, 'invoice_number')}
+                  type="button"
+                >
+                  Ajukan Koreksi
+                </button>
+              </div>
+              <CorrectionHistoryList corrections={corrections} error={correctionsError} loading={correctionsLoading} />
             </section>
           </div>
         </div>
@@ -1885,6 +2043,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [invoiceDetailLoading, setInvoiceDetailLoading] = useState(false);
   const [invoiceDetailError, setInvoiceDetailError] = useState('');
+  const [correctionHistory, setCorrectionHistory] = useState([]);
+  const [correctionHistoryLoading, setCorrectionHistoryLoading] = useState(false);
+  const [correctionHistoryError, setCorrectionHistoryError] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [selectedRpujId, setSelectedRpujId] = useState('');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
@@ -1899,6 +2060,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [transferModalError, setTransferModalError] = useState('');
   const [invoiceConfirmId, setInvoiceConfirmId] = useState('');
   const [invoiceConfirmError, setInvoiceConfirmError] = useState('');
+  const [correctionModal, setCorrectionModal] = useState(null);
+  const [correctionValue, setCorrectionValue] = useState('');
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correctionError, setCorrectionError] = useState('');
+  const [correctionBusy, setCorrectionBusy] = useState(false);
   const activeTab = useMemo(
     () => financeTabs.find((tab) => tab.id === initialTabId) || financeTabs[0],
     [initialTabId],
@@ -2011,6 +2177,36 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       active = false;
     };
   }, [selectedInvoiceId]);
+
+  useEffect(() => {
+    const targetId = selectedOrderId || selectedInvoiceId;
+    if (!targetId) {
+      setCorrectionHistory([]);
+      setCorrectionHistoryError('');
+      setCorrectionHistoryLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setCorrectionHistory([]);
+    setCorrectionHistoryError('');
+    setCorrectionHistoryLoading(true);
+    const request = selectedInvoiceId ? fetchFinanceInvoiceCorrections(targetId) : fetchFinanceOrderCorrections(targetId);
+    request
+      .then((result) => {
+        if (active) setCorrectionHistory((Array.isArray(result) ? result : result.rows || []).map(normalizeFinanceCorrection));
+      })
+      .catch((error) => {
+        if (active) setCorrectionHistoryError(error.message || 'Riwayat koreksi gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setCorrectionHistoryLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedOrderId, selectedInvoiceId]);
 
   function resetSimulation() {
     if (activeTab.id === 'order-verification') {
@@ -2147,6 +2343,84 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setInvoiceConfirmError('');
   }
 
+  function openCorrectionModal(row, type) {
+    setCorrectionModal({
+      ...row,
+      type,
+      invoiceNumber: row.invoiceNumber || '',
+      soNumber: row.soNumber || '',
+      customer: row.customer || '-',
+      destination: row.destination || '-',
+    });
+    setCorrectionValue(type === 'invoice_number' ? row.invoiceNumber || '' : row.soNumber || '');
+    setCorrectionReason('');
+    setCorrectionError('');
+  }
+
+  function closeCorrectionModal() {
+    if (correctionBusy) return;
+    setCorrectionModal(null);
+    setCorrectionValue('');
+    setCorrectionReason('');
+    setCorrectionError('');
+  }
+
+  async function refreshCorrectionHistory(targetId, type) {
+    setCorrectionHistoryLoading(true);
+    setCorrectionHistoryError('');
+    try {
+      const result = type === 'invoice_number'
+        ? await fetchFinanceInvoiceCorrections(targetId)
+        : await fetchFinanceOrderCorrections(targetId);
+      setCorrectionHistory((Array.isArray(result) ? result : result.rows || []).map(normalizeFinanceCorrection));
+    } catch (error) {
+      setCorrectionHistoryError(error.message || 'Riwayat koreksi gagal dimuat.');
+    } finally {
+      setCorrectionHistoryLoading(false);
+    }
+  }
+
+  async function submitCorrection(event) {
+    event.preventDefault();
+    if (!correctionModal?.id) return;
+    const requestedValue = String(correctionValue || '').trim().toUpperCase();
+    const reason = correctionReason.trim();
+    if (!requestedValue) {
+      setCorrectionError(correctionModal.type === 'invoice_number' ? 'Nomor invoice baru wajib diisi.' : 'Nomor SO baru wajib diisi.');
+      return;
+    }
+    if (!reason) {
+      setCorrectionError('Alasan koreksi wajib diisi.');
+      return;
+    }
+
+    setCorrectionBusy(true);
+    setCorrectionError('');
+    try {
+      const saved = correctionModal.type === 'invoice_number'
+        ? await requestFinanceInvoiceCorrection(correctionModal.id, { requestedValue, reason })
+        : await requestFinanceOrderSoCorrection(correctionModal.id, { requestedValue, reason });
+
+      if (saved.status === 'applied') {
+        if (correctionModal.type === 'invoice_number') {
+          setInvoiceRows((rows) => rows.map((row) => (row.id === correctionModal.id ? { ...row, invoiceNumber: requestedValue } : row)));
+          setInvoiceDetail((detail) => (detail?.id === correctionModal.id ? { ...detail, invoiceNumber: requestedValue } : detail));
+        } else {
+          setOrderRows((rows) => rows.map((row) => (row.id === correctionModal.id ? { ...row, soNumber: requestedValue, soNumberDraft: requestedValue } : row)));
+        }
+      }
+
+      await refreshCorrectionHistory(correctionModal.id, correctionModal.type);
+      setCorrectionModal(null);
+      setCorrectionValue('');
+      setCorrectionReason('');
+    } catch (error) {
+      setCorrectionError(error.message || 'Request koreksi gagal dikirim.');
+    } finally {
+      setCorrectionBusy(false);
+    }
+  }
+
   async function submitInvoiceNumber(event) {
     event.preventDefault();
     const row = invoiceRows.find((item) => item.id === invoiceConfirmId);
@@ -2257,7 +2531,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       />
 
       <OrderDetailModal
+        corrections={correctionHistory}
+        correctionsError={correctionHistoryError}
+        correctionsLoading={correctionHistoryLoading}
         onClose={() => setSelectedOrderId('')}
+        onOpenCorrection={openCorrectionModal}
         order={selectedOrder}
       />
       <RpujDetailModal
@@ -2265,6 +2543,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         rpuj={selectedRpuj}
       />
       <InvoiceDetailModal
+        corrections={correctionHistory}
+        correctionsError={correctionHistoryError}
+        correctionsLoading={correctionHistoryLoading}
         error={invoiceDetailError}
         invoice={selectedInvoice}
         loading={invoiceDetailLoading}
@@ -2273,6 +2554,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
           setInvoiceDetail(null);
           setInvoiceDetailError('');
         }}
+        onOpenCorrection={openCorrectionModal}
       />
       <SoNumberInputModal
         busy={savingSoId === soModalId}
@@ -2314,6 +2596,23 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         onClose={closeInvoiceConfirmModal}
         onConfirm={submitInvoiceNumber}
         row={invoiceConfirmRow}
+      />
+      <FinanceCorrectionModal
+        busy={correctionBusy}
+        context={correctionModal}
+        error={correctionError}
+        onClose={closeCorrectionModal}
+        onConfirm={submitCorrection}
+        onReasonChange={(value) => {
+          setCorrectionReason(value);
+          setCorrectionError('');
+        }}
+        onValueChange={(value) => {
+          setCorrectionValue(value);
+          setCorrectionError('');
+        }}
+        reason={correctionReason}
+        value={correctionValue}
       />
     </main>
   );

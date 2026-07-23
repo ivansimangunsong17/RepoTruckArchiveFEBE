@@ -31,6 +31,14 @@ function routeText(job) {
   return `${job.origin || '-'} - ${job.destination || '-'}`;
 }
 
+function rpujStatusText(status) {
+  if (status === 'paid') return 'UJ dikirim';
+  if (status === 'approved') return 'Disetujui Finance';
+  if (status === 'submitted') return 'Menunggu Finance';
+  if (status === 'rejected') return 'Ditolak Finance';
+  return 'Belum diajukan';
+}
+
 function AdminDashboard() {
   const [activeOpsView, setActiveOpsView] = useState('existing');
   const [selectedExistingJob, setSelectedExistingJob] = useState(null);
@@ -274,6 +282,12 @@ function AdminDashboard() {
                 <div><span>Surat Jalan</span><strong>{selectedExistingJob.travelDocument || 'Belum tersedia'}</strong><small>Dokumen perjalanan</small></div>
                 <div><span>TILA / Delivery Card / Gatepass / SP2</span><strong>{selectedExistingJob.tilaGatepassDocument || selectedExistingJob.unloadingVoucher || selectedExistingJob.weighingDocument || 'Belum tersedia'}</strong><small>Dokumen operasional</small></div>
                 <div><span>Catatan</span><strong>{selectedExistingJob.notes || 'Tidak ada catatan'}</strong><small>{selectedExistingJob.updatedBy ? `Update: ${selectedExistingJob.updatedBy}` : 'Belum ada update'}</small></div>
+              </article>
+              <article className="ops-prospect-detail-row">
+                <div><span>Status RPUJ</span><strong>{rpujStatusText(selectedExistingJob.rpujStatus)}</strong><small>{selectedExistingJob.rpujReviewedBy ? `Review: ${selectedExistingJob.rpujReviewedBy}` : 'Pengajuan uang jalan'}</small></div>
+                <div><span>Alasan Reject RPUJ</span><strong>{selectedExistingJob.rpujRejectionNote || '-'}</strong><small>{selectedExistingJob.rpujStatus === 'rejected' ? 'Perlu revisi Operational' : 'Tidak ada reject aktif'}</small></div>
+                <div><span>No. SPK</span><strong>{selectedExistingJob.spkNumber || 'Belum tersedia'}</strong><small>Dokumen perintah kerja</small></div>
+                <div><span>Bukti Transfer UJ</span><strong>{selectedExistingJob.rpujTransferProof?.name || 'Belum tersedia'}</strong><small>{selectedExistingJob.rpujTransferUploadedBy ? `Upload: ${selectedExistingJob.rpujTransferUploadedBy}` : 'Finance'}</small></div>
               </article>
             </div>
             <footer>

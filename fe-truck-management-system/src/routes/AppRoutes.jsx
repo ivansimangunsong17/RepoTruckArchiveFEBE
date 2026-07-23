@@ -29,6 +29,7 @@ const FinanceRpujApprovalPage = lazy(() => import('../pages/finance/FinanceRpujA
 const FinanceInvoiceNumberPage = lazy(() => import('../pages/finance/FinanceInvoiceNumberPage'));
 const FinanceCompletedTripsPage = lazy(() => import('../pages/finance/FinanceCompletedTripsPage'));
 const FinanceBillingReadinessPage = lazy(() => import('../pages/finance/FinanceBillingReadinessPage'));
+const FinanceCorrectionsPage = lazy(() => import('../pages/finance/FinanceCorrectionsPage'));
 
 function LazyPage({ children }) {
   const location = useLocation();
@@ -87,6 +88,7 @@ export const router = createBrowserRouter([
         { path: 'finance/order-verification', children: [guardedPage(financeRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },
         { path: 'finance/rpuj-approval', children: [guardedPage(financeRoles, <LazyPage><FinanceRpujApprovalPage /></LazyPage>)] },
         { path: 'finance/invoices', children: [guardedPage(financeRoles, <LazyPage><FinanceInvoiceNumberPage /></LazyPage>)] },
+        { path: 'finance/corrections', children: [guardedPage(adminRoles, <LazyPage><FinanceCorrectionsPage /></LazyPage>)] },
         { path: 'finance/completed-trips', children: [guardedPage(financeRoles, <LazyPage><FinanceCompletedTripsPage /></LazyPage>)] },
         { path: 'finance/billing-readiness', children: [guardedPage(financeRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
         { path: 'truck-utilization', element: <Navigate to="/reports?tab=utilization" replace /> },

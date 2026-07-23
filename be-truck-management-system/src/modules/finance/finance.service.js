@@ -1,7 +1,11 @@
 import {
+  approveFinanceCorrectionRequest,
   approveRpujRequest,
+  createFinanceCorrectionRequest,
   getCompletedTripDetail,
   getCompletedTripsPage,
+  getFinanceCorrectionRequestsBySalesOrder,
+  getFinanceCorrectionRequestsPage,
   getFinanceDashboard,
   getInvoiceOrderDetail,
   getInvoiceOrdersPage,
@@ -9,6 +13,7 @@ import {
   getRpujRequestsPage,
   markRpujTransferUploaded,
   rejectRpujRequest,
+  rejectFinanceCorrectionRequest,
   updateInvoiceNumber,
   updateOrderVerificationSoNumber,
 } from './finance.repository.js';
@@ -129,6 +134,44 @@ export function saveInvoiceNumber(id, payload = {}, actor) {
   return updateInvoiceNumber(id, {
     invoiceNumber: payload.invoiceNumber,
     actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function requestFinanceCorrection(id, payload = {}, actor) {
+  return createFinanceCorrectionRequest(id, {
+    ...payload,
+    actorName: actor?.name || actor?.email || 'Finance',
+    actorRole: actor?.role || 'finance',
+  });
+}
+
+export function fetchFinanceCorrectionHistory(id) {
+  return getFinanceCorrectionRequestsBySalesOrder(id);
+}
+
+export function fetchFinanceCorrections(query = {}) {
+  return getFinanceCorrectionRequestsPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || query.search || '',
+    status: query.status || '',
+    correctionType: query.correctionType || query.type || '',
+  });
+}
+
+export function approveFinanceCorrection(id, payload = {}, actor) {
+  return approveFinanceCorrectionRequest(id, {
+    reviewNote: payload.reviewNote || payload.note || '',
+    actorName: actor?.name || actor?.email || 'Admin',
+    actorRole: actor?.role || 'admin',
+  });
+}
+
+export function rejectFinanceCorrection(id, payload = {}, actor) {
+  return rejectFinanceCorrectionRequest(id, {
+    reviewNote: payload.reviewNote || payload.note || '',
+    actorName: actor?.name || actor?.email || 'Admin',
+    actorRole: actor?.role || 'admin',
   });
 }
 

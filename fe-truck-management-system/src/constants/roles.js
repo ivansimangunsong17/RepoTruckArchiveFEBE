@@ -46,6 +46,9 @@ export const ROLE_PERMISSIONS = {
     'finance.transfer_proof.upload',
     'finance.invoice.read',
     'finance.invoice.update_number',
+    'finance.correction.read',
+    'finance.correction.request',
+    'finance.correction.approve',
   ],
   sales: [
     'orders.create',
@@ -85,6 +88,8 @@ export const ROLE_PERMISSIONS = {
     'finance.transfer_proof.upload',
     'finance.invoice.read',
     'finance.invoice.update_number',
+    'finance.correction.read',
+    'finance.correction.request',
     'documents.operational.read',
   ],
 };
@@ -114,6 +119,9 @@ const BACKEND_PERMISSION_ALIASES = {
   'finance.transfer_proof.upload': ['finance.transfer_proof.upload'],
   'finance.invoice.read': ['finance.invoice.read', 'finance.read'],
   'finance.invoice.update_number': ['finance.invoice.update_number'],
+  'finance.correction.read': ['finance.correction.read', 'finance.read'],
+  'finance.correction.request': ['finance.correction.request'],
+  'finance.correction.approve': ['finance.correction.approve'],
 };
 
 function hasBackendPermission(user, permission) {

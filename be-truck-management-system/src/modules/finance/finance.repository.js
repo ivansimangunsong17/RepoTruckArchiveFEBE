@@ -1,4 +1,12 @@
 import { query, withTransaction } from '../../db/client.js';
+import {
+  financeCorrectionStatuses,
+  getFinanceCorrectionField,
+  isFinanceCorrectionAdminApprovalRequired,
+  mapFinanceCorrectionRequest,
+  normalizeFinanceCorrectionType,
+  validateFinanceCorrectionInput,
+} from './finance-corrections.js';
 
 function parsePage(options = {}) {
   const page = Math.max(1, Number(options.page || 1));
@@ -47,6 +55,43 @@ function paymentTermsExpression(alias = 'so') {
       else 'Cash'
     end
   `;
+}
+
+async function applyFinanceCorrectionValue(client, orderId, correctionType, requestedValue, actorName) {
+  const field = getFinanceCorrectionField(correctionType);
+  if (field === 'invoice_number') {
+    await client.query(
+      `
+        update sales_orders
+        set invoice_number = $1,
+            billing_status = case
+              when coalesce(billing_status, 'belum_invoice') in ('belum_invoice', 'pending_invoice') then 'belum_dikirim'
+              else billing_status
+            end,
+            invoice_issued_at = coalesce(invoice_issued_at, now()),
+            invoice_input_by_name = coalesce(invoice_input_by_name, $2),
+            updated_by_name = $2,
+            updated_at = now()
+        where id = $3
+      `,
+      [requestedValue, actorName || 'Finance', orderId],
+    );
+    return;
+  }
+
+  await client.query(
+    `
+      update sales_orders
+      set so_number = $1,
+          finance_verification_status = 'verified',
+          finance_verified_by_name = coalesce(finance_verified_by_name, $2),
+          finance_verified_at = coalesce(finance_verified_at, now()),
+          updated_by_name = $2,
+          updated_at = now()
+      where id = $3
+    `,
+    [requestedValue, actorName || 'Finance', orderId],
+  );
 }
 
 function mapOrderVerificationRow(row) {
@@ -1359,6 +1404,398 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
     );
 
     return mapOrderVerificationRow(updated.rows[0]);
+  });
+}
+
+export async function createFinanceCorrectionRequest(salesOrderId, payload = {}) {
+  const { correctionType, requestedValue, reason } = validateFinanceCorrectionInput(payload);
+  const field = getFinanceCorrectionField(correctionType);
+
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select
+          so.id,
+          so.so_number,
+          so.invoice_number,
+          so.status,
+          so.billing_status,
+          coalesce(count(cj.id) filter (where cj.status not in ('cancelled', 'completed')), 0)::int as active_jobs_count
+        from sales_orders so
+        left join container_jobs cj on cj.sales_order_id = so.id
+        where so.id = $1
+        group by so.id
+      `,
+      [salesOrderId],
+    );
+
+    const order = existing.rows[0];
+    if (!order) {
+      const error = new Error('Sales Order untuk koreksi Finance tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'FINANCE_CORRECTION_ORDER_NOT_FOUND';
+      throw error;
+    }
+
+    const currentValue = String(order[field] || '').trim();
+    if (currentValue && currentValue.toLowerCase() === requestedValue.toLowerCase()) {
+      const error = new Error('Nomor baru sama dengan nomor yang sedang digunakan.');
+      error.statusCode = 409;
+      error.code = 'FINANCE_CORRECTION_VALUE_UNCHANGED';
+      throw error;
+    }
+
+    const duplicate = await client.query(
+      `
+        select id
+        from sales_orders
+        where lower(${field}) = lower($1)
+          and id <> $2
+        limit 1
+      `,
+      [requestedValue, salesOrderId],
+    );
+
+    if (duplicate.rows[0]) {
+      const error = new Error(correctionType === 'invoice_number'
+        ? 'Nomor invoice baru sudah digunakan oleh Sales Order lain.'
+        : 'Nomor SO baru sudah digunakan oleh Sales Order lain.');
+      error.statusCode = 409;
+      error.code = correctionType === 'invoice_number' ? 'INVOICE_NUMBER_DUPLICATE' : 'SO_NUMBER_DUPLICATE';
+      throw error;
+    }
+
+    const pending = await client.query(
+      `
+        select id
+        from finance_correction_requests
+        where status = $3
+          and (
+            (sales_order_id = $1 and correction_type = $2)
+            or (correction_type = $2 and lower(requested_value) = lower($4))
+          )
+        limit 1
+      `,
+      [salesOrderId, correctionType, financeCorrectionStatuses.pending, requestedValue],
+    );
+
+    if (pending.rows[0]) {
+      const error = new Error('Masih ada request koreksi yang menunggu approval untuk nomor ini.');
+      error.statusCode = 409;
+      error.code = 'FINANCE_CORRECTION_PENDING_EXISTS';
+      throw error;
+    }
+
+    const requiresAdminApproval = isFinanceCorrectionAdminApprovalRequired(order, correctionType);
+    const status = requiresAdminApproval ? financeCorrectionStatuses.pending : financeCorrectionStatuses.applied;
+    if (!requiresAdminApproval) {
+      await applyFinanceCorrectionValue(client, salesOrderId, correctionType, requestedValue, payload.actorName || 'Finance');
+    }
+
+    const inserted = await client.query(
+      `
+        insert into finance_correction_requests (
+          sales_order_id,
+          correction_type,
+          current_value,
+          requested_value,
+          reason,
+          status,
+          requires_admin_approval,
+          requested_by_name,
+          requested_by_role,
+          applied_at,
+          metadata
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+        returning *
+      `,
+      [
+        salesOrderId,
+        correctionType,
+        currentValue,
+        requestedValue,
+        reason,
+        status,
+        requiresAdminApproval,
+        payload.actorName || 'Finance',
+        payload.actorRole || 'finance',
+        requiresAdminApproval ? null : new Date().toISOString(),
+        JSON.stringify({
+          salesOrderStatus: order.status || '',
+          billingStatus: order.billing_status || '',
+          activeJobsCount: Number(order.active_jobs_count || 0),
+        }),
+      ],
+    );
+
+    return mapFinanceCorrectionRequest({
+      ...inserted.rows[0],
+      so_number: correctionType === 'so_number' && !requiresAdminApproval ? requestedValue : order.so_number,
+      invoice_number: correctionType === 'invoice_number' && !requiresAdminApproval ? requestedValue : order.invoice_number,
+    });
+  });
+}
+
+export async function getFinanceCorrectionRequestsBySalesOrder(salesOrderId) {
+  const result = await query(
+    `
+      select
+        fcr.*,
+        so.so_number,
+        so.invoice_number
+      from finance_correction_requests fcr
+      join sales_orders so on so.id = fcr.sales_order_id
+      where fcr.sales_order_id = $1
+      order by fcr.created_at desc
+      `,
+      [salesOrderId],
+    );
+
+  return result.rows.map(mapFinanceCorrectionRequest);
+}
+
+function buildFinanceCorrectionFilters(options = {}) {
+  const params = [];
+  const clauses = [];
+
+  if (options.status) {
+    params.push(String(options.status).trim());
+    clauses.push(`fcr.status = $${params.length}`);
+  }
+
+  if (options.correctionType || options.type) {
+    params.push(normalizeFinanceCorrectionType(options.correctionType || options.type));
+    clauses.push(`fcr.correction_type = $${params.length}`);
+  }
+
+  if (options.query || options.search) {
+    params.push(`%${String(options.query || options.search).trim()}%`);
+    clauses.push(`(
+      so.so_number ilike $${params.length}
+      or so.invoice_number ilike $${params.length}
+      or so.customer_name ilike $${params.length}
+      or fcr.current_value ilike $${params.length}
+      or fcr.requested_value ilike $${params.length}
+      or fcr.reason ilike $${params.length}
+    )`);
+  }
+
+  return { whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '', params };
+}
+
+export async function getFinanceCorrectionRequestsPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildFinanceCorrectionFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+
+  const [rows, total, summary] = await Promise.all([
+    query(
+      `
+        select
+          fcr.*,
+          so.so_number,
+          so.invoice_number,
+          so.customer_name,
+          so.destination
+        from finance_correction_requests fcr
+        join sales_orders so on so.id = fcr.sales_order_id
+        ${whereSql}
+        order by
+          case when fcr.status = 'pending' then 0 else 1 end,
+          fcr.created_at desc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        select count(*)::int as total
+        from finance_correction_requests fcr
+        join sales_orders so on so.id = fcr.sales_order_id
+        ${whereSql}
+      `,
+      params,
+    ),
+    query(
+      `
+        select
+          count(*) filter (where status = 'pending')::int as pending,
+          count(*) filter (where status = 'applied')::int as applied,
+          count(*) filter (where status = 'rejected')::int as rejected
+        from finance_correction_requests
+      `,
+    ),
+  ]);
+
+  return {
+    rows: rows.rows.map(mapFinanceCorrectionRequest),
+    page,
+    pageSize,
+    total: Number(total.rows[0]?.total || 0),
+    totalPages: Math.max(1, Math.ceil(Number(total.rows[0]?.total || 0) / pageSize)),
+    summary: {
+      pending: Number(summary.rows[0]?.pending || 0),
+      applied: Number(summary.rows[0]?.applied || 0),
+      rejected: Number(summary.rows[0]?.rejected || 0),
+    },
+  };
+}
+
+async function getPendingCorrectionForReview(client, id) {
+  const result = await client.query(
+    `
+      select
+        fcr.*,
+        so.so_number,
+        so.invoice_number,
+        so.customer_name,
+        so.destination
+      from finance_correction_requests fcr
+      join sales_orders so on so.id = fcr.sales_order_id
+      where fcr.id = $1
+      for update of fcr
+    `,
+    [id],
+  );
+
+  const correction = result.rows[0];
+  if (!correction) {
+    const error = new Error('Request koreksi Finance tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'FINANCE_CORRECTION_NOT_FOUND';
+    throw error;
+  }
+
+  if (correction.status !== financeCorrectionStatuses.pending) {
+    const error = new Error('Request koreksi Finance sudah diproses.');
+    error.statusCode = 409;
+    error.code = 'FINANCE_CORRECTION_ALREADY_REVIEWED';
+    throw error;
+  }
+
+  return correction;
+}
+
+export async function approveFinanceCorrectionRequest(id, payload = {}) {
+  const reviewNote = String(payload.reviewNote || payload.note || '').trim();
+  if (reviewNote.length > 500) {
+    const error = new Error('Catatan approval maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'FINANCE_CORRECTION_REVIEW_NOTE_TOO_LONG';
+    throw error;
+  }
+
+  return withTransaction(async (client) => {
+    const correction = await getPendingCorrectionForReview(client, id);
+    const field = getFinanceCorrectionField(correction.correction_type);
+
+    const duplicate = await client.query(
+      `
+        select id
+        from sales_orders
+        where lower(${field}) = lower($1)
+          and id <> $2
+        limit 1
+      `,
+      [correction.requested_value, correction.sales_order_id],
+    );
+
+    if (duplicate.rows[0]) {
+      const error = new Error(correction.correction_type === 'invoice_number'
+        ? 'Nomor invoice baru sudah digunakan oleh Sales Order lain.'
+        : 'Nomor SO baru sudah digunakan oleh Sales Order lain.');
+      error.statusCode = 409;
+      error.code = correction.correction_type === 'invoice_number' ? 'INVOICE_NUMBER_DUPLICATE' : 'SO_NUMBER_DUPLICATE';
+      throw error;
+    }
+
+    await applyFinanceCorrectionValue(
+      client,
+      correction.sales_order_id,
+      correction.correction_type,
+      correction.requested_value,
+      payload.actorName || 'Admin',
+    );
+
+    const updated = await client.query(
+      `
+        update finance_correction_requests
+        set status = $1,
+            reviewed_by_name = $2,
+            reviewed_by_role = $3,
+            reviewed_at = now(),
+            review_note = $4,
+            applied_at = now(),
+            updated_at = now()
+        where id = $5
+        returning *
+      `,
+      [
+        financeCorrectionStatuses.applied,
+        payload.actorName || 'Admin',
+        payload.actorRole || 'admin',
+        reviewNote || null,
+        id,
+      ],
+    );
+
+    return mapFinanceCorrectionRequest({
+      ...updated.rows[0],
+      so_number: correction.correction_type === 'so_number' ? correction.requested_value : correction.so_number,
+      invoice_number: correction.correction_type === 'invoice_number' ? correction.requested_value : correction.invoice_number,
+      customer_name: correction.customer_name,
+      destination: correction.destination,
+    });
+  });
+}
+
+export async function rejectFinanceCorrectionRequest(id, payload = {}) {
+  const reviewNote = String(payload.reviewNote || payload.note || '').trim();
+  if (!reviewNote) {
+    const error = new Error('Catatan reject koreksi wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'FINANCE_CORRECTION_REJECT_NOTE_REQUIRED';
+    throw error;
+  }
+  if (reviewNote.length > 500) {
+    const error = new Error('Catatan reject maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'FINANCE_CORRECTION_REVIEW_NOTE_TOO_LONG';
+    throw error;
+  }
+
+  return withTransaction(async (client) => {
+    const correction = await getPendingCorrectionForReview(client, id);
+    const updated = await client.query(
+      `
+        update finance_correction_requests
+        set status = $1,
+            reviewed_by_name = $2,
+            reviewed_by_role = $3,
+            reviewed_at = now(),
+            review_note = $4,
+            updated_at = now()
+        where id = $5
+        returning *
+      `,
+      [
+        financeCorrectionStatuses.rejected,
+        payload.actorName || 'Admin',
+        payload.actorRole || 'admin',
+        reviewNote,
+        id,
+      ],
+    );
+
+    return mapFinanceCorrectionRequest({
+      ...updated.rows[0],
+      so_number: correction.so_number,
+      invoice_number: correction.invoice_number,
+      customer_name: correction.customer_name,
+      destination: correction.destination,
+    });
   });
 }
 

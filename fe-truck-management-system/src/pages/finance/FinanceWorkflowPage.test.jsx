@@ -4,11 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FinanceWorkflowPage from './FinanceWorkflowPage';
 import {
   approveFinanceRpuj,
+  fetchFinanceInvoiceCorrections,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
+  fetchFinanceOrderCorrections,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
   rejectFinanceRpuj,
+  requestFinanceInvoiceCorrection,
+  requestFinanceOrderSoCorrection,
   updateFinanceInvoiceNumber,
   updateFinanceOrderSoNumber,
   uploadFinanceRpujTransferProof,
@@ -17,11 +21,15 @@ import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/fina
 
 vi.mock('../../services/finance/financeService', () => ({
   approveFinanceRpuj: vi.fn(),
+  fetchFinanceInvoiceCorrections: vi.fn(),
   fetchFinanceInvoiceDetail: vi.fn(),
   fetchFinanceInvoices: vi.fn().mockResolvedValue({ rows: [] }),
+  fetchFinanceOrderCorrections: vi.fn(),
   fetchFinanceOrderVerifications: vi.fn(),
   fetchFinanceRpujRequests: vi.fn(),
   rejectFinanceRpuj: vi.fn(),
+  requestFinanceInvoiceCorrection: vi.fn(),
+  requestFinanceOrderSoCorrection: vi.fn(),
   updateFinanceInvoiceNumber: vi.fn(),
   updateFinanceOrderSoNumber: vi.fn(),
   uploadFinanceRpujTransferProof: vi.fn(),
@@ -91,6 +99,10 @@ beforeEach(() => {
   fetchFinanceOrderVerifications.mockResolvedValue({ rows: [orderRow, cancelledOrderRow] });
   fetchFinanceRpujRequests.mockResolvedValue({ rows: [rpujRow] });
   fetchFinanceInvoices.mockResolvedValue({ rows: [invoiceRow], summary: invoiceSummary });
+  fetchFinanceOrderCorrections.mockResolvedValue([]);
+  fetchFinanceInvoiceCorrections.mockResolvedValue([]);
+  requestFinanceOrderSoCorrection.mockResolvedValue({ status: 'pending' });
+  requestFinanceInvoiceCorrection.mockResolvedValue({ status: 'pending' });
   fetchFinanceInvoiceDetail.mockResolvedValue({
     ...invoiceRow,
     billingItems: ['Jasa Angkut D20 - 1 ritase', 'Bon Muat/Bongkar - 1 item'],
@@ -239,6 +251,26 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByRole('button', { name: /View delivery-order.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Download delivery-order.pdf/i })).toBeEnabled();
     expect(fetchFinanceInvoiceDetail).toHaveBeenCalledWith('invoice-1');
+  });
+
+  it('mengajukan koreksi nomor invoice dari detail invoice', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    await user.click(await screen.findByRole('button', { name: /Ajukan Koreksi/i }));
+    await user.clear(screen.getByLabelText(/Nomor Invoice Baru/i));
+    await user.type(screen.getByLabelText(/Nomor Invoice Baru/i), 'INV-TEST-002');
+    await user.type(screen.getByLabelText(/Alasan Koreksi/i), 'Nomor invoice sebelumnya salah ketik.');
+    await user.click(screen.getAllByRole('button', { name: 'Ajukan Koreksi' }).at(-1));
+
+    await waitFor(() => {
+      expect(requestFinanceInvoiceCorrection).toHaveBeenCalledWith('invoice-1', {
+        requestedValue: 'INV-TEST-002',
+        reason: 'Nomor invoice sebelumnya salah ketik.',
+      });
+    });
   });
 
   it('menampilkan aksi view dan download untuk bukti transfer UJ', async () => {

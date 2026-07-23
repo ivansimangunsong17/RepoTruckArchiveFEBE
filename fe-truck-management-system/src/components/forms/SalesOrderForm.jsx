@@ -25,10 +25,6 @@ const EMPTY_DOCUMENT = {
   notes: '',
 };
 
-function normalizeDateTime(value) {
-  return value ? value.slice(0, 16) : '';
-}
-
 function toLocalDateKey(date) {
   return [
     date.getFullYear(),
@@ -224,7 +220,7 @@ function createInitialForm(order) {
     doNumber: order?.doNumber || '',
     soDate: normalizeDateOnly(order?.soDate) || new Date().toISOString().slice(0, 10),
     tripDate: normalizeDateOnly(order?.tripDate || order?.plannedDate || order?.soDate) || new Date().toISOString().slice(0, 10),
-    receivedAt: normalizeDateTime(order?.receivedAt),
+    receivedAt: order?.receivedAt || '',
     customer: order?.customer || '',
     customerPic: order?.customerPic || '',
     customerPhone: order?.customerPhone || '',

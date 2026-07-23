@@ -272,6 +272,45 @@ describe('SalesOrderForm', () => {
     expect(screen.getByLabelText('Tanggal Jalan')).toHaveValue('2026-07-17');
   });
 
+  it('mempertahankan waktu input sistem saat edit disimpan tanpa perubahan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const receivedAt = '2026-07-23T03:35:00.000Z';
+    const order = {
+      id: 'so-time',
+      soNumber: 'SO-TIME-001',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      receivedAt,
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 0 }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending', receivedAt }],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      receivedAt,
+      containers: [
+        expect.objectContaining({
+          id: 'job-1',
+          receivedAt,
+        }),
+      ],
+    }));
+  });
+
   it('mempertahankan job cancelled saat SO disimpan ulang tanpa perubahan qty', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

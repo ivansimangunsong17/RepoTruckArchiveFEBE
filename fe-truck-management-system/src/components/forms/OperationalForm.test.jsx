@@ -418,6 +418,8 @@ describe('OperationalForm', () => {
     await openOperationalPhase(user, /uang jalan & spk/i);
     await user.click(screen.getByRole('button', { name: /preview spk/i }));
 
+    expect(open).toHaveBeenCalledWith('', '_blank', 'width=900,height=760');
+    expect(open.mock.results[0].value.opener).toBeNull();
     const html = write.mock.calls.map(([value]) => value).join('');
     expect(html.indexOf('Tujuan')).toBeLessThan(html.indexOf('No. SPK'));
     expect(html).toContain('No. Container');

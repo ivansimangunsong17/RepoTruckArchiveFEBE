@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
+  FilePenLine,
   FileClock,
   FileWarning,
   LayoutDashboard,
@@ -102,6 +103,7 @@ export const navigationGroups = [
     label: 'System',
     items: [
       { to: '/users', label: 'User Management', icon: ShieldCheck, roles: adminOnly },
+      { to: '/finance/corrections', label: 'Koreksi Finance', icon: FilePenLine, roles: adminOnly },
       { to: '/activity-log', label: 'Activity Log', icon: FileClock, roles: adminOnly },
       { to: '/settings', label: 'Pengaturan Sistem', icon: Settings, roles: adminOnly },
     ],

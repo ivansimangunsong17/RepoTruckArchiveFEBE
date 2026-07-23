@@ -678,8 +678,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   }
 
   function previewSpk() {
-    const previewWindow = window.open('', '_blank', 'noopener,noreferrer,width=900,height=760');
+    const previewWindow = window.open('', '_blank', 'width=900,height=760');
     if (!previewWindow) return;
+    previewWindow.opener = null;
     const documentData = buildSpkDocumentData();
     const renderRows = (rows) => rows
       .map((row) => `
