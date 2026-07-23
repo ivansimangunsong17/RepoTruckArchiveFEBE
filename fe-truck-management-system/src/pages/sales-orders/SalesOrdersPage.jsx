@@ -762,7 +762,7 @@ function SalesOrdersPage() {
               <div className="order-meta">
                 <div><PackageCheck size={17} /><p>Rute<strong>{selectedOrder.origin} - {selectedOrder.destination}</strong></p></div>
                 <div><Clock3 size={17} /><p>Waktu Input Sistem<strong>{formatDateTime(selectedOrder.receivedAt)}</strong></p></div>
-                <div><Eye size={17} /><p>Sales<strong>{selectedOrder.salesName || '-'}</strong></p></div>
+                <div><Eye size={17} /><p>Sales Pembuat<strong>{getSalesGroupName(selectedOrder)}</strong></p></div>
                 <div><Clock3 size={17} /><p>Terakhir diperbarui<strong>{selectedOrder.updatedBy || '-'} - {formatDateTime(selectedOrder.updatedAt)}</strong></p></div>
               </div>
 

@@ -106,7 +106,9 @@ const jobColumns = `
   status, received_at, running_at, completed_at, created_by_name, updated_by_name,
   created_at, updated_at, cancelled_at, cancel_reason, cancel_source, cancelled_by_name,
   cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role,
-  cancel_requested_at, cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note
+  cancel_requested_at, cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note,
+  repo_location, repo_stored_at, repo_reason, repo_notes,
+  repo_released_driver_id, repo_released_vehicle_id, repo_created_by_name
 `;
 
 const attachmentColumns = `
@@ -262,7 +264,7 @@ async function refreshOrderStatus(client, salesOrderId) {
     ? 'cancelled'
     : activeTotal > 0 && counts.completed === activeTotal
     ? 'completed'
-    : counts.running || counts.completed
+    : counts.running || counts.repo_stored || counts.completed
       ? 'running'
       : 'waiting_operational';
 

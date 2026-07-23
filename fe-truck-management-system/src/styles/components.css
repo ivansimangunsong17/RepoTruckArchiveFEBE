@@ -20,6 +20,7 @@
 }
 .status-badge.expired, .status-badge.rejected { color: #a8141a; background: #ffe8e9; }
 .status-badge.cancelled { color: #a8141a; background: #ffe8e9; }
+.status-badge.repo_stored { color: #2156a3; background: #e8f1ff; }
 .document-list, .position-list { padding: 0 18px 8px; }
 .document-list > div, .position-list > div { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid #edf0f4; }
 .document-icon { display: grid; place-items: center; width: 33px; height: 33px; border-radius: 8px; color: #9f141a; background: #ffe8e9; }

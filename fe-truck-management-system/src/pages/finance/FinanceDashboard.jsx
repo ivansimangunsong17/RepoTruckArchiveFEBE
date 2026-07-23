@@ -229,6 +229,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
                 <div className="grid gap-2 md:grid-cols-4">
                   <ReadOnlyField label="Tarif" value={moneyValue(trip.tariff)} />
                   <ReadOnlyField label="Total Penagihan" value={moneyValue(trip.totalRevenue)} />
+                  <ReadOnlyField label="Jasa Angkut" value={moneyValue(trip.transportRevenue)} />
+                  <ReadOnlyField label="Reimbursement" value={formatCurrency(trip.reimbursementAmount || 0)} />
                   <ReadOnlyField label="Uang Jalan" value={moneyValue(trip.journeyMoney)} />
                   <ReadOnlyField label="Biaya Tambahan" value={formatCurrency(trip.additionalCost || 0)} />
                   <ReadOnlyField label="Estimasi Margin" value={moneyValue(trip.estimatedMargin)} />
@@ -626,6 +628,9 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                         <div className="rounded-md bg-emerald-50 px-2 py-1.5">
                           <span className="block text-[10px] font-bold uppercase text-emerald-700">Penagihan</span>
                           <strong className="text-[11px] text-slate-950">{moneyValue(row.totalRevenue)}</strong>
+                          {Number(row.reimbursementAmount || 0) > 0 ? (
+                            <span className="mt-0.5 block text-[9px] font-semibold text-emerald-700">Reimb. {formatCurrency(row.reimbursementAmount || 0)}</span>
+                          ) : null}
                         </div>
                         <div className="rounded-md bg-blue-50 px-2 py-1.5">
                           <span className="block text-[10px] font-bold uppercase text-blue-700">Uang jalan</span>

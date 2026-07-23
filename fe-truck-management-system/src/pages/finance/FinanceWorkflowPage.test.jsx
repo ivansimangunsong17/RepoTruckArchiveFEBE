@@ -38,6 +38,22 @@ const orderRow = {
   soNumber: '',
 };
 
+const cancelledOrderRow = {
+  id: 'order-cancelled-1',
+  orderDate: '2026-07-18',
+  salesName: 'Sales Test',
+  customer: 'PT Customer Batal',
+  destination: 'Bekasi',
+  runningDate: '2026-07-21',
+  status: 'SO Batal',
+  verificationStatus: 'cancelled',
+  operationalStatus: 'cancelled',
+  soNumber: 'SO-CANCEL-001',
+  cancelReason: 'Customer membatalkan pengiriman setelah nomor SO terbit.',
+  cancelledAt: '2026-07-19T08:30:00.000Z',
+  cancelledByName: 'Admin Test',
+};
+
 const rpujRow = {
   id: 'job-1',
   soNumber: 'SO-TEST-001',
@@ -64,11 +80,17 @@ const invoiceRow = {
   invoiceNumber: 'INV-TEST-001',
 };
 
+const invoiceSummary = {
+  needNumber: 0,
+  inProgress: 1,
+  paid: 2,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
-  fetchFinanceOrderVerifications.mockResolvedValue({ rows: [orderRow] });
+  fetchFinanceOrderVerifications.mockResolvedValue({ rows: [orderRow, cancelledOrderRow] });
   fetchFinanceRpujRequests.mockResolvedValue({ rows: [rpujRow] });
-  fetchFinanceInvoices.mockResolvedValue({ rows: [invoiceRow] });
+  fetchFinanceInvoices.mockResolvedValue({ rows: [invoiceRow], summary: invoiceSummary });
   fetchFinanceInvoiceDetail.mockResolvedValue({
     ...invoiceRow,
     documents: [
@@ -173,6 +195,23 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByLabelText('Bulan pencatatan Finance')).toBeInTheDocument();
   });
 
+  it('menampilkan jumlah tab invoice dari summary backend saat pindah menu', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await screen.findByRole('tab', { name: /Menunggu Sales/i });
+    expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
+    expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+
+    await user.click(screen.getByRole('tab', { name: /Lunas/i }));
+
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'paid' }));
+    });
+    expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
+    expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+  });
+
   it('menampilkan aksi view dan download untuk dokumen Sales dan Operational', async () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
@@ -230,6 +269,23 @@ describe('FinanceWorkflowPage validation modals', () => {
     await user.click(screen.getByRole('button', { name: 'Simpan Nomor SO' }));
 
     expect(updateFinanceOrderSoNumber).toHaveBeenCalledWith('order-1', 'SO-202607-019');
+  });
+
+  it('menampilkan status dan alasan SO batal di finance', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    await user.click(await screen.findByRole('tab', { name: /SO Batal/i }));
+    expect(screen.getByText('Bekasi')).toBeInTheDocument();
+    expect(screen.getAllByText('SO Batal').length).toBeGreaterThan(0);
+    expect(screen.getByText('Customer membatalkan pengiriman setelah nomor SO terbit.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Input Nomor SO' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Detail' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Alasan Batal');
+    expect(dialog).toHaveTextContent('Customer membatalkan pengiriman setelah nomor SO terbit.');
+    expect(dialog).toHaveTextContent('Admin Test');
   });
 
   it('meminta validasi sebelum approve RPUJ', async () => {

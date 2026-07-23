@@ -121,6 +121,13 @@ function normalizeLocalContainers(containers, receivedAt) {
     cancelledByName: container.cancelledByName || '',
     cancelReason: container.cancelReason || container.cancelRequestNote || '',
     cancelSource: container.cancelSource || '',
+    repoLocation: container.repoLocation || '',
+    repoStoredAt: container.repoStoredAt || null,
+    repoReason: container.repoReason || '',
+    repoNotes: container.repoNotes || '',
+    repoReleasedDriverId: container.repoReleasedDriverId || null,
+    repoReleasedVehicleId: container.repoReleasedVehicleId || null,
+    repoCreatedByName: container.repoCreatedByName || '',
     receivedAt: container.receivedAt || receivedAt,
     runningAt: container.runningAt || null,
     completedAt: container.completedAt || null,
@@ -141,7 +148,7 @@ function deriveOrderStatus(containers) {
   const activeContainers = containers.filter((container) => container.status !== 'cancelled');
   const allCancelled = containers.length > 0 && activeContainers.length === 0;
   const allCompleted = activeContainers.length > 0 && activeContainers.every((container) => container.status === 'completed');
-  const hasProgress = activeContainers.some((container) => ['running', 'completed'].includes(container.status));
+  const hasProgress = activeContainers.some((container) => ['running', 'repo_stored', 'completed'].includes(container.status));
   return allCancelled ? 'cancelled' : allCompleted ? 'completed' : hasProgress ? 'running' : 'waiting_operational';
 }
 
@@ -152,7 +159,7 @@ function hasProcessedContainers(order) {
 
 function normalizeAssignedJobForm(form) {
   const hasAssignment = Boolean(form.plateNumber && form.driver);
-  if (!hasAssignment || form.status === 'completed') return form;
+  if (!hasAssignment || ['repo_stored', 'completed', 'cancelled'].includes(form.status)) return form;
   return {
     ...form,
     status: 'running',
@@ -517,6 +524,8 @@ export function ArchiveDataProvider({ children }) {
           cancelledByName: normalizedForm.status === 'cancelled' ? normalizedForm.cancelledByName || user?.fullName || user?.name || 'Operational' : container.cancelledByName,
           cancelledAt: normalizedForm.status === 'cancelled' ? normalizedForm.cancelledAt || container.cancelledAt || now : container.cancelledAt,
           cancelRequestStatus: normalizedForm.status === 'cancelled' ? 'approved' : container.cancelRequestStatus,
+          repoStoredAt: normalizedForm.status === 'repo_stored' ? normalizedForm.repoStoredAt || container.repoStoredAt || now : container.repoStoredAt,
+          repoCreatedByName: normalizedForm.status === 'repo_stored' ? normalizedForm.repoCreatedByName || container.repoCreatedByName || user?.fullName || user?.name || 'Operational' : container.repoCreatedByName,
           updatedBy: user?.fullName || 'Operational',
           updatedAt: now,
         } : container);

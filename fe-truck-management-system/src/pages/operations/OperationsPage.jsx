@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Archive,
   Ban,
   CheckCircle2,
   ChevronLeft,
@@ -28,7 +29,8 @@ import { parseOtherCost } from '../../utils/otherCost';
 import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
-const STATUS_ORDER = { received: 0, running: 1, completed: 2, cancelled: 3 };
+const STATUS_ORDER = { received: 0, running: 1, repo_stored: 2, completed: 3, cancelled: 4 };
+const EMPTY_STATUS_COUNTS = { received: 0, running: 0, repo_stored: 0, completed: 0, cancelled: 0 };
 const CANCEL_SOURCE_OPTIONS = [
   { value: 'customer', label: 'Customer' },
   { value: 'sales', label: 'Sales' },
@@ -43,6 +45,14 @@ const rpujStageOptions = [
 
 function getStatusOrder(status) {
   return STATUS_ORDER[status] ?? Number.MAX_SAFE_INTEGER;
+}
+
+function getJobStatusLabel(status) {
+  if (status === 'completed') return 'Selesai';
+  if (status === 'running') return 'Sedang Jalan';
+  if (status === 'repo_stored') return 'Dititipkan Repo';
+  if (status === 'cancelled') return 'Batal';
+  return 'Belum Jalan';
 }
 
 function formatShipmentLabel(value) {
@@ -79,6 +89,18 @@ function documentState(job) {
 
 function containerLabel(job) {
   return job?.containerNumber || 'Container belum diisi';
+}
+
+function getRepoStorageMissing(job) {
+  const missing = [];
+  if (!String(job?.containerNumber || '').trim()) missing.push('No. Container');
+  if (!String(job?.driver || '').trim()) missing.push('Sopir');
+  if (!String(job?.plateNumber || '').trim()) missing.push('Truck');
+  return missing;
+}
+
+function canStoreRepoJob(job) {
+  return Boolean(job && !['completed', 'cancelled', 'repo_stored'].includes(job.status));
 }
 
 function otherCostValue(job) {
@@ -171,7 +193,7 @@ function OperationsPage({ documentFollowUp = false }) {
   const [databaseJobs, setDatabaseJobs] = useState([]);
   const [pendingDatabaseJobs, setPendingDatabaseJobs] = useState([]);
   const [serverTotal, setServerTotal] = useState(0);
-  const [statusCounts, setStatusCounts] = useState({ received: 0, running: 0, completed: 0, cancelled: 0 });
+  const [statusCounts, setStatusCounts] = useState(EMPTY_STATUS_COUNTS);
   const [rpujCounts, setRpujCounts] = useState({ queue: 0, submitted: 0, paid: 0 });
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
@@ -185,11 +207,18 @@ function OperationsPage({ documentFollowUp = false }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelForm, setCancelForm] = useState({ cancelSource: 'customer', cancelReason: '' });
   const [cancelSaving, setCancelSaving] = useState(false);
+  const [repoTarget, setRepoTarget] = useState(null);
+  const [repoForm, setRepoForm] = useState({ repoLocation: '', repoReason: '', repoNotes: '' });
+  const [repoSaving, setRepoSaving] = useState(false);
   const canEdit = hasPermission(user, 'operations.update');
   const canReviewCancel = canEdit || user?.role === USER_ROLES.ADMIN;
   const canViewDocuments = hasPermission(user, 'documents.operational.read');
   const detailOtherCost = otherCostValue(detail);
   const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
+  const repoMissing = getRepoStorageMissing(repoTarget);
+  const repoLocationValid = repoForm.repoLocation.trim().length >= 3;
+  const repoReasonValid = repoForm.repoReason.trim().length >= 8;
+  const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid);
 
   useEffect(() => {
     if (!detail) return undefined;
@@ -221,6 +250,21 @@ function OperationsPage({ documentFollowUp = false }) {
     };
   }, [cancelSaving, cancelTarget, detail]);
 
+  useEffect(() => {
+    if (!repoTarget) return undefined;
+
+    function closeRepoOnEscape(event) {
+      if (event.key === 'Escape' && !repoSaving) setRepoTarget(null);
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeRepoOnEscape);
+    return () => {
+      document.body.style.overflow = detail ? 'hidden' : '';
+      window.removeEventListener('keydown', closeRepoOnEscape);
+    };
+  }, [detail, repoSaving, repoTarget]);
+
   const demoJobs = useMemo(() => flattenDemoJobs(archive.orders), [archive.orders]);
   const filteredDemoJobs = useMemo(() => sortOperationalJobs(demoJobs.filter((job) => {
     const matchesQuery = !query || [
@@ -239,6 +283,7 @@ function OperationsPage({ documentFollowUp = false }) {
   const counts = archive.isDatabaseMode ? statusCounts : {
     received: demoJobs.filter((job) => job.status === 'received').length,
     running: demoJobs.filter((job) => job.status === 'running').length,
+    repo_stored: demoJobs.filter((job) => job.status === 'repo_stored').length,
     completed: demoJobs.filter((job) => job.status === 'completed').length,
     cancelled: demoJobs.filter((job) => job.status === 'cancelled').length,
   };
@@ -247,7 +292,7 @@ function OperationsPage({ documentFollowUp = false }) {
     submitted: demoJobs.filter((job) => getRpujStage(job) === 'submitted').length,
     paid: demoJobs.filter((job) => getRpujStage(job) === 'paid').length,
   };
-  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.completed || 0) + (counts.cancelled || 0);
+  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoJobs.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -279,13 +324,13 @@ function OperationsPage({ documentFollowUp = false }) {
         if (!active) return;
         setDatabaseJobs(result.rows);
         setServerTotal(result.total);
-        setStatusCounts({ received: 0, running: 0, completed: 0, cancelled: 0, ...result.counts });
+        setStatusCounts({ ...EMPTY_STATUS_COUNTS, ...result.counts });
         setRpujCounts({ queue: 0, submitted: 0, paid: 0, ...result.rpujCounts });
       } catch (requestError) {
         if (!active) return;
         setDatabaseJobs([]);
         setServerTotal(0);
-        setStatusCounts({ received: 0, running: 0, completed: 0, cancelled: 0 });
+        setStatusCounts(EMPTY_STATUS_COUNTS);
         setRpujCounts({ queue: 0, submitted: 0, paid: 0 });
         setError(requestError.message || 'Data Container Job gagal dimuat dari database.');
       } finally {
@@ -338,7 +383,7 @@ function OperationsPage({ documentFollowUp = false }) {
       setEditing(null);
       notify({
         title: 'Proses Operational diperbarui',
-        message: `${containerNumber} berhasil disimpan dengan status ${form.status === 'completed' ? 'Selesai' : form.status === 'running' ? 'Sedang Jalan' : 'Belum Jalan'}.`,
+        message: `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
@@ -401,6 +446,53 @@ function OperationsPage({ documentFollowUp = false }) {
       notify({ type: 'error', title: 'Container Job gagal dibatalkan', message: requestError.message });
     } finally {
       setCancelSaving(false);
+    }
+  }
+
+  function openRepoStorage(job) {
+    setRepoTarget(job);
+    setRepoForm({
+      repoLocation: job.repoLocation || '',
+      repoReason: job.repoReason || '',
+      repoNotes: job.repoNotes || '',
+    });
+  }
+
+  async function storeRepoJob(event) {
+    event.preventDefault();
+    if (!repoFormValid || repoSaving) return;
+
+    const actorName = user?.fullName || user?.name || 'Operational';
+    const payload = {
+      status: 'repo_stored',
+      repoLocation: repoForm.repoLocation.trim(),
+      repoReason: repoForm.repoReason.trim(),
+      repoNotes: repoForm.repoNotes.trim(),
+      repoStoredAt: new Date().toISOString(),
+      repoReleasedDriverId: repoTarget.driverId || null,
+      repoReleasedVehicleId: repoTarget.vehicleId || null,
+      repoCreatedByName: actorName,
+      updatedBy: actorName,
+    };
+
+    setRepoSaving(true);
+    try {
+      const saved = await archive.updateJob(repoTarget.id, payload);
+      if (archive.isDatabaseMode) {
+        if (saved) setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
+        setListVersion((value) => value + 1);
+        archive.refresh?.();
+      }
+      setDetail(null);
+      setRepoTarget(null);
+      notify({
+        title: 'Container dititipkan Repo',
+        message: `${containerLabel(repoTarget)} ditandai Dititipkan Repo. Truck dan sopir bisa dipakai untuk job lain.`,
+      });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Penitipan Repo gagal', message: requestError.message });
+    } finally {
+      setRepoSaving(false);
     }
   }
 
@@ -486,6 +578,7 @@ function OperationsPage({ documentFollowUp = false }) {
       {!documentFollowUp ? <div className="quick-stats operational-stats">
         <div><span>Belum Jalan</span><strong>{counts.received}</strong><small>Menunggu truck dan driver</small></div>
         <div><span>Sedang Jalan</span><strong>{counts.running}</strong><small>Dalam perjalanan</small></div>
+        <div><span>Dititipkan Repo</span><strong>{counts.repo_stored}</strong><small>Truck dan sopir sudah lepas</small></div>
         <div><span>Selesai</span><strong>{counts.completed}</strong><small>Proses telah lengkap</small></div>
         <div><span>Total Job</span><strong>{totalJobs}</strong><small>Container dalam daftar</small></div>
       </div> : null}
@@ -498,6 +591,7 @@ function OperationsPage({ documentFollowUp = false }) {
               ['', 'Semua', totalJobs],
               ['received', 'Belum Jalan', counts.received],
               ['running', 'Sedang Jalan', counts.running],
+              ['repo_stored', 'Dititipkan Repo', counts.repo_stored],
               ['completed', 'Selesai', counts.completed],
               ['cancelled', 'Batal', counts.cancelled],
             ].map(([value, label, count]) => (
@@ -641,6 +735,18 @@ function OperationsPage({ documentFollowUp = false }) {
               <section><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
+              {detail.status === 'repo_stored' || detail.repoLocation || detail.repoStoredAt ? (
+                <section className="container-repo-summary">
+                  <h3>Penitipan Repo</h3>
+                  <div>
+                    <span>Lokasi<strong>{detail.repoLocation || '-'}</strong></span>
+                    <span>Waktu titip<strong>{formatDateTime(detail.repoStoredAt)}</strong></span>
+                    <span>Alasan<strong>{detail.repoReason || '-'}</strong></span>
+                    <span>Dicatat oleh<strong>{detail.repoCreatedByName || detail.updatedBy || '-'}</strong></span>
+                  </div>
+                  {detail.repoNotes ? <p>{detail.repoNotes}</p> : null}
+                </section>
+              ) : null}
               {detail.status === 'cancelled' || detail.cancelReason || detail.cancelRequestStatus === 'approved' ? (
                 <section className="container-cancel-summary">
                   <h3>Pembatalan</h3>
@@ -656,8 +762,9 @@ function OperationsPage({ documentFollowUp = false }) {
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetail(null)}>Tutup</button>
+              {canEdit && canStoreRepoJob(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(detail)}><Archive size={16} /> Titipkan Repo</button> : null}
               {canEdit && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
-              {canEdit && detail.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
+              {canEdit && !['cancelled', 'repo_stored'].includes(detail.status) ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
           </section>
         </div>
@@ -701,6 +808,72 @@ function OperationsPage({ documentFollowUp = false }) {
                 <button className="secondary-button" type="button" disabled={cancelSaving} onClick={() => setCancelTarget(null)}>Batal</button>
                 <button className="danger-button" type="submit" disabled={!cancelReasonValid || cancelSaving}>
                   <Ban size={16} /> {cancelSaving ? 'Membatalkan...' : 'Batalkan Job'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {repoTarget ? (
+        <div className="master-modal-backdrop" role="presentation" onMouseDown={() => !repoSaving && setRepoTarget(null)}>
+          <section className="container-repo-modal" role="dialog" aria-modal="true" aria-labelledby="container-repo-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <span><Archive size={18} /></span>
+              <div>
+                <h2 id="container-repo-title">Titipkan Container ke Repo</h2>
+                <p>{containerLabel(repoTarget)} - {repoTarget.soNumber || '-'} - {repoTarget.customer || '-'}</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup penitipan repo" disabled={repoSaving} onClick={() => setRepoTarget(null)}><X size={18} /></button>
+            </header>
+            <form onSubmit={storeRepoJob}>
+              <div className="repo-assignment-snapshot">
+                <span>Truck<strong>{repoTarget.plateNumber || '-'}</strong></span>
+                <span>Sopir<strong>{repoTarget.driver || '-'}</strong></span>
+                <span>Status<strong>{getJobStatusLabel(repoTarget.status)}</strong></span>
+              </div>
+              {repoMissing.length ? (
+                <div className="container-repo-warning is-blocked">
+                  <AlertTriangle size={16} />
+                  <span>Lengkapi {repoMissing.join(', ')} sebelum container bisa dititipkan Repo.</span>
+                </div>
+              ) : (
+                <div className="container-repo-warning">
+                  <AlertTriangle size={16} />
+                  <span>Setelah disimpan, truck dan sopir tidak lagi terkunci oleh container ini.</span>
+                </div>
+              )}
+              <label>
+                Lokasi Repo
+                <input
+                  autoFocus
+                  value={repoForm.repoLocation}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, repoLocation: event.target.value }))}
+                  placeholder="Contoh: Repo Marunda Blok A"
+                />
+              </label>
+              <label>
+                Alasan Penitipan
+                <textarea
+                  rows={3}
+                  value={repoForm.repoReason}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, repoReason: event.target.value }))}
+                  placeholder="Contoh: Menunggu instruksi bongkar dari customer"
+                />
+              </label>
+              <label>
+                Catatan Tambahan
+                <textarea
+                  rows={3}
+                  value={repoForm.repoNotes}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, repoNotes: event.target.value }))}
+                  placeholder="Seal, posisi blok, atau instruksi keamanan"
+                />
+              </label>
+              <footer>
+                <button className="secondary-button" type="button" disabled={repoSaving} onClick={() => setRepoTarget(null)}>Batal</button>
+                <button className="primary-button repo-submit-button" type="submit" disabled={!repoFormValid || repoSaving}>
+                  <Archive size={16} /> {repoSaving ? 'Menyimpan...' : 'Simpan Titipan'}
                 </button>
               </footer>
             </form>

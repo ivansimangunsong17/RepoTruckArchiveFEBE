@@ -354,7 +354,20 @@ function formatDisplayDate(value) {
   }).format(date);
 }
 
+function isCancelledFinanceOrder(row = {}) {
+  const verificationStatus = String(row.verificationStatus || '').toLowerCase();
+  const operationalStatus = String(row.operationalStatus || '').toLowerCase();
+  const displayStatus = String(row.status || '').toLowerCase();
+  return verificationStatus === 'cancelled' || operationalStatus === 'cancelled' || displayStatus === 'cancelled' || displayStatus.includes('batal');
+}
+
+function isVerifiedFinanceOrder(row = {}) {
+  return !isCancelledFinanceOrder(row) && (row.verificationStatus === 'verified' || Boolean(row.soNumber));
+}
+
 function normalizeFinanceOrderRow(row = {}) {
+  const isCancelled = isCancelledFinanceOrder(row);
+  const soNumber = row.soNumber || '';
   return {
     id: row.id,
     orderDate: formatDisplayDate(row.orderDate),
@@ -373,11 +386,14 @@ function normalizeFinanceOrderRow(row = {}) {
     depo: row.depo || row.origin || '-',
     document: row.document || '-',
     notes: row.notes || '-',
-    status: row.status || (row.soNumber ? 'No. SO Terisi' : 'Menunggu No. SO Accurate'),
-    soNumber: row.soNumber || '',
-    soNumberDraft: row.soNumber || '',
-    verificationStatus: row.verificationStatus || (row.soNumber ? 'verified' : 'pending_so'),
+    status: isCancelled ? 'SO Batal' : row.status || (soNumber ? 'No. SO Terisi' : 'Menunggu No. SO Accurate'),
+    soNumber,
+    soNumberDraft: soNumber,
+    verificationStatus: isCancelled ? 'cancelled' : row.verificationStatus || (soNumber ? 'verified' : 'pending_so'),
     operationalStatus: row.operationalStatus || '',
+    cancelReason: row.cancelReason || row.cancelReviewNote || row.cancelRequestNote || '',
+    cancelledAt: formatDisplayDate(row.cancelledAt),
+    cancelledByName: row.cancelledByName || row.cancelReviewedByName || row.cancelRequestedByName || '',
   };
 }
 
@@ -463,6 +479,7 @@ function formatCurrency(value) {
 function statusClass(value) {
   if (String(value).includes('Lunas')) return 'border-slate-200 bg-slate-100 text-slate-700';
   if (String(value).includes('Menunggu')) return 'border-slate-200 bg-slate-50 text-slate-600';
+  if (String(value).includes('Batal')) return 'border-red-200 bg-red-50 text-red-700';
   if (String(value).includes('Ditolak') || String(value).includes('Revisi') || String(value).includes('Belum') || String(value).includes('Butuh')) return 'border-slate-200 bg-white text-slate-600';
   if (String(value).includes('Terbit') || String(value).includes('Disetujui') || String(value).includes('Diupload') || String(value).includes('Siap')) return 'border-slate-200 bg-white text-slate-700';
   return 'border-slate-200 bg-slate-50 text-slate-600';
@@ -779,6 +796,8 @@ function InvoiceNumberConfirmModal({ row, error, busy, onClose, onConfirm }) {
 function OrderDetailModal({ order, onClose }) {
   if (!order) return null;
 
+  const isCancelled = isCancelledFinanceOrder(order);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
       <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
@@ -807,12 +826,20 @@ function OrderDetailModal({ order, onClose }) {
             <DetailField label="Terminal" value={order.terminal} />
             <DetailField label="Depo" value={order.depo} />
             <DetailField label="Dokumen Awal" value={order.document} />
+            <DetailField label="Status SO" value={order.status} />
           </div>
 
           <div className="mt-2 grid gap-2 xl:grid-cols-[1fr_240px]">
             <DetailField label="Catatan Order" value={order.notes} />
             <DetailField label="Nomor SO Accurate" value={order.soNumber} />
           </div>
+          {isCancelled ? (
+            <div className="mt-2 grid gap-2 xl:grid-cols-[1fr_240px_240px]">
+              <DetailField label="Alasan Batal" value={order.cancelReason || '-'} />
+              <DetailField label="Dibatalkan Oleh" value={order.cancelledByName || '-'} />
+              <DetailField label="Tanggal Batal" value={order.cancelledAt || '-'} />
+            </div>
+          ) : null}
         </div>
       </section>
     </div>
@@ -1097,14 +1124,14 @@ function InvoiceDetailModal({ invoice, loading = false, error = '', onClose }) {
 }
 
 function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onOpenSoModal, savingSoId }) {
-  const isVerifiedOrder = (row) => row.verificationStatus === 'verified' || Boolean(row.soNumber);
   const orderTabs = [
-    { id: 'need-so', label: 'Belum Ada Nomor SO', icon: Clock3, match: (row) => !isVerifiedOrder(row) },
-    { id: 'running', label: 'SO Berjalan', icon: CheckCircle2, match: isVerifiedOrder },
+    { id: 'need-so', label: 'Belum Ada Nomor SO', icon: Clock3, match: (row) => !isCancelledFinanceOrder(row) && !isVerifiedFinanceOrder(row) },
+    { id: 'running', label: 'SO Berjalan', icon: CheckCircle2, match: isVerifiedFinanceOrder },
+    { id: 'cancelled', label: 'SO Batal', icon: AlertTriangle, match: isCancelledFinanceOrder },
   ];
   const [activeOrderTab, setActiveOrderTab] = useState(orderTabs[0].id);
   const currentTab = orderTabs.find((tab) => tab.id === activeOrderTab) || orderTabs[0];
-  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.salesName} ${row.customer} ${row.destination} ${row.paymentTerms}`.toLowerCase().includes(query.toLowerCase()));
+  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.salesName} ${row.customer} ${row.destination} ${row.paymentTerms} ${row.status} ${row.cancelReason}`.toLowerCase().includes(query.toLowerCase()));
   const filteredRows = searchedRows.filter((row) => currentTab.match(row));
   const groupedRows = filteredRows.reduce((groups, row) => {
     const salesName = row.salesName || 'Tanpa Sales';
@@ -1127,25 +1154,31 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
             const count = searchedRows.filter((row) => tab.match(row)).length;
             const active = tab.id === activeOrderTab;
             const Icon = tab.icon;
-            const activeTone = tab.id === 'need-so'
-              ? 'border-red-200 bg-red-50 text-red-800 ring-red-100'
-              : 'border-sky-200 bg-sky-50 text-sky-800 ring-sky-100';
+            const tone = {
+              'need-so': {
+                active: 'border-red-200 bg-red-50 text-red-800 ring-red-100',
+                icon: 'bg-white text-red-600 ring-1 ring-red-100',
+                count: 'bg-red-100 text-red-700',
+              },
+              running: {
+                active: 'border-sky-200 bg-sky-50 text-sky-800 ring-sky-100',
+                icon: 'bg-white text-sky-600 ring-1 ring-sky-100',
+                count: 'bg-sky-100 text-sky-700',
+              },
+              cancelled: {
+                active: 'border-rose-200 bg-rose-50 text-rose-800 ring-rose-100',
+                icon: 'bg-white text-rose-600 ring-1 ring-rose-100',
+                count: 'bg-rose-100 text-rose-700',
+              },
+            }[tab.id];
             const inactiveTone = 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-800';
-            const iconTone = active
-              ? tab.id === 'need-so'
-                ? 'bg-white text-red-600 ring-1 ring-red-100'
-                : 'bg-white text-sky-600 ring-1 ring-sky-100'
-              : 'bg-white text-slate-400';
-            const countTone = active
-              ? tab.id === 'need-so'
-                ? 'bg-red-100 text-red-700'
-                : 'bg-sky-100 text-sky-700'
-              : 'bg-white text-slate-500';
+            const iconTone = active ? tone.icon : 'bg-white text-slate-400';
+            const countTone = active ? tone.count : 'bg-white text-slate-500';
 
             return (
               <button
                 aria-selected={active}
-                className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${active ? `${activeTone} shadow-sm ring-1` : inactiveTone}`}
+                className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${active ? `${tone.active} shadow-sm ring-1` : inactiveTone}`}
                 key={tab.id}
                 onClick={() => setActiveOrderTab(tab.id)}
                 role="tab"
@@ -1163,10 +1196,10 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table min-w-[1020px]">
+        <table className="data-table master-table finance-master-table min-w-[1220px]">
           <thead>
             <tr>
-              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Nomor SO Accurate', 'Aksi'].map((column) => (
+              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Status SO', 'Alasan Batal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -1175,7 +1208,7 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
             {Object.entries(groupedRows).map(([salesName, salesRows]) => (
               <Fragment key={salesName}>
                 <tr className="finance-group-row">
-                  <td colSpan={7}>
+                  <td colSpan={9}>
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Sales</span>
@@ -1186,10 +1219,13 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
                   </td>
                 </tr>
                 <tr aria-hidden="true">
-                  <td className="h-px bg-slate-200 p-0" colSpan={7} />
+                  <td className="h-px bg-slate-200 p-0" colSpan={9} />
                 </tr>
                 {salesRows.map((row) => (
                   <Fragment key={row.id}>
+                    {(() => {
+                      const isCancelled = isCancelledFinanceOrder(row);
+                      return (
                     <tr className="align-middle hover:bg-slate-50">
                       <td className="px-2 py-1 font-semibold text-slate-700">{row.orderDate}</td>
                       <td className="px-2 py-1 font-black text-slate-900">{row.destination}</td>
@@ -1199,7 +1235,17 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
                       </td>
                       <td className="px-2 py-1 font-semibold text-slate-800">{row.runningDate}</td>
                       <td className="px-2 py-1">
-                        {activeOrderTab === 'need-so' ? (
+                        <StatusPill value={row.status} />
+                      </td>
+                      <td className="max-w-[220px] px-2 py-1 text-[10px] font-semibold text-slate-600">
+                        {isCancelled ? (
+                          <span className="block max-h-8 overflow-hidden leading-4">{row.cancelReason || '-'}</span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1">
+                        {activeOrderTab === 'need-so' && !isCancelled ? (
                           <button
                             className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40"
                             disabled={savingSoId === row.id}
@@ -1208,6 +1254,11 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
                           >
                             {savingSoId === row.id ? 'Menyimpan...' : 'Input Nomor SO'}
                           </button>
+                        ) : isCancelled ? (
+                          <div>
+                            <span className="block text-[11px] font-black text-slate-900">{row.soNumber || '-'}</span>
+                            <span className="mt-0.5 block text-[9px] font-semibold text-rose-600">SO sudah dibatalkan</span>
+                          </div>
                         ) : (
                           <div>
                             <span className="block text-[11px] font-black text-slate-900">{row.soNumber}</span>
@@ -1219,8 +1270,10 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
                         <button className="rounded-md bg-slate-900 px-1.5 py-1 text-[10px] font-semibold text-white hover:bg-slate-800" onClick={() => onSelectOrder(row.id)} type="button">Detail</button>
                       </td>
                     </tr>
+                      );
+                    })()}
                     <tr aria-hidden="true">
-                      <td className="h-px bg-slate-200 p-0" colSpan={7} />
+                      <td className="h-px bg-slate-200 p-0" colSpan={9} />
                     </tr>
                   </Fragment>
                 ))}
@@ -1228,7 +1281,7 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
             ))}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={7}>Tidak ada order pada klasifikasi ini.</td>
+                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={9}>Tidak ada order pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
@@ -1476,6 +1529,7 @@ function RpujApprovalTable({
 
 function InvoiceTable({
   rows,
+  summary,
   query,
   activeInvoiceTab,
   onActiveInvoiceTabChange,
@@ -1514,6 +1568,11 @@ function InvoiceTable({
   const currentTab = invoiceTabs.find((tab) => tab.id === activeInvoiceTab) || invoiceTabs[0];
   const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${row.invoiceNumber} ${row.invoiceStatus}`.toLowerCase().includes(query.toLowerCase()));
   const filteredRows = searchedRows.filter((row) => currentTab.match(row));
+  const tabCounts = {
+    'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[0].match(row)).length),
+    'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
+    paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
+  };
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
@@ -1526,7 +1585,7 @@ function InvoiceTable({
             </div>
             <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter invoice Finance">
           {invoiceTabs.map((tab) => {
-          const count = searchedRows.filter((row) => tab.match(row)).length;
+          const count = tabCounts[tab.id] || 0;
           const active = tab.id === activeInvoiceTab;
           const toneClass = {
             red: {
@@ -1681,6 +1740,7 @@ function FinanceTable({
   orderRows,
   rpujRows,
   invoiceRows,
+  invoiceSummary,
   orderError,
   orderLoading,
   rpujError,
@@ -1784,6 +1844,7 @@ function FinanceTable({
           periodYear={periodYear}
           query={query}
           rows={invoiceRows}
+          summary={invoiceSummary}
           {...handlers}
         />
       ) : null}
@@ -1801,6 +1862,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [orderRows, setOrderRows] = useState(initialOrderRows);
   const [rpujRows, setRpujRows] = useState(initialRpujRows);
   const [invoiceRows, setInvoiceRows] = useState(initialInvoiceRows);
+  const [invoiceSummary, setInvoiceSummary] = useState({ needNumber: 0, inProgress: 0, paid: 0 });
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState('');
   const [savingSoId, setSavingSoId] = useState('');
@@ -1899,9 +1961,15 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
           : {}),
       });
       setInvoiceRows((result.rows || []).map(normalizeFinanceInvoiceRow));
+      setInvoiceSummary({
+        needNumber: Number(result.summary?.needNumber || 0),
+        inProgress: Number(result.summary?.inProgress || 0),
+        paid: Number(result.summary?.paid || 0),
+      });
     } catch (error) {
       setInvoiceError(error.message || 'Daftar invoice gagal dimuat.');
       setInvoiceRows([]);
+      setInvoiceSummary({ needNumber: 0, inProgress: 0, paid: 0 });
     } finally {
       setInvoiceLoading(false);
     }
@@ -1948,7 +2016,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       return;
     }
     setRpujRows(initialRpujRows);
-    setInvoiceRows(initialInvoiceRows);
+      setInvoiceRows(initialInvoiceRows);
+      setInvoiceSummary({ needNumber: 0, inProgress: 0, paid: 0 });
     setSelectedOrderId('');
     setSelectedRpujId('');
     setSelectedInvoiceId('');
@@ -2157,6 +2226,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoiceError={invoiceError}
         invoiceLoading={invoiceLoading}
         invoiceRows={invoiceRows}
+        invoiceSummary={invoiceSummary}
         onActiveInvoiceTabChange={setActiveInvoiceTab}
         onActiveRpujTabChange={setActiveRpujTab}
         onPeriodMonthChange={setPeriodMonth}

@@ -102,6 +102,13 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
     error.code = 'CONTAINER_JOB_STATUS_REGRESSION';
     throw error;
   }
+
+  if (job?.status === 'repo_stored') {
+    const error = new Error('Container yang sedang dititipkan Repo perlu proses pengambilan/re-assign khusus.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_REPO_STORED_LOCKED';
+    throw error;
+  }
 }
 
 function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
@@ -165,6 +172,12 @@ function preserveLockedOtherCost(actor, job, payload) {
 
 function ensureOperationalCanEditAssignment(actor, job, payload) {
   if (normalizeRole(actor) !== 'operational') return;
+  if (job?.status === 'repo_stored' && hasAssignmentChange(job, payload)) {
+    const error = new Error('Driver dan truck untuk container titipan Repo tidak bisa diubah dari form update biasa.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_REPO_ASSIGNMENT_LOCKED';
+    throw error;
+  }
   if (job?.rpujStatus !== 'paid' && job?.status !== 'completed') return;
   if (!hasAssignmentChange(job, payload)) return;
   if (job?.status !== 'completed' && isCompletingMissingAssignment(job, payload)) return;
@@ -173,6 +186,37 @@ function ensureOperationalCanEditAssignment(actor, job, payload) {
   error.statusCode = 409;
   error.code = 'CONTAINER_JOB_ASSIGNMENT_LOCKED';
   throw error;
+}
+
+function ensureRepoStoragePayload(job, payload = {}) {
+  if (payload.status !== 'repo_stored') return;
+
+  const containerNumber = normalizeText(payload.containerNumber || job?.containerNumber);
+  const driver = normalizeText(payload.driver || job?.driver);
+  const plateNumber = normalizeText(payload.plateNumber || job?.plateNumber);
+  const repoLocation = normalizeText(payload.repoLocation);
+  const repoReason = normalizeText(payload.repoReason);
+
+  if (!containerNumber || !driver || !plateNumber) {
+    const error = new Error('Container baru bisa dititipkan Repo setelah nomor container, truck, dan sopir terisi.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_REPO_ASSIGNMENT_REQUIRED';
+    throw error;
+  }
+
+  if (repoLocation.length < 3) {
+    const error = new Error('Lokasi penitipan Repo wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_REPO_LOCATION_REQUIRED';
+    throw error;
+  }
+
+  if (repoReason.length < 8) {
+    const error = new Error('Alasan penitipan Repo wajib diisi minimal 8 karakter.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_REPO_REASON_REQUIRED';
+    throw error;
+  }
 }
 
 export async function getContainerJob(id) {
@@ -198,7 +242,7 @@ export async function saveContainerJob(id, payload, actor) {
     tilaGatepassDocument: payload.tilaGatepassDocument || payload.unloadingVoucher || payload.weighingDocument || '',
   };
 
-  const allowedStatuses = ['received', 'running', 'completed', 'cancelled'];
+  const allowedStatuses = ['received', 'running', 'repo_stored', 'completed', 'cancelled'];
   if (normalizedPayload.status && !allowedStatuses.includes(normalizedPayload.status)) {
     const error = new Error('Status Container Job tidak valid.');
     error.statusCode = 400;
@@ -209,6 +253,7 @@ export async function saveContainerJob(id, payload, actor) {
   const currentJob = await getContainerJob(id);
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
+  ensureRepoStoragePayload(currentJob, payloadForUpdate);
   ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
   ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);

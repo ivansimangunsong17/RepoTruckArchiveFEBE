@@ -9,6 +9,12 @@ describe('StatusBadge', () => {
     expect(screen.getByText('Belum Jalan')).toHaveClass('status-badge', 'waiting_operational');
   });
 
+  it('menerjemahkan status penitipan repo', () => {
+    render(<StatusBadge status="repo_stored" />);
+
+    expect(screen.getByText('Dititipkan Repo')).toHaveClass('status-badge', 'repo_stored');
+  });
+
   it('mengutamakan label khusus', () => {
     render(<StatusBadge status="completed" label="Sudah Ditutup" />);
 

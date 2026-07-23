@@ -321,6 +321,24 @@ describe('OperationalForm', () => {
     expect(screen.getByRole('option', { name: /B 3000 CC/i })).toBeInTheDocument();
   });
 
+  it('tetap menampilkan truck jika job sebelumnya berstatus dititipkan repo', () => {
+    render(
+      <OperationalForm
+        container={container}
+        activeJobs={[
+          { id: 'job-repo', status: 'repo_stored', driver: 'Driver Repo', plateNumber: 'B 4000 RR' },
+        ]}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 4000 RR', unitCode: 'TRK-004', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Repo' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('option', { name: /B 4000 RR/i })).toBeInTheDocument();
+  });
+
   it('mengisi info pembayaran UJ driver dari master sopir', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

@@ -1,4 +1,8 @@
 import { query } from '../../db/client.js';
+import {
+  getTransportLineItemForSize,
+  splitFinancialLineItems,
+} from './revenue-line-items.js';
 
 function parsePage(options = {}) {
   const page = Math.max(1, Number(options.page || 1));
@@ -21,6 +25,19 @@ function buildDateWhere(column, { dateFrom = '', dateTo = '' } = {}, startIndex 
 }
 
 export function calculateCompletedJobRevenue(row = {}) {
+  const lineItems = row.line_items ?? row.lineItems;
+  const financialItems = splitFinancialLineItems(lineItems);
+  if (financialItems.items.length) {
+    const transportItem = getTransportLineItemForSize(lineItems, row.container_size || row.containerSize || row.size);
+    if (!transportItem) return 0;
+
+    const unitPrice = Number(transportItem.price || 0);
+    if (unitPrice > 0) return unitPrice;
+
+    const qty = Math.max(1, Number(transportItem.qty || 1));
+    return Number(transportItem.total || 0) / qty;
+  }
+
   const unitPrice = Number(row.price || 0);
   if (unitPrice > 0) return unitPrice;
 
@@ -366,6 +383,7 @@ export async function getMonthlyRevenueReport(options = {}) {
           so.destination,
           so.price,
           so.total_amount,
+          to_jsonb(so)->'line_items' as line_items,
           cj.container_number,
           cj.container_size,
           cj.completed_at::date as completed_date,

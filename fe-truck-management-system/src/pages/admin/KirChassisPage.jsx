@@ -30,6 +30,21 @@ function ConnectedTruckPlate({ row, trucks }) {
   return <span className="master-plain-cell strong">{truck?.plateNumber || '-'}</span>;
 }
 
+function formatDisplayDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+function DateDetail({ value }) {
+  return <span className="master-plain-cell strong">{formatDisplayDate(value)}</span>;
+}
+
 const fields = [
   { key: 'chassisCode', section: 'Identitas Chassis', label: 'Kode Chassis', placeholder: 'Contoh: CHS-001', required: true },
   {
@@ -44,6 +59,7 @@ const fields = [
       { value: 'COMBO', label: 'Combo' },
     ],
   },
+  { key: 'receivedDate', section: 'Identitas Chassis', label: 'Tanggal Unit Diterima', type: 'date', hint: 'Tanggal chassis resmi masuk ke armada. Bisa dikosongkan jika belum diketahui.' },
   { key: 'kirNumber', section: 'Dokumen Chassis', label: 'Nomor Chassis', placeholder: 'Contoh: CHS-DOC-2026-001' },
   { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'KIR OFF', type: 'date', expiryAlert: { label: 'KIR Chassis' } },
   {
@@ -66,6 +82,12 @@ function KirChassisPage() {
   const archive = useArchiveData();
   const truckRows = archive.masters?.trucks || [];
   const detailFields = fields.map((field) => {
+    if (field.key === 'receivedDate') {
+      return {
+        ...field,
+        renderDetail: (value) => <DateDetail value={value} />,
+      };
+    }
     if (field.key === 'kirExpiryDate') {
       return {
         ...field,
@@ -93,6 +115,7 @@ function KirChassisPage() {
         { key: 'chassisCode', label: 'Kode Chassis', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'plateNumber', label: 'Plat / Identitas', render: (_, row) => <ConnectedTruckPlate row={row} trucks={truckRows} /> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        { key: 'receivedDate', label: 'Diterima', render: (value) => <span className="master-plain-cell">{formatDisplayDate(value)}</span> },
         { key: 'kirNumber', label: 'Nomor Chassis', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'kirExpiryDate', label: 'KIR OFF', render: (value) => <MasterExpiryDate value={value} /> },
         { key: 'status', label: 'Status', render: (value) => <ChassisStatus value={value} /> },

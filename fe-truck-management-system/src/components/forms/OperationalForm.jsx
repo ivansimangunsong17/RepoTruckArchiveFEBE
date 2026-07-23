@@ -100,11 +100,15 @@ function isTruckAssignable(truck) {
 }
 
 function isActiveAssignmentJob(job) {
-  return job && !['completed', 'cancelled'].includes(job.status || 'received');
+  return job && !['completed', 'cancelled', 'repo_stored'].includes(job.status || 'received');
 }
 
 function normalizeName(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function isDriverBlacklisted(driver) {
+  return driver?.status === 'Blacklist';
 }
 
 function isTruckBusyForAnotherJob(truck, activeJobs = [], currentJobId) {
@@ -367,9 +371,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const trucks = (Array.isArray(masterTrucks) ? masterTrucks : fallbackTruckRows)
     .map((truck) => normalizeTruck(truck, fallbackTruckRows));
   const drivers = Array.isArray(masterDrivers) ? masterDrivers : fallbackDriverRows;
+  const findDriverByName = (name) => drivers.find((driver) => normalizeName(driver.name) === normalizeName(name));
+  const isTruckDefaultDriverBlacklisted = (truck) => isDriverBlacklisted(findDriverByName(getTruckDefaultDriver(truck, fallbackTruckRows)));
   const containerSize = normalizeSize(container.size || container.containerSize);
   const initialOtherCost = parseOtherCost(container.rpujNotes);
-  const initialDriver = drivers.find((driver) => normalizeName(driver.name) === normalizeName(container.driver));
+  const initialDriver = findDriverByName(container.driver);
   const initialDriverPayment = {
     ...getDriverPaymentInfo(initialDriver),
     driverPaymentMethod: container.driverPaymentMethod || getDriverPaymentInfo(initialDriver).driverPaymentMethod,
@@ -545,7 +551,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       return;
     }
     const driverName = getTruckDefaultDriver(truck, fallbackTruckRows);
-    const selectedDriver = drivers.find((driver) => normalizeName(driver.name) === normalizeName(driverName));
+    const selectedDriver = findDriverByName(driverName);
+    if (truck && isDriverBlacklisted(selectedDriver) && truck.plateNumber !== container.plateNumber) {
+      setError(`Sopir ${selectedDriver.name} masuk blacklist dan tidak bisa di-assign.`);
+      return;
+    }
     const driverPayment = getDriverPaymentInfo(selectedDriver);
     setError('');
     setForm((current) => ({
@@ -973,6 +983,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     (isTruckAssignable(truck) || truck.plateNumber === form.plateNumber)
     && isTruckCompatibleWithContainer(truck, containerSize)
     && !isTruckBusyForAnotherJob(truck, activeJobs, container.id)
+    && (!isTruckDefaultDriverBlacklisted(truck) || truck.plateNumber === form.plateNumber)
   ));
   const currentTruckExists = availableTrucks.some((truck) => truck.plateNumber === form.plateNumber);
 

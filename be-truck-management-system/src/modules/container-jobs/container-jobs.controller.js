@@ -71,6 +71,38 @@ export async function updateContainerJobController(request, response) {
         },
       });
     }
+    if (saved.status === 'repo_stored') {
+      await safeRecordActivityLog(request, {
+        action: 'STORE_CONTAINER_JOB_REPO',
+        module: 'container_jobs',
+        entityType: 'container_job',
+        entityId: saved.id,
+        beforeData: {
+          status: before.status,
+          driverId: before.driverId,
+          vehicleId: before.vehicleId,
+          driver: before.driver,
+          plateNumber: before.plateNumber,
+        },
+        afterData: {
+          status: saved.status,
+          repoLocation: saved.repoLocation,
+          repoStoredAt: saved.repoStoredAt,
+          repoReason: saved.repoReason,
+          repoNotes: saved.repoNotes,
+          repoCreatedByName: saved.repoCreatedByName,
+          repoReleasedDriverId: saved.repoReleasedDriverId,
+          repoReleasedVehicleId: saved.repoReleasedVehicleId,
+        },
+        metadata: {
+          salesOrderId: saved.orderId,
+          soNumber: saved.soNumber,
+          containerNumber: saved.containerNumber,
+          repoLocation: saved.repoLocation,
+          reason: saved.repoReason,
+        },
+      });
+    }
   }
   if (before.rpujStatus !== 'submitted' && saved.rpujStatus === 'submitted') {
     await safeRecordActivityLog(request, {

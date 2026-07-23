@@ -190,6 +190,157 @@
   border-top: 1px solid #e5e7eb;
   background: #fbfcfd;
 }
+.container-repo-summary {
+  border-color: #bfdbfe !important;
+  background: #f8fbff !important;
+}
+.container-repo-summary h3 { color: #1d4ed8; }
+.container-repo-summary p {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid #dbeafe;
+  color: #475569;
+  font-size: .65rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.repo-action-button {
+  color: #1d4ed8 !important;
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+}
+.container-repo-modal {
+  overflow: hidden;
+  width: min(560px, 100%);
+  border: 1px solid #ffffff40;
+  border-radius: 13px;
+  background: white;
+  box-shadow: 0 28px 80px #08090b59;
+}
+.container-repo-modal > header {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 36px;
+  align-items: start;
+  gap: 11px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.container-repo-modal > header > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 9px;
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+.container-repo-modal h2 {
+  margin: 0 0 4px;
+  color: #20242b;
+  font-size: .98rem;
+}
+.container-repo-modal p {
+  overflow: hidden;
+  margin: 0;
+  color: #667085;
+  font-size: .67rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.container-repo-modal form {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px 0;
+}
+.repo-assignment-snapshot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.repo-assignment-snapshot span {
+  display: block;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #64748b;
+  background: #f8fafc;
+  font-size: .58rem;
+  font-weight: 850;
+}
+.repo-assignment-snapshot strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: #172033;
+  font-size: .66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.container-repo-modal label {
+  display: grid;
+  gap: 6px;
+  color: #2f333a;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.container-repo-modal input,
+.container-repo-modal textarea {
+  width: 100%;
+  border: 1px solid #d7dde7;
+  border-radius: 8px;
+  color: #172033;
+  background: white;
+  font: inherit;
+  font-size: .76rem;
+  outline: 0;
+}
+.container-repo-modal input {
+  min-height: 40px;
+  padding: 0 10px;
+}
+.container-repo-modal textarea {
+  min-height: 82px;
+  padding: 11px 12px;
+  resize: vertical;
+}
+.container-repo-modal input:focus,
+.container-repo-modal textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px #2563eb18;
+}
+.container-repo-warning {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1e40af;
+  background: #eff6ff;
+  font-size: .66rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+.container-repo-warning.is-blocked {
+  border-color: #fed7aa;
+  color: #9a3412;
+  background: #fff7ed;
+}
+.container-repo-modal footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin: 3px -20px 0;
+  padding: 14px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: #fbfcfd;
+}
+.repo-submit-button {
+  background: #1d4ed8 !important;
+  box-shadow: none !important;
+}
 .read-only-label { padding: 5px 8px; border-radius: 6px; background: #ececef; }
 .operational-closing-checklist {
   display: grid;
@@ -507,6 +658,7 @@
 .job-status-tabs button span { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; color: #686b71; background: #e9e9eb; font-size: .58rem; }
 .job-status-tabs button.active { border-color: #efc7c9; color: #a8141a; background: #fff1f1; }
 .job-status-tabs button.active span { color: white; background: var(--primary); }
+.operational-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .compact-dashboard-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .compact-attention-list { padding-bottom: 10px; }
 

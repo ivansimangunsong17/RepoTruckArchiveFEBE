@@ -28,6 +28,15 @@ describe('operationalDashboard', () => {
     }, currentDateKey)).toBe(false);
   });
 
+  it('tidak mengunci truck dan sopir untuk container yang dititipkan repo', () => {
+    expect(isActiveOperationalJob({
+      tripDateKey: '2026-07-06',
+      plateNumber: 'B 1234 XYZ',
+      driver: 'Andi',
+      status: 'repo_stored',
+    }, '2026-07-07')).toBe(false);
+  });
+
   it('menampilkan job aktif tanggal lewat sebagai eksisting aktif', () => {
     const result = getOperationalDashboardData([{
       id: 'so-1',

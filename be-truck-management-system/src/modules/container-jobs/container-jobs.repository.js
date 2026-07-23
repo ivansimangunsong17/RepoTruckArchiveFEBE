@@ -16,6 +16,8 @@ const joinedJobColumns = `
   cj.cancel_requested_by_name, cj.cancel_requested_by_role, cj.cancel_requested_at,
   cj.cancel_reviewed_by_name, cj.cancel_reviewed_at, cj.cancel_review_note,
   cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
+  cj.repo_location, cj.repo_stored_at, cj.repo_reason, cj.repo_notes,
+  cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
@@ -197,6 +199,17 @@ function assertVehicleAssignable(vehicle, existingVehicleId) {
   }
 }
 
+function assertDriverAssignable(driver, existingDriverId) {
+  if (!driver) return;
+  if (existingDriverId && String(driver.id) === String(existingDriverId)) return;
+  if (driver.operational_status === 'Blacklist') {
+    const error = new Error(`Sopir ${driver.name} masuk blacklist dan tidak bisa di-assign.`);
+    error.statusCode = 409;
+    error.code = 'DRIVER_BLACKLISTED';
+    throw error;
+  }
+}
+
 async function refreshOrderStatus(client, salesOrderId) {
   const result = await client.query(
     `
@@ -214,7 +227,7 @@ async function refreshOrderStatus(client, salesOrderId) {
     ? 'cancelled'
     : activeTotal > 0 && counts.completed === activeTotal
     ? 'completed'
-    : counts.running || counts.completed
+    : counts.running || counts.repo_stored || counts.completed
       ? 'running'
       : 'waiting_operational';
 
@@ -253,6 +266,15 @@ function normalizeCancelSource(value) {
   return ['customer', 'sales', 'operational', 'other'].includes(normalized) ? normalized : 'operational';
 }
 
+function normalizeOptionalText(value) {
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
+function isAssignmentReleasedStatus(status) {
+  return ['completed', 'cancelled', 'repo_stored'].includes(status);
+}
+
 function requireTripStartAllowed(nextStatus, rpujStatus) {
   if (!['running', 'completed'].includes(nextStatus)) return;
   if (['approved', 'paid'].includes(rpujStatus)) return;
@@ -265,6 +287,10 @@ function requireTripStartAllowed(nextStatus, rpujStatus) {
 
 function assignmentValue(...values) {
   return values.map((value) => String(value || '').trim()).find(Boolean) || '';
+}
+
+function hasOwnInput(form, key) {
+  return Object.prototype.hasOwnProperty.call(form, key);
 }
 
 export function hasCompleteOperationalAssignment(form = {}, driver = null, vehicle = null, existing = {}) {
@@ -284,7 +310,7 @@ function requireCompleteOperationalAssignment(form, driver, vehicle, existing, m
 }
 
 async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus) {
-  if (['completed', 'cancelled'].includes(nextStatus)) return;
+  if (isAssignmentReleasedStatus(nextStatus)) return;
   const driverName = String(form.driver || driver?.name || '').trim();
   const plateNumber = String(form.plateNumber || vehicle?.plate_number || '').trim();
   if (!driver?.id && !driverName && !vehicle?.id && !plateNumber) return;
@@ -295,7 +321,7 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       where cj.id <> $1
-        and cj.status not in ('completed', 'cancelled')
+        and cj.status not in ('completed', 'cancelled', 'repo_stored')
         and (
           ($2::uuid is not null and cj.driver_id = $2::uuid)
           or ($3::uuid is not null and cj.vehicle_id = $3::uuid)
@@ -330,7 +356,7 @@ async function releaseDriverIfIdle(client, driverId) {
           select 1
           from container_jobs cj
           where cj.driver_id = $1
-            and cj.status not in ('completed', 'cancelled')
+            and cj.status not in ('completed', 'cancelled', 'repo_stored')
         )
     `,
     [driverId],
@@ -350,7 +376,7 @@ async function releaseVehicleIfIdle(client, vehicleId) {
           select 1
           from container_jobs cj
           where cj.vehicle_id = $1
-            and cj.status not in ('completed', 'cancelled')
+            and cj.status not in ('completed', 'cancelled', 'repo_stored')
         )
     `,
     [vehicleId],
@@ -362,7 +388,7 @@ async function syncResourceAssignmentStatus(client, existing, nextAssignment = {
   const nextVehicleId = nextAssignment.vehicleId || null;
   const previousDriverId = existing?.driver_id || null;
   const previousVehicleId = existing?.vehicle_id || null;
-  const assignmentActive = !['completed', 'cancelled'].includes(nextStatus);
+  const assignmentActive = !isAssignmentReleasedStatus(nextStatus);
 
   if (assignmentActive && nextDriverId) {
     await client.query(
@@ -478,8 +504,9 @@ export async function findContainerJobsPage(options = {}) {
           case cj.status
             when 'received' then 1
             when 'running' then 2
-            when 'completed' then 3
-            when 'cancelled' then 4
+            when 'repo_stored' then 3
+            when 'completed' then 4
+            when 'cancelled' then 5
             else 4
           end,
           coalesce(cj.cancel_requested_at, cj.updated_at) desc,
@@ -545,7 +572,7 @@ export async function findContainerJobsPage(options = {}) {
     return groups;
   }, {});
 
-  const counts = { received: 0, running: 0, completed: 0, cancelled: 0 };
+  const counts = { received: 0, running: 0, repo_stored: 0, completed: 0, cancelled: 0 };
   statusResult.rows.forEach((row) => {
     counts[row.status] = row.total;
   });
@@ -591,10 +618,13 @@ export async function updateContainerJob(id, form) {
     const existing = await client.query(
       `
         select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.cancelled_at,
-               cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.status, cj.eir_number,
+               cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.rpuj_notes, cj.status, cj.eir_number,
                cj.assignment_snapshot,
                cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
+               cj.unloading_voucher_number, cj.weighing_document_number,
                cj.spk_number, cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
+               cj.repo_location, cj.repo_stored_at, cj.repo_reason, cj.repo_notes,
+               cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
                so.so_number, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -612,6 +642,7 @@ export async function updateContainerJob(id, form) {
 
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
+    assertDriverAssignable(driver, existing.rows[0].driver_id);
     assertVehicleAssignable(vehicle, existing.rows[0].vehicle_id);
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
     const nextStatus = form.status || existing.rows[0].status || 'received';
@@ -649,9 +680,13 @@ export async function updateContainerJob(id, form) {
     const requestRpujAt = nextRpujStatus === 'submitted' && existing.rows[0].rpuj_status !== 'submitted'
       ? new Date().toISOString()
       : null;
-    const nextContainerNumber = String(form.containerNumber || existing.rows[0].container_number || '').trim().toUpperCase() || null;
+    const nextContainerNumber = hasOwnInput(form, 'containerNumber')
+      ? String(form.containerNumber || existing.rows[0].container_number || '').trim().toUpperCase() || null
+      : existing.rows[0].container_number || null;
     const runningAt = nextStatus === 'cancelled'
       ? existing.rows[0].running_at
+      : nextStatus === 'repo_stored'
+        ? form.runningAt || existing.rows[0].running_at
       : ['running', 'completed'].includes(nextStatus)
         ? form.runningAt || new Date().toISOString()
         : null;
@@ -667,8 +702,48 @@ export async function updateContainerJob(id, form) {
     const cancelledByName = nextStatus === 'cancelled'
       ? form.cancelledByName || form.updatedBy || existing.rows[0].cancelled_by_name || 'Operational'
       : existing.rows[0].cancelled_by_name || null;
-    const nextDriverId = driver?.id || form.driverId || null;
-    const nextVehicleId = vehicle?.id || form.vehicleId || null;
+    const hasDriverAssignmentInput = hasOwnInput(form, 'driverId') || hasOwnInput(form, 'driver');
+    const hasVehicleAssignmentInput = hasOwnInput(form, 'vehicleId') || hasOwnInput(form, 'plateNumber');
+    const nextDriverId = driver?.id || form.driverId || (hasDriverAssignmentInput ? null : existing.rows[0].driver_id);
+    const nextVehicleId = vehicle?.id || form.vehicleId || (hasVehicleAssignmentInput ? null : existing.rows[0].vehicle_id);
+    const existingAssignment = existing.rows[0].assignment_snapshot || {};
+    const nextAssignmentForm = {
+      driver: existingAssignment.driver || '',
+      plateNumber: existingAssignment.plateNumber || '',
+      chassis: existingAssignment.vehicleDetail || '',
+      driverPaymentMethod: existingAssignment.driverPaymentMethod || 'bank',
+      driverBankName: existingAssignment.driverBankName || '',
+      driverBankAccountNumber: existingAssignment.driverBankAccountNumber || '',
+      driverBankAccountHolder: existingAssignment.driverBankAccountHolder || '',
+      driverEmoneyProvider: existingAssignment.driverEmoneyProvider || '',
+      driverEmoneyNumber: existingAssignment.driverEmoneyNumber || '',
+      ...form,
+    };
+    const nextRepoLocation = normalizeOptionalText(form.repoLocation ?? existing.rows[0].repo_location);
+    const nextRepoStoredAt = nextStatus === 'repo_stored'
+      ? form.repoStoredAt || existing.rows[0].repo_stored_at || new Date().toISOString()
+      : form.repoStoredAt || existing.rows[0].repo_stored_at || null;
+    const nextRepoReason = normalizeOptionalText(form.repoReason ?? existing.rows[0].repo_reason);
+    const nextRepoNotes = normalizeOptionalText(form.repoNotes ?? existing.rows[0].repo_notes);
+    const nextRepoReleasedDriverId = form.repoReleasedDriverId
+      || existing.rows[0].repo_released_driver_id
+      || (nextStatus === 'repo_stored' ? existing.rows[0].driver_id || nextDriverId : null);
+    const nextRepoReleasedVehicleId = form.repoReleasedVehicleId
+      || existing.rows[0].repo_released_vehicle_id
+      || (nextStatus === 'repo_stored' ? existing.rows[0].vehicle_id || nextVehicleId : null);
+    const nextRepoCreatedByName = normalizeOptionalText(
+      form.repoCreatedByName
+        ?? existing.rows[0].repo_created_by_name
+        ?? (nextStatus === 'repo_stored' ? form.updatedBy || 'Operational' : null),
+    );
+    const nextRpujNotes = hasOwnInput(form, 'rpujNotes') ? form.rpujNotes || null : existing.rows[0].rpuj_notes || null;
+    const nextEirNumber = hasOwnInput(form, 'eirNumber') ? form.eirNumber || null : existing.rows[0].eir_number || null;
+    const nextLoadingVoucher = hasOwnInput(form, 'loadingVoucher') ? form.loadingVoucher || null : existing.rows[0].loading_voucher_number || null;
+    const nextTravelDocument = hasOwnInput(form, 'travelDocument') ? form.travelDocument || null : existing.rows[0].travel_document_number || null;
+    const hasTilaInput = hasOwnInput(form, 'tilaGatepassDocument') || hasOwnInput(form, 'unloadingVoucher') || hasOwnInput(form, 'weighingDocument');
+    const nextTilaGatepassDocument = hasTilaInput
+      ? form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null
+      : existing.rows[0].tila_gatepass_document_number || existing.rows[0].unloading_voucher_number || existing.rows[0].weighing_document_number || null;
 
     await client.query(
       `
@@ -697,24 +772,31 @@ export async function updateContainerJob(id, form) {
             cancel_request_note = case when $14 = 'cancelled' then coalesce($18, cancel_request_note) else cancel_request_note end,
             cancel_reviewed_by_name = case when $14 = 'cancelled' then coalesce($20, cancel_reviewed_by_name) else cancel_reviewed_by_name end,
             cancel_reviewed_at = case when $14 = 'cancelled' then now() else cancel_reviewed_at end,
-            updated_by_name = $21,
+            repo_location = $21,
+            repo_stored_at = $22,
+            repo_reason = $23,
+            repo_notes = $24,
+            repo_released_driver_id = $25,
+            repo_released_vehicle_id = $26,
+            repo_created_by_name = $27,
+            updated_by_name = $28,
             updated_at = now()
-        where id = $22
+        where id = $29
       `,
       [
         nextContainerNumber,
         nextDriverId,
         nextVehicleId,
-        JSON.stringify(toAssignmentSnapshot(form, driver, vehicle)),
+        JSON.stringify(toAssignmentSnapshot(nextAssignmentForm, driver, vehicle)),
         nextRpujStatus,
-        form.rpujNotes || null,
+        nextRpujNotes,
         requestRpujAt,
         form.updatedBy || 'Operational',
         form.spkNumber || null,
-        form.eirNumber || null,
-        form.loadingVoucher || null,
-        form.travelDocument || null,
-        form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null,
+        nextEirNumber,
+        nextLoadingVoucher,
+        nextTravelDocument,
+        nextTilaGatepassDocument,
         nextStatus,
         runningAt,
         nextStatus === 'completed' ? form.completedAt || new Date().toISOString() : null,
@@ -722,6 +804,13 @@ export async function updateContainerJob(id, form) {
         cancelReason,
         cancelSource,
         cancelledByName,
+        nextRepoLocation,
+        nextRepoStoredAt,
+        nextRepoReason,
+        nextRepoNotes,
+        nextRepoReleasedDriverId,
+        nextRepoReleasedVehicleId,
+        nextRepoCreatedByName,
         form.updatedBy || 'Operational',
         id,
       ],
@@ -1003,6 +1092,7 @@ export async function generateContainerJobSpk(id, form = {}) {
     }
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
+    assertDriverAssignable(driver, existing.rows[0].driver_id);
     requireCompleteOperationalAssignment(
       form,
       driver,

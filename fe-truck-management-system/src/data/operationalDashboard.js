@@ -49,8 +49,12 @@ export function isCancelled(job) {
   return ['cancelled', 'Dibatalkan', 'Batal'].includes(job.status);
 }
 
+export function isRepoStored(job) {
+  return ['repo_stored', 'Dititipkan Repo'].includes(job.status);
+}
+
 export function isTerminal(job) {
-  return isCompleted(job) || isCancelled(job);
+  return isCompleted(job) || isCancelled(job) || isRepoStored(job);
 }
 
 export function isAssigned(job) {

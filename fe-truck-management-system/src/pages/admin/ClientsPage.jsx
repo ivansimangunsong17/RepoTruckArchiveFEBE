@@ -32,12 +32,12 @@ function CustomerDocumentView({ file, documentName }) {
         disabled
         title={`${documentName} belum tersedia`}
       >
-        <Eye size={13} /> View
+        <Eye size={13} />
       </button>
     );
   }
 
-  return <DocumentLink file={file} className="customer-document-button" label="View" />;
+  return <DocumentLink file={file} className="customer-document-button" label="View" iconOnly />;
 }
 
 const baseFields = [

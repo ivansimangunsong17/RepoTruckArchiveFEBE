@@ -139,6 +139,7 @@ function createFields(driverOptions, chassisRows = [], truckRows = []) {
     { key: 'status', section: 'Identitas Unit', label: 'Status Truck', type: 'select', defaultValue: 'Aktif', normalize: (value) => (value === 'Bertugas' ? 'Aktif' : value), options: [
       { value: 'Aktif', label: 'Aktif / Standby' }, { value: 'Maintenance', label: 'Maintenance' }, { value: 'Tidak Aktif', label: 'Tidak Aktif' },
     ] },
+    { key: 'receivedDate', section: 'Identitas Unit', label: 'Tanggal Unit Diterima', type: 'date', hint: 'Tanggal unit resmi masuk ke armada. Bisa dikosongkan jika belum diketahui.' },
     { key: 'brand', section: 'Spesifikasi Kendaraan', label: 'Merk Truck', placeholder: 'Contoh: Hino' },
     { key: 'type', section: 'Spesifikasi Kendaraan', label: 'Tipe Truck', placeholder: 'Contoh: Ranger FG 235 JJ' },
     { key: 'vin', section: 'Nomor Identifikasi Kendaraan', label: 'Nomor Rangka (VIN)', placeholder: 'Masukkan nomor rangka kendaraan' },
@@ -402,6 +403,21 @@ function ExpiryDetail({ value }) {
   return <MasterExpiryDate value={value} />;
 }
 
+function formatDisplayDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+function DateDetail({ value }) {
+  return <span className="master-plain-cell strong">{formatDisplayDate(value)}</span>;
+}
+
 const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
   'kirNumber',
   'kirExpiryDate',
@@ -633,6 +649,12 @@ function TrucksPage() {
     ...fields
       .filter((field) => !TRUCK_DOCUMENT_FIELD_KEYS.has(field.key))
       .map((field) => {
+        if (field.key === 'receivedDate') {
+          return {
+            ...field,
+            renderDetail: (value) => <DateDetail value={value} />,
+          };
+        }
         if (field.key === 'kirExpiryDate' || field.key === 'stnkExpiryDate' || field.key === 'stidExpiryDate' || field.key === 'insuranceExpiryDate') {
           return {
             ...field,

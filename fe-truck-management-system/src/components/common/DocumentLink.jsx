@@ -11,11 +11,12 @@ function triggerDownload(url, fileName) {
   anchor.remove();
 }
 
-function DocumentLink({ file, className = 'document-link', download = false, label = '' }) {
+function DocumentLink({ file, className = 'document-link', download = false, label = '', iconOnly = false }) {
   if (!file) return <span>Belum ada dokumen</span>;
   const ActionIcon = download ? Download : Eye;
   const fileName = file.name || 'Dokumen';
-  const accessibleLabel = label ? `${label} ${fileName}` : fileName;
+  const textLabel = typeof label === 'string' ? label : '';
+  const accessibleLabel = textLabel ? `${textLabel} ${fileName}` : fileName;
 
   async function openDocument() {
     const rawFile = file instanceof File ? file : file.rawFile instanceof File ? file.rawFile : null;
@@ -49,7 +50,7 @@ function DocumentLink({ file, className = 'document-link', download = false, lab
 
   return (
     <button aria-label={accessibleLabel} className={className} type="button" onClick={openDocument} disabled={!file.path && !file.dataUrl && !file.rawFile && !(file instanceof File)} title={accessibleLabel}>
-      <ActionIcon size={14} /> {label || fileName}
+      <ActionIcon size={14} /> {iconOnly ? null : label || fileName}
     </button>
   );
 }

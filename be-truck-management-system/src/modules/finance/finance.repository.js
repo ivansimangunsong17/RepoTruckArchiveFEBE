@@ -51,6 +51,8 @@ function paymentTermsExpression(alias = 'so') {
 
 function mapOrderVerificationRow(row) {
   const verificationStatus = normalizeVerificationStatus(row);
+  const isCancelled = row.status === 'cancelled';
+  const cancelReason = row.cancel_review_note || row.cancel_request_note || row.cancel_reason || '';
   const referenceDocuments = parseJsonArray(row.reference_documents);
 
   return {
@@ -72,9 +74,20 @@ function mapOrderVerificationRow(row) {
     depo: row.origin,
     document: referenceDocuments[0]?.file?.name || referenceDocuments[0]?.referenceNumber || '-',
     notes: row.notes || row.job_description || '',
-    status: verificationStatus === 'verified' ? 'No. SO Terisi' : 'Menunggu No. SO Accurate',
-    verificationStatus,
+    status: isCancelled ? 'SO Batal' : verificationStatus === 'verified' ? 'No. SO Terisi' : 'Menunggu No. SO Accurate',
+    verificationStatus: isCancelled ? 'cancelled' : verificationStatus,
     soNumber: row.so_number || '',
+    cancelReason,
+    cancelRequestStatus: row.cancel_request_status || 'none',
+    cancelRequestNote: row.cancel_request_note || '',
+    cancelRequestedByName: row.cancel_requested_by_name || '',
+    cancelRequestedByRole: row.cancel_requested_by_role || '',
+    cancelRequestedAt: row.cancel_requested_at,
+    cancelReviewedByName: row.cancel_reviewed_by_name || '',
+    cancelReviewedAt: row.cancel_reviewed_at,
+    cancelReviewNote: row.cancel_review_note || '',
+    cancelledAt: row.cancelled_at,
+    cancelledByName: row.cancel_reviewed_by_name || row.cancel_requested_by_name || row.cancelled_by_name || '',
     financeVerifiedBy: row.finance_verified_by_name || '',
     financeVerifiedAt: row.finance_verified_at,
     operationalStatus: row.status,
@@ -115,6 +128,56 @@ function financeRowsCte() {
       where status <> 'cancelled'
       group by sales_order_id
     ),
+    order_financials as (
+      select
+        so.id as sales_order_id,
+        count(item.value)::int as line_item_count,
+        max(case
+          when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) = lower('Jasa Angkut D20')
+          then coalesce(
+            nullif(nullif(item.value->>'price', '')::numeric, 0),
+            nullif(nullif(item.value->>'total', '')::numeric, 0) / greatest(coalesce(nullif(nullif(item.value->>'qty', '')::numeric, 0), 1), 1)
+          )
+          else null
+        end) as transport_20ft_unit,
+        max(case
+          when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) = lower('Jasa Angkut D40')
+          then coalesce(
+            nullif(nullif(item.value->>'price', '')::numeric, 0),
+            nullif(nullif(item.value->>'total', '')::numeric, 0) / greatest(coalesce(nullif(nullif(item.value->>'qty', '')::numeric, 0), 1), 1)
+          )
+          else null
+        end) as transport_40ft_unit,
+        max(case
+          when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) = lower('Jasa Angkut')
+          then coalesce(
+            nullif(nullif(item.value->>'price', '')::numeric, 0),
+            nullif(nullif(item.value->>'total', '')::numeric, 0) / greatest(coalesce(nullif(nullif(item.value->>'qty', '')::numeric, 0), 1), 1)
+          )
+          else null
+        end) as transport_legacy_unit,
+        coalesce(sum(case
+          when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) in (
+            lower('Bon Muat/Bongkar'),
+            lower('Tila/Gatepass'),
+            lower('Jasa Handling'),
+            lower('Jasa Lainnya')
+          )
+          then coalesce(
+            nullif(nullif(item.value->>'total', '')::numeric, 0),
+            greatest(coalesce(nullif(item.value->>'qty', '')::numeric, 1), 0) * coalesce(nullif(item.value->>'price', '')::numeric, 0)
+          )
+          else 0
+        end), 0)::numeric as reimbursement_total
+      from sales_orders so
+      left join lateral jsonb_array_elements(
+        case
+          when jsonb_typeof(to_jsonb(so)->'line_items') = 'array' then to_jsonb(so)->'line_items'
+          else '[]'::jsonb
+        end
+      ) item on true
+      group by so.id
+    ),
     finance_rows as (
       select
         cj.id,
@@ -152,21 +215,78 @@ function financeRowsCte() {
         cj.running_at,
         cj.completed_at,
         cj.assignment_snapshot,
-        coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1)) as tariff,
+        coalesce(
+          case
+            when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+            else nullif(ofi.transport_20ft_unit, 0)
+          end,
+          nullif(ofi.transport_legacy_unit, 0),
+          case
+            when coalesce(ofi.line_item_count, 0) = 0
+            then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+            else null
+          end
+        ) as tariff,
         1::int as trip_quantity,
-        coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1)) as total_revenue,
+        coalesce(
+          case
+            when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+            else nullif(ofi.transport_20ft_unit, 0)
+          end,
+          nullif(ofi.transport_legacy_unit, 0),
+          case
+            when coalesce(ofi.line_item_count, 0) = 0
+            then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+            else null
+          end
+        ) as transport_revenue,
+        coalesce(ofi.reimbursement_total, 0) / greatest(coalesce(jc.total_jobs, 1), 1) as reimbursement_amount,
+        coalesce(
+          case
+            when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+            else nullif(ofi.transport_20ft_unit, 0)
+          end,
+          nullif(ofi.transport_legacy_unit, 0),
+          case
+            when coalesce(ofi.line_item_count, 0) = 0
+            then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+            else null
+          end
+        ) + (coalesce(ofi.reimbursement_total, 0) / greatest(coalesce(jc.total_jobs, 1), 1)) as total_revenue,
         case
           when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
           else nullif(dl.uj_20ft, 0)
         end as journey_money,
         coalesce(((regexp_match(coalesce(cj.rpuj_notes, ''), '"amount"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1])::numeric, 0) as additional_cost,
         case
-          when coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1)) is not null
+          when coalesce(
+            case
+              when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+              else nullif(ofi.transport_20ft_unit, 0)
+            end,
+            nullif(ofi.transport_legacy_unit, 0),
+            case
+              when coalesce(ofi.line_item_count, 0) = 0
+              then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+              else null
+            end
+          ) is not null
             and case
               when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
               else nullif(dl.uj_20ft, 0)
             end is not null
-          then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+          then coalesce(
+            case
+              when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+              else nullif(ofi.transport_20ft_unit, 0)
+            end,
+            nullif(ofi.transport_legacy_unit, 0),
+            case
+              when coalesce(ofi.line_item_count, 0) = 0
+              then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+              else null
+            end
+          )
             - case
               when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
               else nullif(dl.uj_20ft, 0)
@@ -185,7 +305,18 @@ function financeRowsCte() {
             and (nullif(btrim(cj.travel_document_number), '') is not null or coalesce(af.has_travel_file, false))
           )
           then case
-            when coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1)) is not null
+            when coalesce(
+              case
+                when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+                else nullif(ofi.transport_20ft_unit, 0)
+              end,
+              nullif(ofi.transport_legacy_unit, 0),
+              case
+                when coalesce(ofi.line_item_count, 0) = 0
+                then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+                else null
+              end
+            ) is not null
               and case
                 when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
                 else nullif(dl.uj_20ft, 0)
@@ -205,6 +336,7 @@ function financeRowsCte() {
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       left join job_counts jc on jc.sales_order_id = so.id
+      left join order_financials ofi on ofi.sales_order_id = so.id
       left join destination_locations dl on lower(trim(dl.name)) = lower(trim(so.destination)) and dl.archived_at is null
       left join attachment_flags af on af.entity_id = cj.id
       where cj.status = 'completed'
@@ -262,7 +394,7 @@ function buildFinanceFilters(options = {}) {
 }
 
 function buildOrderVerificationFilters(options = {}) {
-  const clauses = ["so.status not in ('completed', 'cancelled')"];
+  const clauses = ["so.status <> 'completed'"];
   const params = [];
 
   if (options.dateFrom) {
@@ -274,9 +406,13 @@ function buildOrderVerificationFilters(options = {}) {
     clauses.push(`coalesce(so.so_date, so.created_at::date) <= $${params.length}`);
   }
 
-  if (options.status === 'pending_so') {
+  if (options.status === 'cancelled') {
+    clauses.push("so.status = 'cancelled'");
+  } else if (options.status === 'pending_so') {
+    clauses.push("so.status <> 'cancelled'");
     clauses.push("(so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null)");
   } else if (options.status === 'verified') {
+    clauses.push("so.status <> 'cancelled'");
     clauses.push("so.finance_verification_status = 'verified'");
     clauses.push("nullif(btrim(so.so_number), '') is not null");
   }
@@ -290,6 +426,8 @@ function buildOrderVerificationFilters(options = {}) {
       or so.destination ilike $${params.length}
       or so.created_by_name ilike $${params.length}
       or so.sales_name ilike $${params.length}
+      or so.cancel_request_note ilike $${params.length}
+      or so.cancel_review_note ilike $${params.length}
     )`);
   }
 
@@ -447,6 +585,8 @@ function rpujRowsSelect() {
 function mapFinanceRow(row) {
   const tariff = row.tariff == null ? null : Number(row.tariff);
   const totalRevenue = row.total_revenue == null ? null : Number(row.total_revenue);
+  const transportRevenue = row.transport_revenue == null ? null : Number(row.transport_revenue);
+  const reimbursementAmount = Number(row.reimbursement_amount || 0);
   const journeyMoney = row.journey_money == null ? null : Number(row.journey_money);
   const additionalCost = Number(row.additional_cost || 0);
   const estimatedMargin = row.estimated_margin == null ? null : Number(row.estimated_margin);
@@ -479,6 +619,9 @@ function mapFinanceRow(row) {
     completedAt: row.completed_at,
     tariff,
     totalRevenue,
+    transportRevenue,
+    reimbursementAmount,
+    billingAmount: totalRevenue,
     journeyMoney,
     additionalCost,
     estimatedMargin,
@@ -811,20 +954,40 @@ function invoiceOrdersCte() {
         bool_and(fr.has_loading_document) as has_loading_document,
         bool_and(fr.has_tila_gatepass_document) as has_tila_gatepass_document,
         bool_and(fr.has_travel_document) as has_travel_document,
-        (
-          select array_agg(
-            concat(grouped.service_name, ' ', grouped.container_size, ' - ', grouped.trip_quantity, ' ritase')
-            order by grouped.container_size, grouped.service_name
+        coalesce(
+          (
+            select array_agg(
+              concat(
+                coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', 'Jasa'),
+                ' - ',
+                greatest(coalesce(nullif(line_item.value->>'qty', '')::numeric, 1), 0)::int,
+                ' item'
+              )
+              order by coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', 'Jasa')
+            )
+            from jsonb_array_elements(
+              case
+                when jsonb_typeof(to_jsonb(so)->'line_items') = 'array' then to_jsonb(so)->'line_items'
+                else '[]'::jsonb
+              end
+            ) line_item
+            where nullif(btrim(coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', '')), '') is not null
+          ),
+          (
+            select array_agg(
+              concat(grouped.service_name, ' ', grouped.container_size, ' - ', grouped.trip_quantity, ' ritase')
+              order by grouped.container_size, grouped.service_name
+            )
+            from (
+              select
+                coalesce(item.service_name, 'Jasa Angkut') as service_name,
+                coalesce(item.container_size, '') as container_size,
+                sum(item.trip_quantity)::int as trip_quantity
+              from finance_rows item
+              where item.sales_order_id = so.id
+              group by coalesce(item.service_name, 'Jasa Angkut'), coalesce(item.container_size, '')
+            ) grouped
           )
-          from (
-            select
-              coalesce(item.service_name, 'Jasa Angkut') as service_name,
-              coalesce(item.container_size, '') as container_size,
-              sum(item.trip_quantity)::int as trip_quantity
-            from finance_rows item
-            where item.sales_order_id = so.id
-            group by coalesce(item.service_name, 'Jasa Angkut'), coalesce(item.container_size, '')
-          ) grouped
         ) as billing_items
       from sales_orders so
       join finance_rows fr on fr.sales_order_id = so.id
@@ -845,6 +1008,8 @@ export async function getFinanceDashboard(options = {}) {
           count(distinct customer_name)::int as total_customers,
           coalesce(sum(trip_quantity), 0)::int as total_completed_containers,
           coalesce(sum(total_revenue) filter (where total_revenue is not null), 0)::numeric as total_revenue,
+          coalesce(sum(transport_revenue) filter (where transport_revenue is not null), 0)::numeric as total_transport_revenue,
+          coalesce(sum(reimbursement_amount), 0)::numeric as total_reimbursement_amount,
           coalesce(sum(journey_money) filter (where journey_money is not null), 0)::numeric as total_journey_money,
           coalesce(sum(additional_cost), 0)::numeric as total_additional_cost,
           coalesce(sum(estimated_margin) filter (where estimated_margin is not null), 0)::numeric as estimated_margin,
@@ -924,6 +1089,8 @@ export async function getFinanceDashboard(options = {}) {
     totalCustomers: Number(row.total_customers || 0),
     totalCompletedContainers: Number(row.total_completed_containers || 0),
     totalRevenue: Number(row.total_revenue || 0),
+    totalTransportRevenue: Number(row.total_transport_revenue || 0),
+    totalReimbursementAmount: Number(row.total_reimbursement_amount || 0),
     totalJourneyMoney: Number(row.total_journey_money || 0),
     totalAdditionalCost: Number(row.total_additional_cost || 0),
     estimatedMargin: Number(row.estimated_margin || 0),
@@ -986,6 +1153,15 @@ export async function getOrderVerificationsPage(options = {}) {
           so.status,
           so.sales_name,
           so.created_by_name,
+          so.cancelled_at,
+          so.cancel_request_status,
+          so.cancel_request_note,
+          so.cancel_requested_by_name,
+          so.cancel_requested_by_role,
+          so.cancel_requested_at,
+          so.cancel_reviewed_by_name,
+          so.cancel_reviewed_at,
+          so.cancel_review_note,
           so.created_at,
           so.updated_at,
           so.notes,
@@ -997,7 +1173,11 @@ export async function getOrderVerificationsPage(options = {}) {
         ${whereSql}
         group by so.id
         order by
-          case when so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null then 2 else 1 end,
+          case
+            when so.status = 'cancelled' then 3
+            when so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null then 2
+            else 1
+          end,
           so.trip_date asc,
           so.created_at desc
         limit $${limitIndex} offset $${offsetIndex}
@@ -1016,7 +1196,8 @@ export async function getOrderVerificationsPage(options = {}) {
       `
         select
           count(*) filter (where so.status not in ('completed', 'cancelled') and (so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null))::int as pending_so,
-          count(*) filter (where so.status not in ('completed', 'cancelled') and so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null)::int as verified
+          count(*) filter (where so.status not in ('completed', 'cancelled') and so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null)::int as verified,
+          count(*) filter (where so.status = 'cancelled')::int as cancelled
         from sales_orders so
         ${summaryWhereSql}
       `,
@@ -1033,6 +1214,7 @@ export async function getOrderVerificationsPage(options = {}) {
     summary: {
       pendingSo: Number(summary.rows[0]?.pending_so || 0),
       verified: Number(summary.rows[0]?.verified || 0),
+      cancelled: Number(summary.rows[0]?.cancelled || 0),
     },
   };
 }
@@ -1125,6 +1307,15 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
           so.status,
           so.sales_name,
           so.created_by_name,
+          so.cancelled_at,
+          so.cancel_request_status,
+          so.cancel_request_note,
+          so.cancel_requested_by_name,
+          so.cancel_requested_by_role,
+          so.cancel_requested_at,
+          so.cancel_reviewed_by_name,
+          so.cancel_reviewed_at,
+          so.cancel_review_note,
           so.created_at,
           so.updated_at,
           so.notes,

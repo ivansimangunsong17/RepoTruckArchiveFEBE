@@ -30,6 +30,7 @@ const DEFAULT_REVENUE_SUMMARY = {
   totalTrucks: 0,
   totalTrips: 0,
 };
+
 const DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY = 1.8;
 
 function readUtilizationTargetTripsPerDay() {
@@ -653,7 +654,7 @@ function ReportsPage() {
   const masterTruckRows = archive.masters?.trucks;
   const masterDriverRows = archive.masters?.drivers;
   const revenueTruckRows = useMemo(() => buildRevenueTruckRows(masterTruckRows || [], revenueRows), [masterTruckRows, revenueRows]);
-  const averageRevenuePerTruck = revenueTruckRows.length ? revenueSummary.totalRevenue / revenueTruckRows.length : 0;
+  const averageRevenuePerTrip = revenueSummary.totalTrips ? revenueSummary.totalRevenue / revenueSummary.totalTrips : 0;
   const utilizationSourceRows = utilizationRows.length ? utilizationRows : revenueRows;
   const utilizationTruckRows = useMemo(() => buildUtilizationTruckRows(masterTruckRows || [], utilizationSourceRows), [masterTruckRows, utilizationSourceRows]);
   const activeDays = daysInMonth(month, year);
@@ -727,11 +728,11 @@ function ReportsPage() {
       <section className="mb-4 grid gap-3 lg:grid-cols-3">
         <SummaryToggleCard
           icon={BarChart3}
-          label="Total Revenue"
+          label="Revenue Jasa Angkut"
           value={formatCurrency(revenueSummary.totalRevenue)}
-          helper="Akumulasi revenue periode ini"
-          secondaryLabel="AVG Revenue/Truck"
-          secondaryValue={formatCurrency(averageRevenuePerTruck)}
+          helper="Tidak termasuk reimbursement / jasa lainnya"
+          secondaryLabel="AVG Revenue/Trip"
+          secondaryValue={formatCurrency(averageRevenuePerTrip)}
           tone="emerald"
           expanded={selectedReport === 'revenue'}
           onClick={() => selectReport('revenue')}
@@ -768,7 +769,6 @@ function ReportsPage() {
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-3 py-2.5">
             <h2 className="text-sm font-bold text-slate-950">Detail Revenue Truck</h2>
-            <p className="text-xs text-slate-500">Semua data truck beserta jumlah trip dan revenue pada periode yang dipilih.</p>
           </div>
 
           {revenueLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan revenue...</div> : null}

@@ -15,6 +15,7 @@
     "storage:init:phase4": "node scripts/initialize-storage-phase4.js",
     "storage:audit": "node scripts/storage-audit.js",
     "storage:audit:apply": "node scripts/storage-audit.js --apply",
+    "finance:revenue-audit": "node scripts/audit-revenue-line-items.js",
     "backup:local": "powershell -ExecutionPolicy Bypass -File scripts/backup-local.ps1",
     "backup:storage": "powershell -ExecutionPolicy Bypass -File scripts/backup-storage.ps1",
     "backup:database": "powershell -ExecutionPolicy Bypass -File scripts/backup-database.ps1"
