@@ -24,11 +24,17 @@ function normalizeTruck(truck) {
     id: truck.id || truck.plateNumber,
     plateNumber: truck.plateNumber,
     unitCode: truck.unitCode,
+    status: truck.status || truck.operationalStatus || truck.operational_status || 'Aktif',
     capacity: chassisSize || normalizeSize(truck.capacity || truck.containerSize || truck.size || truck.defaultSize || '20FT'),
     chassisCode: truck.chassisCode || truck.chassis_code || truck.kirChassisNumber || truck.kir_chassis_number || '',
     chassisSize,
     driver: truck.defaultDriver || truck.default_driver_name || truck.defaultDriverName || truck.lastDriver || '-',
   };
+}
+
+function isTruckAvailableForDashboard(truck) {
+  const status = String(truck?.status || '').trim().toLowerCase();
+  return ['aktif', 'siap'].includes(status);
 }
 
 function formatTruckNumber(unitCode) {
@@ -94,12 +100,13 @@ function buildTruckRows(trucks, jobs) {
 }
 
 function getAvailability(trucks, activeJobs) {
+  const availableTrucks = trucks.filter(isTruckAvailableForDashboard);
   const summary = {
     '20FT': { total: 0, activePlates: new Set() },
     '40FT': { total: 0, activePlates: new Set() },
   };
 
-  trucks.forEach((truck) => {
+  availableTrucks.forEach((truck) => {
     const truckSize = normalizeSize(truck.capacity);
     if (summary[truckSize]) summary[truckSize].total += 1;
   });
@@ -107,7 +114,8 @@ function getAvailability(trucks, activeJobs) {
   activeJobs.forEach((job) => {
     const plateNumber = job.plateNumber || job.truck;
     if (!plateNumber) return;
-    const truck = trucks.find((item) => item.plateNumber === plateNumber);
+    const truck = availableTrucks.find((item) => item.plateNumber === plateNumber);
+    if (!truck) return;
     const activeSize = normalizeSize(truck?.capacity || job.size);
     if (summary[activeSize]) summary[activeSize].activePlates.add(plateNumber);
   });

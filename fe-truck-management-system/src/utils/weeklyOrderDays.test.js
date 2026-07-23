@@ -56,4 +56,21 @@ describe('buildWeeklyOrderDays', () => {
     expect(days[0].shortCustomerSummary).toBe('PT Alpha +2');
     expect(days[0].fullCustomerSummary).toBe('PT Alpha, PT Beta, PT Gamma');
   });
+
+  it('tidak menghitung container yang sudah dibatalkan', () => {
+    const days = buildWeeklyOrderDays([
+      { id: 'job-active', soNumber: 'SO-1', containerNumber: 'CONT-1', size: '20FT', tripDateKey: '2026-07-12', customer: 'PT Alpha', status: 'received' },
+      { id: 'job-cancelled', soNumber: 'SO-1', containerNumber: 'CONT-2', size: '20FT', tripDateKey: '2026-07-12', customer: 'PT Alpha', status: 'cancelled' },
+    ], '2026-07-11');
+
+    expect(days[0]).toMatchObject({
+      orderCount: 1,
+      totalContainers: 1,
+      twentyFt: 1,
+      fortyFt: 0,
+    });
+    expect(days[0].customerBreakdown).toEqual([
+      { customer: 'PT Alpha', totalContainers: 1, twentyFt: 1, fortyFt: 0 },
+    ]);
+  });
 });

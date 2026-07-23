@@ -451,6 +451,10 @@ function normalizeFinanceInvoiceRow(row = {}) {
     completedAt: formatDisplayDate(row.completedAt),
     documentStatus: row.documentStatus || '-',
     billingAmount: Number(row.billingAmount || 0),
+    plannedJobsCount: Number(row.plannedJobsCount || 0),
+    billedJobsCount: Number(row.billedJobsCount || 0),
+    cancelledJobsCount: Number(row.cancelledJobsCount || 0),
+    cancellationNote: row.cancellationNote || '',
     paymentTerms: row.paymentTerms || '-',
     invoiceDate: formatDisplayDate(row.invoiceDate),
     dueDate: formatDisplayDate(row.dueDate),
@@ -1045,6 +1049,12 @@ function InvoiceDetailModal({ invoice, loading = false, error = '', onClose }) {
                 <div className="finance-invoice-detail-card">
                   <h4 className="mb-1.5 text-xs font-black text-slate-950">Rincian Tagihan</h4>
                   <CompactList items={invoice.billingItems} />
+                  {invoice.cancellationNote ? (
+                    <div className="mt-2 flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold leading-relaxed text-amber-800">
+                      <Info className="mt-0.5 shrink-0" size={14} />
+                      <span>{invoice.cancellationNote}</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="finance-invoice-detail-card">
                   <h4 className="mb-1.5 text-xs font-black text-slate-950">Riwayat Finance</h4>

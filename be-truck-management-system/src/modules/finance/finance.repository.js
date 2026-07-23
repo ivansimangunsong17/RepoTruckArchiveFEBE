@@ -781,6 +781,10 @@ function mapInvoiceOrderRow(row) {
   const invoiceNumber = row.invoice_number || '';
   const documentStatus = mapInvoiceDocumentStatus(row);
   const billingItems = Array.isArray(row.billing_items) ? row.billing_items.filter(Boolean) : [];
+  const cancelledJobsCount = Number(row.cancelled_jobs_count || 0);
+  const cancellationNote = cancelledJobsCount > 0
+    ? `${cancelledJobsCount} container dibatalkan; tagihan hanya menghitung container yang selesai.`
+    : '';
   const activityLogs = [];
   if (row.completed_at) activityLogs.push(`${new Date(row.completed_at).toISOString()} - Operational menyelesaikan job`);
   if (documentStatus === 'Siap Ditagihkan') activityLogs.push(`${new Date(row.completed_at || row.updated_at).toISOString()} - Dokumen siap invoice`);
@@ -797,6 +801,10 @@ function mapInvoiceOrderRow(row) {
     completedAt: row.completed_at,
     documentStatus,
     billingAmount: row.billing_amount == null ? 0 : Number(row.billing_amount),
+    plannedJobsCount: Number(row.planned_jobs_count || 0),
+    billedJobsCount: Number(row.billed_jobs_count || row.total_jobs_count || 0),
+    cancelledJobsCount,
+    cancellationNote,
     paymentTerms: row.payment_terms || '-',
     dueDate: row.due_date,
     billingItems: billingItems.length ? billingItems : ['Rincian tagihan belum tersedia'],
@@ -928,6 +936,14 @@ export function mapInvoiceDocuments(rows = []) {
 function invoiceOrdersCte() {
   return `
     ${financeRowsCte()},
+    order_job_statuses as (
+      select
+        sales_order_id,
+        count(*)::int as planned_jobs_count,
+        count(*) filter (where status = 'cancelled')::int as cancelled_jobs_count
+      from container_jobs
+      group by sales_order_id
+    ),
     invoice_orders as (
       select
         so.id,
@@ -948,6 +964,9 @@ function invoiceOrdersCte() {
         ${paymentTermsExpression('so')} as payment_terms,
         max(fr.completed_at) as completed_at,
         count(fr.id)::int as total_jobs_count,
+        count(fr.id)::int as billed_jobs_count,
+        coalesce(max(ojs.planned_jobs_count), count(fr.id))::int as planned_jobs_count,
+        coalesce(max(ojs.cancelled_jobs_count), 0)::int as cancelled_jobs_count,
         count(fr.id) filter (where fr.document_status = 'BELUM_LENGKAP')::int as incomplete_documents_count,
         count(fr.id) filter (where fr.document_status = 'SIAP_DITAGIHKAN')::int as ready_documents_count,
         coalesce(sum(fr.total_revenue) filter (where fr.total_revenue is not null), nullif(so.total_amount, 0), 0)::numeric as billing_amount,
@@ -955,6 +974,23 @@ function invoiceOrdersCte() {
         bool_and(fr.has_tila_gatepass_document) as has_tila_gatepass_document,
         bool_and(fr.has_travel_document) as has_travel_document,
         coalesce(
+          (
+            select array_agg(
+              concat(grouped.service_name, ' ', grouped.container_size, ' - ', grouped.trip_quantity, ' ritase')
+              order by grouped.container_size, grouped.service_name
+            )
+            from (
+              select
+                coalesce(item.service_name, 'Jasa Angkut') as service_name,
+                coalesce(item.container_size, '') as container_size,
+                sum(item.trip_quantity)::int as trip_quantity
+              from finance_rows item
+              where item.sales_order_id = so.id
+              group by coalesce(item.service_name, 'Jasa Angkut'), coalesce(item.container_size, '')
+            ) grouped
+          ),
+          array[]::text[]
+        ) || coalesce(
           (
             select array_agg(
               concat(
@@ -971,26 +1007,18 @@ function invoiceOrdersCte() {
                 else '[]'::jsonb
               end
             ) line_item
-            where nullif(btrim(coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', '')), '') is not null
-          ),
-          (
-            select array_agg(
-              concat(grouped.service_name, ' ', grouped.container_size, ' - ', grouped.trip_quantity, ' ritase')
-              order by grouped.container_size, grouped.service_name
+            where lower(btrim(coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', ''))) in (
+              lower('Bon Muat/Bongkar'),
+              lower('Tila/Gatepass'),
+              lower('Jasa Handling'),
+              lower('Jasa Lainnya')
             )
-            from (
-              select
-                coalesce(item.service_name, 'Jasa Angkut') as service_name,
-                coalesce(item.container_size, '') as container_size,
-                sum(item.trip_quantity)::int as trip_quantity
-              from finance_rows item
-              where item.sales_order_id = so.id
-              group by coalesce(item.service_name, 'Jasa Angkut'), coalesce(item.container_size, '')
-            ) grouped
-          )
-        ) as billing_items
+          ),
+          array[]::text[])
+        as billing_items
       from sales_orders so
       join finance_rows fr on fr.sales_order_id = so.id
+      left join order_job_statuses ojs on ojs.sales_order_id = so.id
       where so.status = 'completed'
       group by so.id
     )

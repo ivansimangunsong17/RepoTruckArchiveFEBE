@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TodayTruckDashboard from './TodayTruckDashboard';
@@ -66,12 +66,55 @@ describe('TodayTruckDashboard', () => {
     render(<TodayTruckDashboard />);
 
     expect(await screen.findByRole('columnheader', { name: 'No Lambung' })).toBeInTheDocument();
-    const rows = await screen.findAllByRole('row');
+    let rows = [];
+    await waitFor(async () => {
+      rows = await screen.findAllByRole('row');
+      expect(rows.length).toBeGreaterThan(2);
+    });
     expect(rows[1]).toHaveTextContent('1');
     expect(rows[1]).toHaveTextContent('99');
     expect(rows[1]).toHaveTextContent('20FT');
     expect(rows[2]).toHaveTextContent('2');
     expect(rows[2]).toHaveTextContent('1');
     expect(rows[2]).toHaveTextContent('40FT');
+  });
+
+  it('tidak menghitung truck maintenance sebagai availability dashboard', async () => {
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [
+        {
+          id: 'truck-active',
+          plateNumber: 'B 2000 OK',
+          unitCode: 'TRK-020',
+          capacity: '20FT',
+          status: 'Aktif',
+        },
+        {
+          id: 'truck-maintenance',
+          plateNumber: 'B 2100 MT',
+          unitCode: 'TRK-021',
+          capacity: '20FT',
+          status: 'Maintenance',
+        },
+        {
+          id: 'truck-inactive',
+          plateNumber: 'B 2200 NA',
+          unitCode: 'TRK-022',
+          capacity: '40FT',
+          status: 'Tidak Aktif',
+        },
+      ],
+      activeJobs: [],
+    });
+
+    render(<TodayTruckDashboard />);
+
+    let availabilityRegion;
+    await waitFor(() => {
+      expect(fetchDashboardReport).toHaveBeenCalled();
+      availabilityRegion = screen.getByLabelText('Ketersediaan Truck Hari Ini');
+      expect(within(availabilityRegion).getByText('20FT').closest('article')).toHaveTextContent('1 Unit');
+      expect(within(availabilityRegion).getByText('40FT').closest('article')).toHaveTextContent('0 Unit');
+    });
   });
 });

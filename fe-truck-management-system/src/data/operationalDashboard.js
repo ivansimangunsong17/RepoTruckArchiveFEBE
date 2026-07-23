@@ -134,6 +134,7 @@ export function buildOperationalJobs(orders, currentDateKey = todayKey(), useDem
 export function groupFutureJobsByDate(jobs) {
   const grouped = (jobs || []).filter(Boolean).reduce((result, job) => {
     if (!job.tripDateKey) return result;
+    if (isTerminal(job)) return result;
 
     const current = result[job.tripDateKey] || {
       tripDateKey: job.tripDateKey,

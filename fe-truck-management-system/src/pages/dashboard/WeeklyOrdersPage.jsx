@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Download, X } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import WeeklyOrderSummary from '../../components/dashboard/WeeklyOrderSummary';
-import { buildOperationalJobs, formatShortDate, isCompleted, todayKey, toDateKey } from '../../data/operationalDashboard';
+import { buildOperationalJobs, formatShortDate, isTerminal, todayKey, toDateKey } from '../../data/operationalDashboard';
 import { fetchSalesOrders } from '../../services/archive/salesOrderService';
 import { fetchDashboardReport } from '../../services/reports/reportService';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
@@ -42,7 +42,7 @@ function mergeWeeklyJobs(...jobGroups) {
   const merged = new Map();
   jobGroups.flat().filter(Boolean).map(normalizeWeeklyJob).forEach((job) => {
     if (!job.tripDateKey) return;
-    if (isCompleted(job) || job.tripDateKey < todayKey()) return;
+    if (isTerminal(job) || job.tripDateKey < todayKey()) return;
     const key = job.id || `${job.soNumber || '-'}-${job.containerNumber || '-'}-${job.tripDateKey}`;
     merged.set(key, { ...merged.get(key), ...job });
   });

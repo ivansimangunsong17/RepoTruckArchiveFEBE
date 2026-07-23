@@ -93,6 +93,11 @@ beforeEach(() => {
   fetchFinanceInvoices.mockResolvedValue({ rows: [invoiceRow], summary: invoiceSummary });
   fetchFinanceInvoiceDetail.mockResolvedValue({
     ...invoiceRow,
+    billingItems: ['Jasa Angkut D20 - 1 ritase', 'Bon Muat/Bongkar - 1 item'],
+    plannedJobsCount: 2,
+    billedJobsCount: 1,
+    cancelledJobsCount: 1,
+    cancellationNote: '1 container dibatalkan; tagihan hanya menghitung container yang selesai.',
     documents: [
       {
         id: 'attachment-1',
@@ -222,6 +227,8 @@ describe('FinanceWorkflowPage validation modals', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('CONT-TEST-001');
     expect(dialog).toHaveTextContent('CONT-TEST-002');
+    expect(dialog).toHaveTextContent('1 container dibatalkan; tagihan hanya menghitung container yang selesai.');
+    expect(dialog).toHaveTextContent('Jasa Angkut D20 - 1 ritase');
     expect(dialog).toHaveTextContent('Dokumen Sales / SO');
     expect(dialog).toHaveTextContent('1/4 lengkap');
     expect(screen.getAllByText('Belum dilengkapi oleh Operational.')).toHaveLength(6);
