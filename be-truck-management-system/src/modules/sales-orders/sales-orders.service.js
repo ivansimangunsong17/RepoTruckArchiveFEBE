@@ -12,7 +12,7 @@ import {
   billingStatusRequiresInvoice,
   normalizeSalesOrderBillingStatus,
 } from './sales-orders.billing-status.js';
-import { isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
+import { isSalesOrderLockedByFinanceNumber, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
 
 const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
@@ -258,7 +258,14 @@ function ensureCanAccessSalesOrder(actor, order) {
 }
 
 function ensureSalesOrderUnlockedForSales(actor, order) {
-  if (actor?.role !== 'sales' || !isSalesOrderLockedByRpuj(order)) return;
+  if (actor?.role !== 'sales') return;
+  if (isSalesOrderLockedByFinanceNumber(order)) {
+    const error = new Error('Sales Order terkunci karena Finance sudah menerbitkan nomor SO. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'SALES_ORDER_FINANCE_NUMBER_LOCKED_ADMIN_ONLY';
+    throw error;
+  }
+  if (!isSalesOrderLockedByRpuj(order)) return;
   const error = new Error('Sales Order terkunci karena RPUJ sudah dikirim. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.');
   error.statusCode = 403;
   error.code = 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY';

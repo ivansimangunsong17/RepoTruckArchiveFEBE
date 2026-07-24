@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
+import { Archive, BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
@@ -294,6 +294,32 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
   });
 }
 
+function repoStoredDate(row = {}) {
+  return row.repoStoredAt || row.updatedAt || row.tripDate || '';
+}
+
+function repoAgeDays(value, baseDate = new Date()) {
+  const storedAt = new Date(value);
+  if (!value || Number.isNaN(storedAt.getTime())) return 0;
+  const start = new Date(storedAt.getFullYear(), storedAt.getMonth(), storedAt.getDate());
+  const base = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  return Math.max(0, Math.floor((base - start) / 86400000));
+}
+
+export function buildRepoMonitoringRows(rows = [], baseDate = new Date()) {
+  return rows
+    .filter((row) => row?.status === 'repo_stored')
+    .map((row) => ({
+      ...row,
+      storedDate: repoStoredDate(row),
+      ageDays: repoAgeDays(repoStoredDate(row), baseDate),
+    }))
+    .sort((left, right) => {
+      if (right.ageDays !== left.ageDays) return right.ageDays - left.ageDays;
+      return String(left.containerNumber || '').localeCompare(String(right.containerNumber || ''));
+    });
+}
+
 function SummaryToggleCard({
   icon: Icon,
   label,
@@ -375,7 +401,7 @@ function DetailTable({ columns, rows, rowRenderer }) {
 }
 
 function normalizeReportTab(tab) {
-  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue') return tab;
+  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'repo') return tab;
   return 'revenue';
 }
 
@@ -391,6 +417,13 @@ function getReportHeader(selectedReport) {
     return {
       title: 'Driver Performance',
       description: 'Ringkasan performa sopir pada periode yang dipilih.',
+    };
+  }
+
+  if (selectedReport === 'repo') {
+    return {
+      title: 'Container Titip',
+      description: 'Monitoring container yang sedang dititipkan di depo penitipan.',
     };
   }
 
@@ -540,6 +573,9 @@ function ReportsPage() {
   const [driverPerformanceRows, setDriverPerformanceRows] = useState([]);
   const [driverPerformanceLoading, setDriverPerformanceLoading] = useState(true);
   const [driverPerformanceError, setDriverPerformanceError] = useState('');
+  const [repoRows, setRepoRows] = useState([]);
+  const [repoLoading, setRepoLoading] = useState(true);
+  const [repoError, setRepoError] = useState('');
   const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab')));
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
   const utilizationTargetTripsPerDay = readUtilizationTargetTripsPerDay();
@@ -575,9 +611,11 @@ function ReportsPage() {
     setRevenueLoading(true);
     setUtilizationLoading(true);
     setDriverPerformanceLoading(true);
+    setRepoLoading(true);
     setRevenueError('');
     setUtilizationError('');
     setDriverPerformanceError('');
+    setRepoError('');
 
     async function loadUtilizationRows() {
       const pageSize = 100;
@@ -607,7 +645,12 @@ function ReportsPage() {
       fetchMonthlyRevenueReport({ month, year }),
       loadUtilizationRows(),
       fetchDriverPerformanceReport({ month: monthKey(month, year) }),
-    ]).then(([revenueResult, utilizationResult, driverPerformanceResult]) => {
+      fetchOperationReport({
+        page: 1,
+        pageSize: 100,
+        status: 'repo_stored',
+      }),
+    ]).then(([revenueResult, utilizationResult, driverPerformanceResult, repoResult]) => {
       if (!active) return;
 
       if (revenueResult.status === 'fulfilled') {
@@ -639,11 +682,19 @@ function ReportsPage() {
         setDriverPerformanceRows([]);
         setDriverPerformanceError(driverPerformanceResult.reason?.message || 'Laporan performa sopir gagal dimuat.');
       }
+
+      if (repoResult.status === 'fulfilled') {
+        setRepoRows(Array.isArray(repoResult.value?.rows) ? repoResult.value.rows : []);
+      } else {
+        setRepoRows([]);
+        setRepoError(repoResult.reason?.message || 'Laporan titipan repo gagal dimuat.');
+      }
     }).finally(() => {
       if (!active) return;
       setRevenueLoading(false);
       setUtilizationLoading(false);
       setDriverPerformanceLoading(false);
+      setRepoLoading(false);
     });
 
     return () => {
@@ -686,6 +737,12 @@ function ReportsPage() {
       ? driverRows.reduce((total, driver) => total + driver.totalTrips, 0) / driverRows.filter((driver) => driver.totalTrips > 0).length
       : 0,
   }), [driverRows]);
+  const repoMonitoringRows = useMemo(() => buildRepoMonitoringRows(repoRows), [repoRows]);
+  const repoSummary = useMemo(() => ({
+    total: repoMonitoringRows.length,
+    overdue: repoMonitoringRows.filter((row) => row.ageDays >= 3).length,
+    locations: new Set(repoMonitoringRows.map((row) => row.repoLocation).filter(Boolean)).size,
+  }), [repoMonitoringRows]);
   const reportHeader = getReportHeader(selectedReport);
 
   return (
@@ -725,7 +782,7 @@ function ReportsPage() {
         </div>
       </section>
 
-      <section className="mb-4 grid gap-3 lg:grid-cols-3">
+      <section className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Jasa Angkut"
@@ -762,6 +819,19 @@ function ReportsPage() {
           tone="amber"
           expanded={selectedReport === 'driver'}
           onClick={() => selectReport('driver')}
+        />
+        <SummaryToggleCard
+          icon={Archive}
+          label="Container Titip"
+          value={`${repoSummary.total} Container`}
+          helper="Container masih dititipkan"
+          secondaryLabel="Lewat 3 Hari"
+          secondaryValue={`${repoSummary.overdue} Container`}
+          tertiaryLabel="Lokasi"
+          tertiaryValue={`${repoSummary.locations} Repo`}
+          tone="slate"
+          expanded={selectedReport === 'repo'}
+          onClick={() => selectReport('repo')}
         />
       </section>
 
@@ -872,6 +942,65 @@ function ReportsPage() {
         activeMonthLabel={activeMonthLabel}
         year={year}
       />
+
+      {selectedReport === 'repo' ? (
+        <section className="rounded-md border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-3 py-2.5">
+            <h2 className="text-sm font-bold text-slate-950">Monitoring Container Titip</h2>
+          </div>
+
+          {repoLoading ? <div className="p-4 text-sm text-slate-500">Memuat titipan repo...</div> : null}
+          {!repoLoading && repoError ? <div className="p-4 text-sm text-red-600">{repoError}</div> : null}
+
+          {!repoLoading && !repoError && repoMonitoringRows.length ? (
+            <DetailTable
+              columns={[
+                { label: 'No' },
+                { label: 'SO / Container' },
+                { label: 'Customer' },
+                { label: 'Depo Penitipan' },
+                { label: 'Kondisi' },
+                { label: 'Tanggal Titip' },
+                { label: 'Usia', align: 'right' },
+                { label: 'Dicatat Oleh' },
+                { label: 'Alasan' },
+              ]}
+              rows={repoMonitoringRows}
+              rowRenderer={(row, index) => (
+                <tr key={row.id || `${row.soNumber}-${row.containerNumber}`} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                  <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
+                  <td className="px-3 py-2">
+                    <strong className="block text-slate-950">{row.soNumber || '-'}</strong>
+                    <span className="text-[11px] text-slate-500">{row.containerNumber || 'Container belum diisi'} - {row.size || '-'}</span>
+                  </td>
+                  <td className="px-3 py-2 font-semibold text-slate-800">{row.customer || '-'}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-950">{row.repoLocation || '-'}</td>
+                  <td className="px-3 py-2">{row.repoContainerCondition === 'loaded' ? 'Isi' : row.repoContainerCondition === 'empty' ? 'Kosong' : '-'}</td>
+                  <td className="px-3 py-2">{formatDate(row.storedDate)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <span className={`inline-flex min-w-14 justify-center rounded-md px-2 py-0.5 font-bold ${
+                      row.ageDays >= 3 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {row.ageDays} hari
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">{row.repoCreatedByName || '-'}</td>
+                  <td className="max-w-xs px-3 py-2">
+                    <span className="line-clamp-2">{row.repoReason || row.repoNotes || '-'}</span>
+                  </td>
+                </tr>
+              )}
+            />
+          ) : null}
+
+          {!repoLoading && !repoError && !repoMonitoringRows.length ? (
+            <div className="p-6 text-center">
+              <h3 className="text-sm font-bold text-slate-900">Belum ada container titip</h3>
+              <p className="mt-1 text-xs text-slate-500">Tidak ada container yang sedang dititipkan.</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {selectedReport === 'driver' ? (
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">

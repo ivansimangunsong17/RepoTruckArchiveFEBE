@@ -294,7 +294,10 @@ function SalesOrderForm({
     (Array.isArray(providedCustomers) ? providedCustomers : fallbackCustomers)
       .filter((customer) => customer.contract === 'Aktif')
   ), [providedCustomers]);
-  const depotOptions = useMemo(() => normalizeMasterOptions(providedDepots), [providedDepots]);
+  const depotOptions = useMemo(() => normalizeMasterOptions(
+    (Array.isArray(providedDepots) ? providedDepots : [])
+      .filter((depot) => (depot.depotType || 'destination') === 'destination'),
+  ), [providedDepots]);
   const terminalOptions = useMemo(() => normalizeMasterOptions(providedTerminals), [providedTerminals]);
   const destinationOptions = useMemo(() => normalizeMasterOptions(providedDestinations), [providedDestinations]);
 

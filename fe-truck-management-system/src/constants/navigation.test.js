@@ -22,4 +22,12 @@ describe('navigationGroups', () => {
     expect(dashboardItem?.roles).toContain(USER_ROLES.FINANCE);
     expect(weeklyItem?.roles).toContain(USER_ROLES.FINANCE);
   });
+
+  it('menampilkan menu container titip pada group operational', () => {
+    const operationalGroup = navigationGroups.find((group) => group.label === 'Operational');
+    const repoItem = operationalGroup?.items.find((item) => item.to === '/operations/repo-storage');
+
+    expect(repoItem?.label).toBe('Container Titip');
+    expect(repoItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER]);
+  });
 });

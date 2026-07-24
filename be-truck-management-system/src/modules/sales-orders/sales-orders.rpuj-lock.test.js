@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasContainerSentRpuj, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
+import {
+  hasContainerSentRpuj,
+  isSalesOrderLockedByFinanceNumber,
+  isSalesOrderLockedByRpuj,
+} from './sales-orders.rpuj-lock.js';
 
 test('mengunci SO setelah RPUJ diajukan ke Finance', () => {
   assert.equal(isSalesOrderLockedByRpuj({
@@ -18,4 +22,16 @@ test('tidak mengunci SO selama seluruh RPUJ masih pending', () => {
   assert.equal(isSalesOrderLockedByRpuj({
     containers: [{ rpujStatus: 'pending', rpujRequestedAt: null }],
   }), false);
+});
+
+test('mengunci SO untuk Sales setelah nomor SO Finance terisi', () => {
+  assert.equal(isSalesOrderLockedByFinanceNumber({ soNumber: 'SO-202607-001' }), true);
+});
+
+test('mengunci SO untuk Sales setelah status Finance verified', () => {
+  assert.equal(isSalesOrderLockedByFinanceNumber({ financeVerificationStatus: 'verified' }), true);
+});
+
+test('tidak mengunci SO Finance ketika masih menunggu nomor SO', () => {
+  assert.equal(isSalesOrderLockedByFinanceNumber({ soNumber: '', financeVerificationStatus: 'pending_so' }), false);
 });

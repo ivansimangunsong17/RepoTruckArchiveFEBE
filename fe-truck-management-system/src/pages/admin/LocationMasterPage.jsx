@@ -29,40 +29,46 @@ export function LocationMasterPage({
   columns,
   toolbarDescription,
   pageClassName,
+  statusFieldOverride,
+  statusColumnOverride,
+  filtersOverride,
+  statsOverride,
 }) {
+  const effectiveStatusField = statusFieldOverride === null ? null : statusFieldOverride || statusField;
+  const effectiveStatusColumn = statusColumnOverride === null ? null : statusColumnOverride || {
+    key: 'status',
+    label: 'Status',
+    headerClassName: '!w-36 !text-center',
+    cellClassName: '!w-36 !text-center',
+    render: (value) => <StatusCell value={value} />,
+  };
+  const effectiveFilters = filtersOverride || [{ key: 'status', label: 'Semua Status', options: ['Aktif', 'Tidak Aktif'] }];
+  const effectiveStats = statsOverride || ((data) => [
+    { label: `Total ${singular}`, value: data.length, detail: 'Data terdaftar' },
+    { label: 'Aktif', value: data.filter((item) => item.status === 'Aktif').length, detail: 'Bisa dipilih' },
+    { label: 'Tidak Aktif', value: data.filter((item) => item.status === 'Tidak Aktif').length, detail: 'Disembunyikan dari operasional' },
+    { label: 'Lengkap', value: data.filter((item) => item.name).length, detail: 'Nama tersedia' },
+  ]);
+
   return (
     <MasterDataPage
       eyebrow="Master Data"
       title={title}
       singular={singular}
       description={description}
-      fields={[...fields, statusField, { key: 'notes', section: 'Catatan', label: 'Catatan', type: 'textarea', placeholder: 'Catatan tambahan', full: true }]}
-      columns={[
-        ...columns,
-        {
-          key: 'status',
-          label: 'Status',
-          headerClassName: '!w-36 !text-center',
-          cellClassName: '!w-36 !text-center',
-          render: (value) => <StatusCell value={value} />,
-        },
-      ]}
+      fields={[...fields, ...(effectiveStatusField ? [effectiveStatusField] : []), { key: 'notes', section: 'Catatan', label: 'Catatan', type: 'textarea', placeholder: 'Catatan tambahan', full: true }]}
+      columns={[...columns, ...(effectiveStatusColumn ? [effectiveStatusColumn] : [])]}
       initialRows={emptyRows}
       resource={resource}
       storageKey={storageKey}
       uniqueKeys={['name', 'code']}
-      filters={[{ key: 'status', label: 'Semua Status', options: ['Aktif', 'Tidak Aktif'] }]}
+      filters={effectiveFilters}
       pageClassName={pageClassName || 'driver-data-page truck-data-page'}
       pageSize={20}
       showModeChip={false}
       toolbarTitle={`Daftar ${singular}`}
       toolbarDescription={toolbarDescription}
-      stats={(data) => [
-        { label: `Total ${singular}`, value: data.length, detail: 'Data terdaftar' },
-        { label: 'Aktif', value: data.filter((item) => item.status === 'Aktif').length, detail: 'Bisa dipilih' },
-        { label: 'Tidak Aktif', value: data.filter((item) => item.status === 'Tidak Aktif').length, detail: 'Disembunyikan dari operasional' },
-        { label: 'Lengkap', value: data.filter((item) => item.name).length, detail: 'Nama tersedia' },
-      ]}
+      stats={effectiveStats}
     />
   );
 }

@@ -37,6 +37,34 @@ describe('operationalDashboard', () => {
     }, '2026-07-07')).toBe(false);
   });
 
+  it('memisahkan container titipan repo dari active jobs dashboard', () => {
+    const result = getOperationalDashboardData([{
+      id: 'so-repo',
+      soNumber: 'SO-REPO',
+      customer: 'PT Repo',
+      origin: 'Jakarta',
+      destination: 'Bekasi',
+      tripDate: '2026-07-06',
+      status: 'running',
+      containers: [{
+        id: 'job-repo',
+        containerNumber: 'CONT-REPO',
+        plateNumber: 'B 1234 XYZ',
+        driver: 'Andi',
+        status: 'repo_stored',
+        repoLocation: 'Repo Cakung',
+      }],
+    }], {
+      currentDateKey: '2026-07-07',
+      hasLiveOrders: true,
+      allowDemoFallback: false,
+    });
+
+    expect(result.activeJobs).toHaveLength(0);
+    expect(result.repoJobs).toHaveLength(1);
+    expect(result.repoStoredJobs).toBe(1);
+  });
+
   it('menampilkan job aktif tanggal lewat sebagai eksisting aktif', () => {
     const result = getOperationalDashboardData([{
       id: 'so-1',

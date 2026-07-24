@@ -196,6 +196,7 @@ export function getOperationalDashboardData(orders, options = {}) {
   }
 
   const todayJobs = jobs.filter((job) => job && job.tripDateKey === currentDateKey && !isTerminal(job));
+  const repoJobs = jobs.filter(isRepoStored);
   const dueJobs = jobs.filter((job) => job
     && !isTerminal(job)
     && (!job.tripDateKey || job.tripDateKey <= currentDateKey));
@@ -214,6 +215,7 @@ export function getOperationalDashboardData(orders, options = {}) {
     currentDateKey,
     jobs,
     todayJobs,
+    repoJobs,
     dueJobs,
     activeJobs,
     workQueues,
@@ -222,6 +224,7 @@ export function getOperationalDashboardData(orders, options = {}) {
     prospectSchedule,
     assignedTodayJobs: todayJobs.filter(isAssigned).length,
     assignedActiveJobs: activeJobs.filter(isAssigned).length,
+    repoStoredJobs: repoJobs.length,
     prospectTwentyFt: visibleFutureJobs.filter((job) => normalizeSize(job.size) === '20FT').length,
     prospectFortyFt: visibleFutureJobs.filter((job) => normalizeSize(job.size) === '40FT').length,
     nextSchedule: prospectSchedule[0],

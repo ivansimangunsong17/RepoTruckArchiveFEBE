@@ -40,6 +40,11 @@ function hasRpujNotesInput(payload = {}) {
   return Boolean(String(payload.rpujNotes || '').trim());
 }
 
+function hasRpujNotesChange(job, payload = {}) {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'rpujNotes')) return false;
+  return normalizeText(payload.rpujNotes) !== normalizeText(job?.rpujNotes);
+}
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -60,6 +65,42 @@ function hasAssignmentChange(currentJob, payload = {}) {
   );
 }
 
+function hasCompleteAssignmentPayload(payload = {}) {
+  return Boolean(normalizeText(payload.driver) && normalizeText(payload.plateNumber));
+}
+
+function hasRepoPickupAssignmentChange(job, payload = {}) {
+  const releasedDriverId = job?.repoReleasedDriverId || job?.repo_released_driver_id || job?.driverId || null;
+  const releasedVehicleId = job?.repoReleasedVehicleId || job?.repo_released_vehicle_id || job?.vehicleId || null;
+  const releasedDriverName = normalizeText(job?.driver || job?.assignment_snapshot?.driver);
+  const releasedPlateNumber = normalizeText(job?.plateNumber || job?.assignment_snapshot?.plateNumber);
+  const nextDriverId = payload.driverId || null;
+  const nextVehicleId = payload.vehicleId || null;
+  const nextDriverName = normalizeText(payload.driver);
+  const nextPlateNumber = normalizeText(payload.plateNumber);
+
+  return Boolean(
+    (nextDriverId && String(nextDriverId) !== String(releasedDriverId || ''))
+    || (nextVehicleId && String(nextVehicleId) !== String(releasedVehicleId || ''))
+    || (nextDriverName && nextDriverName !== releasedDriverName)
+    || (nextPlateNumber && nextPlateNumber !== releasedPlateNumber)
+  );
+}
+
+function isRepoPickupPayload(job, payload = {}) {
+  return job?.status === 'repo_stored' && ['received', 'running'].includes(payload.status);
+}
+
+export function hasRepoStorageHistory(job = {}) {
+  return Boolean(
+    job?.status === 'repo_stored'
+      || job?.repoLocation
+      || job?.repoStoredAt
+      || job?.repoEirNumber
+      || job?.repoPickedUpAt,
+  );
+}
+
 function hasContainerNumberChange(currentJob, payload = {}) {
   if (!Object.prototype.hasOwnProperty.call(payload, 'containerNumber')) return false;
   return normalizeText(payload.containerNumber).toUpperCase() !== normalizeText(currentJob?.containerNumber).toUpperCase();
@@ -68,6 +109,17 @@ function hasContainerNumberChange(currentJob, payload = {}) {
 export function isInitialContainerNumberInput(currentJob, payload = {}) {
   if (!Object.prototype.hasOwnProperty.call(payload, 'containerNumber')) return false;
   return !normalizeText(currentJob?.containerNumber) && Boolean(normalizeText(payload.containerNumber));
+}
+
+export function isContainerNumberLockedForOperational(job, payload = {}) {
+  if (!hasContainerNumberChange(job, payload)) return false;
+  if (job?.status === 'repo_stored') return true;
+  if (isInitialContainerNumberInput(job, payload) && !['completed', 'cancelled'].includes(job?.status)) return false;
+  return ['running', 'completed', 'cancelled'].includes(job?.status) || job?.rpujStatus === 'paid';
+}
+
+export function isOtherCostLockedForRepoPickup(job, payload = {}) {
+  return Boolean(job?.status === 'repo_stored' && isRepoPickupPayload(job, payload) && hasRpujNotesChange(job, payload));
 }
 
 export function hasOperationalDocumentChange(currentJob, payload = {}) {
@@ -104,7 +156,22 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
   }
 
   if (job?.status === 'repo_stored') {
-    const error = new Error('Container yang sedang dititipkan Repo perlu proses pengambilan/re-assign khusus.');
+    if (isRepoPickupPayload(job, payload)) {
+      if (!hasCompleteAssignmentPayload(payload)) {
+        const error = new Error('Container titip hanya bisa diambil setelah truck dan sopir baru diassign.');
+        error.statusCode = 409;
+        error.code = 'CONTAINER_JOB_REPO_PICKUP_ASSIGNMENT_REQUIRED';
+        throw error;
+      }
+      if (!hasRepoPickupAssignmentChange(job, payload)) {
+        const error = new Error('Ambil container titip wajib memakai assignment truck/sopir baru.');
+        error.statusCode = 409;
+        error.code = 'CONTAINER_JOB_REPO_PICKUP_REASSIGN_REQUIRED';
+        throw error;
+      }
+      return;
+    }
+    const error = new Error('Container titip perlu proses pengambilan/re-assign khusus.');
     error.statusCode = 409;
     error.code = 'CONTAINER_JOB_REPO_STORED_LOCKED';
     throw error;
@@ -113,9 +180,7 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
 
 function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
   if (normalizeRole(actor) !== 'operational') return;
-  if (!hasContainerNumberChange(job, payload)) return;
-  if (isInitialContainerNumberInput(job, payload) && !['completed', 'cancelled'].includes(job?.status)) return;
-  if (!['running', 'completed', 'cancelled'].includes(job?.status) && job?.rpujStatus !== 'paid') return;
+  if (!isContainerNumberLockedForOperational(job, payload)) return;
 
   const error = new Error('No. Container yang sudah terisi tidak bisa diubah setelah pekerjaan berjalan, selesai, dibatalkan, atau UJ ditransfer.');
   error.statusCode = 409;
@@ -151,6 +216,15 @@ function ensureOperationalCanInputOtherCost(actor, job, payload) {
   }
 }
 
+function ensureRepoPickupOtherCostLocked(job, payload = {}) {
+  if (!isOtherCostLockedForRepoPickup(job, payload)) return;
+
+  const error = new Error('Biaya lainnya tidak bisa diubah saat ambil container titip.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_REPO_PICKUP_OTHER_COST_LOCKED';
+  throw error;
+}
+
 function isCompletingMissingAssignment(job, payload = {}) {
   const currentComplete = Boolean(normalizeText(job?.driver) && normalizeText(job?.plateNumber));
   const nextComplete = Boolean(normalizeText(payload.driver) && normalizeText(payload.plateNumber));
@@ -172,8 +246,8 @@ function preserveLockedOtherCost(actor, job, payload) {
 
 function ensureOperationalCanEditAssignment(actor, job, payload) {
   if (normalizeRole(actor) !== 'operational') return;
-  if (job?.status === 'repo_stored' && hasAssignmentChange(job, payload)) {
-    const error = new Error('Driver dan truck untuk container titipan Repo tidak bisa diubah dari form update biasa.');
+  if (job?.status === 'repo_stored' && hasAssignmentChange(job, payload) && !isRepoPickupPayload(job, payload)) {
+    const error = new Error('Driver dan truck untuk container titip tidak bisa diubah dari form update biasa.');
     error.statusCode = 409;
     error.code = 'CONTAINER_JOB_REPO_ASSIGNMENT_LOCKED';
     throw error;
@@ -188,35 +262,86 @@ function ensureOperationalCanEditAssignment(actor, job, payload) {
   throw error;
 }
 
-function ensureRepoStoragePayload(job, payload = {}) {
+export function ensureRepoStoragePayload(job, payload = {}) {
   if (payload.status !== 'repo_stored') return;
+
+  if (hasRepoStorageHistory(job)) {
+    const error = new Error('Container yang pernah dititipkan tidak bisa dititipkan ulang.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_REPO_ALREADY_STORED';
+    throw error;
+  }
+
+  if (job?.status !== 'running') {
+    const error = new Error('Container hanya bisa dititipkan saat status pekerjaan Sedang Jalan.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_REPO_REQUIRES_RUNNING_STATUS';
+    throw error;
+  }
 
   const containerNumber = normalizeText(payload.containerNumber || job?.containerNumber);
   const driver = normalizeText(payload.driver || job?.driver);
   const plateNumber = normalizeText(payload.plateNumber || job?.plateNumber);
   const repoLocation = normalizeText(payload.repoLocation);
   const repoReason = normalizeText(payload.repoReason);
+  const repoEirNumber = normalizeText(payload.repoEirNumber);
+  const repoContainerCondition = normalizeText(payload.repoContainerCondition);
+  const hasRepoEirReceipt = Boolean(job?.repoEirDocument);
 
   if (!containerNumber || !driver || !plateNumber) {
-    const error = new Error('Container baru bisa dititipkan Repo setelah nomor container, truck, dan sopir terisi.');
+    const error = new Error('Container baru bisa dititipkan setelah nomor container, truck, dan sopir terisi.');
     error.statusCode = 409;
     error.code = 'CONTAINER_JOB_REPO_ASSIGNMENT_REQUIRED';
     throw error;
   }
 
   if (repoLocation.length < 3) {
-    const error = new Error('Lokasi penitipan Repo wajib diisi.');
+    const error = new Error('Depo Penitipan wajib dipilih.');
     error.statusCode = 400;
     error.code = 'CONTAINER_JOB_REPO_LOCATION_REQUIRED';
     throw error;
   }
 
   if (repoReason.length < 8) {
-    const error = new Error('Alasan penitipan Repo wajib diisi minimal 8 karakter.');
+    const error = new Error('Alasan penitipan container wajib diisi minimal 8 karakter.');
     error.statusCode = 400;
     error.code = 'CONTAINER_JOB_REPO_REASON_REQUIRED';
     throw error;
   }
+
+  if (!repoEirNumber) {
+    const error = new Error('Nomor EIR Titip wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_REPO_EIR_NUMBER_REQUIRED';
+    throw error;
+  }
+
+  if (!['empty', 'loaded'].includes(repoContainerCondition)) {
+    const error = new Error('Status container wajib dipilih: Kosong atau Isi.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_REPO_CONDITION_REQUIRED';
+    throw error;
+  }
+
+  if (!hasRepoEirReceipt) {
+    const error = new Error('Dokumen EIR Titip wajib diupload sebagai tanda terima container.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_REPO_EIR_REQUIRED';
+    throw error;
+  }
+}
+
+export function isRepoCancellationLockedForOperational(actor, job, payload = {}) {
+  return Boolean(normalizeRole(actor) === 'operational' && payload.status === 'cancelled' && hasRepoStorageHistory(job));
+}
+
+function ensureRepoHistoryCanCancel(actor, job, payload = {}) {
+  if (!isRepoCancellationLockedForOperational(actor, job, payload)) return;
+
+  const error = new Error('Container yang sudah masuk flow titip tidak bisa dibatalkan dari detail operational.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_REPO_CANCEL_LOCKED';
+  throw error;
 }
 
 export async function getContainerJob(id) {
@@ -251,6 +376,8 @@ export async function saveContainerJob(id, payload, actor) {
   }
 
   const currentJob = await getContainerJob(id);
+  ensureRepoPickupOtherCostLocked(currentJob, normalizedPayload);
+  ensureRepoHistoryCanCancel(actor, currentJob, normalizedPayload);
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
   ensureRepoStoragePayload(currentJob, payloadForUpdate);

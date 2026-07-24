@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDriverPerformanceRows, buildMonthlyUtilizationPivot } from './ReportsPage';
+import { buildDriverPerformanceRows, buildMonthlyUtilizationPivot, buildRepoMonitoringRows } from './ReportsPage';
 
 describe('buildDriverPerformanceRows', () => {
   it('menggunakan monthlyTrips 0 tanpa jatuh ke totalTrips lama', () => {
@@ -69,5 +69,19 @@ describe('buildMonthlyUtilizationPivot', () => {
     expect(pivot.totalsByDay['2026-07-01']).toBe(2);
     expect(pivot.totalsByDay['2026-07-02']).toBe(1);
     expect(pivot.grandTotal).toBe(3);
+  });
+});
+
+describe('buildRepoMonitoringRows', () => {
+  it('hanya menampilkan repo_stored dan mengurutkan titipan paling lama', () => {
+    const rows = buildRepoMonitoringRows([
+      { id: 'new', status: 'repo_stored', containerNumber: 'CONT-NEW', repoStoredAt: '2026-07-22T10:00:00.000Z' },
+      { id: 'done', status: 'completed', containerNumber: 'CONT-DONE', repoStoredAt: '2026-07-18T10:00:00.000Z' },
+      { id: 'old', status: 'repo_stored', containerNumber: 'CONT-OLD', repoStoredAt: '2026-07-19T10:00:00.000Z' },
+    ], new Date('2026-07-23T08:00:00.000Z'));
+
+    expect(rows.map((row) => row.id)).toEqual(['old', 'new']);
+    expect(rows[0].ageDays).toBe(4);
+    expect(rows[1].ageDays).toBe(1);
   });
 });

@@ -204,14 +204,22 @@
   font-weight: 700;
   line-height: 1.45;
 }
+.operational-form-repo-pickup {
+  border-color: #bfdbfe;
+  color: #1e40af;
+  background: #eff6ff;
+}
 .repo-action-button {
   color: #1d4ed8 !important;
   border-color: #bfdbfe !important;
   background: #eff6ff !important;
 }
 .container-repo-modal {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
   border: 1px solid #ffffff40;
   border-radius: 13px;
   background: white;
@@ -250,8 +258,12 @@
 }
 .container-repo-modal form {
   display: grid;
+  flex: 1 1 auto;
   gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
   padding: 18px 20px 0;
+  overscroll-behavior: contain;
 }
 .repo-assignment-snapshot {
   display: grid;
@@ -286,6 +298,7 @@
   font-weight: 800;
 }
 .container-repo-modal input,
+.container-repo-modal select,
 .container-repo-modal textarea {
   width: 100%;
   border: 1px solid #d7dde7;
@@ -296,7 +309,8 @@
   font-size: .76rem;
   outline: 0;
 }
-.container-repo-modal input {
+.container-repo-modal input,
+.container-repo-modal select {
   min-height: 40px;
   padding: 0 10px;
 }
@@ -306,9 +320,17 @@
   resize: vertical;
 }
 .container-repo-modal input:focus,
+.container-repo-modal select:focus,
 .container-repo-modal textarea:focus {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px #2563eb18;
+}
+.repo-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #2f333a;
+  font-size: .68rem;
+  font-weight: 800;
 }
 .container-repo-warning {
   display: grid;
@@ -329,6 +351,9 @@
   background: #fff7ed;
 }
 .container-repo-modal footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
   gap: 9px;
@@ -3496,6 +3521,14 @@
   background: #b91c1c;
 }
 
+.operational-workspace .job-status-tabs button.is-repo_stored.active {
+  color: #1d4ed8;
+}
+
+.operational-workspace .job-status-tabs button.is-repo_stored.active span {
+  background: #2563eb;
+}
+
 .operational-filter-substrip {
   display: flex;
   align-items: center;
@@ -3665,16 +3698,30 @@
 
 .operational-container-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1.15fr) 108px minmax(150px, .86fr) minmax(210px, 1fr) minmax(112px, .62fr) 132px;
+  grid-template-columns: minmax(170px, 1fr) 96px minmax(125px, .72fr) minmax(170px, .92fr) 104px 118px;
   align-items: center;
-  gap: 10px;
-  min-height: 58px;
-  padding: 8px 12px;
+  gap: 8px;
+  min-height: 52px;
+  padding: 7px 10px;
   border-top: 1px solid #f0f3f7;
 }
 
 .operational-container-row:first-child {
   border-top: 0;
+}
+
+.operational-container-row.is-repo-stored {
+  grid-template-columns: minmax(170px, 1.05fr) minmax(125px, .72fr) minmax(180px, .95fr) 104px 128px;
+  border-left: 3px solid #2563eb;
+  background: #f8fbff;
+}
+
+.operational-container-row.is-repo-stored .container-row-status {
+  display: none;
+}
+
+.operational-container-row.is-repo-stored .container-row-main strong {
+  color: #1d4ed8;
 }
 
 .container-row-main,
@@ -3692,7 +3739,7 @@
 .container-row-main strong {
   overflow: hidden;
   color: #0f172a;
-  font-size: .73rem;
+  font-size: .68rem;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3709,7 +3756,7 @@
 .container-row-docs span {
   overflow: hidden;
   color: #64748b;
-  font-size: .55rem;
+  font-size: .51rem;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3725,7 +3772,7 @@
 .container-rpuj-status::before {
   grid-row: 1 / 4;
   width: 6px;
-  height: 28px;
+  height: 24px;
   border-radius: 999px;
   background: #f59e0b;
   content: "";
@@ -3734,7 +3781,7 @@
 .container-rpuj-status strong {
   overflow: hidden;
   color: #334155;
-  font-size: .64rem;
+  font-size: .58rem;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3776,7 +3823,7 @@
   gap: 5px;
   overflow: hidden;
   color: #1f2937;
-  font-size: .62rem;
+  font-size: .56rem;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3789,9 +3836,9 @@
 
 .container-row-docs {
   display: grid;
-  grid-template-columns: auto minmax(42px, 1fr) auto;
+  grid-template-columns: auto minmax(28px, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .container-row-docs div {
@@ -3826,15 +3873,17 @@
 
 .container-row-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  min-width: 0;
 }
 
 .container-row-actions .secondary-button,
 .container-row-actions .primary-button {
-  min-height: 30px;
-  padding: 0 8px;
-  font-size: .58rem;
+  width: 100%;
+  min-height: 27px;
+  padding: 0 7px;
+  font-size: .53rem;
   white-space: nowrap;
 }
 

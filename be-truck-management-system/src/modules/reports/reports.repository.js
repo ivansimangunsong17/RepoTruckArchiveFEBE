@@ -440,7 +440,9 @@ export async function getOperationReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const dateColumn = options.status === 'completed'
     ? 'coalesce(cj.completed_at, so.trip_date)::date'
-    : 'so.trip_date';
+    : options.status === 'repo_stored'
+      ? 'coalesce(cj.repo_stored_at, so.trip_date)::date'
+      : 'so.trip_date';
   const dateFilter = buildDateWhere(dateColumn, options);
   const clauses = [...dateFilter.clauses];
   const params = [...dateFilter.params];
@@ -474,6 +476,9 @@ export async function getOperationReport(options = {}) {
                cj.weighing_document_number, cj.tila_gatepass_document_number,
                cj.received_at, cj.running_at,
                cj.completed_at, cj.updated_at, cj.assignment_snapshot,
+               cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
+               cj.repo_released_driver_id, cj.repo_released_vehicle_id,
+               cj.repo_created_by_name, cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                so.so_number, so.do_number, so.customer_name, so.trip_date,
                so.origin, so.destination
         from container_jobs cj
@@ -498,7 +503,8 @@ export async function getOperationReport(options = {}) {
         select count(*)::int as jobs,
                count(*) filter (where cj.status = 'completed')::int as completed,
                count(*) filter (where cj.status = 'running')::int as running,
-               count(*) filter (where cj.status = 'received')::int as received
+               count(*) filter (where cj.status = 'received')::int as received,
+               count(*) filter (where cj.status = 'repo_stored')::int as repo_stored
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         ${whereSql}
@@ -533,9 +539,20 @@ export async function getOperationReport(options = {}) {
       runningAt: row.running_at,
       completedAt: row.completed_at,
       updatedAt: row.updated_at,
+      repoLocation: row.repo_location || '',
+      repoStoredAt: row.repo_stored_at,
+      repoEirNumber: row.repo_eir_number || '',
+      repoReason: row.repo_reason || '',
+      repoNotes: row.repo_notes || '',
+      repoContainerCondition: row.repo_container_condition || '',
+      repoReleasedDriverId: row.repo_released_driver_id,
+      repoReleasedVehicleId: row.repo_released_vehicle_id,
+      repoCreatedByName: row.repo_created_by_name || '',
+      repoPickedUpAt: row.repo_picked_up_at,
+      repoPickedUpByName: row.repo_picked_up_by_name || '',
     })),
     total: total.rows[0]?.total || 0,
-    summary: summary.rows[0] || { jobs: 0, completed: 0, running: 0, received: 0 },
+    summary: summary.rows[0] || { jobs: 0, completed: 0, running: 0, received: 0, repo_stored: 0 },
   };
 }
 

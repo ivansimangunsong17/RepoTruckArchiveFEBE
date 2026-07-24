@@ -37,6 +37,15 @@ function isTruckAvailableForDashboard(truck) {
   return ['aktif', 'siap'].includes(status);
 }
 
+function isTruckMaintenance(truck) {
+  const status = String(truck?.status || '').trim().toLowerCase();
+  return status.includes('maintenance') || status.includes('maintanance');
+}
+
+function isActiveDashboardJob(job) {
+  return ['received', 'running', 'Belum Jalan', 'Sedang Jalan'].includes(job?.status);
+}
+
 function formatTruckNumber(unitCode) {
   const value = String(unitCode || '-').trim();
   if (!value || value === '-') return '-';
@@ -159,6 +168,17 @@ function reportDateKey(value) {
   return String(value || '').replace(/[^0-9]/g, '') || 'report';
 }
 
+function rowStatusLabel(row) {
+  if (isTruckMaintenance(row.truck)) return 'Maintenance';
+  return row.job ? 'Assign' : 'Unassign';
+}
+
+function rowStatusClass(row) {
+  if (isTruckMaintenance(row.truck)) return 'border-amber-300 bg-amber-100 text-amber-800';
+  if (row.job) return 'border-emerald-300 bg-emerald-100 text-emerald-700';
+  return 'border-slate-300 bg-slate-100 text-slate-500';
+}
+
 function TodayTruckDashboard() {
   const [selectedRow, setSelectedRow] = useState(null);
   const [dashboard, setDashboard] = useState({ trucks: [], activeJobs: [] });
@@ -194,7 +214,7 @@ function TodayTruckDashboard() {
   }, []);
 
   const sourceTrucks = dashboard.trucks;
-  const sourceJobs = dashboard.activeJobs;
+  const sourceJobs = dashboard.activeJobs.filter(isActiveDashboardJob);
   const truckRows = sourceTrucks.map(normalizeTruck);
   const rows = buildTruckRows(truckRows, sourceJobs);
   const availability = getAvailability(truckRows, sourceJobs);
@@ -303,7 +323,7 @@ function TodayTruckDashboard() {
             </thead>
             <tbody>
               {!loading && !error && rows.map((row, index) => (
-                <tr className="border-t border-slate-200 odd:bg-white even:bg-slate-50/45 hover:bg-red-50/40" key={row.id}>
+                <tr className={`border-t border-slate-200 odd:bg-white even:bg-slate-50/45 hover:bg-red-50/40 ${isTruckMaintenance(row.truck) ? '!bg-amber-50/70' : ''}`} key={row.id}>
                   <td className="px-2.5 py-0.5 text-center font-black text-slate-800" data-label="No">
                     {index + 1}
                   </td>
@@ -312,8 +332,9 @@ function TodayTruckDashboard() {
                   </td>
                   <td className="px-2.5 py-0.5" data-label="Plat">
                     <div className="flex min-w-0 items-center gap-1.5" title={row.truck.plateNumber || '-'}>
-                      <Truck className="shrink-0 text-red-700" size={12} />
+                      <Truck className={`shrink-0 ${isTruckMaintenance(row.truck) ? 'text-amber-700' : 'text-red-700'}`} size={12} />
                       <strong className="min-w-0 truncate font-black leading-none text-slate-900">{row.truck.plateNumber || '-'}</strong>
+                      {isTruckMaintenance(row.truck) ? <span className="rounded-full bg-amber-100 px-1.5 py-0 text-[9px] font-black uppercase text-amber-800">Maint</span> : null}
                     </div>
                   </td>
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Nama Sopir" title={row.job?.driver || row.truck.driver || '-'}>{row.job?.driver || row.truck.driver || '-'}</td>
@@ -323,10 +344,10 @@ function TodayTruckDashboard() {
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Tujuan" title={destinationText(row.job)}>{destinationText(row.job)}</td>
                   <td className="px-2.5 py-0.5 text-center" data-label="Status">
                     <span
-                      className={`inline-flex min-h-5 items-center justify-center rounded-full border px-2 py-0.5 text-[10px] font-black ${row.job ? 'border-emerald-300 bg-emerald-100 text-emerald-700' : 'border-slate-300 bg-slate-100 text-slate-500'}`}
-                      title={row.job ? 'Assign' : 'Unassign'}
+                      className={`inline-flex min-h-5 items-center justify-center rounded-full border px-2 py-0.5 text-[10px] font-black ${rowStatusClass(row)}`}
+                      title={rowStatusLabel(row)}
                     >
-                      {row.job ? 'Assign' : 'Unassign'}
+                      {rowStatusLabel(row)}
                     </span>
                   </td>
                   <td className="px-2.5 py-0.5 text-center" data-label="Detail">
@@ -365,7 +386,7 @@ function TodayTruckDashboard() {
                 <div><span>No Lambung</span><strong>{selectedRow.truck.unitCode || '-'}</strong></div>
                 <div><span>Plat</span><strong>{selectedRow.truck.plateNumber || '-'}</strong></div>
                 <div><span>Nama Sopir</span><strong>{selectedRow.job?.driver || selectedRow.truck.driver || '-'}</strong></div>
-                <div><span>Status</span><strong>{selectedRow.job ? 'Assign' : 'Unassign'}</strong></div>
+                <div><span>Status</span><strong>{rowStatusLabel(selectedRow)}</strong></div>
                 <div><span>Nomor SO</span><strong>{selectedRow.job?.soNumber || '-'}</strong></div>
                 <div><span>Customer</span><strong>{selectedRow.job?.customer || '-'}</strong></div>
                 <div><span>Sales/PIC</span><strong>{selectedRow.job?.salesName || selectedRow.job?.createdBy || '-'}</strong></div>

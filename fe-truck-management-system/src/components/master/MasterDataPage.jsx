@@ -715,7 +715,7 @@ function MasterDataPage({
                 onChange={(event) => setActiveFilters((current) => ({ ...current, [filter.key]: event.target.value }))}
               >
                 <option value="">{filter.label}</option>
-                {filter.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                {filter.options.map((option) => <option key={option} value={option}>{filter.optionLabels?.[option] || option}</option>)}
               </select>
             ))}
           </div>

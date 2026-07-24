@@ -420,27 +420,30 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const otherCostAmountValue = Number(form.otherCostAmount || 0);
   const totalJourneyCost = ujAmount + otherCostAmountValue;
+  const rpujStatus = form.rpujStatus || 'pending';
+  const isRepoPickupMode = Boolean(container.repoPickupMode);
   const requiresFinanceApprovalForSpk = Boolean(onGenerateSpk);
   const hasCompleteAssignment = Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
   const financeApprovedForSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
-  const canGenerateSpk = financeApprovedForSpk && hasCompleteAssignment;
+  const canGenerateSpk = !isRepoPickupMode && financeApprovedForSpk && hasCompleteAssignment;
   const assignmentRequirementMessage = 'Lengkapi truck dan driver terlebih dahulu.';
   const spkRequirementMessage = !form.spkNumber && !hasCompleteAssignment
     ? 'SPK bisa dibuat setelah truck dan driver lengkap.'
     : requiresFinanceApprovalForSpk && !form.spkNumber && !financeApprovedForSpk
       ? 'SPK bisa dibuat setelah Finance approve RPUJ.'
       : '';
-  const rpujStatus = form.rpujStatus || 'pending';
   const canReviseLockedFields = String(currentUser?.role || '').toLowerCase() === 'admin';
-  const canSubmitRpujRequest = !['submitted', 'approved', 'paid'].includes(rpujStatus);
-  const canEditOtherCost = canReviseLockedFields || !['approved', 'paid'].includes(rpujStatus);
+  const canSubmitRpujRequest = !isRepoPickupMode && !['submitted', 'approved', 'paid'].includes(rpujStatus);
+  const canEditOtherCost = !isRepoPickupMode && (canReviseLockedFields || !['approved', 'paid'].includes(rpujStatus));
   const canFillMissingAssignment = !hasCompleteAssignment && form.status !== 'completed';
   const canEditAssignment = canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed');
   const hasSavedContainerNumber = Boolean(String(container.containerNumber || '').trim());
   const canFillInitialContainerNumber = !hasSavedContainerNumber && !['completed', 'cancelled'].includes(container.status);
-  const canEditContainerNumber = canReviseLockedFields
-    || canFillInitialContainerNumber
-    || (!['running', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid');
+  const canEditContainerNumber = !isRepoPickupMode && (
+    canReviseLockedFields
+      || canFillInitialContainerNumber
+      || (!['running', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid')
+  );
   const isCompletedDocumentFollowUp = !canReviseLockedFields && form.status === 'completed';
   const canEditDocumentValue = (field) => !isCompletedDocumentFollowUp || !String(container[field] || '').trim();
   const canEditDocumentFile = (field) => !isCompletedDocumentFollowUp || !container[field];
@@ -461,6 +464,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   });
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.';
   const hasEirDocument = Boolean(form.eirDocument);
+  const hasRepoHistory = Boolean(container.repoLocation || container.repoStoredAt || container.repoEirNumber || container.repoPickedUpAt || container.repoEirDocument);
+  const hasRepoEirReceipt = Boolean(String(container.repoEirNumber || '').trim() && container.repoEirDocument);
   const hasSpkDocument = Boolean(form.spkNumber || form.spkDocument);
   const isReadyToStart = form.status === 'received'
     && hasCompleteAssignment
@@ -483,6 +488,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     { label: 'Waktu mulai dan selesai ada', ready: Boolean(form.runningAt && form.completedAt) },
     { label: 'UJ sudah disetujui/dikirim', ready: canStartTrip },
     { label: 'SPK ada', ready: hasSpkDocument },
+    ...(hasRepoHistory ? [{ label: 'EIR Titip tersedia', ready: hasRepoEirReceipt }] : []),
     { label: 'Lampiran EIR sudah diupload', ready: hasEirDocument },
   ];
 
@@ -872,7 +878,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     updateFile(fileField, file);
   }
 
-  function buildSubmitForm({ forceRpujStatus, includeRpujNotes = activePhase === 'rpuj' } = {}) {
+  function buildSubmitForm({ forceRpujStatus, includeRpujNotes = activePhase === 'rpuj' && !isRepoPickupMode } = {}) {
     const otherCostAmount = Number(form.otherCostAmount || 0);
     if (otherCostAmount < 0) {
       return { error: 'Nominal biaya lainnya tidak boleh negatif.' };
@@ -930,6 +936,15 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       showSubmitNotification(submitError);
       return;
     }
+    if (isRepoPickupMode && !hasCompleteAssignment) {
+      showSubmitNotification('Ambil container titip wajib assign ulang truck dan sopir terlebih dahulu.');
+      return;
+    }
+    if (isRepoPickupMode) {
+      submitForm.containerNumber = container.containerNumber || submitForm.containerNumber;
+      submitForm.status = 'running';
+      submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
+    }
     const shouldStartTrip = activePhase === 'closing'
       && hasCompleteAssignment
       && submitForm.status === 'received'
@@ -964,7 +979,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       const missingContainerNumber = !String(submitForm.containerNumber || '').trim();
       const missingAssignment = !hasCompleteAssignment || !submitForm.runningAt || !submitForm.completedAt;
       const missingSpk = !submitForm.spkNumber && !submitForm.spkDocument;
+      const missingRepoEirReceipt = hasRepoHistory && !hasRepoEirReceipt;
       const missingEirDocument = !submitForm.eirDocument;
+      if (missingRepoEirReceipt) {
+        showSubmitNotification('Pekerjaan belum dapat diselesaikan. Lengkapi EIR Titip dari depo penitipan terlebih dahulu.');
+        return;
+      }
       if (missingContainerNumber || missingAssignment || missingSpk || missingEirDocument) {
         showSubmitNotification('Pekerjaan belum dapat diselesaikan. Lengkapi nomor container, truck/driver, waktu jalan, waktu selesai, SPK, dan upload lampiran EIR.');
         return;
@@ -997,6 +1017,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         </header>
         <form onSubmit={handleSubmit}>
           {error ? <div className="alert error operational-form-error">{error}</div> : null}
+          {isRepoPickupMode ? (
+            <div className="alert operational-form-repo-pickup">
+              Container sedang diambil dari depo penitipan. Pilih truck dan sopir baru untuk melanjutkan perjalanan ke tujuan akhir.
+            </div>
+          ) : null}
 
           <div className="operational-phase-tabs" role="tablist" aria-label="Phase Operational">
             {operationalPhaseOptions.map((phase, index) => (
@@ -1029,7 +1054,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <p className="mt-2 text-[11px] font-medium text-amber-700">Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</p>
             ) : null}
             {!canEditContainerNumber ? (
-              <p className="mt-2 text-[11px] font-medium text-amber-700">No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.</p>
+              <p className="mt-2 text-[11px] font-medium text-amber-700">{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memilih truck dan sopir baru.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</p>
             ) : !hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid') ? (
               <p className="mt-2 text-[11px] font-medium text-emerald-700">No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</p>
             ) : null}
@@ -1051,7 +1076,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
                 {!canEditOtherCost ? (
                   <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    Biaya lainnya terkunci karena UJ sudah disetujui Finance. Admin dapat membuka revisi jika diperlukan.
+                    {isRepoPickupMode ? 'Biaya lainnya terkunci saat ambil container titip. Operational hanya memilih truck dan sopir baru.' : 'Biaya lainnya terkunci karena UJ sudah disetujui Finance. Admin dapat membuka revisi jika diperlukan.'}
                   </div>
                 ) : null}
 
@@ -1116,7 +1141,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       {canEditOtherCost && canSubmitRpujRequest
                         ? 'Kirim total UJ dan biaya lainnya ke Finance untuk approval.'
                         : !canEditOtherCost
-                          ? 'Biaya lainnya tidak bisa diubah setelah UJ disetujui Finance.'
+                          ? isRepoPickupMode
+                            ? 'Biaya lainnya tidak bisa diubah saat ambil container titip.'
+                            : 'Biaya lainnya tidak bisa diubah setelah UJ disetujui Finance.'
                         : 'Pengajuan uang jalan sudah masuk ke alur Finance.'}
                     </small>
                   </div>
@@ -1191,6 +1218,26 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                 <p className="mb-3 text-[11px] font-medium text-amber-700">Pekerjaan sudah selesai. Operational hanya dapat melengkapi data atau file yang masih kosong; revisi dokumen tersimpan hanya dapat dilakukan Admin.</p>
               ) : null}
               <div className="order-form-grid">
+                {hasRepoHistory ? (
+                  <div className="operational-document-card operational-repo-eir-card">
+                    <span>EIR Titip</span>
+                    <p className="operational-eir-note">Bukti container diterima di depo penitipan.</p>
+                    <label className="operational-inline-label">
+                      No. EIR Titip
+                      <input
+                        value={container.repoEirNumber || ''}
+                        disabled
+                        placeholder="Belum ada nomor"
+                      />
+                    </label>
+                    <div className="operational-document-upload-row">
+                      <span className="operational-file-name">
+                        {container.repoEirDocument?.name || 'Belum ada file'}
+                      </span>
+                    </div>
+                    <small className="operational-document-helper">Dibuat saat container dititipkan.</small>
+                  </div>
+                ) : null}
                 <div className="operational-document-card operational-eir-card">
                   <span>EIR</span>
                   <p className="operational-eir-note">Bukti akhir container sudah diserahkan.</p>

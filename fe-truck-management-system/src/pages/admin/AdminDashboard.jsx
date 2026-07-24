@@ -10,6 +10,7 @@ import {
   getTripDate,
   isAssigned,
   isCompleted,
+  isRepoStored,
   isRunning,
   normalizeSize,
 } from '../../data/operationalDashboard';
@@ -63,6 +64,7 @@ function AdminDashboard() {
   const completedJobs = jobs.filter(isCompleted);
   const runningJobs = activeJobs.filter(isRunning);
   const existingJobs = activeJobs;
+  const repoJobs = jobs.filter(isRepoStored);
   const assignedActiveJobs = activeJobs.filter(isAssigned);
   const prospectJobs = visibleFutureJobs;
   const incompleteDocs = jobs.filter((job) => (
@@ -143,7 +145,7 @@ function AdminDashboard() {
         <div>
           <span>System Overview</span>
           <h2>{activeOrders.length} SO aktif, {jobs.length} container tercatat</h2>
-          <p>{incompleteDocs.length} dokumen perlu dicek, {prospectJobs.length} container menunggu assignment.</p>
+          <p>{incompleteDocs.length} dokumen perlu dicek, {prospectJobs.length} container menunggu assignment, {repoJobs.length} container titip repo.</p>
         </div>
         <div className="admin-control-stats">
           <span><strong>{assignmentRate}%</strong> Assign Rate</span>
@@ -155,6 +157,7 @@ function AdminDashboard() {
       <section className="admin-metric-grid pro">
         <AdminMetric icon={ClipboardList} label="Sales Order Aktif" value={activeOrders.length} detail={`${jobs.length} container dari seluruh SO`} tone="red" />
         <AdminMetric icon={Truck} label="Operational Aktif" value={existingJobs.length} detail={`${assignedActiveJobs.length} sudah assign, ${runningJobs.length} berjalan`} tone="blue" />
+        <AdminMetric icon={Archive} label="Container Titip" value={repoJobs.length} detail="Container dititipkan, resource sudah lepas" tone="blue" />
         <AdminMetric icon={CalendarDays} label="Prospek / Planning" value={prospectJobs.length} detail="Container belum punya truck atau driver" tone="amber" />
         <AdminMetric icon={FileWarning} label="Dokumen Belum Lengkap" value={incompleteDocs.length} detail="SPK, surat jalan, atau surat timbang" tone="red" />
       </section>
@@ -167,6 +170,7 @@ function AdminDashboard() {
         </div>
         <div className="ops-dashboard-switch admin-ops-switch" role="tablist" aria-label="Pilih snapshot operational admin">
           <button type="button" className={activeOpsView === 'existing' ? 'active' : ''} onClick={() => setActiveOpsView('existing')}><Truck size={16} /> Eksisting</button>
+          <button type="button" className={activeOpsView === 'repo' ? 'active' : ''} onClick={() => setActiveOpsView('repo')}><Archive size={16} /> Repo</button>
           <button type="button" className={activeOpsView === 'prospect' ? 'active' : ''} onClick={() => setActiveOpsView('prospect')}><CalendarDays size={16} /> Prospek</button>
         </div>
 
@@ -180,6 +184,17 @@ function AdminDashboard() {
                 <button className="secondary-button ops-detail-button" type="button" onClick={() => setSelectedExistingJob(job)}>Detail</button>
               </div>
             )) : <div className="empty-state compact-empty">Belum ada truck/container aktif.</div>}
+          </div>
+        ) : activeOpsView === 'repo' ? (
+          <div className="admin-ops-list">
+            {repoJobs.length ? repoJobs.slice(0, 6).map((job) => (
+              <div key={job.id || job.containerNumber}>
+                <div><strong>{job.customer || '-'}</strong><small>{job.soNumber || '-'}</small></div>
+                <div><strong>{job.containerNumber || 'Container belum diisi'}</strong><small>{job.repoLocation || 'Lokasi repo belum diisi'}</small></div>
+                <div><strong>{formatShortDate(job.repoStoredAt)}</strong><small>{job.repoContainerCondition === 'loaded' ? 'Isi' : job.repoContainerCondition === 'empty' ? 'Kosong' : job.repoReason || 'Alasan belum diisi'}</small></div>
+                <button className="secondary-button ops-detail-button" type="button" onClick={() => setSelectedExistingJob(job)}>Detail</button>
+              </div>
+            )) : <div className="empty-state compact-empty">Belum ada container titipan repo.</div>}
           </div>
         ) : (
           <div className="admin-prospect-mini-table">
@@ -289,6 +304,16 @@ function AdminDashboard() {
                 <div><span>No. SPK</span><strong>{selectedExistingJob.spkNumber || 'Belum tersedia'}</strong><small>Dokumen perintah kerja</small></div>
                 <div><span>Bukti Transfer UJ</span><strong>{selectedExistingJob.rpujTransferProof?.name || 'Belum tersedia'}</strong><small>{selectedExistingJob.rpujTransferUploadedBy ? `Upload: ${selectedExistingJob.rpujTransferUploadedBy}` : 'Finance'}</small></div>
               </article>
+              {isRepoStored(selectedExistingJob) || selectedExistingJob.repoLocation || selectedExistingJob.repoStoredAt ? (
+                <article className="ops-prospect-detail-row">
+                  <div><span>Status</span><strong>Container Titip</strong><small>Truck dan sopir sudah lepas</small></div>
+                  <div><span>Depo Penitipan</span><strong>{selectedExistingJob.repoLocation || '-'}</strong><small>{formatShortDate(selectedExistingJob.repoStoredAt)}</small></div>
+                  <div><span>Alasan Titip</span><strong>{selectedExistingJob.repoReason || '-'}</strong><small>{selectedExistingJob.repoCreatedByName ? `Dicatat: ${selectedExistingJob.repoCreatedByName}` : 'Belum ada pencatat'}</small></div>
+                  <div><span>Kondisi Container</span><strong>{selectedExistingJob.repoContainerCondition === 'loaded' ? 'Isi' : selectedExistingJob.repoContainerCondition === 'empty' ? 'Kosong' : '-'}</strong><small>Tanda terima EIR wajib</small></div>
+                  <div><span>Diambil dari Repo</span><strong>{selectedExistingJob.repoPickedUpByName || '-'}</strong><small>{formatShortDate(selectedExistingJob.repoPickedUpAt)}</small></div>
+                  <div><span>Catatan Repo</span><strong>{selectedExistingJob.repoNotes || '-'}</strong><small>Follow-up Operational</small></div>
+                </article>
+              ) : null}
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setSelectedExistingJob(null)}>Tutup</button>

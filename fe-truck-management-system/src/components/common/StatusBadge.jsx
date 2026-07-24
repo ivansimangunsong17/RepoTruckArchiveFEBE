@@ -16,7 +16,7 @@ const labels = {
   received: 'Belum Jalan',
   waiting_operational: 'Belum Jalan',
   running: 'Sedang Jalan',
-  repo_stored: 'Dititipkan Repo',
+  repo_stored: 'Container Titip',
   partial_complete: 'Sebagian Selesai',
   approved: 'Disetujui',
   submitted: 'Diajukan',

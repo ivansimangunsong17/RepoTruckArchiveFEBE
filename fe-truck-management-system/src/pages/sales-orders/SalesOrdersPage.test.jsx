@@ -152,7 +152,8 @@ describe('SalesOrdersPage billing status flow', () => {
     fetchSalesOrdersPage.mockResolvedValue({
       rows: [{
         id: 'order-rpuj-locked',
-        soNumber: 'SO-LOCK-001',
+        soNumber: '',
+        financeVerificationStatus: 'pending_so',
         customer: 'PT Terkunci',
         shipment: 'import',
         status: 'waiting_operational',
@@ -184,6 +185,51 @@ describe('SalesOrdersPage billing status flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
 
     expect(screen.getByText(/SO terkunci karena RPUJ sudah dikirim/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit Sales Order/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Hapus Sales Order/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Ajukan Batal/i })).not.toBeInTheDocument();
+  });
+
+  it('mengunci edit dan pembatalan Sales setelah nomor SO Finance terbit', async () => {
+    const user = userEvent.setup();
+    useAuth.mockReturnValue({
+      user: { id: 'user-1', role: 'sales', fullName: 'Sales A' },
+    });
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-finance-locked',
+        soNumber: 'SO-FIN-001',
+        financeVerificationStatus: 'verified',
+        customer: 'PT Bernomor',
+        shipment: 'import',
+        status: 'waiting_operational',
+        createdByUserId: 'user-1',
+        createdBy: 'Sales A',
+        salesName: 'Sales A',
+        quantity: 1,
+        containers: [{
+          id: 'job-finance-locked',
+          size: '20FT',
+          type: 'Dry',
+          status: 'received',
+          rpujStatus: 'pending',
+        }],
+      }],
+      total: 1,
+      summary: {
+        orders: 1,
+        waitingOrders: 1,
+        runningOrders: 0,
+        completedOrders: 0,
+        invoicedOrders: 0,
+        cancelledOrders: 0,
+      },
+    });
+
+    render(<SalesOrdersPage />);
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+
+    expect(screen.getByText(/SO terkunci karena Finance sudah menerbitkan nomor SO/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit Sales Order/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Hapus Sales Order/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Ajukan Batal/i })).not.toBeInTheDocument();

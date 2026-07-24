@@ -588,6 +588,15 @@ function rpujRowsSelect() {
       cj.rpuj_transfer_uploaded_by_name,
       cj.rpuj_transfer_uploaded_at,
       cj.spk_number,
+      cj.status as job_status,
+      cj.repo_location,
+      cj.repo_stored_at,
+      cj.repo_reason,
+      cj.repo_notes,
+      cj.repo_container_condition,
+      cj.repo_created_by_name,
+      cj.repo_picked_up_at,
+      cj.repo_picked_up_by_name,
       cj.driver_id,
       cj.assignment_snapshot,
       case
@@ -794,6 +803,15 @@ function mapRpujRequestRow(row) {
     transferProofFile: transferProof,
     transferUploadedBy: row.rpuj_transfer_uploaded_by_name || '',
     transferUploadedAt: row.rpuj_transfer_uploaded_at,
+    jobStatus: row.job_status || '',
+    repoLocation: row.repo_location || '',
+    repoStoredAt: row.repo_stored_at,
+    repoReason: row.repo_reason || '',
+    repoNotes: row.repo_notes || '',
+    repoContainerCondition: row.repo_container_condition || '',
+    repoCreatedByName: row.repo_created_by_name || '',
+    repoPickedUpAt: row.repo_picked_up_at,
+    repoPickedUpByName: row.repo_picked_up_by_name || '',
   };
 }
 
@@ -827,8 +845,12 @@ function mapInvoiceOrderRow(row) {
   const documentStatus = mapInvoiceDocumentStatus(row);
   const billingItems = Array.isArray(row.billing_items) ? row.billing_items.filter(Boolean) : [];
   const cancelledJobsCount = Number(row.cancelled_jobs_count || 0);
+  const repoStoredJobsCount = Number(row.repo_stored_jobs_count || 0);
   const cancellationNote = cancelledJobsCount > 0
     ? `${cancelledJobsCount} container dibatalkan; tagihan hanya menghitung container yang selesai.`
+    : '';
+  const repoStoredNote = repoStoredJobsCount > 0
+    ? `${repoStoredJobsCount} container masih dititipkan Repo; belum masuk tagihan sampai job selesai.`
     : '';
   const activityLogs = [];
   if (row.completed_at) activityLogs.push(`${new Date(row.completed_at).toISOString()} - Operational menyelesaikan job`);
@@ -849,7 +871,9 @@ function mapInvoiceOrderRow(row) {
     plannedJobsCount: Number(row.planned_jobs_count || 0),
     billedJobsCount: Number(row.billed_jobs_count || row.total_jobs_count || 0),
     cancelledJobsCount,
+    repoStoredJobsCount,
     cancellationNote,
+    repoStoredNote,
     paymentTerms: row.payment_terms || '-',
     dueDate: row.due_date,
     billingItems: billingItems.length ? billingItems : ['Rincian tagihan belum tersedia'],
@@ -985,7 +1009,8 @@ function invoiceOrdersCte() {
       select
         sales_order_id,
         count(*)::int as planned_jobs_count,
-        count(*) filter (where status = 'cancelled')::int as cancelled_jobs_count
+        count(*) filter (where status = 'cancelled')::int as cancelled_jobs_count,
+        count(*) filter (where status = 'repo_stored')::int as repo_stored_jobs_count
       from container_jobs
       group by sales_order_id
     ),
@@ -1012,6 +1037,7 @@ function invoiceOrdersCte() {
         count(fr.id)::int as billed_jobs_count,
         coalesce(max(ojs.planned_jobs_count), count(fr.id))::int as planned_jobs_count,
         coalesce(max(ojs.cancelled_jobs_count), 0)::int as cancelled_jobs_count,
+        coalesce(max(ojs.repo_stored_jobs_count), 0)::int as repo_stored_jobs_count,
         count(fr.id) filter (where fr.document_status = 'BELUM_LENGKAP')::int as incomplete_documents_count,
         count(fr.id) filter (where fr.document_status = 'SIAP_DITAGIHKAN')::int as ready_documents_count,
         coalesce(sum(fr.total_revenue) filter (where fr.total_revenue is not null), nullif(so.total_amount, 0), 0)::numeric as billing_amount,

@@ -116,5 +116,38 @@ describe('TodayTruckDashboard', () => {
       expect(within(availabilityRegion).getByText('20FT').closest('article')).toHaveTextContent('1 Unit');
       expect(within(availabilityRegion).getByText('40FT').closest('article')).toHaveTextContent('0 Unit');
     });
+    expect(await screen.findByText('Maintenance')).toBeInTheDocument();
+    expect(screen.getByText('Maint')).toBeInTheDocument();
+  });
+
+  it('tidak menghitung job titipan repo sebagai truck terpakai di availability', async () => {
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [
+        {
+          id: 'truck-repo',
+          plateNumber: 'B 2300 RP',
+          unitCode: 'TRK-023',
+          capacity: '20FT',
+          status: 'Aktif',
+        },
+      ],
+      activeJobs: [
+        {
+          id: 'job-repo',
+          plateNumber: 'B 2300 RP',
+          truck: 'B 2300 RP',
+          status: 'repo_stored',
+          containerNumber: 'CONT-REPO',
+        },
+      ],
+    });
+
+    render(<TodayTruckDashboard />);
+
+    await waitFor(() => {
+      const availabilityRegion = screen.getByLabelText('Ketersediaan Truck Hari Ini');
+      expect(within(availabilityRegion).getByText('20FT').closest('article')).toHaveTextContent('1 Unit');
+    });
+    expect(screen.queryByText('CONT-REPO')).not.toBeInTheDocument();
   });
 });

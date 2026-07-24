@@ -56,6 +56,7 @@ const containerJobCategoryFolders = {
   container_job: [CONTAINER_DOCUMENTS_FOLDER, 'Dokumen Lainnya'],
   spkDocument: [CONTAINER_DOCUMENTS_FOLDER, 'SPK'],
   eirDocument: [CONTAINER_DOCUMENTS_FOLDER, 'EIR'],
+  repoEirDocument: [CONTAINER_DOCUMENTS_FOLDER, 'EIR Titip'],
   travelDocumentFile: [CONTAINER_DOCUMENTS_FOLDER, 'Surat Jalan'],
   loadingVoucherDocument: [CONTAINER_DOCUMENTS_FOLDER, 'Bon Muat Bongkar'],
   unloadingVoucherDocument: [CONTAINER_DOCUMENTS_FOLDER, 'Bon Muat Bongkar'],

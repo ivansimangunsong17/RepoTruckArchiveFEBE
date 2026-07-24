@@ -195,6 +195,11 @@ function hasSentRpuj(order) {
   });
 }
 
+function isNumberedByFinance(order) {
+  const verificationStatus = String(order?.financeVerificationStatus || order?.finance_verification_status || '').trim().toLowerCase();
+  return Boolean(String(order?.soNumber || order?.so_number || '').trim() || verificationStatus === 'verified');
+}
+
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '') {
   if (!selectedStatus) return true;
   if (selectedStatus === 'waiting_operational') return isWaitingStatus(order.status);
@@ -310,13 +315,15 @@ function SalesOrdersPage() {
   const canCreateOrder = user?.role === USER_ROLES.SALES && hasPermission(user, 'orders.create');
   const canUpdateOrder = hasPermission(user, 'orders.update');
   const canViewCommercial = hasPermission(user, 'commercial.read');
-  const selectedOrderLockedForSales = user?.role === USER_ROLES.SALES && hasSentRpuj(selectedOrder);
+  const selectedOrderLockedByFinanceForSales = user?.role === USER_ROLES.SALES && isNumberedByFinance(selectedOrder);
+  const selectedOrderLockedByRpujForSales = user?.role === USER_ROLES.SALES && hasSentRpuj(selectedOrder);
+  const selectedOrderLockedForSales = selectedOrderLockedByFinanceForSales || selectedOrderLockedByRpujForSales;
   const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN
     || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder) && !selectedOrderLockedForSales);
   const canModifyOrder = (order) => {
     if (!order || !canUpdateOrder) return false;
     if (user?.role === USER_ROLES.ADMIN) return true;
-    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && !hasSentRpuj(order);
+    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && !isNumberedByFinance(order) && !hasSentRpuj(order);
     return false;
   };
   const canUpdateBillingOrder = (order) => canViewCommercial && canUpdateOrder && (
@@ -876,7 +883,12 @@ function SalesOrdersPage() {
                 </div>
               </div>
 
-              {selectedOrderLockedForSales ? (
+              {selectedOrderLockedByFinanceForSales ? (
+                <div className="sales-order-cancelled-note">
+                  <Clock3 size={16} />
+                  <span>SO terkunci karena Finance sudah menerbitkan nomor SO. Revisi dan pembatalan hanya dapat dilakukan oleh Admin.</span>
+                </div>
+              ) : selectedOrderLockedByRpujForSales ? (
                 <div className="sales-order-cancelled-note">
                   <Clock3 size={16} />
                   <span>SO terkunci karena RPUJ sudah dikirim. Revisi dan pembatalan hanya dapat dilakukan oleh Admin.</span>

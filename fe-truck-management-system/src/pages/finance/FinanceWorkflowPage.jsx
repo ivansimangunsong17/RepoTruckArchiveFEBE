@@ -443,6 +443,15 @@ function normalizeFinanceRpujRow(row = {}) {
     rejectionNote: row.rejectionNote || '',
     transferProof: row.transferProof || row.transferProofFile?.name || '',
     transferProofFile: row.transferProofFile || null,
+    jobStatus: row.jobStatus || '',
+    repoLocation: row.repoLocation || '',
+    repoStoredAt: row.repoStoredAt || '',
+    repoReason: row.repoReason || '',
+    repoNotes: row.repoNotes || '',
+    repoContainerCondition: row.repoContainerCondition || '',
+    repoCreatedByName: row.repoCreatedByName || '',
+    repoPickedUpAt: row.repoPickedUpAt || '',
+    repoPickedUpByName: row.repoPickedUpByName || '',
   };
 }
 
@@ -458,7 +467,9 @@ function normalizeFinanceInvoiceRow(row = {}) {
     plannedJobsCount: Number(row.plannedJobsCount || 0),
     billedJobsCount: Number(row.billedJobsCount || 0),
     cancelledJobsCount: Number(row.cancelledJobsCount || 0),
+    repoStoredJobsCount: Number(row.repoStoredJobsCount || 0),
     cancellationNote: row.cancellationNote || '',
+    repoStoredNote: row.repoStoredNote || '',
     paymentTerms: row.paymentTerms || '-',
     invoiceDate: formatDisplayDate(row.invoiceDate),
     dueDate: formatDisplayDate(row.dueDate),
@@ -1046,6 +1057,16 @@ function RpujDetailModal({ rpuj, onClose }) {
               <DetailField className="finance-rpuj-detail-field" label="Terminal" value={rpuj.terminal} />
               <DetailField className="finance-rpuj-detail-field" label="Depo / Asal" value={rpuj.depo} />
             </div>
+            {rpuj.jobStatus === 'repo_stored' || rpuj.repoLocation || rpuj.repoStoredAt ? (
+              <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-blue-700">Container Titip</span>
+                <strong className="mt-1 block text-xs font-semibold leading-relaxed text-blue-950">{rpuj.repoLocation || 'Lokasi repo belum diisi'}</strong>
+                <small className="mt-1 block text-[11px] font-medium leading-relaxed text-blue-800">
+                  {rpuj.repoReason || 'Alasan titip belum diisi'}{rpuj.repoContainerCondition ? ` - ${rpuj.repoContainerCondition === 'loaded' ? 'Isi' : 'Kosong'}` : ''}{rpuj.repoStoredAt ? ` - ${formatDisplayDate(rpuj.repoStoredAt)}` : ''}
+                  {rpuj.repoPickedUpByName ? ` - Diambil oleh ${rpuj.repoPickedUpByName}` : ''}
+                </small>
+              </div>
+            ) : null}
           </section>
 
           <section className="finance-rpuj-detail-card is-subtle">
@@ -1193,6 +1214,12 @@ function InvoiceDetailModal({
                     <div className="mt-2 flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold leading-relaxed text-amber-800">
                       <Info className="mt-0.5 shrink-0" size={14} />
                       <span>{invoice.cancellationNote}</span>
+                    </div>
+                  ) : null}
+                  {invoice.repoStoredNote ? (
+                    <div className="mt-2 flex gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-xs font-semibold leading-relaxed text-blue-800">
+                      <Info className="mt-0.5 shrink-0" size={14} />
+                      <span>{invoice.repoStoredNote}</span>
                     </div>
                   ) : null}
                 </div>

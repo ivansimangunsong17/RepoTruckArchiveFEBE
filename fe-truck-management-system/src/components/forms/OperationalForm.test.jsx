@@ -132,6 +132,28 @@ describe('OperationalForm', () => {
     expect(screen.getByText('Lampiran EIR sudah diupload')).toBeInTheDocument();
   });
 
+  it('menampilkan EIR Titip di checklist closing untuk job yang pernah dititipkan', () => {
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          repoLocation: 'Repo Cakung',
+          repoEirNumber: 'EIR-TITIP-001',
+          repoEirDocument: { name: 'eir-titip.pdf' },
+        }}
+        initialPhase="closing"
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('EIR Titip tersedia')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('EIR-TITIP-001')).toBeDisabled();
+    expect(screen.getByText('eir-titip.pdf')).toBeInTheDocument();
+  });
+
   it('menolak status sedang jalan sebelum UJ disetujui Finance', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
@@ -337,6 +359,95 @@ describe('OperationalForm', () => {
     );
 
     expect(screen.getByRole('option', { name: /B 4000 RR/i })).toBeInTheDocument();
+  });
+
+  it('mewajibkan reassign truck dan sopir saat ambil container titip', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'received',
+          repoPickupMode: true,
+          plateNumber: '',
+          driver: '',
+          repoLocation: 'Repo Cakung',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByText(/Container sedang diambil dari depo penitipan/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('No. Container')).toBeDisabled();
+    expect(screen.getByText(/No. Container terkunci saat ambil container titip/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+
+    expect(screen.getByText(/Ambil container titip wajib assign ulang truck dan sopir/i)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('mengunci biaya lainnya saat ambil container titip', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'received',
+          repoPickupMode: true,
+          rpujStatus: 'paid',
+          rpujNotes: JSON.stringify({ amount: 150000, notes: 'parkir' }),
+          repoLocation: 'Repo Cakung',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /uang jalan & spk/i);
+
+    expect(screen.getByLabelText(/nominal biaya/i)).toBeDisabled();
+    expect(screen.getByLabelText(/catatan biaya/i)).toBeDisabled();
+    expect(screen.getByRole('button', { name: /sudah dibayar/i })).toBeDisabled();
+    expect(screen.getByText(/Biaya lainnya terkunci saat ambil container titip/i)).toBeInTheDocument();
+  });
+
+  it('mengirim pickup container titip sebagai perjalanan sedang jalan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'received',
+          repoPickupMode: true,
+          rpujStatus: 'approved',
+          spkNumber: 'SPK-TEST-001',
+          plateNumber: '',
+          driver: '',
+          repoLocation: 'Repo Cakung',
+        }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'running',
+      plateNumber: 'B 1000 AA',
+      driver: 'Driver Aktif',
+      runningAt: expect.any(String),
+    }));
   });
 
   it('mengisi info pembayaran UJ driver dari master sopir', async () => {

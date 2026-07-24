@@ -1,4 +1,5 @@
 import {
+  Archive,
   BarChart3,
   CalendarDays,
   CheckCircle2,
@@ -68,6 +69,12 @@ export const navigationGroups = [
         to: '/operations',
         label: 'Container Job',
         icon: ClipboardCheck,
+        roles: operationalRoles,
+      },
+      {
+        to: '/operations/repo-storage',
+        label: 'Container Titip',
+        icon: Archive,
         roles: operationalRoles,
       },
       {

@@ -252,8 +252,8 @@ export const resourceConfig = {
   },
   depots: {
     table: 'depots',
-    searchable: ['name', 'company_name', 'code', 'address', 'operational_status', 'notes'],
-    filters: { status: 'operational_status' },
+    searchable: ['name', 'company_name', 'code', 'address', 'operational_status', 'depot_type', 'notes'],
+    filters: { status: 'operational_status', depotType: 'depot_type' },
     archivedColumn: 'archived_at',
     orderColumn: 'created_at',
     toApi: (row) => ({
@@ -263,6 +263,7 @@ export const resourceConfig = {
       code: row.code || '',
       address: row.address || '',
       status: row.operational_status || 'Aktif',
+      depotType: row.depot_type || 'destination',
       notes: row.notes || '',
     }),
     toDb: (row) => ({
@@ -271,6 +272,7 @@ export const resourceConfig = {
       code: row.code || null,
       address: row.address || null,
       operational_status: row.status || 'Aktif',
+      depot_type: row.depotType || 'destination',
       notes: row.notes || null,
     }),
   },

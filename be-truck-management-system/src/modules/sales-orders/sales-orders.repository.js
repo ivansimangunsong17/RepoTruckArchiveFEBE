@@ -107,8 +107,9 @@ const jobColumns = `
   created_at, updated_at, cancelled_at, cancel_reason, cancel_source, cancelled_by_name,
   cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role,
   cancel_requested_at, cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note,
-  repo_location, repo_stored_at, repo_reason, repo_notes,
-  repo_released_driver_id, repo_released_vehicle_id, repo_created_by_name
+  repo_location, repo_stored_at, repo_eir_number, repo_reason, repo_notes, repo_container_condition,
+  repo_released_driver_id, repo_released_vehicle_id, repo_created_by_name,
+  repo_picked_up_at, repo_picked_up_by_name
 `;
 
 const attachmentColumns = `

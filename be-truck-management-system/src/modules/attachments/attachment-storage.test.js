@@ -69,6 +69,34 @@ test('stores container documents under the immutable job reference', () => {
   ]);
 });
 
+test('stores repo EIR separately from final EIR documents', () => {
+  const storagePath = buildAttachmentStoragePath(
+    {
+      entityType: 'container_job',
+      entityId: containerJobId,
+      category: 'repoEirDocument',
+      fileName: 'EIR Titip.png',
+    },
+    {
+      salesOrderId,
+      containerJobId,
+      soNumber: 'SO-009878',
+      createdAt: '2026-07-01T08:00:00.000Z',
+    },
+  );
+
+  const parts = pathParts(storagePath);
+  assert.deepEqual(parts.slice(0, -1), [
+    'Sales Order',
+    '2026',
+    '07 - Juli',
+    'SO-009878',
+    '02 - Dokumen Container',
+    'JOB-F412EB2C',
+    'EIR Titip',
+  ]);
+});
+
 test('stores a transfer proof in Finance instead of the container folder', () => {
   const storagePath = buildAttachmentStoragePath(
     {

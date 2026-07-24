@@ -88,8 +88,10 @@ export async function updateContainerJobController(request, response) {
           status: saved.status,
           repoLocation: saved.repoLocation,
           repoStoredAt: saved.repoStoredAt,
+          repoEirNumber: saved.repoEirNumber,
           repoReason: saved.repoReason,
           repoNotes: saved.repoNotes,
+          repoContainerCondition: saved.repoContainerCondition,
           repoCreatedByName: saved.repoCreatedByName,
           repoReleasedDriverId: saved.repoReleasedDriverId,
           repoReleasedVehicleId: saved.repoReleasedVehicleId,
@@ -99,7 +101,44 @@ export async function updateContainerJobController(request, response) {
           soNumber: saved.soNumber,
           containerNumber: saved.containerNumber,
           repoLocation: saved.repoLocation,
+          repoEirNumber: saved.repoEirNumber,
+          repoContainerCondition: saved.repoContainerCondition,
           reason: saved.repoReason,
+        },
+      });
+    }
+    if (before.status === 'repo_stored' && saved.status !== 'repo_stored') {
+      await safeRecordActivityLog(request, {
+        action: 'PICKUP_CONTAINER_JOB_REPO',
+        module: 'container_jobs',
+        entityType: 'container_job',
+        entityId: saved.id,
+        beforeData: {
+          status: before.status,
+          repoLocation: before.repoLocation,
+          repoStoredAt: before.repoStoredAt,
+          repoReason: before.repoReason,
+          driverId: before.driverId,
+          vehicleId: before.vehicleId,
+          driver: before.driver,
+          plateNumber: before.plateNumber,
+        },
+        afterData: {
+          status: saved.status,
+          driverId: saved.driverId,
+          vehicleId: saved.vehicleId,
+          driver: saved.driver,
+          plateNumber: saved.plateNumber,
+          repoPickedUpAt: saved.repoPickedUpAt,
+          repoPickedUpByName: saved.repoPickedUpByName,
+          updatedBy: saved.updatedBy,
+          updatedAt: saved.updatedAt,
+        },
+        metadata: {
+          salesOrderId: saved.orderId,
+          soNumber: saved.soNumber,
+          containerNumber: saved.containerNumber,
+          repoLocation: before.repoLocation,
         },
       });
     }

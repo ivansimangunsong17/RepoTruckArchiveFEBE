@@ -11,6 +11,7 @@ const routeLabels = {
   profile: 'Profil Saya',
   'sales-orders': 'Sales Order',
   operations: 'Container Job',
+  'repo-storage': 'Container Titip',
   clients: 'Master Client',
   trucks: 'Master Truck',
   stids: 'Master STID',

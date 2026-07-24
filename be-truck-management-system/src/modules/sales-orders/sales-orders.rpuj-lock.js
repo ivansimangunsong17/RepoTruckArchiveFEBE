@@ -13,3 +13,9 @@ export function isSalesOrderLockedByRpuj(order = {}) {
   const containers = Array.isArray(order.containers) ? order.containers : [];
   return containers.some(hasContainerSentRpuj);
 }
+
+export function isSalesOrderLockedByFinanceNumber(order = {}) {
+  const soNumber = String(order.soNumber || order.so_number || '').trim();
+  const verificationStatus = String(order.financeVerificationStatus || order.finance_verification_status || '').trim().toLowerCase();
+  return Boolean(soNumber || verificationStatus === 'verified');
+}

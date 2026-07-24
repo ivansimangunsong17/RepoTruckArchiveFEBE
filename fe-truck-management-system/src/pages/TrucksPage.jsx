@@ -40,7 +40,7 @@ function hasActiveDriverJob(row, activeJobs) {
 }
 
 function getDriverBaseStatus(row) {
-  return ['Bertugas', 'Cuti', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
+  return ['Cuti', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
 }
 
 function getDriverStatus(row, activeJobs) {
@@ -621,7 +621,7 @@ function hasActiveTruckJob(row, activeJobs) {
 }
 
 function getTruckBaseStatus(row) {
-  return ['Bertugas', 'Maintenance', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
+  return ['Maintenance', 'Tidak Aktif'].includes(row.status) ? row.status : 'Aktif';
 }
 
 function getTruckStatus(row, activeJobs) {

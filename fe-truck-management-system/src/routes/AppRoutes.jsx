@@ -71,6 +71,7 @@ export const router = createBrowserRouter([
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },
         { path: 'operations', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage /></LazyPage>)] },
+        { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },
         { path: 'trucks', children: [guardedPage(adminRoles, <LazyPage><TrucksPage /></LazyPage>)] },
         { path: 'drivers', children: [guardedPage(adminRoles, <LazyPage><DriversPage /></LazyPage>)] },

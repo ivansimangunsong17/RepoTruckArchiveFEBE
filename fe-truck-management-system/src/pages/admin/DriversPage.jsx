@@ -55,7 +55,7 @@ function hasActiveDriverJob(row, activeJobs) {
 }
 
 function getDriverBaseStatus(row) {
-  return ['Bertugas', 'Cuti', 'Tidak Aktif', 'Blacklist'].includes(row.status) ? row.status : 'Aktif';
+  return ['Cuti', 'Tidak Aktif', 'Blacklist'].includes(row.status) ? row.status : 'Aktif';
 }
 
 function getDriverStatus(row, activeJobs) {

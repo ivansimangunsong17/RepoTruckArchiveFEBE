@@ -16,8 +16,9 @@ const joinedJobColumns = `
   cj.cancel_requested_by_name, cj.cancel_requested_by_role, cj.cancel_requested_at,
   cj.cancel_reviewed_by_name, cj.cancel_reviewed_at, cj.cancel_review_note,
   cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
-  cj.repo_location, cj.repo_stored_at, cj.repo_reason, cj.repo_notes,
+  cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
   cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
+  cj.repo_picked_up_at, cj.repo_picked_up_by_name,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
@@ -113,6 +114,22 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
         where attachment.entity_type = 'container_job'
           and attachment.entity_id = cj.id
           and attachment.category = 'travelDocumentFile'
+      )
+      or (
+        (
+          nullif(btrim(cj.repo_location), '') is not null
+          or cj.repo_stored_at is not null
+          or nullif(btrim(cj.repo_eir_number), '') is not null
+        )
+        and (
+          nullif(btrim(cj.repo_eir_number), '') is null
+          or not exists (
+            select 1 from attachments attachment
+            where attachment.entity_type = 'container_job'
+              and attachment.entity_id = cj.id
+              and attachment.category = 'repoEirDocument'
+          )
+        )
       )
     )`);
   }
@@ -269,6 +286,24 @@ function normalizeCancelSource(value) {
 function normalizeOptionalText(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
+}
+
+function hasRepoStorageHistory(existing = {}) {
+  return Boolean(
+    existing.repo_stored_at
+      || existing.repoStoredAt
+      || existing.repo_location
+      || existing.repoLocation
+      || existing.repo_eir_number
+      || existing.repoEirNumber
+      || existing.repo_picked_up_at
+      || existing.repoPickedUpAt,
+  );
+}
+
+export function hasRequiredRepoCompletionDocuments(existing = {}, categories = new Set()) {
+  if (!hasRepoStorageHistory(existing)) return true;
+  return Boolean(String(existing.repo_eir_number || existing.repoEirNumber || '').trim() && categories.has('repoEirDocument'));
 }
 
 function isAssignmentReleasedStatus(status) {
@@ -465,11 +500,18 @@ async function requireCompletedJobReady(client, id, form, existing) {
       from attachments
       where entity_type = 'container_job'
         and entity_id = $1
-        and category in ('spkDocument', 'eirDocument')
+        and category in ('spkDocument', 'eirDocument', 'repoEirDocument')
     `,
     [id],
   );
   const categories = new Set(attachmentResult.rows.map((row) => row.category));
+  if (!hasRequiredRepoCompletionDocuments(existing, categories)) {
+    throw validationError(
+      'Pekerjaan belum dapat diselesaikan. Lengkapi EIR Titip dari depo penitipan terlebih dahulu.',
+      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
+      409,
+    );
+  }
   if (!(form.spkNumber || existing.spk_number || categories.has('spkDocument'))) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. Lengkapi SPK terlebih dahulu.',
@@ -623,8 +665,9 @@ export async function updateContainerJob(id, form) {
                cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
                cj.unloading_voucher_number, cj.weighing_document_number,
                cj.spk_number, cj.cancel_reason, cj.cancel_source, cj.cancelled_by_name,
-               cj.repo_location, cj.repo_stored_at, cj.repo_reason, cj.repo_notes,
+               cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
+               cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                so.so_number, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -723,8 +766,10 @@ export async function updateContainerJob(id, form) {
     const nextRepoStoredAt = nextStatus === 'repo_stored'
       ? form.repoStoredAt || existing.rows[0].repo_stored_at || new Date().toISOString()
       : form.repoStoredAt || existing.rows[0].repo_stored_at || null;
+    const nextRepoEirNumber = normalizeOptionalText(form.repoEirNumber ?? existing.rows[0].repo_eir_number);
     const nextRepoReason = normalizeOptionalText(form.repoReason ?? existing.rows[0].repo_reason);
     const nextRepoNotes = normalizeOptionalText(form.repoNotes ?? existing.rows[0].repo_notes);
+    const nextRepoContainerCondition = normalizeOptionalText(form.repoContainerCondition ?? existing.rows[0].repo_container_condition);
     const nextRepoReleasedDriverId = form.repoReleasedDriverId
       || existing.rows[0].repo_released_driver_id
       || (nextStatus === 'repo_stored' ? existing.rows[0].driver_id || nextDriverId : null);
@@ -736,6 +781,13 @@ export async function updateContainerJob(id, form) {
         ?? existing.rows[0].repo_created_by_name
         ?? (nextStatus === 'repo_stored' ? form.updatedBy || 'Operational' : null),
     );
+    const isRepoPickup = existing.rows[0].status === 'repo_stored' && nextStatus !== 'repo_stored';
+    const nextRepoPickedUpAt = isRepoPickup
+      ? form.repoPickedUpAt || existing.rows[0].repo_picked_up_at || new Date().toISOString()
+      : existing.rows[0].repo_picked_up_at || null;
+    const nextRepoPickedUpByName = isRepoPickup
+      ? normalizeOptionalText(form.repoPickedUpByName || form.updatedBy || 'Operational')
+      : existing.rows[0].repo_picked_up_by_name || null;
     const nextRpujNotes = hasOwnInput(form, 'rpujNotes') ? form.rpujNotes || null : existing.rows[0].rpuj_notes || null;
     const nextEirNumber = hasOwnInput(form, 'eirNumber') ? form.eirNumber || null : existing.rows[0].eir_number || null;
     const nextLoadingVoucher = hasOwnInput(form, 'loadingVoucher') ? form.loadingVoucher || null : existing.rows[0].loading_voucher_number || null;
@@ -774,14 +826,18 @@ export async function updateContainerJob(id, form) {
             cancel_reviewed_at = case when $14 = 'cancelled' then now() else cancel_reviewed_at end,
             repo_location = $21,
             repo_stored_at = $22,
-            repo_reason = $23,
-            repo_notes = $24,
-            repo_released_driver_id = $25,
-            repo_released_vehicle_id = $26,
-            repo_created_by_name = $27,
-            updated_by_name = $28,
+            repo_eir_number = $23,
+            repo_reason = $24,
+            repo_notes = $25,
+            repo_container_condition = $26,
+            repo_released_driver_id = $27,
+            repo_released_vehicle_id = $28,
+            repo_created_by_name = $29,
+            repo_picked_up_at = $30,
+            repo_picked_up_by_name = $31,
+            updated_by_name = $32,
             updated_at = now()
-        where id = $29
+        where id = $33
       `,
       [
         nextContainerNumber,
@@ -806,11 +862,15 @@ export async function updateContainerJob(id, form) {
         cancelledByName,
         nextRepoLocation,
         nextRepoStoredAt,
+        nextRepoEirNumber,
         nextRepoReason,
         nextRepoNotes,
+        nextRepoContainerCondition,
         nextRepoReleasedDriverId,
         nextRepoReleasedVehicleId,
         nextRepoCreatedByName,
+        nextRepoPickedUpAt,
+        nextRepoPickedUpByName,
         form.updatedBy || 'Operational',
         id,
       ],

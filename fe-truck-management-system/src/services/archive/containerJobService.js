@@ -4,6 +4,7 @@ import { uploadAttachmentFile } from '../files/fileService';
 const documentFields = [
   ['spkDocument', 'spkDocument'],
   ['eirDocument', 'eirDocument'],
+  ['repoEirDocument', 'repoEirDocument'],
   ['loadingVoucherDocument', 'loadingVoucherDocument'],
   ['tilaGatepassDocumentFile', 'tilaGatepassDocumentFile'],
   ['travelDocumentFile', 'travelDocumentFile'],

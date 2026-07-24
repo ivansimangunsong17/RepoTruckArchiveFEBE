@@ -16,6 +16,7 @@ import {
 import PageHeader from '../../components/common/PageHeader';
 import StatusBadge from '../../components/common/StatusBadge';
 import EmptyState from '../../components/common/EmptyState';
+import AttachmentUploadField from '../../components/common/AttachmentUploadField';
 import OperationalForm from '../../components/forms/OperationalForm';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
@@ -42,6 +43,10 @@ const rpujStageOptions = [
   { value: 'submitted', label: 'Sudah Diajukan', description: 'Menunggu approval atau transfer Finance' },
   { value: 'paid', label: 'UJ Dikirim', description: 'Bukti transfer UJ sudah masuk' },
 ];
+const REPO_CONTAINER_CONDITIONS = [
+  { value: 'empty', label: 'Kosong' },
+  { value: 'loaded', label: 'Isi' },
+];
 
 function getStatusOrder(status) {
   return STATUS_ORDER[status] ?? Number.MAX_SAFE_INTEGER;
@@ -50,7 +55,7 @@ function getStatusOrder(status) {
 function getJobStatusLabel(status) {
   if (status === 'completed') return 'Selesai';
   if (status === 'running') return 'Sedang Jalan';
-  if (status === 'repo_stored') return 'Dititipkan Repo';
+  if (status === 'repo_stored') return 'Container Titip';
   if (status === 'cancelled') return 'Batal';
   return 'Belum Jalan';
 }
@@ -74,8 +79,11 @@ function sortOperationalJobs(rows) {
 }
 
 function documentState(job) {
+  const eirRequirement = isRepoStoredJob(job)
+    ? { label: 'EIR Titip', file: job.repoEirDocument }
+    : { label: 'EIR', file: job.eirDocument };
   const required = [
-    { label: 'EIR', file: job.eirDocument },
+    eirRequirement,
     { label: 'Bon Muat / Bon Bongkar', file: job.loadingVoucherDocument },
     { label: 'TILA / Delivery Card / Gatepass / SP2', file: job.tilaGatepassDocumentFile || job.unloadingVoucherDocument || job.weighingDocumentFile },
     { label: 'Surat Jalan', file: job.travelDocumentFile },
@@ -91,6 +99,30 @@ function containerLabel(job) {
   return job?.containerNumber || 'Container belum diisi';
 }
 
+function repoStorageSummary(job) {
+  const location = job?.repoLocation || 'Depo penitipan belum dipilih';
+  const storedAt = job?.repoStoredAt ? formatDateTime(job.repoStoredAt) : 'Waktu titip belum diisi';
+  return {
+    location,
+    storedAt,
+    reason: job?.repoReason || 'Alasan titip belum diisi',
+  };
+}
+
+function isRepoStoredJob(job) {
+  return Boolean(job?.status === 'repo_stored' || (job?.repoStoredAt && !job?.repoPickedUpAt));
+}
+
+function hasRepoStorageHistory(job) {
+  return Boolean(
+    job?.status === 'repo_stored'
+      || job?.repoLocation
+      || job?.repoStoredAt
+      || job?.repoEirNumber
+      || job?.repoPickedUpAt,
+  );
+}
+
 function getRepoStorageMissing(job) {
   const missing = [];
   if (!String(job?.containerNumber || '').trim()) missing.push('No. Container');
@@ -100,7 +132,22 @@ function getRepoStorageMissing(job) {
 }
 
 function canStoreRepoJob(job) {
-  return Boolean(job && !['completed', 'cancelled', 'repo_stored'].includes(job.status));
+  return Boolean(job && job.status === 'running' && !hasRepoStorageHistory(job));
+}
+
+function repoContainerConditionLabel(value) {
+  return REPO_CONTAINER_CONDITIONS.find((option) => option.value === value)?.label || '-';
+}
+
+function normalizeDepotOptions(rows = []) {
+  const activeDepots = (Array.isArray(rows) ? rows : [])
+    .filter((row) => !row.status || row.status === 'Aktif')
+    .filter((row) => (row.depotType || 'destination') === 'storage');
+
+  return activeDepots
+    .map((row) => row.name || row.label || '')
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, 'id'));
 }
 
 function otherCostValue(job) {
@@ -190,7 +237,7 @@ function flattenPendingCancelJobs(orders) {
   })));
 }
 
-function OperationsPage({ documentFollowUp = false }) {
+function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const { user } = useAuth();
   const { notify, confirmAction } = useFeedback();
   const archive = useArchiveData();
@@ -212,7 +259,14 @@ function OperationsPage({ documentFollowUp = false }) {
   const [cancelForm, setCancelForm] = useState({ cancelSource: 'customer', cancelReason: '' });
   const [cancelSaving, setCancelSaving] = useState(false);
   const [repoTarget, setRepoTarget] = useState(null);
-  const [repoForm, setRepoForm] = useState({ repoLocation: '', repoReason: '', repoNotes: '' });
+  const [repoForm, setRepoForm] = useState({
+    repoLocation: '',
+    repoReason: '',
+    repoNotes: '',
+    repoContainerCondition: '',
+    repoEirNumber: '',
+    repoEirDocument: null,
+  });
   const [repoSaving, setRepoSaving] = useState(false);
   const canEdit = hasPermission(user, 'operations.update');
   const canReviewCancel = canEdit || user?.role === USER_ROLES.ADMIN;
@@ -220,9 +274,15 @@ function OperationsPage({ documentFollowUp = false }) {
   const detailOtherCost = otherCostValue(detail);
   const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
   const repoMissing = getRepoStorageMissing(repoTarget);
+  const depotOptions = useMemo(() => normalizeDepotOptions(archive.masters?.depots), [archive.masters?.depots]);
+  const hasCurrentDepot = Boolean(repoForm.repoLocation && !depotOptions.includes(repoForm.repoLocation));
   const repoLocationValid = repoForm.repoLocation.trim().length >= 3;
   const repoReasonValid = repoForm.repoReason.trim().length >= 8;
-  const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid);
+  const repoConditionValid = ['empty', 'loaded'].includes(repoForm.repoContainerCondition);
+  const repoEirNumberValid = Boolean(repoForm.repoEirNumber.trim());
+  const repoEirValid = Boolean(repoForm.repoEirDocument || repoTarget?.repoEirDocument);
+  const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid && repoConditionValid && repoEirNumberValid && repoEirValid);
+  const effectiveStatus = repoStorageOnly ? 'repo_stored' : status;
 
   useEffect(() => {
     if (!detail) return undefined;
@@ -275,10 +335,12 @@ function OperationsPage({ documentFollowUp = false }) {
       job.soNumber, job.doNumber, job.customer, job.containerNumber, job.driver, job.plateNumber,
     ].some((value) => value?.toLowerCase().includes(query.toLowerCase()));
     const matchesRpujStage = !rpujStage || getRpujStage(job) === rpujStage;
+    const matchesRepoStorage = !repoStorageOnly || isRepoStoredJob(job);
+    const matchesStatus = !effectiveStatus || (effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
     const matchesDocumentFollowUp = !documentFollowUp
       || (job.status === 'completed' && documentState(job).completed < documentState(job).total);
-    return matchesQuery && (!status || job.status === status) && matchesRpujStage && matchesDocumentFollowUp;
-  })), [demoJobs, documentFollowUp, query, rpujStage, status]);
+    return matchesQuery && matchesStatus && matchesRpujStage && matchesRepoStorage && matchesDocumentFollowUp;
+  })), [demoJobs, documentFollowUp, effectiveStatus, query, repoStorageOnly, rpujStage]);
 
   const jobs = archive.isDatabaseMode
     ? sortOperationalJobs(databaseJobs)
@@ -287,7 +349,7 @@ function OperationsPage({ documentFollowUp = false }) {
   const counts = archive.isDatabaseMode ? statusCounts : {
     received: demoJobs.filter((job) => job.status === 'received').length,
     running: demoJobs.filter((job) => job.status === 'running').length,
-    repo_stored: demoJobs.filter((job) => job.status === 'repo_stored').length,
+    repo_stored: demoJobs.filter((job) => isRepoStoredJob(job)).length,
     completed: demoJobs.filter((job) => job.status === 'completed').length,
     cancelled: demoJobs.filter((job) => job.status === 'cancelled').length,
   };
@@ -321,8 +383,8 @@ function OperationsPage({ documentFollowUp = false }) {
           page,
           pageSize: PAGE_SIZE,
           query,
-          status: documentFollowUp ? 'completed' : status,
-          rpujStage: documentFollowUp ? '' : rpujStage,
+          status: documentFollowUp ? 'completed' : effectiveStatus,
+          rpujStage: documentFollowUp || repoStorageOnly ? '' : rpujStage,
           documentStatus: documentFollowUp ? 'incomplete' : '',
         });
         if (!active) return;
@@ -346,7 +408,7 @@ function OperationsPage({ documentFollowUp = false }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive.isDatabaseMode, documentFollowUp, listVersion, page, query, rpujStage, status]);
+  }, [archive.isDatabaseMode, documentFollowUp, effectiveStatus, listVersion, page, query, repoStorageOnly, rpujStage]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -375,8 +437,19 @@ function OperationsPage({ documentFollowUp = false }) {
 
   async function updateOperational(form) {
     const containerNumber = form.containerNumber || containerLabel(editing);
+    const actorName = user?.fullName || user?.name || 'Operational';
+    const payload = editing.repoPickupMode
+      ? {
+          ...form,
+          status: 'running',
+          runningAt: form.runningAt || new Date().toISOString(),
+          repoPickedUpAt: new Date().toISOString(),
+          repoPickedUpByName: actorName,
+          updatedBy: actorName,
+        }
+      : form;
     try {
-      const saved = await archive.updateJob(editing.id, form);
+      const saved = await archive.updateJob(editing.id, payload);
       if (archive.isDatabaseMode) {
         if (saved) {
           setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
@@ -386,8 +459,10 @@ function OperationsPage({ documentFollowUp = false }) {
       }
       setEditing(null);
       notify({
-        title: 'Proses Operational diperbarui',
-        message: `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
+        title: editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
+        message: editing.repoPickupMode
+          ? `${containerNumber} berhasil diambil dari Repo dan lanjut Sedang Jalan dengan assignment baru.`
+          : `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
@@ -411,6 +486,10 @@ function OperationsPage({ documentFollowUp = false }) {
   }
 
   function openCancelOperational(job) {
+    if (hasRepoStorageHistory(job)) {
+      notify({ type: 'error', title: 'Container pernah dititipkan', message: 'Container yang sudah masuk flow titip tidak bisa dibatalkan dari detail operational.' });
+      return;
+    }
     setCancelTarget(job);
     setCancelForm({
       cancelSource: job.cancelSource || 'customer',
@@ -459,7 +538,26 @@ function OperationsPage({ documentFollowUp = false }) {
       repoLocation: job.repoLocation || '',
       repoReason: job.repoReason || '',
       repoNotes: job.repoNotes || '',
+      repoContainerCondition: job.repoContainerCondition || '',
+      repoEirNumber: job.repoEirNumber || '',
+      repoEirDocument: job.repoEirDocument || null,
     });
+  }
+
+  function openRepoPickup(job) {
+    setEditing({
+      ...job,
+      status: 'received',
+      plateNumber: '',
+      driver: '',
+      driverId: null,
+      vehicleId: null,
+      chassis: '',
+      runningAt: '',
+      completedAt: '',
+      repoPickupMode: true,
+    });
+    setDetail(null);
   }
 
   async function storeRepoJob(event) {
@@ -472,6 +570,9 @@ function OperationsPage({ documentFollowUp = false }) {
       repoLocation: repoForm.repoLocation.trim(),
       repoReason: repoForm.repoReason.trim(),
       repoNotes: repoForm.repoNotes.trim(),
+      repoContainerCondition: repoForm.repoContainerCondition,
+      repoEirNumber: repoForm.repoEirNumber.trim(),
+      repoEirDocument: repoForm.repoEirDocument || repoTarget.repoEirDocument || null,
       repoStoredAt: new Date().toISOString(),
       repoReleasedDriverId: repoTarget.driverId || null,
       repoReleasedVehicleId: repoTarget.vehicleId || null,
@@ -490,11 +591,11 @@ function OperationsPage({ documentFollowUp = false }) {
       setDetail(null);
       setRepoTarget(null);
       notify({
-        title: 'Container dititipkan Repo',
-        message: `${containerLabel(repoTarget)} ditandai Dititipkan Repo. Truck dan sopir bisa dipakai untuk job lain.`,
+        title: 'Container dititipkan',
+        message: `${containerLabel(repoTarget)} dititipkan di ${repoForm.repoLocation.trim()}. Truck dan sopir bisa dipakai untuk job lain.`,
       });
     } catch (requestError) {
-      notify({ type: 'error', title: 'Penitipan Repo gagal', message: requestError.message });
+      notify({ type: 'error', title: 'Penitipan container gagal', message: requestError.message });
     } finally {
       setRepoSaving(false);
     }
@@ -536,16 +637,18 @@ function OperationsPage({ documentFollowUp = false }) {
   }
 
   return (
-    <div className={`page ${documentFollowUp ? 'operational-document-followup-page' : ''}`.trim()}>
+    <div className={`page ${documentFollowUp ? 'operational-document-followup-page' : ''} ${repoStorageOnly ? 'operational-repo-storage-page' : ''}`.trim()}>
       <PageHeader
         eyebrow="Operational"
-        title={documentFollowUp ? 'Dokumen Container Belum Lengkap' : 'Container Job'}
-        description={documentFollowUp
-          ? 'Tindak lanjuti container selesai yang masih membutuhkan dokumen operasional.'
-          : 'Kelola assignment, dokumen operasional, status, dan timeline setiap container.'}
+        title={repoStorageOnly ? 'Container Titip' : documentFollowUp ? 'Dokumen Container Belum Lengkap' : 'Container Job'}
+        description={repoStorageOnly
+          ? 'Pantau container yang sedang dititipkan di depo penitipan dan ambil kembali saat siap dijalankan.'
+          : documentFollowUp
+            ? 'Tindak lanjuti container selesai yang masih membutuhkan dokumen operasional.'
+            : 'Kelola assignment, dokumen operasional, status, dan timeline setiap container.'}
       />
 
-      {canReviewCancel && pendingCancelJobs.length ? (
+      {canReviewCancel && !repoStorageOnly && pendingCancelJobs.length ? (
         <section className="panel cancel-review-panel">
           <header className="cancel-review-head">
             <div>
@@ -582,7 +685,7 @@ function OperationsPage({ documentFollowUp = false }) {
       {!documentFollowUp ? <div className="quick-stats operational-stats">
         <div><span>Belum Jalan</span><strong>{counts.received}</strong><small>Menunggu truck dan driver</small></div>
         <div><span>Sedang Jalan</span><strong>{counts.running}</strong><small>Dalam perjalanan</small></div>
-        <div><span>Dititipkan Repo</span><strong>{counts.repo_stored}</strong><small>Truck dan sopir sudah lepas</small></div>
+        <div><span>Container Titip</span><strong>{counts.repo_stored}</strong><small>Truck dan sopir sudah lepas</small></div>
         <div><span>Selesai</span><strong>{counts.completed}</strong><small>Proses telah lengkap</small></div>
         <div><span>Total Job</span><strong>{totalJobs}</strong><small>Container dalam daftar</small></div>
       </div> : null}
@@ -590,22 +693,32 @@ function OperationsPage({ documentFollowUp = false }) {
       <section className="panel operational-workspace">
         <div className="operational-filter-strip">
           <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari SO, container, driver, atau truck..." /></label>
-          {!documentFollowUp ? <div className="job-status-tabs" role="tablist" aria-label="Status Container Job">
+          {!documentFollowUp && !repoStorageOnly ? <div className="job-status-tabs" role="tablist" aria-label="Status Container Job">
             {[
               ['', 'Semua', totalJobs],
               ['received', 'Belum Jalan', counts.received],
               ['running', 'Sedang Jalan', counts.running],
-              ['repo_stored', 'Dititipkan Repo', counts.repo_stored],
+              ['repo_stored', 'Container Titip', counts.repo_stored],
               ['completed', 'Selesai', counts.completed],
               ['cancelled', 'Batal', counts.cancelled],
             ].map(([value, label, count]) => (
-              <button key={label} type="button" role="tab" aria-selected={status === value} className={status === value ? 'active' : ''} onClick={() => setStatus(value)}>
+              <button
+                key={label}
+                type="button"
+                role="tab"
+                aria-selected={effectiveStatus === value}
+                className={`${effectiveStatus === value ? 'active' : ''} ${value ? `is-${value}` : ''}`.trim()}
+                onClick={() => setStatus(value)}
+                title={value === 'repo_stored' ? 'Container sedang dititipkan dan perlu dipantau.' : label}
+              >
                 {label}<span>{count}</span>
               </button>
             ))}
-          </div> : <div className="operational-document-followup-summary"><FileText size={17} /><strong>{totalItems}</strong><span>container perlu dilengkapi</span></div>}
+          </div> : repoStorageOnly ? (
+            <div className="operational-document-followup-summary"><Archive size={17} /><strong>{totalItems}</strong><span>container sedang dititipkan</span></div>
+          ) : <div className="operational-document-followup-summary"><FileText size={17} /><strong>{totalItems}</strong><span>container perlu dilengkapi</span></div>}
         </div>
-        {!documentFollowUp ? <div className="operational-filter-substrip">
+        {!documentFollowUp && !repoStorageOnly ? <div className="operational-filter-substrip">
           <span>RPUJ</span>
           <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
             {rpujStageOptions.map((option) => {
@@ -626,7 +739,7 @@ function OperationsPage({ documentFollowUp = false }) {
             })}
           </div>
           <small>Menampilkan {totalItems} dari {totalJobs} container job</small>
-          {query.trim() || status || rpujStage ? (
+          {query.trim() || effectiveStatus || rpujStage ? (
             <button className="filter-reset-link" type="button" onClick={() => {
               setQuery('');
               setStatus('');
@@ -662,11 +775,12 @@ function OperationsPage({ documentFollowUp = false }) {
                   const sizeTypeLabel = [job.size, job.type].filter(Boolean).join(' / ') || '-';
                   const rpuj = rpujDetail(job);
                   const documentPercent = (documents.completed / documents.total) * 100;
+                  const repoSummary = isRepoStoredJob(job) ? repoStorageSummary(job) : null;
                   return (
-                    <article className="operational-container-row" key={job.id}>
+                    <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''}`} key={job.id}>
                       <div className="container-row-main">
                         <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
-                        <small>{shipmentLabel} - {sizeTypeLabel}</small>
+                        <small>{repoSummary ? `Container Titip - ${repoSummary.reason}` : `${shipmentLabel} - ${sizeTypeLabel}`}</small>
                       </div>
                       <div className="container-row-status">
                         <StatusBadge status={job.status} />
@@ -677,8 +791,17 @@ function OperationsPage({ documentFollowUp = false }) {
                         <small>{rpuj.helper}</small>
                       </div>
                       <div className="container-row-assignment">
-                        <span><UserRound size={13} /> {job.driver || 'Driver belum ditentukan'}</span>
-                        <span><Truck size={13} /> {job.plateNumber || 'Truck belum ditentukan'}</span>
+                        {repoSummary ? (
+                          <>
+                    <span><Archive size={13} /> {repoSummary.location}</span>
+                            <span><Truck size={13} /> {repoSummary.storedAt} - {repoContainerConditionLabel(job.repoContainerCondition)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span><UserRound size={13} /> {job.driver || 'Driver belum ditentukan'}</span>
+                            <span><Truck size={13} /> {job.plateNumber || 'Truck belum ditentukan'}</span>
+                          </>
+                        )}
                       </div>
                       <div className="container-row-docs">
                         <span>Dokumen</span>
@@ -688,7 +811,9 @@ function OperationsPage({ documentFollowUp = false }) {
                       </div>
                       <div className="container-row-actions">
                         <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={14} /> Detail</button>
-                        {canEdit && job.status !== 'cancelled' ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
+                        {canEdit && canStoreRepoJob(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(job)}><Archive size={14} /> Titipkan</button> : null}
+                        {canEdit && isRepoStoredJob(job) ? <button className="primary-button" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
+                        {canEdit && !isRepoStoredJob(job) && !['cancelled'].includes(job.status) ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
                     </article>
                   );
@@ -699,10 +824,12 @@ function OperationsPage({ documentFollowUp = false }) {
           {!loading && !error && !totalItems ? (
             <div className="archive-empty-wrapper">
               <EmptyState
-                title={documentFollowUp ? 'Semua dokumen sudah lengkap' : 'Belum ada Container Job'}
-                description={documentFollowUp
-                  ? 'Tidak ada container selesai yang membutuhkan tindak lanjut dokumen.'
-                  : 'Pekerjaan akan tampil setelah tim Sales membuat Sales Order.'}
+                title={repoStorageOnly ? 'Belum ada container titip' : documentFollowUp ? 'Semua dokumen sudah lengkap' : 'Belum ada Container Job'}
+                description={repoStorageOnly
+                  ? 'Container yang dititipkan akan tampil di sini.'
+                  : documentFollowUp
+                    ? 'Tidak ada container selesai yang membutuhkan tindak lanjut dokumen.'
+                    : 'Pekerjaan akan tampil setelah tim Sales membuat Sales Order.'}
               />
             </div>
           ) : null}
@@ -739,14 +866,18 @@ function OperationsPage({ documentFollowUp = false }) {
               <section><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
-              {detail.status === 'repo_stored' || detail.repoLocation || detail.repoStoredAt ? (
+              {isRepoStoredJob(detail) || detail.repoLocation || detail.repoStoredAt ? (
                 <section className="container-repo-summary">
-                  <h3>Penitipan Repo</h3>
+                  <h3>Penitipan Container</h3>
                   <div>
-                    <span>Lokasi<strong>{detail.repoLocation || '-'}</strong></span>
+                    <span>Depo Penitipan<strong>{detail.repoLocation || '-'}</strong></span>
                     <span>Waktu titip<strong>{formatDateTime(detail.repoStoredAt)}</strong></span>
+                    <span>No. EIR Titip<strong>{detail.repoEirNumber || '-'}</strong></span>
                     <span>Alasan<strong>{detail.repoReason || '-'}</strong></span>
+                    <span>Kondisi Container<strong>{repoContainerConditionLabel(detail.repoContainerCondition)}</strong></span>
                     <span>Dicatat oleh<strong>{detail.repoCreatedByName || detail.updatedBy || '-'}</strong></span>
+                    <span>Resource<strong>Truck & sopir sudah lepas</strong><small>Bisa dipakai untuk job lain</small></span>
+                    <span>Diambil oleh<strong>{detail.repoPickedUpByName || '-'}</strong><small>{formatDateTime(detail.repoPickedUpAt)}</small></span>
                   </div>
                   {detail.repoNotes ? <p>{detail.repoNotes}</p> : null}
                 </section>
@@ -766,9 +897,10 @@ function OperationsPage({ documentFollowUp = false }) {
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetail(null)}>Tutup</button>
-              {canEdit && canStoreRepoJob(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(detail)}><Archive size={16} /> Titipkan Repo</button> : null}
-              {canEdit && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
-              {canEdit && !['cancelled', 'repo_stored'].includes(detail.status) ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
+              {canEdit && canStoreRepoJob(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(detail)}><Archive size={16} /> Titipkan Container</button> : null}
+              {canEdit && isRepoStoredJob(detail) ? <button className="primary-button" type="button" onClick={() => openRepoPickup(detail)}><Truck size={16} /> Ambil Container</button> : null}
+              {canEdit && !hasRepoStorageHistory(detail) && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
+              {canEdit && !isRepoStoredJob(detail) && !['cancelled'].includes(detail.status) ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
           </section>
         </div>
@@ -825,10 +957,10 @@ function OperationsPage({ documentFollowUp = false }) {
             <header>
               <span><Archive size={18} /></span>
               <div>
-                <h2 id="container-repo-title">Titipkan Container ke Repo</h2>
+                <h2 id="container-repo-title">Titipkan Container</h2>
                 <p>{containerLabel(repoTarget)} - {repoTarget.soNumber || '-'} - {repoTarget.customer || '-'}</p>
               </div>
-              <button className="modal-close-button" type="button" aria-label="Tutup penitipan repo" disabled={repoSaving} onClick={() => setRepoTarget(null)}><X size={18} /></button>
+              <button className="modal-close-button" type="button" aria-label="Tutup penitipan container" disabled={repoSaving} onClick={() => setRepoTarget(null)}><X size={18} /></button>
             </header>
             <form onSubmit={storeRepoJob}>
               <div className="repo-assignment-snapshot">
@@ -839,7 +971,7 @@ function OperationsPage({ documentFollowUp = false }) {
               {repoMissing.length ? (
                 <div className="container-repo-warning is-blocked">
                   <AlertTriangle size={16} />
-                  <span>Lengkapi {repoMissing.join(', ')} sebelum container bisa dititipkan Repo.</span>
+                  <span>Lengkapi {repoMissing.join(', ')} sebelum container bisa dititipkan.</span>
                 </div>
               ) : (
                 <div className="container-repo-warning">
@@ -848,13 +980,26 @@ function OperationsPage({ documentFollowUp = false }) {
                 </div>
               )}
               <label>
-                Lokasi Repo
-                <input
+                Depo Penitipan
+                <select
                   autoFocus
                   value={repoForm.repoLocation}
                   onChange={(event) => setRepoForm((current) => ({ ...current, repoLocation: event.target.value }))}
-                  placeholder="Contoh: Repo Marunda Blok A"
-                />
+                >
+                  <option value="">Pilih Depo Penitipan</option>
+                  {hasCurrentDepot ? <option value={repoForm.repoLocation}>{repoForm.repoLocation}</option> : null}
+                  {depotOptions.map((depot) => <option key={depot} value={depot}>{depot}</option>)}
+                </select>
+              </label>
+              <label>
+                Kondisi Container
+                <select
+                  value={repoForm.repoContainerCondition}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, repoContainerCondition: event.target.value }))}
+                >
+                  <option value="">Pilih Kondisi Container</option>
+                  {REPO_CONTAINER_CONDITIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
               </label>
               <label>
                 Alasan Penitipan
@@ -865,6 +1010,32 @@ function OperationsPage({ documentFollowUp = false }) {
                   placeholder="Contoh: Menunggu instruksi bongkar dari customer"
                 />
               </label>
+              <label>
+                No. EIR Titip
+                <input
+                  value={repoForm.repoEirNumber}
+                  onChange={(event) => setRepoForm((current) => ({ ...current, repoEirNumber: event.target.value }))}
+                  placeholder="EIR-TITIP-2026-001"
+                />
+              </label>
+              <div>
+                <span className="repo-field-label">Dokumen EIR Titip</span>
+                <AttachmentUploadField
+                  id="repo-eir-document"
+                  label="Dokumen EIR Titip"
+                  title="Upload EIR Titip"
+                  helper="Wajib. PDF, JPG, PNG"
+                  value={repoForm.repoEirDocument}
+                  onSelect={(file, validationError) => {
+                    if (validationError) {
+                      notify({ type: 'error', title: 'Dokumen EIR Titip tidak valid', message: validationError });
+                      return;
+                    }
+                    setRepoForm((current) => ({ ...current, repoEirDocument: file }));
+                  }}
+                  onClear={() => setRepoForm((current) => ({ ...current, repoEirDocument: null }))}
+                />
+              </div>
               <label>
                 Catatan Tambahan
                 <textarea
@@ -906,6 +1077,7 @@ function OperationsPage({ documentFollowUp = false }) {
 function documentFieldsForDetail(job) {
   return [
     ['Lampiran Biaya Lainnya', job.spkDocument],
+    ['Lampiran EIR Titip', job.repoEirDocument],
     ['Lampiran EIR', job.eirDocument],
     ['Bon Muat', job.loadingVoucherDocument],
     ['TILA / Delivery Card / Gatepass / SP2', job.tilaGatepassDocumentFile || job.unloadingVoucherDocument || job.weighingDocumentFile],
