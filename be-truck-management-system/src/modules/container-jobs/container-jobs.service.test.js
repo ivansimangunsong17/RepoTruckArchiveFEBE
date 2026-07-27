@@ -3,7 +3,7 @@ import test from 'node:test';
 
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
-const { ensureRepoStoragePayload, hasOperationalDocumentChange, isContainerNumberLockedForOperational, isInitialContainerNumberInput, isOtherCostLockedForRepoPickup, isRepoCancellationLockedForOperational } = await import('./container-jobs.service.js');
+const { ensureRepoStoragePayload, hasCompletedTimelineChange, hasOperationalDocumentChange, isContainerNumberLockedForOperational, isInitialContainerNumberInput, isOtherCostLockedForRepoPickup, isRepoCancellationLockedForOperational } = await import('./container-jobs.service.js');
 const { hasCompleteOperationalAssignment, hasRequiredRepoCompletionDocuments } = await import('./container-jobs.repository.js');
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
@@ -62,6 +62,29 @@ test('mengenali revisi dokumen yang sudah tersimpan', () => {
   assert.equal(hasOperationalDocumentChange(
     { eirNumber: 'EIR-001' },
     { eirNumber: 'EIR-REVISI' },
+  ), true);
+});
+
+test('mengenali revisi timeline job selesai', () => {
+  assert.equal(hasCompletedTimelineChange(
+    {
+      runningAt: '2026-06-29T06:45:00.000Z',
+      completedAt: '2026-07-01T06:45:00.000Z',
+    },
+    {
+      runningAt: '2026-06-29T06:45:00.000Z',
+      completedAt: '2026-07-01T06:45:00.000Z',
+    },
+  ), false);
+  assert.equal(hasCompletedTimelineChange(
+    {
+      runningAt: '2026-06-29T06:45:00.000Z',
+      completedAt: '2026-07-01T06:45:00.000Z',
+    },
+    {
+      runningAt: '2026-06-29T07:45:00.000Z',
+      completedAt: '2026-07-01T06:45:00.000Z',
+    },
   ), true);
 });
 

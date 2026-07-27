@@ -124,8 +124,9 @@ function DetailField({ label, value }) {
 }
 
 function journeyLog(job) {
+  const doReceivedDate = job?.soDate || job?.receivedAt;
   return [
-    { label: 'DO diterima', value: formatDateTime(job?.receivedAt) },
+    { label: 'DO diterima', value: formatDate(doReceivedDate) },
     { label: 'Tanggal jalan', value: formatDate(job?.tripDate) },
     { label: 'Mulai jalan', value: formatDateTime(job?.runningAt) },
     ...(hasRepoHistory(job) ? [
@@ -461,8 +462,6 @@ function OrderHistoryPage() {
               <thead>
                 <tr className="bg-slate-100">
                   <th>No.</th>
-                  <th>Tanggal DO Diterima</th>
-                  <th>Tanggal Jalan</th>
                   <th>Tanggal Selesai</th>
                   <th>Nomor Container</th>
                   <th>Customer</th>
@@ -479,8 +478,6 @@ function OrderHistoryPage() {
                 {rows.map((job, index) => (
                   <tr className="border-t border-slate-200 text-slate-800 odd:bg-white even:bg-slate-50/80 hover:bg-slate-100/70" key={job.id || `${job.containerNumber}-${index}`}>
                     <td data-label="No."><strong>{showingFrom + index}.</strong></td>
-                    <td data-label="Tanggal DO Diterima"><strong>{formatDate(job.receivedAt)}</strong></td>
-                    <td data-label="Tanggal Jalan"><strong>{formatDate(job.tripDate)}</strong></td>
                     <td data-label="Tanggal Selesai"><strong>{formatDate(job.completedAt || job.cancelledAt)}</strong></td>
                     <td data-label="Nomor Container">
                       <strong className="block text-slate-950">{job.containerNumber || '-'}</strong>

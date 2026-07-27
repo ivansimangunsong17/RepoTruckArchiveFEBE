@@ -3,7 +3,7 @@ import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom';
 import App from '../App';
 import { AppErrorBoundary, PageSkeleton } from '../components/common/PageStates';
-import { USER_ROLES } from '../constants/roles';
+import { ALL_ROLES, USER_ROLES } from '../constants/roles';
 import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
 
@@ -43,7 +43,7 @@ function LazyPage({ children }) {
 }
 
 const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
-const overviewRoles = [...nonFinanceRoles, USER_ROLES.FINANCE];
+const overviewRoles = ALL_ROLES;
 const orderRoles = nonFinanceRoles;
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
 const adminRoles = [USER_ROLES.ADMIN];

@@ -485,7 +485,7 @@ export async function getOperationReport(options = {}) {
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id,
                cj.repo_created_by_name, cj.repo_picked_up_at, cj.repo_picked_up_by_name,
-               so.so_number, so.do_number, so.customer_name, so.trip_date,
+               so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
                so.sales_name, so.created_by_name,
                so.origin, so.destination
         from container_jobs cj
@@ -528,6 +528,7 @@ export async function getOperationReport(options = {}) {
       doNumber: row.do_number,
       customer: row.customer_name,
       salesName: row.sales_name || row.created_by_name,
+      soDate: row.so_date,
       tripDate: row.trip_date,
       origin: row.origin,
       destination: row.destination,

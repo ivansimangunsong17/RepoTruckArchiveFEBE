@@ -58,6 +58,46 @@ test('setiap container memiliki empat slot dokumen tanpa menggabungkan file yang
   assert.equal(documents[4].jobReference, 'Container 2 (nomor belum diisi)');
 });
 
+test('dokumen tambahan operational ikut tampil di detail invoice finance', () => {
+  const base = {
+    source: 'Operational',
+    job_id: 'job-1',
+    container_number: 'CSGU23338220',
+    file_size: 100,
+    mime_type: 'application/pdf',
+  };
+  const documents = mapInvoiceDocuments([
+    {
+      ...base,
+      id: 'attachment-sj',
+      category: 'travelDocumentFile',
+      reference_number: 'SJ-001',
+      file_name: 'surat-jalan.pdf',
+    },
+    {
+      ...base,
+      id: 'attachment-other-1',
+      category: 'otherDocument',
+      notes: 'Foto segel',
+      file_name: 'foto-segel.pdf',
+    },
+    {
+      ...base,
+      id: 'attachment-other-2',
+      category: 'otherDocument',
+      notes: 'Berita acara',
+      file_name: 'berita-acara.pdf',
+    },
+  ]);
+
+  const otherDocuments = documents.filter((document) => document.category === 'otherDocument');
+
+  assert.equal(documents.length, 6);
+  assert.deepEqual(otherDocuments.map((document) => document.label), ['Foto segel', 'Berita acara']);
+  assert.deepEqual(otherDocuments.map((document) => document.file.name), ['foto-segel.pdf', 'berita-acara.pdf']);
+  assert.equal(otherDocuments.every((document) => document.ready), true);
+});
+
 test('validasi koreksi Finance mewajibkan tipe, nomor baru, dan alasan', () => {
   assert.equal(normalizeFinanceCorrectionType('soNumber'), financeCorrectionTypes.soNumber);
   assert.equal(normalizeFinanceCorrectionType('invoice_number'), financeCorrectionTypes.invoiceNumber);

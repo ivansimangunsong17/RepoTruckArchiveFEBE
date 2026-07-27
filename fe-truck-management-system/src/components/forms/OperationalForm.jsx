@@ -155,6 +155,25 @@ function nowForDateTimeInput() {
   return date.toISOString().slice(0, 16);
 }
 
+function toDateTimeInputValue(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) return raw;
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw.slice(0, 16);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function dateTimeInputToIso(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString();
+}
+
 function generateSpkNumber() {
   const now = new Date();
   const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -410,8 +429,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     travelDocumentFile: container.travelDocumentFile || null,
     otherDocuments: container.otherDocuments || [],
     status: container.status || 'received',
-    runningAt: container.runningAt?.slice(0, 16) || '',
-    completedAt: container.completedAt?.slice(0, 16) || '',
+    runningAt: toDateTimeInputValue(container.runningAt),
+    completedAt: toDateTimeInputValue(container.completedAt),
   });
   const [activePhase, setActivePhase] = useState(initialPhase);
   const [error, setError] = useState('');
@@ -448,6 +467,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const canEditDocumentValue = (field) => !isCompletedDocumentFollowUp || !String(container[field] || '').trim();
   const canEditDocumentFile = (field) => !isCompletedDocumentFollowUp || !container[field];
   const canEditOtherDocuments = !isCompletedDocumentFollowUp;
+  const canEditTimeline = canReviseLockedFields || container.status !== 'completed';
   const rpujActionLabel = rpujStatus === 'submitted'
     ? 'Sudah Diajukan'
     : rpujStatus === 'approved'
@@ -893,6 +913,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const submitForm = {
       ...form,
       rpujStatus: nextRpujStatus,
+      runningAt: dateTimeInputToIso(form.runningAt),
+      completedAt: dateTimeInputToIso(form.completedAt),
     };
     if (includeRpujNotes) {
       submitForm.rpujNotes = serializeOtherCost({
@@ -1407,8 +1429,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     </small>
                   ) : null}
                 </label>
-                <label className="operational-date-field operational-date-start">Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} /></label>
-                <label className="operational-date-field operational-date-end">Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} /></label>
+                <label className="operational-date-field operational-date-start">Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} disabled={!canEditTimeline} /></label>
+                <label className="operational-date-field operational-date-end">Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} disabled={!canEditTimeline} /></label>
               </div>
             </div>
           </>

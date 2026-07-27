@@ -137,6 +137,25 @@ export function hasOperationalDocumentChange(currentJob, payload = {}) {
   ));
 }
 
+function normalizeTimelineValue(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).trim();
+  return date.toISOString();
+}
+
+export function hasCompletedTimelineChange(currentJob, payload = {}) {
+  const timelineFields = [
+    ['runningAt', 'runningAt'],
+    ['completedAt', 'completedAt'],
+  ];
+
+  return timelineFields.some(([payloadKey, jobKey]) => (
+    Object.prototype.hasOwnProperty.call(payload, payloadKey)
+    && normalizeTimelineValue(payload[payloadKey]) !== normalizeTimelineValue(currentJob?.[jobKey])
+  ));
+}
+
 function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
   if (normalizeRole(actor) !== 'operational') return;
   if (!payload.status || payload.status === job?.status) return;
@@ -196,6 +215,17 @@ function ensureOperationalCanEditDocuments(actor, job, payload = {}) {
   const error = new Error('Dokumen operasional tidak bisa diubah lagi setelah pekerjaan selesai.');
   error.statusCode = 409;
   error.code = 'CONTAINER_JOB_DOCUMENTS_LOCKED';
+  throw error;
+}
+
+function ensureOperationalCanEditCompletedTimeline(actor, job, payload = {}) {
+  if (normalizeRole(actor) !== 'operational') return;
+  if (job?.status !== 'completed') return;
+  if (!hasCompletedTimelineChange(job, payload)) return;
+
+  const error = new Error('Waktu mulai dan selesai hanya bisa direvisi Admin setelah pekerjaan selesai.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_TIMELINE_LOCKED';
   throw error;
 }
 
@@ -385,6 +415,7 @@ export async function saveContainerJob(id, payload, actor) {
   ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditDocuments(actor, currentJob, payloadForUpdate);
+  ensureOperationalCanEditCompletedTimeline(actor, currentJob, payloadForUpdate);
 
   return updateContainerJob(id, payloadForUpdate);
 }

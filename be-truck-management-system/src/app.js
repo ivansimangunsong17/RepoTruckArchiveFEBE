@@ -59,10 +59,17 @@ const routes = [
 ];
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-function applyCors(response) {
-  response.setHeader('Access-Control-Allow-Origin', env.corsOrigin);
+function resolveCorsOrigin(requestOrigin) {
+  if (env.corsOrigins.includes('*')) return '*';
+  if (requestOrigin && env.corsOrigins.includes(requestOrigin)) return requestOrigin;
+  return env.corsOrigins[0] || 'http://localhost:5173';
+}
+
+function applyCors(request, response) {
+  response.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request.headers.origin));
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  response.setHeader('Vary', 'Origin');
 }
 
 async function parseBody(request) {
@@ -106,7 +113,7 @@ function findRoute(method, pathname) {
 
 export function createApp() {
   return createServer(async (request, response) => {
-    applyCors(response);
+    applyCors(request, response);
 
     if (request.method === 'OPTIONS') {
       response.writeHead(204);

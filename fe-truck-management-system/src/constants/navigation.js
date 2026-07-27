@@ -22,7 +22,7 @@ import {
   Truck,
   Warehouse,
 } from 'lucide-react';
-import { USER_ROLES } from './roles';
+import { ALL_ROLES, USER_ROLES } from './roles';
 
 const adminOnly = [USER_ROLES.ADMIN];
 const nonFinanceRoles = [
@@ -31,10 +31,7 @@ const nonFinanceRoles = [
   USER_ROLES.OPERATIONAL,
   USER_ROLES.OBSERVER,
 ];
-const overviewRoles = [
-  ...nonFinanceRoles,
-  USER_ROLES.FINANCE,
-];
+const overviewRoles = ALL_ROLES;
 const orderRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.SALES,

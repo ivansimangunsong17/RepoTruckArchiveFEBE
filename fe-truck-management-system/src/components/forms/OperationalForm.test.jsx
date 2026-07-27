@@ -18,6 +18,12 @@ async function openOperationalPhase(user, name) {
   await user.click(screen.getByRole('tab', { name }));
 }
 
+function expectedDateTimeLocalValue(value) {
+  const date = new Date(value);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
 describe('OperationalForm', () => {
   it('membagi form operasional ke dalam phase kerja', async () => {
     const user = userEvent.setup();
@@ -130,6 +136,39 @@ describe('OperationalForm', () => {
     expect(screen.getByText('UJ sudah disetujui/dikirim')).toBeInTheDocument();
     expect(screen.getByText('SPK ada')).toBeInTheDocument();
     expect(screen.getByText('Lampiran EIR sudah diupload')).toBeInTheDocument();
+  });
+
+  it('menampilkan waktu edit sesuai jam lokal dan mengirimnya kembali sebagai ISO', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const runningAt = '2026-06-29T06:45:00.000Z';
+    const expectedInputValue = expectedDateTimeLocalValue(runningAt);
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+          status: 'running',
+          plateNumber: 'B 1000 AA',
+          driver: 'Driver Aktif',
+          runningAt,
+        }}
+        initialPhase="closing"
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByLabelText(/waktu mulai/i)).toHaveValue(expectedInputValue);
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      runningAt: new Date(expectedInputValue).toISOString(),
+    }));
   });
 
   it('menampilkan EIR Titip di checklist closing untuk job yang pernah dititipkan', () => {
@@ -288,6 +327,8 @@ describe('OperationalForm', () => {
     );
 
     expect(screen.getByLabelText('No. EIR')).toBeDisabled();
+    expect(screen.getByLabelText(/waktu mulai/i)).toBeDisabled();
+    expect(screen.getByLabelText(/waktu selesai/i)).toBeDisabled();
     expect(document.getElementById('operational-eir-document')).toBeEnabled();
     expect(screen.getByText(/hanya dapat melengkapi data atau file yang masih kosong/i)).toBeInTheDocument();
   });
@@ -870,6 +911,9 @@ describe('OperationalForm', () => {
     await openOperationalPhase(user, /persiapan job/i);
 
     expect(screen.getByLabelText('Truck')).not.toBeDisabled();
+    await openOperationalPhase(user, /dokumen & closing/i);
+    expect(screen.getByLabelText(/waktu mulai/i)).not.toBeDisabled();
+    expect(screen.getByLabelText(/waktu selesai/i)).not.toBeDisabled();
     expect(screen.queryByText(/Hubungi admin untuk revisi/i)).not.toBeInTheDocument();
   });
 

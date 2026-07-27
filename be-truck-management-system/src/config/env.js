@@ -46,10 +46,19 @@ function readPositiveInteger(name, fallback) {
   return value;
 }
 
+function readCorsOrigins() {
+  const rawValue = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173';
+  return rawValue
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 export const env = {
   nodeEnv,
   port: Number(process.env.PORT || 3000),
-  corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  host: process.env.HOST || '0.0.0.0',
+  corsOrigins: readCorsOrigins(),
   databaseUrl: process.env.DATABASE_URL || '',
   uploadDir: process.env.UPLOAD_DIR || 'uploads',
   authTokenSecret: readAuthTokenSecret(),

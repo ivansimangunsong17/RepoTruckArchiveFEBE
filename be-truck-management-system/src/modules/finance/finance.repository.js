@@ -173,6 +173,24 @@ function financeRowsCte() {
       where status <> 'cancelled'
       group by sales_order_id
     ),
+    ranked_jobs as (
+      select
+        cj.*,
+        case
+          when upper(replace(cj.container_size, ' ', '')) = '40FT' then '40FT'
+          else '20FT'
+        end as finance_size_key,
+        row_number() over (
+          partition by cj.sales_order_id,
+          case
+            when upper(replace(cj.container_size, ' ', '')) = '40FT' then '40FT'
+            else '20FT'
+          end
+          order by cj.created_at asc, cj.id asc
+        ) as finance_size_sequence
+      from container_jobs cj
+      where cj.status <> 'cancelled'
+    ),
     order_financials as (
       select
         so.id as sales_order_id,
@@ -223,6 +241,46 @@ function financeRowsCte() {
       ) item on true
       group by so.id
     ),
+    transport_line_items as (
+      select
+        so.id as sales_order_id,
+        case
+          when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) = lower('Jasa Angkut D40')
+          then '40FT'
+          else '20FT'
+        end as finance_size_key,
+        item.line_index,
+        greatest(coalesce(nullif(item.value->>'qty', '')::numeric, 1), 0)::int as qty,
+        coalesce(
+          nullif(nullif(item.value->>'price', '')::numeric, 0),
+          nullif(nullif(item.value->>'total', '')::numeric, 0) / greatest(coalesce(nullif(nullif(item.value->>'qty', '')::numeric, 0), 1), 1)
+        ) as unit_price
+      from sales_orders so
+      join lateral jsonb_array_elements(
+        case
+          when jsonb_typeof(to_jsonb(so)->'line_items') = 'array' then to_jsonb(so)->'line_items'
+          else '[]'::jsonb
+        end
+      ) with ordinality as item(value, line_index) on true
+      where lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) in (
+        lower('Jasa Angkut D20'),
+        lower('Jasa Angkut D40'),
+        lower('Jasa Angkut')
+      )
+    ),
+    transport_unit_prices as (
+      select
+        sales_order_id,
+        finance_size_key,
+        unit_price,
+        row_number() over (
+          partition by sales_order_id, finance_size_key
+          order by line_index asc, unit_index asc
+        ) as finance_size_sequence
+      from transport_line_items
+      cross join lateral generate_series(1, qty) as unit_index
+      where unit_price is not null
+    ),
     finance_rows as (
       select
         cj.id,
@@ -261,6 +319,7 @@ function financeRowsCte() {
         cj.completed_at,
         cj.assignment_snapshot,
         coalesce(
+          nullif(tup.unit_price, 0),
           case
             when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
             else nullif(ofi.transport_20ft_unit, 0)
@@ -274,6 +333,7 @@ function financeRowsCte() {
         ) as tariff,
         1::int as trip_quantity,
         coalesce(
+          nullif(tup.unit_price, 0),
           case
             when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
             else nullif(ofi.transport_20ft_unit, 0)
@@ -287,6 +347,7 @@ function financeRowsCte() {
         ) as transport_revenue,
         coalesce(ofi.reimbursement_total, 0) / greatest(coalesce(jc.total_jobs, 1), 1) as reimbursement_amount,
         coalesce(
+          nullif(tup.unit_price, 0),
           case
             when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
             else nullif(ofi.transport_20ft_unit, 0)
@@ -305,6 +366,7 @@ function financeRowsCte() {
         coalesce(((regexp_match(coalesce(cj.rpuj_notes, ''), '"amount"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1])::numeric, 0) as additional_cost,
         case
           when coalesce(
+            nullif(tup.unit_price, 0),
             case
               when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
               else nullif(ofi.transport_20ft_unit, 0)
@@ -321,6 +383,7 @@ function financeRowsCte() {
               else nullif(dl.uj_20ft, 0)
             end is not null
           then coalesce(
+            nullif(tup.unit_price, 0),
             case
               when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
               else nullif(ofi.transport_20ft_unit, 0)
@@ -351,6 +414,7 @@ function financeRowsCte() {
           )
           then case
             when coalesce(
+              nullif(tup.unit_price, 0),
               case
                 when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
                 else nullif(ofi.transport_20ft_unit, 0)
@@ -378,10 +442,14 @@ function financeRowsCte() {
           or coalesce(af.has_tila_gatepass_file, false)
         ) as has_tila_gatepass_document,
         (nullif(btrim(cj.travel_document_number), '') is not null or coalesce(af.has_travel_file, false)) as has_travel_document
-      from container_jobs cj
+      from ranked_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       left join job_counts jc on jc.sales_order_id = so.id
       left join order_financials ofi on ofi.sales_order_id = so.id
+      left join transport_unit_prices tup
+        on tup.sales_order_id = cj.sales_order_id
+       and tup.finance_size_key = cj.finance_size_key
+       and tup.finance_size_sequence = cj.finance_size_sequence
       left join destination_locations dl on lower(trim(dl.name)) = lower(trim(so.destination)) and dl.archived_at is null
       left join attachment_flags af on af.entity_id = cj.id
       where cj.status = 'completed'
@@ -710,6 +778,7 @@ function mapAttachment(row) {
     fileName: row.file_name,
     mimeType: row.mime_type,
     fileSize: row.file_size == null ? 0 : Number(row.file_size),
+    notes: row.notes || '',
     uploadedByName: row.uploaded_by_name,
     createdAt: row.created_at,
     file: {
@@ -959,8 +1028,13 @@ export function mapInvoiceDocuments(rows = []) {
       containerNumber: row.container_number || '',
       jobReference: `Container ${jobSequences.get(row.job_id)} (nomor belum diisi)`,
       attachments: new Map(),
+      otherDocuments: [],
     };
-    if (row.id && row.category) job.attachments.set(row.category, row);
+    if (row.id && row.category === 'otherDocument') {
+      job.otherDocuments.push(row);
+    } else if (row.id && row.category) {
+      job.attachments.set(row.category, row);
+    }
     containerJobs.set(row.job_id, job);
   });
 
@@ -999,7 +1073,16 @@ export function mapInvoiceDocuments(rows = []) {
     })
   ));
 
-  return [...operationalDocuments, ...salesDocuments];
+  const additionalOperationalDocuments = [...containerJobs.values()].flatMap((job) => (
+    job.otherDocuments.map((attachment) => ({
+      ...mapInvoiceDocument(attachment),
+      label: attachment.notes || attachment.reference_number || attachment.file_name || invoiceDocumentLabels.otherDocument,
+      jobReference: job.jobReference,
+      ready: true,
+    }))
+  ));
+
+  return [...operationalDocuments, ...additionalOperationalDocuments, ...salesDocuments];
 }
 
 function invoiceOrdersCte() {
@@ -2114,7 +2197,8 @@ export async function getInvoiceOrderDetail(id) {
            'travelDocumentFile',
            'loadingVoucherDocument',
            'unloadingVoucherDocument',
-           'tilaGatepassDocumentFile'
+           'tilaGatepassDocumentFile',
+           'otherDocument'
          )
         where cj.sales_order_id = $1
 

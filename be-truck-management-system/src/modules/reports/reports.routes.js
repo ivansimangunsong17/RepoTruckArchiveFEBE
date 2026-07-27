@@ -29,7 +29,7 @@ export const reportRoutes = [
   {
     method: 'GET',
     path: '/api/reports/operations',
-    permission: 'report.read',
+    permissions: ['report.read', 'container_job.read', 'sales_order.read'],
     handler: operationReportController,
   },
   {

@@ -137,12 +137,21 @@ function ReadOnlyField({ label, value }) {
 function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
   if (!trip && !loading && !error) return null;
 
+  const attachments = Array.isArray(trip?.attachments) ? trip.attachments : [];
   const docs = [
-    ['SPK', trip?.spkNumber, trip?.attachments?.find((item) => item.category === 'spkDocument')?.file],
-    ['Bon Muat / Bon Bongkar', trip?.operationalDocuments?.loadingVoucher, trip?.attachments?.find((item) => item.category === 'loadingVoucherDocument')?.file],
-    ['TILA / Delivery Card / Gatepass / SP2', trip?.operationalDocuments?.tilaGatepassDocument, trip?.attachments?.find((item) => ['tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'deliveryCard', 'gatepass'].includes(item.category))?.file],
-    ['Surat Jalan', trip?.operationalDocuments?.travelDocument, trip?.attachments?.find((item) => item.category === 'travelDocumentFile')?.file],
-    ['EIR', trip?.operationalDocuments?.eirNumber, trip?.attachments?.find((item) => item.category === 'eirDocument')?.file],
+    { id: 'spkDocument', label: 'SPK', number: trip?.spkNumber, file: attachments.find((item) => item.category === 'spkDocument')?.file },
+    { id: 'loadingVoucherDocument', label: 'Bon Muat / Bon Bongkar', number: trip?.operationalDocuments?.loadingVoucher, file: attachments.find((item) => item.category === 'loadingVoucherDocument')?.file },
+    { id: 'tilaGatepassDocumentFile', label: 'TILA / Delivery Card / Gatepass / SP2', number: trip?.operationalDocuments?.tilaGatepassDocument, file: attachments.find((item) => ['tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'deliveryCard', 'gatepass'].includes(item.category))?.file },
+    { id: 'travelDocumentFile', label: 'Surat Jalan', number: trip?.operationalDocuments?.travelDocument, file: attachments.find((item) => item.category === 'travelDocumentFile')?.file },
+    { id: 'eirDocument', label: 'EIR', number: trip?.operationalDocuments?.eirNumber, file: attachments.find((item) => item.category === 'eirDocument')?.file },
+    ...attachments
+      .filter((item) => item.category === 'otherDocument')
+      .map((item, index) => ({
+        id: item.id || item.file?.path || `otherDocument-${index}`,
+        label: item.notes || item.referenceNumber || item.file?.name || 'Dokumen Tambahan',
+        number: item.referenceNumber || '',
+        file: item.file,
+      })),
   ];
 
   return (
@@ -251,12 +260,12 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {docs.map(([label, number, file]) => (
-                        <tr className="border-t border-slate-100" key={label}>
-                          <td className="px-3 py-2 font-semibold text-slate-900">{label}</td>
-                          <td className="px-3 py-2 text-slate-700">{number || '-'}</td>
+                      {docs.map((document) => (
+                        <tr className="border-t border-slate-100" key={document.id}>
+                          <td className="px-3 py-2 font-semibold text-slate-900">{document.label}</td>
+                          <td className="px-3 py-2 text-slate-700">{document.number || '-'}</td>
                           <td className="px-3 py-2">
-                            <DocumentLink file={file} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" />
+                            <DocumentLink file={document.file} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" />
                           </td>
                         </tr>
                       ))}

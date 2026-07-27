@@ -121,6 +121,17 @@ beforeEach(() => {
         ready: true,
         file: { name: 'surat-jalan.pdf', path: 'attachment-1', type: 'application/pdf', size: 100 },
       },
+      {
+        id: 'attachment-other-1',
+        category: 'otherDocument',
+        label: 'Foto segel',
+        source: 'Operational',
+        jobId: 'job-1',
+        containerNumber: 'CONT-TEST-001',
+        referenceNumber: '',
+        ready: true,
+        file: { name: 'foto-segel.pdf', path: 'attachment-other-1', type: 'application/pdf', size: 100 },
+      },
       ...[
         ['eirDocument', 'EIR'],
         ['loadingVoucherDocument', 'Bon Muat / Bon Bongkar'],
@@ -242,10 +253,13 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(dialog).toHaveTextContent('1 container dibatalkan; tagihan hanya menghitung container yang selesai.');
     expect(dialog).toHaveTextContent('Jasa Angkut D20 - 1 ritase');
     expect(dialog).toHaveTextContent('Dokumen Sales / SO');
-    expect(dialog).toHaveTextContent('1/4 lengkap');
+    expect(dialog).toHaveTextContent('2/5 lengkap');
+    expect(dialog).toHaveTextContent('Foto segel');
     expect(screen.getAllByText('Belum dilengkapi oleh Operational.')).toHaveLength(6);
     expect(await screen.findByRole('button', { name: /View surat-jalan.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Download surat-jalan.pdf/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /View foto-segel.pdf/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Download foto-segel.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /View eir-container-2.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Download eir-container-2.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /View delivery-order.pdf/i })).toBeEnabled();
