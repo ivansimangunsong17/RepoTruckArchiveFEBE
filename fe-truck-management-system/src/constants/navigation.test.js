@@ -14,13 +14,16 @@ describe('navigationGroups', () => {
     });
   });
 
-  it('menampilkan dashboard today dan order mingguan untuk finance', () => {
-    const overviewGroup = navigationGroups.find((group) => group.label === 'Overview');
-    const dashboardItem = overviewGroup?.items.find((item) => item.to === '/dashboard');
-    const weeklyItem = overviewGroup?.items.find((item) => item.to === '/weekly-orders');
+  it('menampilkan struktur menu order untuk finance', () => {
+    const orderGroup = navigationGroups.find((group) => group.label === 'Order');
+    const runningItem = orderGroup?.items.find((item) => item.to === '/order-running');
+    const weeklyItem = orderGroup?.items.find((item) => item.to === '/weekly-orders');
+    const historyItem = orderGroup?.items.find((item) => item.to === '/order-history');
 
-    expect(dashboardItem?.roles).toContain(USER_ROLES.FINANCE);
+    expect(orderGroup?.items.map((item) => item.label)).toEqual(['Order Berjalan', 'Order Mingguan', 'Riwayat Order']);
+    expect(runningItem?.roles).toContain(USER_ROLES.FINANCE);
     expect(weeklyItem?.roles).toContain(USER_ROLES.FINANCE);
+    expect(historyItem?.roles).toContain(USER_ROLES.FINANCE);
   });
 
   it('menampilkan menu container titip pada group operational', () => {

@@ -6,8 +6,10 @@ import { ROLE_LABELS, USER_ROLES } from '../../constants/roles';
 import { useArchiveData } from '../../hooks/useArchiveData';
 
 const routeLabels = {
-  dashboard: 'Dashboard',
+  dashboard: 'Order Berjalan',
+  'order-running': 'Order Berjalan',
   'weekly-orders': 'Order Mingguan',
+  'order-history': 'Riwayat Order',
   profile: 'Profil Saya',
   'sales-orders': 'Sales Order',
   operations: 'Container Job',
@@ -97,7 +99,7 @@ function Navbar({ sidebarCollapsed, onMenuClick, onSidebarToggle }) {
       </button>
       <div className="topbar-context">
         <div className="breadcrumb" aria-label="Breadcrumb">
-          <Link to="/dashboard">ATMS</Link>
+          <Link to="/order-running">ATMS</Link>
           {pathSegments.map((segment) => <span key={segment}>/ {routeLabels[segment] || segment}</span>)}
         </div>
         <span className="environment-badge">Development</span>

@@ -7,7 +7,7 @@ function AccessRestrictedPage() {
       <span><ShieldX size={30} /></span>
       <h1>Akses Dibatasi</h1>
       <p>Role Anda tidak memiliki izin untuk membuka halaman ini.</p>
-      <Link className="primary-button" to="/dashboard">Kembali ke Dashboard</Link>
+      <Link className="primary-button" to="/order-running">Kembali ke Order Berjalan</Link>
     </div>
   );
 }

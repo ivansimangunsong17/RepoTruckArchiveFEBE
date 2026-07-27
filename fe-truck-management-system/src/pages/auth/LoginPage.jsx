@@ -18,7 +18,7 @@ function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to="/order-running" replace />;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -26,7 +26,7 @@ function LoginPage() {
     setError('');
     try {
       await signIn(form.email, form.password);
-      navigate(location.state?.from?.pathname || '/dashboard', { replace: true });
+      navigate(location.state?.from?.pathname || '/order-running', { replace: true });
     } catch (submitError) {
       setError(submitError.message);
     } finally {
@@ -50,13 +50,13 @@ function LoginPage() {
           <div className="mobile-login-brand"><img src={armadaLogo} alt="Armada" /><strong>ARMADA</strong></div>
           <span className="login-lock"><LockKeyhole size={23} /></span>
           <h2>Selamat datang kembali</h2>
-          <p>Masuk untuk melanjutkan ke dashboard operasional.</p>
+          <p>Masuk untuk melanjutkan ke order berjalan.</p>
           {isDemo ? <div className="demo-notice">Akun demo: admin@demo.com, sales@demo.com, operational@demo.com, atau pengamat@demo.com. Password: password.</div> : null}
           {error ? <div className="alert error">{error}</div> : null}
           <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="nama@perusahaan.com" /></label>
           <label>Password<div className="password-field"><input type={showPassword ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /><button type="button" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
           <div className="login-options"><label><input type="checkbox" /> Ingat saya</label><button type="button">Lupa password?</button></div>
-          <button className="primary-button full" disabled={loading}>{loading ? 'Memproses...' : 'Masuk ke Dashboard'}</button>
+          <button className="primary-button full" disabled={loading}>{loading ? 'Memproses...' : 'Masuk ke Aplikasi'}</button>
           <small className="login-footer">© 2026 Trucking Management System</small>
         </form>
       </section>

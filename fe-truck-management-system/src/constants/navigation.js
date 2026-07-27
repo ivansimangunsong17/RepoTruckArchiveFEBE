@@ -1,20 +1,26 @@
 import {
   Archive,
+  Anchor,
   BarChart3,
+  Boxes,
+  Building2,
   CalendarDays,
   CheckCircle2,
   ClipboardCheck,
   ClipboardList,
+  Database,
   FilePenLine,
   FileClock,
   FileWarning,
+  History,
+  IdCard,
   LayoutDashboard,
   ReceiptText,
+  Route,
   Settings,
   ShieldCheck,
   Truck,
-  UserRound,
-  UsersRound,
+  Warehouse,
 } from 'lucide-react';
 import { USER_ROLES } from './roles';
 
@@ -45,10 +51,11 @@ const financeRoles = [USER_ROLES.FINANCE];
 
 export const navigationGroups = [
   {
-    label: 'Overview',
+    label: 'Order',
     items: [
-      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: overviewRoles },
+      { to: '/order-running', label: 'Order Berjalan', icon: LayoutDashboard, roles: overviewRoles },
       { to: '/weekly-orders', label: 'Order Mingguan', icon: CalendarDays, roles: overviewRoles },
+      { to: '/order-history', label: 'Riwayat Order', icon: History, roles: overviewRoles },
     ],
   },
   {
@@ -88,13 +95,20 @@ export const navigationGroups = [
   {
     label: 'Master Data',
     items: [
-      { to: '/clients', label: 'Data Customer', icon: UsersRound, roles: adminOnly },
-      { to: '/drivers', label: 'Data Supir', icon: UserRound, roles: adminOnly },
-      { to: '/trucks', label: 'Data Truck', icon: Truck, roles: adminOnly },
-      { to: '/kir-chassis', label: 'Data Chassis', icon: ClipboardCheck, roles: adminOnly },
-      { to: '/depots', label: 'Data Depo', icon: ClipboardCheck, roles: adminOnly },
-      { to: '/terminals', label: 'Data Terminal', icon: ClipboardCheck, roles: adminOnly },
-      { to: '/destinations', label: 'Data Lokasi Tujuan', icon: ClipboardCheck, roles: adminOnly },
+      {
+        label: 'Master Data',
+        icon: Database,
+        roles: adminOnly,
+        children: [
+          { to: '/clients', label: 'Data Customer', icon: Building2, roles: adminOnly },
+          { to: '/drivers', label: 'Data Supir', icon: IdCard, roles: adminOnly },
+          { to: '/trucks', label: 'Data Truck', icon: Truck, roles: adminOnly },
+          { to: '/kir-chassis', label: 'Data Chassis', icon: Boxes, roles: adminOnly },
+          { to: '/depots', label: 'Data Depo', icon: Warehouse, roles: adminOnly },
+          { to: '/terminals', label: 'Data Terminal', icon: Anchor, roles: adminOnly },
+          { to: '/destinations', label: 'Data Lokasi Tujuan', icon: Route, roles: adminOnly },
+        ],
+      },
     ],
   },
   {

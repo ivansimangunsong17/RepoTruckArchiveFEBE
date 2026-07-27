@@ -202,7 +202,7 @@ function TodayTruckDashboard() {
       .catch((requestError) => {
         if (!active) return;
         setDashboard({ trucks: [], activeJobs: [] });
-        setError(requestError.message || 'Dashboard gagal dimuat.');
+        setError(requestError.message || 'Order berjalan gagal dimuat.');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -221,7 +221,7 @@ function TodayTruckDashboard() {
 
   function handleDownloadReport() {
     downloadPdfReport({
-      title: 'Dashboard Truck Harian',
+      title: 'Order Berjalan Hari Ini',
       subtitle: `Tanggal ${formatShortDate(currentDateKey)}`,
       filename: `dashboard-truck-harian-${reportDateKey(currentDateKey)}.pdf`,
       meta: [
@@ -249,7 +249,7 @@ function TodayTruckDashboard() {
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 className="m-0 text-[22px] font-black leading-none text-slate-950">Dashboard Truck Hari Ini</h1>
+            <h1 className="m-0 text-[22px] font-black leading-none text-slate-950">Order Berjalan Hari Ini</h1>
           </div>
           <p className="m-0 mt-1 text-[12px] font-semibold leading-none text-slate-500">Data truck yang berjalan dan belum selesai.</p>
         </div>
@@ -269,7 +269,7 @@ function TodayTruckDashboard() {
         </div>
       </header>
       {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat dashboard truck...</p></div> : null}
-      {error ? <div className="archive-inline-state is-error"><h3>Dashboard gagal dimuat</h3><p>{error}</p></div> : null}
+      {error ? <div className="archive-inline-state is-error"><h3>Order berjalan gagal dimuat</h3><p>{error}</p></div> : null}
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="grid items-center gap-2.5 border-b border-slate-200 bg-slate-50 px-4 py-2 lg:grid-cols-[260px_1fr]" aria-label="Ketersediaan Truck Hari Ini">
           <div className="flex items-center pl-0">

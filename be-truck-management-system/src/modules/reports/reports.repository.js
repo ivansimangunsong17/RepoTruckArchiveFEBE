@@ -438,17 +438,23 @@ export async function getMonthlyRevenueReport(options = {}) {
 
 export async function getOperationReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
-  const dateColumn = options.status === 'completed'
+  const status = String(options.status || '');
+  const isFinishedHistory = status === 'finished';
+  const dateColumn = isFinishedHistory
+    ? 'coalesce(cj.completed_at, cj.cancelled_at, so.trip_date)::date'
+    : status === 'completed'
     ? 'coalesce(cj.completed_at, so.trip_date)::date'
-    : options.status === 'repo_stored'
+    : status === 'repo_stored'
       ? 'coalesce(cj.repo_stored_at, so.trip_date)::date'
       : 'so.trip_date';
   const dateFilter = buildDateWhere(dateColumn, options);
   const clauses = [...dateFilter.clauses];
   const params = [...dateFilter.params];
 
-  if (options.status) {
-    params.push(options.status);
+  if (isFinishedHistory) {
+    clauses.push("cj.status in ('completed', 'cancelled')");
+  } else if (status) {
+    params.push(status);
     clauses.push(`cj.status = $${params.length}`);
   }
   if (options.query) {
@@ -474,12 +480,13 @@ export async function getOperationReport(options = {}) {
                cj.status, cj.rpuj_status, cj.spk_number, cj.loading_voucher_number,
                cj.unloading_voucher_number, cj.travel_document_number,
                cj.weighing_document_number, cj.tila_gatepass_document_number,
-               cj.received_at, cj.running_at,
+               cj.received_at, cj.running_at, cj.cancelled_at,
                cj.completed_at, cj.updated_at, cj.assignment_snapshot,
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id,
                cj.repo_created_by_name, cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                so.so_number, so.do_number, so.customer_name, so.trip_date,
+               so.sales_name, so.created_by_name,
                so.origin, so.destination
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -502,6 +509,7 @@ export async function getOperationReport(options = {}) {
       `
         select count(*)::int as jobs,
                count(*) filter (where cj.status = 'completed')::int as completed,
+               count(*) filter (where cj.status = 'cancelled')::int as cancelled,
                count(*) filter (where cj.status = 'running')::int as running,
                count(*) filter (where cj.status = 'received')::int as received,
                count(*) filter (where cj.status = 'repo_stored')::int as repo_stored
@@ -519,6 +527,7 @@ export async function getOperationReport(options = {}) {
       soNumber: row.so_number,
       doNumber: row.do_number,
       customer: row.customer_name,
+      salesName: row.sales_name || row.created_by_name,
       tripDate: row.trip_date,
       origin: row.origin,
       destination: row.destination,
@@ -538,6 +547,7 @@ export async function getOperationReport(options = {}) {
       receivedAt: row.received_at,
       runningAt: row.running_at,
       completedAt: row.completed_at,
+      cancelledAt: row.cancelled_at,
       updatedAt: row.updated_at,
       repoLocation: row.repo_location || '',
       repoStoredAt: row.repo_stored_at,
@@ -552,7 +562,7 @@ export async function getOperationReport(options = {}) {
       repoPickedUpByName: row.repo_picked_up_by_name || '',
     })),
     total: total.rows[0]?.total || 0,
-    summary: summary.rows[0] || { jobs: 0, completed: 0, running: 0, received: 0, repo_stored: 0 },
+    summary: summary.rows[0] || { jobs: 0, completed: 0, cancelled: 0, running: 0, received: 0, repo_stored: 0 },
   };
 }
 

@@ -12,7 +12,7 @@ const orderTargets = {
   twentyFt: 12,
   eightFt: 8,
 };
-const targetNote = 'Target';
+const targetNote = 'Kebutuhan Order';
 
 function formatShipment(value) {
   const shipmentMap = {
@@ -178,7 +178,7 @@ function WeeklyOrdersPage() {
   return (
     <div className="page weekly-orders-page">
       <PageHeader
-        eyebrow="Overview"
+        eyebrow="Order"
         title="Order Mingguan"
         description="Ringkasan jumlah order tujuh hari ke depan berdasarkan tanggal jalan."
       />

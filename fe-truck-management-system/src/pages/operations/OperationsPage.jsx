@@ -160,12 +160,14 @@ function otherCostValue(job) {
 }
 
 function getRpujStage(job) {
+  if (job?.status === 'cancelled') return 'cancelled';
   if (job?.rpujStatus === 'paid') return 'paid';
   if (['submitted', 'approved'].includes(job?.rpujStatus)) return 'submitted';
   return 'queue';
 }
 
 function rpujDetail(job) {
+  if (job?.status === 'cancelled') return { tone: 'cancelled', label: 'Tidak Diproses', helper: 'Job sudah batal' };
   if (job?.rpujStatus === 'paid') return { tone: 'paid', label: 'UJ Dikirim', helper: 'Bukti transfer masuk' };
   if (job?.rpujStatus === 'approved') return { tone: 'approved', label: 'Disetujui Finance', helper: 'Siap transfer / SPK' };
   if (job?.rpujStatus === 'submitted') return { tone: 'submitted', label: 'Menunggu Finance', helper: 'Pengajuan sudah masuk' };
@@ -175,6 +177,19 @@ function rpujDetail(job) {
     helper: job.rpujRejectionNote || 'Ajukan ulang',
   };
   return { tone: 'queue', label: 'Belum Diajukan', helper: 'Perlu ajukan UJ' };
+}
+
+function nextActionHint(job, documents, rpuj, { documentFollowUp = false, repoSummary = null } = {}) {
+  if (job?.status === 'cancelled') return null;
+  if (repoSummary) return { label: 'Perlu ambil container', tone: 'repo' };
+  if (documentFollowUp && documents.missing.length) return { label: 'Dokumen belum lengkap', tone: 'warning' };
+  if (!String(job?.containerNumber || '').trim()) return { label: 'Isi nomor container', tone: 'warning' };
+  if (rpuj.tone === 'rejected') return { label: 'Ajukan ulang UJ', tone: 'danger' };
+  if (rpuj.tone === 'queue') return { label: 'Ajukan UJ', tone: 'warning' };
+  if (!String(job?.driver || '').trim() || !String(job?.plateNumber || '').trim()) return { label: 'Lengkapi assignment', tone: 'warning' };
+  if (documents.missing.length && !['cancelled'].includes(job?.status)) return { label: 'Dokumen belum lengkap', tone: 'neutral' };
+  if (job?.status === 'running') return { label: 'Pantau perjalanan', tone: 'info' };
+  return null;
 }
 
 function groupJobsBySo(rows = []) {
@@ -334,7 +349,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     const matchesQuery = !query || [
       job.soNumber, job.doNumber, job.customer, job.containerNumber, job.driver, job.plateNumber,
     ].some((value) => value?.toLowerCase().includes(query.toLowerCase()));
-    const matchesRpujStage = !rpujStage || getRpujStage(job) === rpujStage;
+    const matchesRpujStage = !rpujStage || (job.status !== 'cancelled' && getRpujStage(job) === rpujStage);
     const matchesRepoStorage = !repoStorageOnly || isRepoStoredJob(job);
     const matchesStatus = !effectiveStatus || (effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
     const matchesDocumentFollowUp = !documentFollowUp
@@ -354,9 +369,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     cancelled: demoJobs.filter((job) => job.status === 'cancelled').length,
   };
   const activeRpujCounts = archive.isDatabaseMode ? rpujCounts : {
-    queue: demoJobs.filter((job) => getRpujStage(job) === 'queue').length,
-    submitted: demoJobs.filter((job) => getRpujStage(job) === 'submitted').length,
-    paid: demoJobs.filter((job) => getRpujStage(job) === 'paid').length,
+    queue: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'queue').length,
+    submitted: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'submitted').length,
+    paid: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'paid').length,
   };
   const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoJobs.length;
@@ -757,9 +772,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               <button className="secondary-button" type="button" onClick={() => setListVersion((value) => value + 1)}>Muat Ulang</button>
             </div>
           ) : null}
-          {!loading && !error ? groupedJobs.map((group) => (
+          {!loading && !error ? groupedJobs.map((group, groupIndex) => (
             <section className="operational-so-group" key={group.key}>
               <header className="operational-so-header">
+                <span className="operational-so-number">SO {groupIndex + 1}</span>
                 <div>
                   <span>Sales Order</span>
                   <strong>{group.soNumber}</strong>
@@ -776,14 +792,17 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   const rpuj = rpujDetail(job);
                   const documentPercent = (documents.completed / documents.total) * 100;
                   const repoSummary = isRepoStoredJob(job) ? repoStorageSummary(job) : null;
+                  const actionHint = nextActionHint(job, documents, rpuj, { documentFollowUp, repoSummary });
                   return (
                     <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''}`} key={job.id}>
                       <div className="container-row-main">
                         <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
                         <small>{repoSummary ? `Container Titip - ${repoSummary.reason}` : `${shipmentLabel} - ${sizeTypeLabel}`}</small>
+                        {repoSummary && actionHint ? <em className={`container-action-hint ${actionHint.tone}`}>{actionHint.label}</em> : null}
                       </div>
                       <div className="container-row-status">
                         <StatusBadge status={job.status} />
+                        {actionHint ? <em className={`container-action-hint ${actionHint.tone}`}>{actionHint.label}</em> : null}
                       </div>
                       <div className={`container-rpuj-status ${rpuj.tone}`}>
                         <span>RPUJ</span>
@@ -812,8 +831,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                       <div className="container-row-actions">
                         <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={14} /> Detail</button>
                         {canEdit && canStoreRepoJob(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(job)}><Archive size={14} /> Titipkan</button> : null}
-                        {canEdit && isRepoStoredJob(job) ? <button className="primary-button" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
-                        {canEdit && !isRepoStoredJob(job) && !['cancelled'].includes(job.status) ? <button className="primary-button" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
+                        {canEdit && isRepoStoredJob(job) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
+                        {canEdit && !isRepoStoredJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
                     </article>
                   );
@@ -898,9 +917,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetail(null)}>Tutup</button>
               {canEdit && canStoreRepoJob(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(detail)}><Archive size={16} /> Titipkan Container</button> : null}
-              {canEdit && isRepoStoredJob(detail) ? <button className="primary-button" type="button" onClick={() => openRepoPickup(detail)}><Truck size={16} /> Ambil Container</button> : null}
+              {canEdit && isRepoStoredJob(detail) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(detail)}><Truck size={16} /> Ambil Container</button> : null}
               {canEdit && !hasRepoStorageHistory(detail) && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
-              {canEdit && !isRepoStoredJob(detail) && !['cancelled'].includes(detail.status) ? <button className="primary-button" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
+              {canEdit && !isRepoStoredJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
           </section>
         </div>

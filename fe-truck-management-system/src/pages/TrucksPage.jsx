@@ -132,6 +132,12 @@ function getChassisCapacity(rows, chassisValue) {
   return getChassisRow(rows, chassisValue)?.capacity || '';
 }
 
+const INSURANCE_TYPE_OPTIONS = [
+  { value: '', label: 'Pilih jenis asuransi' },
+  { value: 'All Risk', label: 'All Risk' },
+  { value: 'TLO', label: 'TLO' },
+];
+
 function createFields(driverOptions, chassisRows = [], truckRows = []) {
   return [
     { key: 'plateNumber', section: 'Identitas Unit', label: 'Nomor Polisi', placeholder: 'B 1234 CPL' },
@@ -187,10 +193,10 @@ function createFields(driverOptions, chassisRows = [], truckRows = []) {
     { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'span-third' },
     { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'span-third', expiryAlert: { label: 'STID' } },
     { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'span-third', compactUpload: true },
-    { key: 'insuranceCompany', section: 'Asuransi Kendaraan', label: 'Nama Asuransi', placeholder: 'Contoh: PT Asuransi Jasa Indonesia', className: 'span-third' },
-    { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Polis', placeholder: 'Contoh: POL-TRK-001', className: 'span-third' },
-    { key: 'insuranceExpiryDate', section: 'Asuransi Kendaraan', label: 'Masa Berlaku Asuransi', type: 'date', className: 'span-third', expiryAlert: { label: 'Asuransi Truck' } },
-    { key: 'insuranceDocument', section: 'Asuransi Kendaraan', label: 'Dokumen Asuransi', type: 'file', className: 'span-third', compactUpload: true },
+    { key: 'insuranceType', section: 'Asuransi Kendaraan', label: 'Jenis Asuransi', type: 'select', defaultValue: '', options: INSURANCE_TYPE_OPTIONS, className: 'span-quarter' },
+    { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Asuransi', placeholder: 'Contoh: POL-TRK-001', className: 'span-quarter' },
+    { key: 'insuranceExpiryDate', section: 'Asuransi Kendaraan', label: 'Tanggal Berakhir', type: 'date', className: 'span-quarter', expiryAlert: { label: 'Asuransi Truck' } },
+    { key: 'insuranceDocument', section: 'Asuransi Kendaraan', label: 'Upload Dokumen', type: 'file', className: 'span-quarter', compactUpload: true },
     { key: 'defaultDriver', section: 'Assignment Default', label: 'Driver Tetap', type: 'select', defaultValue: '', options: [{ value: '', label: 'Belum di-assign' }, ...driverOptions], hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.' },
   ];
 }
@@ -428,7 +434,7 @@ const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
   'stidCode',
   'stidExpiryDate',
   'stidDocument',
-  'insuranceCompany',
+  'insuranceType',
   'insurancePolicyNumber',
   'insuranceExpiryDate',
   'insuranceDocument',
@@ -459,7 +465,7 @@ function TruckDocumentSummary({ row }) {
     },
     {
       label: 'Asuransi',
-      number: [row.insuranceCompany, row.insurancePolicyNumber].filter(Boolean).join(' / '),
+      number: [row.insuranceType, row.insurancePolicyNumber].filter(Boolean).join(' / '),
       expiryDate: row.insuranceExpiryDate,
       expiryLabel: 'Asuransi Truck',
       file: row.insuranceDocument,

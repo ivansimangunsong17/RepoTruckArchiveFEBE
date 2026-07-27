@@ -12,6 +12,7 @@ alter table vehicle_documents add constraint vehicle_documents_document_type_che
   ));
 
 alter table vehicles add column if not exists insurance_company text;
+alter table vehicles add column if not exists insurance_type text;
 alter table vehicles add column if not exists insurance_policy_number text;
 alter table vehicles add column if not exists insurance_expiry_date date;
 alter table vehicles add column if not exists insurance_document jsonb;

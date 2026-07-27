@@ -10,6 +10,7 @@ import RoleRoute from './RoleRoute';
 const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
 const Dashboard = lazy(() => import('../pages/Dashboard'));
 const WeeklyOrdersPage = lazy(() => import('../pages/dashboard/WeeklyOrdersPage'));
+const OrderHistoryPage = lazy(() => import('../pages/dashboard/OrderHistoryPage'));
 const SalesOrdersPage = lazy(() => import('../pages/sales-orders/SalesOrdersPage'));
 const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
@@ -64,9 +65,11 @@ export const router = createBrowserRouter([
       path: '/',
       element: <App />,
       children: [
-        { index: true, element: <Navigate to="/dashboard" replace /> },
-        { path: 'dashboard', element: <LazyPage><Dashboard /></LazyPage> },
+        { index: true, element: <Navigate to="/order-running" replace /> },
+        { path: 'dashboard', element: <Navigate to="/order-running" replace /> },
+        { path: 'order-running', element: <LazyPage><Dashboard /></LazyPage> },
         { path: 'weekly-orders', children: [guardedPage(overviewRoles, <LazyPage><WeeklyOrdersPage /></LazyPage>)] },
+        { path: 'order-history', children: [guardedPage(overviewRoles, <LazyPage><OrderHistoryPage /></LazyPage>)] },
         { path: 'profile', element: <LazyPage><ProfilePage /></LazyPage> },
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },
@@ -98,5 +101,5 @@ export const router = createBrowserRouter([
       ],
     }],
   },
-  { path: '*', element: <Navigate to="/dashboard" replace /> },
+  { path: '*', element: <Navigate to="/order-running" replace /> },
 ]);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
@@ -450,18 +451,27 @@ function PivotCell({ cell }) {
   );
 }
 
-function MonthlyUtilizationModal({
+export function MonthlyUtilizationModal({
   open,
   onClose,
   pivot,
   activeMonthLabel,
   year,
 }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-[220] bg-white" role="dialog" aria-modal="true" aria-labelledby="monthly-utilization-title">
-      <div className="flex h-screen flex-col">
+  const modal = (
+    <div className="fixed inset-0 z-[220] flex items-start justify-center overflow-hidden bg-slate-950/45 px-3 py-6" role="presentation" onMouseDown={onClose}>
+      <section className="flex max-h-[calc(100vh-3rem)] w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="monthly-utilization-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <span className="block text-[9px] font-black uppercase text-sky-700">Utilisasi Bulanan</span>
@@ -552,9 +562,11 @@ function MonthlyUtilizationModal({
             </div>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 function ReportsPage() {
@@ -738,11 +750,6 @@ function ReportsPage() {
       : 0,
   }), [driverRows]);
   const repoMonitoringRows = useMemo(() => buildRepoMonitoringRows(repoRows), [repoRows]);
-  const repoSummary = useMemo(() => ({
-    total: repoMonitoringRows.length,
-    overdue: repoMonitoringRows.filter((row) => row.ageDays >= 3).length,
-    locations: new Set(repoMonitoringRows.map((row) => row.repoLocation).filter(Boolean)).size,
-  }), [repoMonitoringRows]);
   const reportHeader = getReportHeader(selectedReport);
 
   return (
@@ -782,7 +789,7 @@ function ReportsPage() {
         </div>
       </section>
 
-      <section className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Jasa Angkut"
@@ -819,19 +826,6 @@ function ReportsPage() {
           tone="amber"
           expanded={selectedReport === 'driver'}
           onClick={() => selectReport('driver')}
-        />
-        <SummaryToggleCard
-          icon={Archive}
-          label="Container Titip"
-          value={`${repoSummary.total} Container`}
-          helper="Container masih dititipkan"
-          secondaryLabel="Lewat 3 Hari"
-          secondaryValue={`${repoSummary.overdue} Container`}
-          tertiaryLabel="Lokasi"
-          tertiaryValue={`${repoSummary.locations} Repo`}
-          tone="slate"
-          expanded={selectedReport === 'repo'}
-          onClick={() => selectReport('repo')}
         />
       </section>
 

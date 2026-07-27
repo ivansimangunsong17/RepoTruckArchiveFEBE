@@ -49,7 +49,7 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
-function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', includeRpujStage = true } = {}) {
+function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', includeRpujStage = true, excludeCancelledJobs = false } = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
     "so.finance_verification_status = 'verified'",
@@ -74,12 +74,17 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
     clauses.push(`cj.status = $${params.length}`);
   }
 
+  if (excludeCancelledJobs) {
+    clauses.push("cj.status <> 'cancelled'");
+  }
+
   if (requestStatus) {
     params.push(requestStatus);
     clauses.push(`cj.cancel_request_status = $${params.length}`);
   }
 
   if (includeRpujStage && rpujStage) {
+    clauses.push("cj.status <> 'cancelled'");
     if (rpujStage === 'queue') {
       clauses.push("coalesce(cj.rpuj_status, 'pending') in ('pending', 'rejected')");
     } else if (rpujStage === 'submitted') {
@@ -531,7 +536,7 @@ async function requireCompletedJobReady(client, id, form, existing) {
 export async function findContainerJobsPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildJobWhere(options);
-  const rpujCountWhere = buildJobWhere({ ...options, includeRpujStage: false });
+  const rpujCountWhere = buildJobWhere({ ...options, includeRpujStage: false, excludeCancelledJobs: true });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
