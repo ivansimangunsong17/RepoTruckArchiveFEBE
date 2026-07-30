@@ -4,7 +4,7 @@ import { BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
-import { SETTINGS_STORAGE_KEY } from '../../services/settings/adapters/localSettingsStore';
+import { buildHolidayMap, fetchIndonesiaPublicHolidays } from '../../services/reports/holidayService';
 import { fetchDriverPerformanceReport, fetchMonthlyRevenueReport, fetchOperationReport } from '../../services/reports/reportService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
@@ -24,6 +24,16 @@ const MONTHS = [
   { value: 12, label: 'Desember' },
 ];
 
+const WEEKDAYS = [
+  { short: 'Min', long: 'Minggu' },
+  { short: 'Sen', long: 'Senin' },
+  { short: 'Sel', long: 'Selasa' },
+  { short: 'Rab', long: 'Rabu' },
+  { short: 'Kam', long: 'Kamis' },
+  { short: 'Jum', long: 'Jumat' },
+  { short: 'Sab', long: 'Sabtu' },
+];
+
 const DEFAULT_REVENUE_SUMMARY = {
   totalRevenue: 0,
   totalOrders: 0,
@@ -31,18 +41,6 @@ const DEFAULT_REVENUE_SUMMARY = {
   totalTrucks: 0,
   totalTrips: 0,
 };
-
-const DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY = 1.8;
-
-function readUtilizationTargetTripsPerDay() {
-  try {
-    const savedSettings = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY));
-    const target = Number(savedSettings?.utilizationTargetTripsPerTruckPerDay);
-    return Number.isFinite(target) && target > 0 ? target : DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY;
-  } catch {
-    return DEFAULT_TARGET_TRIPS_PER_TRUCK_PER_DAY;
-  }
-}
 
 function currentPeriod() {
   const now = new Date();
@@ -66,6 +64,20 @@ function getTruckPlate(row = {}) {
   return String(row.plateNumber || row.plate || row.unitCode || 'Truck belum diassign').trim() || 'Truck belum diassign';
 }
 
+function getTruckUnitCode(row = {}) {
+  return String(row.unitCode || row.unit_code || row.truckCode || row.truckNumber || '').trim();
+}
+
+function getTruckId(row = {}) {
+  return String(row.vehicleId || row.vehicle_id || row.truckId || row.truck_id || row.id || '').trim();
+}
+
+function formatTruckUnitCode(unitCode) {
+  const value = String(unitCode || '').trim();
+  if (!value) return '-';
+  return value.replace(/^TRK-?/i, '').replace(/^0+(\d)/, '$1') || value;
+}
+
 function getDriverName(row = {}) {
   return String(row.driver || row.defaultDriver || row.defaultDriverName || row.name || 'Sopir belum diisi').trim() || 'Sopir belum diisi';
 }
@@ -78,15 +90,107 @@ function daysInMonth(month, year) {
   return new Date(Number(year), Number(month), 0).getDate();
 }
 
-function buildMonthDays(month, year) {
+function normalizeIdentity(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function addTruckIdentityKeys(map, truck, value) {
+  const keys = [
+    getTruckId(truck),
+    truck.vehicleId,
+    truck.vehicle_id,
+    getTruckPlate(truck),
+    truck.plateNumber,
+    truck.plate,
+    getTruckUnitCode(truck),
+  ].map(normalizeIdentity).filter(Boolean);
+
+  keys.forEach((key) => {
+    if (!map.has(key)) map.set(key, value);
+  });
+}
+
+function normalizeTruckStatus(row = {}) {
+  return String(row.status || row.operationalStatus || row.operational_status || 'Aktif').trim().toLowerCase();
+}
+
+function isActiveTruck(row = {}) {
+  const status = normalizeTruckStatus(row);
+  return !['maintenance', 'maintanance', 'tidak aktif', 'nonaktif', 'inactive', 'archived', 'arsip'].includes(status);
+}
+
+function buildUtilizationPeriod(month, year, baseDate = new Date()) {
+  const selectedYear = Number(year);
+  const selectedMonth = Number(month);
+  const selectedMonthIndex = selectedMonth - 1;
+  const currentYear = baseDate.getFullYear();
+  const currentMonthIndex = baseDate.getMonth();
+  const totalDays = daysInMonth(selectedMonth, selectedYear);
+  const startDay = 1;
+  let endDay = totalDays;
+
+  if (selectedYear === currentYear && selectedMonthIndex === currentMonthIndex) {
+    endDay = Math.max(0, baseDate.getDate() - 1);
+  } else if (
+    selectedYear > currentYear
+    || (selectedYear === currentYear && selectedMonthIndex > currentMonthIndex)
+  ) {
+    endDay = 0;
+  }
+
+  return {
+    startDay,
+    endDay,
+    days: endDay > 0 ? endDay : 0,
+    dateFrom: endDay > 0 ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01` : '',
+    dateTo: endDay > 0 ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(endDay).padStart(2, '0')}` : '',
+  };
+}
+
+function formatUtilizationPeriod(period, activeMonthLabel, year) {
+  if (!period.days) return 'Belum ada data utilisasi bulan berjalan';
+  return `${period.startDay}-${period.endDay} ${activeMonthLabel} ${year}`;
+}
+
+function normalizeHolidayEntry(entry) {
+  if (!entry) return null;
+  if (typeof entry === 'string') return { localName: entry, name: entry };
+  const localName = String(entry.localName || entry.name || 'Libur Nasional').trim();
+  const name = String(entry.name || entry.localName || 'Public Holiday').trim();
+  return { localName, name };
+}
+
+function getHolidayEntries(holidaysByDate, dateKey) {
+  const entries = holidaysByDate?.[dateKey];
+  if (!entries) return [];
+  return (Array.isArray(entries) ? entries : [entries]).map(normalizeHolidayEntry).filter(Boolean);
+}
+
+function buildMonthDays(month, year, holidaysByDate = {}) {
   const totalDays = daysInMonth(month, year);
   return Array.from({ length: totalDays }, (_, index) => {
     const day = index + 1;
+    const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const date = new Date(Number(year), Number(month) - 1, day);
+    const weekday = WEEKDAYS[date.getDay()] || WEEKDAYS[0];
+    const holidays = getHolidayEntries(holidaysByDate, key);
+    const isSunday = date.getDay() === 0;
+    const isRedDate = isSunday || holidays.length > 0;
+    const holidayLabel = holidays.map((holiday) => holiday.localName).join(', ');
     return {
       day,
-      key: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      key,
       label: String(day).padStart(2, '0'),
-      fullLabel: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+      weekdayLabel: weekday.long,
+      weekdayShort: weekday.short,
+      isSunday,
+      isRedDate,
+      holidays,
+      holidayLabel,
+      fullLabel: [
+        `${weekday.long}, ${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
+        holidayLabel,
+      ].filter(Boolean).join(' - '),
     };
   });
 }
@@ -133,45 +237,6 @@ function buildRevenueTruckRows(masterTrucks = [], revenueRows = []) {
   });
 }
 
-function buildUtilizationTruckRows(masterTrucks = [], rows = []) {
-  const trucks = new Map();
-
-  masterTrucks.forEach((truck) => {
-    const plateNumber = getTruckPlate(truck);
-    if (!trucks.has(plateNumber)) {
-      trucks.set(plateNumber, {
-        plateNumber,
-        totalTrips: 0,
-        lastCompletedAt: '',
-      });
-    }
-  });
-
-  rows.forEach((row) => {
-    const plateNumber = getTruckPlate(row);
-    if (!trucks.has(plateNumber)) {
-      trucks.set(plateNumber, {
-        plateNumber,
-        totalTrips: 0,
-        lastCompletedAt: '',
-      });
-    }
-
-    const truck = trucks.get(plateNumber);
-    truck.totalTrips += 1;
-
-    const completedAt = row.completedDate || row.completedAt || row.updatedAt || '';
-    if (completedAt && (!truck.lastCompletedAt || new Date(completedAt) > new Date(truck.lastCompletedAt))) {
-      truck.lastCompletedAt = completedAt;
-    }
-  });
-
-  return Array.from(trucks.values()).sort((left, right) => {
-    if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
-    return left.plateNumber.localeCompare(right.plateNumber);
-  });
-}
-
 function toDateKey(value) {
   if (!value) return '';
 
@@ -208,8 +273,98 @@ function compactCellLabel(row = {}) {
   return label.toUpperCase();
 }
 
-export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month, year) {
-  const days = buildMonthDays(month, year);
+function getUtilizationTruckKey(row = {}, activeTruckLookup = new Map()) {
+  const keys = [
+    getTruckId(row),
+    row.vehicleId,
+    row.vehicle_id,
+    getTruckPlate(row),
+    row.plateNumber,
+    row.plate,
+    getTruckUnitCode(row),
+  ].map(normalizeIdentity).filter(Boolean);
+
+  return keys.map((key) => activeTruckLookup.get(key)).find(Boolean) || '';
+}
+
+export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], month, year, baseDate = new Date()) {
+  const period = buildUtilizationPeriod(month, year, baseDate);
+  const activeTrucks = (masterTrucks || [])
+    .filter(isActiveTruck)
+    .map((truck) => ({
+      id: getTruckId(truck) || getTruckPlate(truck),
+      plateNumber: getTruckPlate(truck),
+      unitCode: getTruckUnitCode(truck),
+      totalTrips: 0,
+      activeTruckDays: 0,
+      targetTruckDays: period.days,
+      utilizationPercent: 0,
+      lastCompletedAt: '',
+    }));
+  const activeTruckLookup = new Map();
+  const rowsByTruck = new Map();
+
+  activeTrucks.forEach((truck) => {
+    rowsByTruck.set(truck.id, truck);
+    addTruckIdentityKeys(activeTruckLookup, truck, truck.id);
+  });
+
+  const truckDayKeys = new Set();
+
+  rows.forEach((row) => {
+    if (String(row.status || '').trim().toLowerCase() === 'cancelled') return;
+
+    const dateKey = getUtilizationDateKey(row);
+    if (!period.days || !dateKey || dateKey < period.dateFrom || dateKey > period.dateTo) return;
+
+    const truckKey = getUtilizationTruckKey(row, activeTruckLookup);
+    if (!truckKey) return;
+
+    const truck = rowsByTruck.get(truckKey);
+    if (!truck) return;
+
+    truck.totalTrips += 1;
+    const completedAt = row.completedDate || row.completedAt || row.updatedAt || row.tripDate || '';
+    if (completedAt && (!truck.lastCompletedAt || new Date(completedAt) > new Date(truck.lastCompletedAt))) {
+      truck.lastCompletedAt = completedAt;
+    }
+    truckDayKeys.add(`${truckKey}|${dateKey}`);
+  });
+
+  truckDayKeys.forEach((key) => {
+    const truckKey = key.split('|')[0];
+    const truck = rowsByTruck.get(truckKey);
+    if (truck) truck.activeTruckDays += 1;
+  });
+
+  const utilizationRows = Array.from(rowsByTruck.values())
+    .map((truck) => ({
+      ...truck,
+      utilizationPercent: truck.targetTruckDays ? (truck.activeTruckDays / truck.targetTruckDays) * 100 : 0,
+    }))
+    .sort((left, right) => {
+      if (right.activeTruckDays !== left.activeTruckDays) return right.activeTruckDays - left.activeTruckDays;
+      if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+      return left.plateNumber.localeCompare(right.plateNumber);
+    });
+
+  const activeTruckCount = activeTrucks.length;
+  const potentialTruckDays = activeTruckCount * period.days;
+  const realizedTruckDays = truckDayKeys.size;
+
+  return {
+    period,
+    rows: utilizationRows,
+    totalTrips: utilizationRows.reduce((total, truck) => total + truck.totalTrips, 0),
+    activeTruckCount,
+    realizedTruckDays,
+    potentialTruckDays,
+    utilizationPercent: potentialTruckDays ? (realizedTruckDays / potentialTruckDays) * 100 : 0,
+  };
+}
+
+export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month, year, holidaysByDate = {}) {
+  const days = buildMonthDays(month, year, holidaysByDate);
   const dayKeys = new Set(days.map((day) => day.key));
   const trucks = new Map();
 
@@ -218,6 +373,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     if (!trucks.has(plateNumber)) {
       trucks.set(plateNumber, {
         plateNumber,
+        unitCode: getTruckUnitCode(truck),
         driver: getDriverName(truck),
         cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
         totalTrips: 0,
@@ -233,6 +389,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     if (!trucks.has(plateNumber)) {
       trucks.set(plateNumber, {
         plateNumber,
+        unitCode: getTruckUnitCode(row),
         driver: getDriverName(row),
         cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
         totalTrips: 0,
@@ -240,6 +397,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     }
 
     const truck = trucks.get(plateNumber);
+    if (!truck.unitCode) truck.unitCode = getTruckUnitCode(row);
     const cell = truck.cells[dateKey];
     cell.count += 1;
     const label = compactCellLabel(row);
@@ -500,19 +658,27 @@ export function MonthlyUtilizationModal({
 
         {pivot.rows.length ? (
           <div className="min-h-0 flex-1 overflow-auto bg-white">
-            <table className="min-w-max border-collapse text-[9px]">
+            <table className="w-full min-w-max border-collapse text-[9px]">
               <thead>
                 <tr className="bg-slate-100 text-slate-700">
                   <th className="sticky left-0 top-0 z-30 min-w-[112px] border border-slate-200 bg-slate-100 px-1.5 py-1 text-left font-black">
-                    Row Labels
+                    Truck
+                  </th>
+                  <th className="sticky left-[112px] top-0 z-30 min-w-[58px] border border-slate-200 bg-slate-100 px-1.5 py-1 text-center font-black">
+                    No Lambung
                   </th>
                   {pivot.days.map((day) => (
                     <th
                       key={day.key}
-                      className="sticky top-0 z-20 min-w-[38px] border border-slate-200 bg-slate-100 px-1 py-1 text-center font-black"
-                      title={day.fullLabel}
+                      className={`sticky top-0 z-20 min-w-[38px] border px-1 py-1 text-center font-black leading-tight ${
+                        day.isRedDate
+                          ? 'border-red-200 bg-red-50 text-red-700'
+                          : 'border-slate-200 bg-slate-100 text-slate-700'
+                      }`}
+                      title={day.isRedDate ? `${day.fullLabel} - tanggal merah` : day.fullLabel}
                     >
-                      {day.label}
+                      <span className={`block text-[7px] font-black ${day.isRedDate ? 'text-red-500' : 'text-slate-500'}`}>{day.weekdayShort}</span>
+                      <span className="block">{day.label}</span>
                     </th>
                   ))}
                   <th className="sticky right-0 top-0 z-30 min-w-[48px] border border-slate-200 bg-slate-100 px-1 py-1 text-center font-black">
@@ -523,11 +689,19 @@ export function MonthlyUtilizationModal({
               <tbody>
                 {pivot.rows.map((truck) => (
                   <tr key={truck.plateNumber} className="odd:bg-white even:bg-slate-50/80">
-                    <th className="sticky left-0 z-10 border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-left font-black text-slate-900 shadow-[inset_0_-1px_0_#94a3b8]">
-                      <span className="block truncate">{truck.plateNumber}</span>
+                    <th className="sticky left-0 z-10 min-w-[112px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-left font-black text-slate-900 shadow-[inset_0_-1px_0_#94a3b8]">
+                      <span className="block truncate" title={truck.plateNumber}>{truck.plateNumber}</span>
+                    </th>
+                    <th className="sticky left-[112px] z-10 min-w-[58px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-center font-black text-slate-700 shadow-[inset_0_-1px_0_#94a3b8]">
+                      {formatTruckUnitCode(truck.unitCode)}
                     </th>
                     {pivot.days.map((day) => (
-                      <td key={day.key} className="h-6 max-w-[38px] border-x border-slate-200 border-b border-b-slate-400 px-0.5 py-0 text-center align-middle shadow-[inset_0_-1px_0_#94a3b8]">
+                      <td
+                        key={day.key}
+                        className={`h-6 max-w-[38px] border-x border-b border-b-slate-400 px-0.5 py-0 text-center align-middle shadow-[inset_0_-1px_0_#94a3b8] ${
+                          day.isRedDate ? 'border-x-red-100 bg-red-50/55' : 'border-x-slate-200'
+                        }`}
+                      >
                         <PivotCell cell={truck.cells[day.key]} />
                       </td>
                     ))}
@@ -539,11 +713,16 @@ export function MonthlyUtilizationModal({
               </tbody>
               <tfoot>
                 <tr className="bg-slate-900 text-white">
-                  <th className="sticky bottom-0 left-0 z-30 border border-slate-700 bg-slate-900 px-1.5 py-1 text-left font-black">
+                  <th colSpan={2} className="sticky bottom-0 left-0 z-30 border border-slate-700 bg-slate-900 px-1.5 py-1 text-left font-black">
                     Grand Total
                   </th>
                   {pivot.days.map((day) => (
-                    <td key={day.key} className="sticky bottom-0 z-20 border border-slate-700 bg-slate-900 px-1 py-1 text-center font-black">
+                    <td
+                      key={day.key}
+                      className={`sticky bottom-0 z-20 border px-1 py-1 text-center font-black ${
+                        day.isRedDate ? 'border-red-800 bg-red-950 text-red-50' : 'border-slate-700 bg-slate-900'
+                      }`}
+                    >
                       {pivot.totalsByDay[day.key] || ''}
                     </td>
                   ))}
@@ -588,9 +767,9 @@ function ReportsPage() {
   const [repoRows, setRepoRows] = useState([]);
   const [repoLoading, setRepoLoading] = useState(true);
   const [repoError, setRepoError] = useState('');
+  const [publicHolidays, setPublicHolidays] = useState([]);
   const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab')));
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
-  const utilizationTargetTripsPerDay = readUtilizationTargetTripsPerDay();
   const yearOptions = useMemo(() => {
     const baseYear = currentPeriod().year;
     return Array.from({ length: 7 }, (_, index) => baseYear - 3 + index);
@@ -604,6 +783,21 @@ function ReportsPage() {
   useEffect(() => {
     if (selectedReport !== 'utilization') setUtilizationModalOpen(false);
   }, [selectedReport]);
+
+  useEffect(() => {
+    let active = true;
+    fetchIndonesiaPublicHolidays(year)
+      .then((holidays) => {
+        if (active) setPublicHolidays(Array.isArray(holidays) ? holidays : []);
+      })
+      .catch(() => {
+        if (active) setPublicHolidays([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [year]);
 
   function selectReport(report) {
     const normalized = normalizeReportTab(report);
@@ -719,26 +913,16 @@ function ReportsPage() {
   const revenueTruckRows = useMemo(() => buildRevenueTruckRows(masterTruckRows || [], revenueRows), [masterTruckRows, revenueRows]);
   const averageRevenuePerTrip = revenueSummary.totalTrips ? revenueSummary.totalRevenue / revenueSummary.totalTrips : 0;
   const utilizationSourceRows = utilizationRows.length ? utilizationRows : revenueRows;
-  const utilizationTruckRows = useMemo(() => buildUtilizationTruckRows(masterTruckRows || [], utilizationSourceRows), [masterTruckRows, utilizationSourceRows]);
-  const activeDays = daysInMonth(month, year);
-  const utilizationTargetPerTruck = activeDays * utilizationTargetTripsPerDay;
-  const utilizationRowsWithTarget = useMemo(() => utilizationTruckRows.map((truck) => ({
-    ...truck,
-    targetTrips: utilizationTargetPerTruck,
-    utilizationPercent: utilizationTargetPerTruck ? (truck.totalTrips / utilizationTargetPerTruck) * 100 : 0,
-  })), [utilizationTargetPerTruck, utilizationTruckRows]);
-  const utilizationSummary = useMemo(() => ({
-    totalTrips: utilizationSourceRows.length || revenueSummary.totalTrips,
-    totalTrucks: utilizationRowsWithTarget.length,
-    utilizedTrucks: utilizationRowsWithTarget.filter((truck) => truck.totalTrips > 0).length,
-    totalTargetTrips: utilizationRowsWithTarget.reduce((total, truck) => total + truck.targetTrips, 0),
-  }), [utilizationSourceRows.length, revenueSummary.totalTrips, utilizationRowsWithTarget]);
-  const utilizationPercent = utilizationSummary.totalTargetTrips
-    ? (utilizationSummary.totalTrips / utilizationSummary.totalTargetTrips) * 100
-    : 0;
-  const utilizationPivot = useMemo(
-    () => buildMonthlyUtilizationPivot(masterTruckRows || [], utilizationSourceRows, month, year),
+  const holidaysByDate = useMemo(() => buildHolidayMap(publicHolidays), [publicHolidays]);
+  const utilizationSummary = useMemo(
+    () => buildTruckDayUtilizationSummary(masterTruckRows || [], utilizationSourceRows, month, year),
     [masterTruckRows, month, utilizationSourceRows, year],
+  );
+  const utilizationPeriodLabel = formatUtilizationPeriod(utilizationSummary.period, activeMonthLabel, year);
+  const utilizationRowsWithTarget = utilizationSummary.rows;
+  const utilizationPivot = useMemo(
+    () => buildMonthlyUtilizationPivot(masterTruckRows || [], utilizationSourceRows, month, year, holidaysByDate),
+    [holidaysByDate, masterTruckRows, month, utilizationSourceRows, year],
   );
   const driverRows = useMemo(() => buildDriverPerformanceRows(masterDriverRows || [], driverPerformanceRows), [masterDriverRows, driverPerformanceRows]);
   const driverSummary = useMemo(() => ({
@@ -804,12 +988,12 @@ function ReportsPage() {
         <SummaryToggleCard
           icon={Truck}
           label="Utilization Report"
-          value={`${utilizationSummary.totalTrips} Trip`}
-          helper={`Target ${formatDecimal(utilizationSummary.totalTargetTrips)} trip dari ${utilizationSummary.totalTrucks} truck`}
-          secondaryLabel="Utilisasi"
-          secondaryValue={`${utilizationPercent.toFixed(1)}%`}
-          tertiaryLabel="Target Harian"
-          tertiaryValue={`${formatDecimal(utilizationTargetTripsPerDay)} Trip/Truck`}
+          value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
+          helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
+          secondaryLabel="Truck-Hari"
+          secondaryValue={`${utilizationSummary.realizedTruckDays} / ${utilizationSummary.potentialTruckDays} truck-hari`}
+          tertiaryLabel="Truck Aktif"
+          tertiaryValue={`${utilizationSummary.activeTruckCount} Unit`}
           tone="sky"
           expanded={selectedReport === 'utilization'}
           onClick={() => selectReport('utilization')}
@@ -876,7 +1060,11 @@ function ReportsPage() {
           <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-sm font-bold text-slate-950">Utilisasi Truck</h2>
-              <p className="text-xs text-slate-500">Ringkasan jumlah trip per truck pada periode yang dipilih.</p>
+              <p className="text-xs text-slate-500">
+                {utilizationSummary.period.days
+                  ? `Periode ${utilizationPeriodLabel}. Realisasi ${utilizationSummary.realizedTruckDays} dari ${utilizationSummary.potentialTruckDays} truck-hari.`
+                  : utilizationPeriodLabel}
+              </p>
             </div>
             <button
               type="button"
@@ -892,14 +1080,16 @@ function ReportsPage() {
           {utilizationLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan utilisasi...</div> : null}
           {!utilizationLoading && utilizationError ? <div className="p-4 text-sm text-red-600">{utilizationError}</div> : null}
 
-          {!utilizationLoading && !utilizationError && utilizationTruckRows.length ? (
+          {!utilizationLoading && !utilizationError && utilizationRowsWithTarget.length ? (
             <DetailTable
               columns={[
                 { label: 'No' },
                 { label: 'Plat' },
+                { label: 'No Lambung' },
                 { label: 'Jumlah Trip', align: 'right' },
-                { label: 'Target Trip', align: 'right' },
-                { label: 'Utilisasi', align: 'right' },
+                { label: 'Hari Jalan', align: 'right' },
+                { label: 'Hari Periode', align: 'right' },
+                { label: 'Utilisasi Truck', align: 'right' },
                 { label: 'Terakhir Selesai' },
               ]}
               rows={utilizationRowsWithTarget}
@@ -907,12 +1097,14 @@ function ReportsPage() {
                 <tr key={truck.plateNumber} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
                   <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
                   <td className="px-3 py-2 font-semibold text-slate-950">{truck.plateNumber}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-700">{formatTruckUnitCode(truck.unitCode)}</td>
                   <td className="px-3 py-2 text-right">
                     <span className="inline-flex min-w-8 justify-center rounded-md bg-sky-50 px-2 py-0.5 font-bold text-sky-700">
                       {truck.totalTrips}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-700">{formatDecimal(truck.targetTrips)}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-700">{truck.activeTruckDays}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-700">{truck.targetTruckDays}</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-950">{truck.utilizationPercent.toFixed(1)}%</td>
                   <td className="px-3 py-2">{formatDate(truck.lastCompletedAt)}</td>
                 </tr>
@@ -920,7 +1112,7 @@ function ReportsPage() {
             />
           ) : null}
 
-          {!utilizationLoading && !utilizationError && !utilizationTruckRows.length ? (
+          {!utilizationLoading && !utilizationError && !utilizationRowsWithTarget.length ? (
             <div className="p-6 text-center">
               <h3 className="text-sm font-bold text-slate-900">Belum ada trip selesai</h3>
               <p className="mt-1 text-xs text-slate-500">Tidak ada utilisasi truck pada {activeMonthLabel} {year}.</p>

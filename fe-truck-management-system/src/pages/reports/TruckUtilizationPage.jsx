@@ -41,6 +41,16 @@ function normalizeSize(value) {
   return String(value || '').toUpperCase().replace(/\s/g, '');
 }
 
+function getTruckUnitCode(row = {}) {
+  return String(row.unitCode || row.unit_code || row.truckCode || row.truckNumber || '').trim();
+}
+
+function formatTruckUnitCode(unitCode) {
+  const value = String(unitCode || '').trim();
+  if (!value) return '-';
+  return value.replace(/^TRK-?/i, '').replace(/^0+(\d)/, '$1') || value;
+}
+
 function buildTruckUtilization(rows = []) {
   const trucks = new Map();
 
@@ -49,6 +59,7 @@ function buildTruckUtilization(rows = []) {
     if (!trucks.has(plateNumber)) {
       trucks.set(plateNumber, {
         plateNumber,
+        unitCode: getTruckUnitCode(job),
         driver: job.driver || '-',
         completedTrips: 0,
         qty20ft: 0,
@@ -58,6 +69,7 @@ function buildTruckUtilization(rows = []) {
     }
 
     const truck = trucks.get(plateNumber);
+    if (!truck.unitCode) truck.unitCode = getTruckUnitCode(job);
     truck.completedTrips += 1;
     if (job.driver) truck.driver = job.driver;
     if (normalizeSize(job.size) === '40FT') truck.qty40ft += 1;
@@ -201,6 +213,7 @@ function TruckUtilizationPage() {
               <thead className="bg-slate-900 text-[11px] uppercase text-white">
                 <tr>
                   <th className="px-3 py-2 font-bold">Truck</th>
+                  <th className="px-3 py-2 font-bold">No Lambung</th>
                   <th className="px-3 py-2 font-bold">Driver Terakhir</th>
                   <th className="px-3 py-2 text-right font-bold">Trip Selesai</th>
                   <th className="px-3 py-2 text-right font-bold">20FT</th>
@@ -212,6 +225,7 @@ function TruckUtilizationPage() {
                 {utilizationRows.map((truck) => (
                   <tr key={truck.plateNumber} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
                     <td className="px-3 py-2 font-semibold text-slate-950">{truck.plateNumber}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-700">{formatTruckUnitCode(truck.unitCode)}</td>
                     <td className="px-3 py-2">{truck.driver}</td>
                     <td className="px-3 py-2 text-right"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{truck.completedTrips}</span></td>
                     <td className="px-3 py-2 text-right">{truck.qty20ft}</td>

@@ -388,11 +388,15 @@ export async function getMonthlyRevenueReport(options = {}) {
           cj.container_size,
           cj.completed_at::date as completed_date,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
+          coalesce(v.unit_code, snapshot_vehicle.unit_code, nullif(cj.assignment_snapshot->>'unitCode', '')) as unit_code,
           nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
           greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
         left join order_job_totals ojt on ojt.sales_order_id = so.id
+        left join vehicles v on v.id = cj.vehicle_id
+        left join vehicles snapshot_vehicle on snapshot_vehicle.archived_at is null
+          and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
         where so.status <> 'cancelled'
           and cj.status = 'completed'
       )
@@ -415,6 +419,7 @@ export async function getMonthlyRevenueReport(options = {}) {
     container: row.container_number || row.container_size || '-',
     size: row.container_size,
     driver: row.driver || '',
+    unitCode: row.unit_code || '',
     plateNumber: row.plate_number || '',
     totalContainers: Number(row.total_containers || 0),
     revenue: calculateCompletedJobRevenue(row),
@@ -480,6 +485,7 @@ export async function getOperationReport(options = {}) {
                cj.status, cj.rpuj_status, cj.spk_number, cj.loading_voucher_number,
                cj.unloading_voucher_number, cj.travel_document_number,
                cj.weighing_document_number, cj.tila_gatepass_document_number,
+               cj.driver_id, cj.vehicle_id,
                cj.received_at, cj.running_at, cj.cancelled_at,
                cj.completed_at, cj.updated_at, cj.assignment_snapshot,
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
@@ -487,9 +493,13 @@ export async function getOperationReport(options = {}) {
                cj.repo_created_by_name, cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
                so.sales_name, so.created_by_name,
-               so.origin, so.destination
+               so.origin, so.destination,
+               coalesce(v.unit_code, snapshot_vehicle.unit_code, nullif(cj.assignment_snapshot->>'unitCode', '')) as unit_code
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
+        left join vehicles v on v.id = cj.vehicle_id
+        left join vehicles snapshot_vehicle on snapshot_vehicle.archived_at is null
+          and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
         ${whereSql}
         order by so.trip_date desc, cj.created_at desc
         limit $${limitIndex} offset $${offsetIndex}
@@ -543,7 +553,10 @@ export async function getOperationReport(options = {}) {
       unloadingVoucher: row.unloading_voucher_number,
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,
+      driverId: row.driver_id,
+      vehicleId: row.vehicle_id,
       driver: row.assignment_snapshot?.driver || null,
+      unitCode: row.unit_code || row.assignment_snapshot?.unitCode || '',
       plateNumber: row.assignment_snapshot?.plateNumber || null,
       receivedAt: row.received_at,
       runningAt: row.running_at,

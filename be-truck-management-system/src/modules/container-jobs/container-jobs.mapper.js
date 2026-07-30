@@ -71,6 +71,7 @@ export function mapContainerJob(row, attachments = []) {
     driverBankAccountHolder: assignment.driverBankAccountHolder || '',
     driverEmoneyProvider: assignment.driverEmoneyProvider || '',
     driverEmoneyNumber: assignment.driverEmoneyNumber || '',
+    unitCode: assignment.unitCode || row.vehicle_unit_code || '',
     plateNumber: assignment.plateNumber || null,
     chassis: assignment.vehicleDetail || null,
     rpujStatus: row.rpuj_status,
@@ -150,6 +151,7 @@ export function toAssignmentSnapshot(form, driver, vehicle) {
 
   return {
     driver: form.driver || driver?.name || null,
+    unitCode: form.unitCode || vehicle?.unit_code || null,
     plateNumber: form.plateNumber || vehicle?.plate_number || null,
     vehicleDetail,
     driverPaymentMethod: paymentMethod === 'emoney' ? 'emoney' : 'bank',
