@@ -5,8 +5,9 @@ import { fallbackDrivers, fallbackTruckUnits } from '../data/truckData';
 import { useArchiveData } from '../hooks/useArchiveData';
 import { useAuth } from '../hooks/useAuth';
 import { useEffect, useState } from 'react';
-import { Download, Edit3, Trash2 } from 'lucide-react';
+import { Edit3, Trash2 } from 'lucide-react';
 import { validateArchiveFile } from '../utils/fileValidation';
+import DocumentLink from '../components/common/DocumentLink';
 import {
   createVehicleDocument,
   createVehicleDocumentDownloadUrl,
@@ -213,6 +214,16 @@ function statusClass(status) {
   return 'border-emerald-200 bg-emerald-50 text-emerald-700';
 }
 
+function toVehicleDocumentFile(vehicleId, row) {
+  if (!vehicleId || !row?.relativePath) return null;
+  return {
+    name: row.fileNameOriginal || row.fileName || documentTypeLabel(row.documentType) || 'Dokumen kendaraan',
+    type: row.mimeType || row.fileType || '',
+    size: row.sizeBytes || row.fileSize || 0,
+    url: createVehicleDocumentDownloadUrl(vehicleId, row.id),
+  };
+}
+
 function VehicleDocumentsPanel({ vehicle, editable = false }) {
   const { user } = useAuth();
   const canRead = hasPermission(user, 'vehicle_document.read');
@@ -374,21 +385,28 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
             {!loading && !rows.length ? <tr><td className="px-3 py-4 text-slate-500" colSpan="7">Belum ada dokumen kendaraan.</td></tr> : null}
             {rows.map((row) => (
               <tr className="border-t border-slate-200" key={row.id}>
+                {(() => {
+                  const documentFile = toVehicleDocumentFile(vehicleId, row);
+                  return (
+                    <>
                 <td className="px-3 py-2 font-bold text-slate-900">{documentTypeLabel(row.documentType)}</td>
                 <td className="px-3 py-2 text-slate-700">{row.documentNumber || '-'}</td>
                 <td className="px-3 py-2 text-slate-700">{row.issuedDate || '-'}</td>
                 <td className="px-3 py-2 text-slate-700">{row.expiredDate || '-'}</td>
                 <td className="px-3 py-2"><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-bold ${statusClass(row.status)}`}>{row.status}</span></td>
                 <td className="px-3 py-2">
-                  {row.relativePath && vehicleId ? <a className="font-bold text-slate-700 underline" href={createVehicleDocumentDownloadUrl(vehicleId, row.id)} target="_blank" rel="noreferrer">{row.fileNameOriginal || 'Download'}</a> : '-'}
+                  {documentFile ? <DocumentLink file={documentFile} className="font-bold text-slate-700 underline" label="" /> : '-'}
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex gap-2">
-                    {row.relativePath && vehicleId ? <a className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" href={createVehicleDocumentDownloadUrl(vehicleId, row.id)} target="_blank" rel="noreferrer" aria-label="Download"><Download size={14} /></a> : null}
+                    {documentFile ? <DocumentLink file={documentFile} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" label="Download" download iconOnly /> : null}
                     {editable && canUpdate ? <button className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" type="button" onClick={() => { setEditing(row); setForm({ documentType: row.documentType, documentNumber: row.documentNumber || '', issuedDate: row.issuedDate || '', expiredDate: row.expiredDate || '', file: null, notes: row.notes || '' }); }} aria-label="Edit dokumen"><Edit3 size={14} /></button> : null}
                     {editable && canDelete ? <button className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-700" type="button" onClick={() => removeDocument(row)} aria-label="Hapus dokumen"><Trash2 size={14} /></button> : null}
                   </div>
                 </td>
+                    </>
+                  );
+                })()}
               </tr>
             ))}
           </tbody>

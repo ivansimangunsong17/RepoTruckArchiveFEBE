@@ -32,6 +32,16 @@
 .document-list > div > div strong { color: #9f141a; font-size: .69rem; }
 .document-link { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 0; border: 0; color: #a8141a; background: transparent; font-size: .6rem; font-weight: 700; text-align: left; }
 .document-link:disabled { color: #8a8d93; cursor: default; opacity: 1; }
+.document-preview-backdrop { position: fixed; inset: 0; z-index: 260; display: grid; place-items: center; padding: 22px; background: #17181cb3; backdrop-filter: blur(3px); }
+.document-preview-modal { display: flex; overflow: hidden; width: min(1040px, 100%); height: min(760px, calc(100vh - 44px)); border: 1px solid #ffffff40; border-radius: 12px; background: white; box-shadow: 0 28px 80px #08090b59; flex-direction: column; }
+.document-preview-modal > header { display: flex; flex: none; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid #e4e8ef; background: white; }
+.document-preview-modal > header span { display: block; color: #a8141a; font-size: .6rem; font-weight: 850; text-transform: uppercase; }
+.document-preview-modal > header h2 { overflow: hidden; max-width: min(760px, calc(100vw - 130px)); margin: 2px 0 0; color: #25272b; font-size: .92rem; text-overflow: ellipsis; white-space: nowrap; }
+.document-preview-modal > header button { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border: 1px solid #e3e7ed; border-radius: 8px; color: #6d7788; background: white; }
+.document-preview-modal > header button:hover { border-color: #efc3c5; color: var(--primary); background: #fff5f5; }
+.document-preview-body { display: grid; flex: 1; min-height: 0; place-items: center; background: #f4f6f9; }
+.document-preview-body iframe { width: 100%; height: 100%; border: 0; background: white; }
+.document-preview-body img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
 .position-list > div > div strong { font-size: .68rem; }
 .position-dot { width: 8px; height: 8px; border-radius: 50%; background: #aab3c0; box-shadow: 0 0 0 4px #eef1f5; }
 .position-dot.moving { background: var(--primary); box-shadow: 0 0 0 4px #ffe8e9; }

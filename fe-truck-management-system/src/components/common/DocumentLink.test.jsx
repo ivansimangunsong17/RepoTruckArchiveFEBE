@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DocumentLink from './DocumentLink';
-import { downloadAttachmentFile } from '../../services/files/fileService';
+import { createAttachmentDownloadUrl, downloadAttachmentFile } from '../../services/files/fileService';
 
 vi.mock('../../services/files/fileService', () => ({
   createAttachmentDownloadUrl: vi.fn(),
@@ -21,5 +21,20 @@ describe('DocumentLink', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download KTP Driver.pdf' }));
 
     await waitFor(() => expect(downloadAttachmentFile).toHaveBeenCalledWith('file-id', 'KTP Driver.pdf'));
+  });
+
+  it('menampilkan preview attachment di layar tanpa membuka tab baru', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    createAttachmentDownloadUrl.mockResolvedValue('https://api.test/attachments/file-id');
+
+    render(<DocumentLink file={{ name: 'KTP Driver.pdf', path: 'file-id', type: 'application/pdf' }} label="View" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View KTP Driver.pdf' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Preview KTP Driver.pdf' })).toBeInTheDocument();
+    expect(screen.getByTitle('KTP Driver.pdf')).toHaveAttribute('src', 'https://api.test/attachments/file-id');
+    expect(openSpy).not.toHaveBeenCalled();
+
+    openSpy.mockRestore();
   });
 });
