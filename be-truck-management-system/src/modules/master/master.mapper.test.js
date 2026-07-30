@@ -16,3 +16,18 @@ test('customer mapper membaca dan menyimpan nama sales', () => {
   });
   assert.equal(databaseRow.sales_name, 'Sales Armada 02');
 });
+
+test('driver mapper membaca dan menyimpan tanggal lahir', () => {
+  const mapped = resourceConfig.drivers.toApi({
+    id: 'driver-1',
+    name: 'Sopir Contoh',
+    birth_date: '1988-04-12',
+  });
+  assert.equal(mapped.birthDate, '1988-04-12');
+
+  const databaseRow = resourceConfig.drivers.toDb({
+    name: 'Sopir Contoh',
+    birthDate: '1988-04-12',
+  });
+  assert.equal(databaseRow.birth_date, '1988-04-12');
+});

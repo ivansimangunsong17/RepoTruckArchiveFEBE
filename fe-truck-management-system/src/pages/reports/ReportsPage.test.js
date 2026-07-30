@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDriverPerformanceRows,
+  buildMonthlyDriverUtilizationPivot,
   buildMonthlyUtilizationPivot,
   buildRepoMonitoringRows,
   buildTruckDayUtilizationSummary,
@@ -17,6 +18,8 @@ describe('buildDriverPerformanceRows', () => {
       {
         driver: 'Budi',
         totalTrips: 0,
+        totalRevenue: 0,
+        averageRevenuePerTrip: 0,
       },
     ]);
   });
@@ -31,6 +34,33 @@ describe('buildDriverPerformanceRows', () => {
       {
         driver: 'Budi',
         totalTrips: 4,
+        totalRevenue: 0,
+        averageRevenuePerTrip: 0,
+      },
+    ]);
+  });
+
+  it('menyertakan total revenue dan rata-rata revenue per trip', () => {
+    const rows = buildDriverPerformanceRows(
+      [{ id: 'driver-1', name: 'Budi' }, { id: 'driver-2', name: 'Agus' }],
+      [
+        { driver: 'Budi', monthlyTrips: 2, totalRevenue: 6000000, averageRevenuePerTrip: 3000000 },
+        { driver: 'Agus', monthlyTrips: 3, totalRevenue: 4500000, averageRevenuePerTrip: 1500000 },
+      ],
+    );
+
+    expect(rows).toEqual([
+      {
+        driver: 'Budi',
+        totalTrips: 2,
+        totalRevenue: 6000000,
+        averageRevenuePerTrip: 3000000,
+      },
+      {
+        driver: 'Agus',
+        totalTrips: 3,
+        totalRevenue: 4500000,
+        averageRevenuePerTrip: 1500000,
       },
     ]);
   });
@@ -40,8 +70,8 @@ describe('buildMonthlyUtilizationPivot', () => {
   it('membuat kolom tanggal, total per truck, total harian, dan grand total', () => {
     const pivot = buildMonthlyUtilizationPivot(
       [
-        { plateNumber: 'B 9102 BEL', unitCode: 'TRK-102', defaultDriver: 'Asep' },
-        { plateNumber: 'B 9103 BEL', unitCode: 'TRK-103', defaultDriver: 'Budi' },
+        { plateNumber: 'B 9102 BEL', unitCode: 'TRK-102', capacity: '40FT', defaultDriver: 'Asep' },
+        { plateNumber: 'B 9103 BEL', unitCode: 'TRK-103', capacity: '20FT', defaultDriver: 'Budi' },
       ],
       [
         {
@@ -92,10 +122,45 @@ describe('buildMonthlyUtilizationPivot', () => {
       holidayLabel: 'Hari Contoh Nasional',
       fullLabel: 'Jumat, 17/07/2026 - Hari Contoh Nasional',
     });
-    expect(pivot.rows.map((row) => row.plateNumber)).toEqual(['B 9102 BEL', 'B 9103 BEL']);
-    expect(pivot.rows.map((row) => row.unitCode)).toEqual(['TRK-102', 'TRK-103']);
+    expect(pivot.rows.map((row) => row.plateNumber)).toEqual(['B 9103 BEL', 'B 9102 BEL']);
+    expect(pivot.rows.map((row) => row.unitCode)).toEqual(['TRK-103', 'TRK-102']);
+    expect(pivot.rows.map((row) => row.size)).toEqual(['20FT', '40FT']);
+    expect(pivot.rows[1].cells['2026-07-01'].count).toBe(2);
+    expect(pivot.rows[0].cells['2026-07-02'].labels).toEqual(['CILEGON']);
+    expect(pivot.totalsByDay['2026-07-01']).toBe(2);
+    expect(pivot.totalsByDay['2026-07-02']).toBe(1);
+    expect(pivot.grandTotal).toBe(3);
+  });
+});
+
+describe('buildMonthlyDriverUtilizationPivot', () => {
+  it('membuat pivot utilisasi sopir per tanggal', () => {
+    const pivot = buildMonthlyDriverUtilizationPivot(
+      [
+        { id: 'driver-1', name: 'Budi' },
+        { id: 'driver-2', name: 'Agus' },
+      ],
+      [
+        { driver: 'Budi', completedAt: '2026-07-01T10:00:00.000Z', destination: 'Jakarta', status: 'completed' },
+        { driver: 'Budi', completedAt: '2026-07-01T16:00:00.000Z', destination: 'Bekasi', status: 'completed' },
+        { driver: 'Agus', completedDate: '2026-07-02', destination: 'Cilegon', status: 'completed' },
+        { driver: 'Agus', completedDate: '2026-07-02', destination: 'Cilegon', status: 'cancelled' },
+      ],
+      7,
+      2026,
+      {
+        '2026-07-17': [{ localName: 'Hari Contoh Nasional', name: 'Sample National Holiday' }],
+      },
+    );
+
+    expect(pivot.days).toHaveLength(31);
+    expect(pivot.days[16]).toMatchObject({
+      isRedDate: true,
+      holidayLabel: 'Hari Contoh Nasional',
+    });
+    expect(pivot.rows.map((row) => row.driver)).toEqual(['Budi', 'Agus']);
     expect(pivot.rows[0].cells['2026-07-01'].count).toBe(2);
-    expect(pivot.rows[1].cells['2026-07-02'].labels).toEqual(['CILEGON']);
+    expect(pivot.rows[1].cells['2026-07-02'].count).toBe(1);
     expect(pivot.totalsByDay['2026-07-01']).toBe(2);
     expect(pivot.totalsByDay['2026-07-02']).toBe(1);
     expect(pivot.grandTotal).toBe(3);

@@ -221,7 +221,7 @@ function getAcceptedFileConfig(field) {
     allowedTypes,
     imageOnly,
     title: imageOnly ? 'Pilih gambar' : 'Pilih dokumen',
-    helper: imageOnly ? 'JPG atau PNG - Maksimal 5 MB' : 'PDF, JPG, atau PNG - Maksimal 5 MB',
+    helper: imageOnly ? 'JPG atau PNG - Maksimal 10 MB' : 'PDF maks. 5 MB, JPG/PNG maks. 10 MB',
     errorLabel: imageOnly ? 'JPG atau PNG' : 'PDF, JPG, atau PNG',
   };
 }

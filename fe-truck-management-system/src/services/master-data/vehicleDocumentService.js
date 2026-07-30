@@ -1,6 +1,8 @@
 import { httpClient } from '../api/httpClient';
 import { getAuthToken } from '../auth/authTokenStore';
 import { API_BASE_URL } from '../config/dataSource';
+import { compressImageFile } from '../../utils/imageCompression';
+import { validateFinalUploadFile } from '../../utils/fileValidation';
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -21,10 +23,13 @@ async function toPayload(form) {
   };
 
   if (form.file instanceof File) {
-    payload.fileName = form.file.name;
-    payload.mimeType = form.file.type;
-    payload.fileSize = form.file.size;
-    payload.fileBase64 = await readFileAsDataUrl(form.file);
+    const uploadFile = await compressImageFile(form.file);
+    const validationError = validateFinalUploadFile(uploadFile);
+    if (validationError) throw new Error(validationError);
+    payload.fileName = uploadFile.name;
+    payload.mimeType = uploadFile.type;
+    payload.fileSize = uploadFile.size;
+    payload.fileBase64 = await readFileAsDataUrl(uploadFile);
   }
 
   return payload;

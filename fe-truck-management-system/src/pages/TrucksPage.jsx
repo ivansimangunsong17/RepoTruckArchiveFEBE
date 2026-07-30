@@ -183,16 +183,17 @@ function createFields(driverOptions, chassisRows = [], truckRows = []) {
       sectionClassName: 'accent-documents',
       label: 'Nomor KIR',
       placeholder: 'Opsional, bisa dilengkapi nanti',
-      className: 'span-third',
+      className: 'vehicle-document-field vehicle-document-number',
     },
-    { key: 'kirExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal KIR OFF', type: 'date', className: 'span-third', expiryAlert: { label: 'KIR Truck' } },
-    { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file', className: 'span-third', compactUpload: true },
-    { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'span-third' },
-    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', className: 'span-third', expiryAlert: { label: 'STNK' } },
-    { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file', className: 'span-third', compactUpload: true },
-    { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'span-third' },
-    { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'span-third', expiryAlert: { label: 'STID' } },
-    { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'span-third', compactUpload: true },
+    { key: 'kirExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal KIR OFF', type: 'date', className: 'vehicle-document-field vehicle-document-date', expiryAlert: { label: 'KIR Truck' } },
+    { key: 'kirDocument', section: 'Dokumen Kendaraan', label: 'Dokumen KIR', type: 'file', className: 'vehicle-document-field vehicle-document-upload', compactUpload: true },
+    { key: 'stnkNumber', section: 'Dokumen Kendaraan', label: 'Nomor STNK', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'vehicle-document-field vehicle-document-number' },
+    { key: 'stnkExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STNK OFF', type: 'date', className: 'vehicle-document-field vehicle-document-date', expiryAlert: { label: 'STNK' } },
+    { key: 'stnkDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STNK', type: 'file', className: 'vehicle-document-field vehicle-document-upload', compactUpload: true },
+    { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'vehicle-document-field vehicle-document-number' },
+    { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'vehicle-document-field vehicle-document-date', expiryAlert: { label: 'STID' } },
+    { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'vehicle-document-field vehicle-document-upload', compactUpload: true },
+    { key: 'taxPaymentDate', section: 'Dokumen Kendaraan', label: 'Tanggal Bayar Pajak', type: 'date', className: 'vehicle-document-field vehicle-document-tax' },
     { key: 'insuranceType', section: 'Asuransi Kendaraan', label: 'Jenis Asuransi', type: 'select', defaultValue: '', options: INSURANCE_TYPE_OPTIONS, className: 'span-quarter' },
     { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Asuransi', placeholder: 'Contoh: POL-TRK-001', className: 'span-quarter' },
     { key: 'insuranceExpiryDate', section: 'Asuransi Kendaraan', label: 'Tanggal Berakhir', type: 'date', className: 'span-quarter', expiryAlert: { label: 'Asuransi Truck' } },
@@ -340,7 +341,7 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
               <label className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700" htmlFor={`vehicle-document-file-${vehicleId}`}>Pilih File</label>
               <span className="min-w-0 truncate text-sm font-semibold text-slate-600">{form.file?.name || 'Belum ada file'}</span>
             </div>
-            <small className="text-xs font-medium text-slate-500">PDF, JPG, PNG - Maks. 5 MB</small>
+            <small className="text-xs font-medium text-slate-500">PDF maks. 5 MB, JPG/PNG maks. 10 MB</small>
           </label>
           <label className="grid gap-1 text-xs font-bold text-slate-600">
             Catatan
@@ -431,6 +432,7 @@ const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
   'stnkNumber',
   'stnkExpiryDate',
   'stnkDocument',
+  'taxPaymentDate',
   'stidCode',
   'stidExpiryDate',
   'stidDocument',
@@ -455,6 +457,7 @@ function TruckDocumentSummary({ row }) {
       expiryDate: row.stnkExpiryDate,
       expiryLabel: 'STNK',
       file: row.stnkDocument,
+      extra: row.taxPaymentDate ? `Bayar pajak: ${formatDisplayDate(row.taxPaymentDate)}` : '',
     },
     {
       label: 'STID',
@@ -483,7 +486,10 @@ function TruckDocumentSummary({ row }) {
       {documents.map((document) => (
         <div className="truck-document-summary-row" key={document.label}>
           <strong>{document.label}</strong>
-          <span className={document.number ? '' : 'is-empty'}>{document.number || '-'}</span>
+          <span className={document.number || document.extra ? '' : 'is-empty'}>
+            {document.number || '-'}
+            {document.extra ? <small>{document.extra}</small> : null}
+          </span>
           <div>
             <MasterExpiryDate value={document.expiryDate} label={document.expiryLabel} />
           </div>
@@ -496,6 +502,10 @@ function TruckDocumentSummary({ row }) {
 
 function TruckStnkExpiry({ row }) {
   return <MasterExpiryDate value={row.stnkExpiryDate} />;
+}
+
+function TruckTaxPaymentDate({ row }) {
+  return <span className="master-plain-cell strong">{formatDisplayDate(row.taxPaymentDate)}</span>;
 }
 
 function getChassisRow(rows, chassisValue) {
@@ -661,6 +671,12 @@ function TrucksPage() {
             renderDetail: (value) => <DateDetail value={value} />,
           };
         }
+        if (field.key === 'taxPaymentDate') {
+          return {
+            ...field,
+            renderDetail: (value) => <DateDetail value={value} />,
+          };
+        }
         if (field.key === 'kirExpiryDate' || field.key === 'stnkExpiryDate' || field.key === 'stidExpiryDate' || field.key === 'insuranceExpiryDate') {
           return {
             ...field,
@@ -693,6 +709,7 @@ function TrucksPage() {
         { key: 'kirExpiryDate', label: 'KIR OFF', render: (_, row) => <TruckKirExpiry row={row} /> },
         { key: 'stidExpiryDate', label: 'STID OFF', render: (_, row) => <TruckStidExpiry row={row} /> },
         { key: 'stnkExpiryDate', label: 'STNK OFF', render: (_, row) => <TruckStnkExpiry row={row} /> },
+        { key: 'taxPaymentDate', label: 'Bayar Pajak', render: (_, row) => <TruckTaxPaymentDate row={row} /> },
         { key: 'status', label: 'Kondisi', render: (_, row) => <TruckStatus row={row} activeJobs={activeJobs} /> },
       ]}
       initialRows={fallbackTruckUnits}

@@ -1,4 +1,6 @@
 import { httpClient } from '../api/httpClient';
+import { compressImageFile } from '../../utils/imageCompression';
+import { validateFinalUploadFile } from '../../utils/fileValidation';
 
 function buildQuery(params = {}) {
   const searchParams = new URLSearchParams();
@@ -52,11 +54,14 @@ function readFileAsDataUrl(file) {
 }
 
 export async function uploadFinanceRpujTransferProof(id, file) {
-  const fileBase64 = await readFileAsDataUrl(file);
+  const uploadFile = await compressImageFile(file);
+  const validationError = validateFinalUploadFile(uploadFile);
+  if (validationError) throw new Error(validationError);
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
   return httpClient.post(`/finance/rpuj-requests/${encodeURIComponent(id)}/transfer-proof`, {
-    fileName: file.name,
-    mimeType: file.type,
-    fileSize: file.size,
+    fileName: uploadFile.name,
+    mimeType: uploadFile.type,
+    fileSize: uploadFile.size,
     fileBase64,
   });
 }

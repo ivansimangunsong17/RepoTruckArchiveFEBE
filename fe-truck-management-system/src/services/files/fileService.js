@@ -1,6 +1,8 @@
 import { httpClient } from '../api/httpClient';
 import { getAuthToken } from '../auth/authTokenStore';
 import { API_BASE_URL } from '../config/dataSource';
+import { compressImageFile } from '../../utils/imageCompression';
+import { validateFinalUploadFile } from '../../utils/fileValidation';
 
 export async function createAttachmentDownloadUrl(path, { download = false } = {}) {
   if (!path) return null;
@@ -57,21 +59,34 @@ export async function uploadAttachmentFile({
   };
 
   if (file && file instanceof File) {
-    const fileBase64 = await readFileAsDataUrl(file);
-    payload.fileName = file.name;
-    payload.mimeType = file.type;
-    payload.fileSize = file.size;
+    const uploadFile = await compressImageFile(file);
+    const validationError = validateFinalUploadFile(uploadFile);
+    if (validationError) throw new Error(validationError);
+    const fileBase64 = await readFileAsDataUrl(uploadFile);
+    payload.fileName = uploadFile.name;
+    payload.mimeType = uploadFile.type;
+    payload.fileSize = uploadFile.size;
     payload.fileBase64 = fileBase64;
   } else if (!path) {
     return null;
   }
 
-  return path
-    ? httpClient.patch(`/attachments/${encodeURIComponent(path)}`, payload)
-    : httpClient.post('/attachments/upload', payload);
+  if (!path) return httpClient.post('/attachments/upload', payload);
+
+  try {
+    return await httpClient.patch(`/attachments/${encodeURIComponent(path)}`, payload);
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+    return httpClient.post('/attachments/upload', payload);
+  }
 }
 
-export function deleteAttachmentFile(path) {
+export async function deleteAttachmentFile(path) {
   if (!path) return null;
-  return httpClient.delete(`/attachments/${encodeURIComponent(path)}`);
+  try {
+    return await httpClient.delete(`/attachments/${encodeURIComponent(path)}`);
+  } catch (error) {
+    if (error?.status === 404) return null;
+    throw error;
+  }
 }

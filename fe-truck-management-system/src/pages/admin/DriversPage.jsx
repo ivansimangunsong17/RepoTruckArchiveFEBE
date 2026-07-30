@@ -68,6 +68,23 @@ function DriverIdentity({ row }) {
   return <span className="driver-name-cell">{row.name}</span>;
 }
 
+function calculateDriverAge(birthDate, referenceDate = new Date()) {
+  if (!birthDate) return null;
+  const birth = new Date(`${birthDate}T00:00:00`);
+  if (Number.isNaN(birth.getTime())) return null;
+
+  let age = referenceDate.getFullYear() - birth.getFullYear();
+  const monthDiff = referenceDate.getMonth() - birth.getMonth();
+  const dayDiff = referenceDate.getDate() - birth.getDate();
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function DriverAge({ row }) {
+  const age = calculateDriverAge(row.birthDate);
+  return <span className="master-plain-cell strong">{age === null ? '-' : `${age} th`}</span>;
+}
+
 function DriverNumber({ row, trucks }) {
   const truck = getDriverTruck(row, trucks);
   return <span className="driver-number-cell">{formatTruckNumber(truck?.unitCode)}</span>;
@@ -169,6 +186,7 @@ const fields = [
     hint: 'Opsional, isi sesuai NIK pada KTP sopir.',
     validate: (form) => (form.nik && !/^\d{16}$/.test(String(form.nik).trim()) ? 'NIK harus 16 digit angka.' : ''),
   },
+  { key: 'birthDate', section: 'Identitas Driver', label: 'Tanggal Lahir', type: 'date' },
   { key: 'phone', section: 'Identitas Driver', label: 'Kontak Driver', placeholder: '08xx xxxx xxxx', required: true },
   { key: 'paymentMethod', section: 'Pembayaran UJ Sopir', label: 'Metode Pembayaran', type: 'select', defaultValue: 'bank', options: [
     { value: 'bank', label: 'Bank Transfer' }, { value: 'emoney', label: 'E-Money' },
@@ -292,6 +310,7 @@ function DriversPage() {
         { key: 'truckNumber', label: 'No', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
         { key: 'name', label: 'Nama Sopir', render: (_, row) => <DriverIdentity row={row} /> },
         { key: 'nik', label: 'NIK', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
+        { key: 'birthDate', label: 'Umur', render: (_, row) => <DriverAge row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (_, row) => <DriverPlate row={row} trucks={truckRows} /> },
         { key: 'licenseExpiry', label: 'Masa SIM', render: (_, row) => <DriverLicense row={row} /> },
         { key: 'paymentMethod', label: 'Rekening / E-Money', render: (_, row) => <DriverPayment row={row} /> },

@@ -233,7 +233,8 @@ function formatSpkShipment(value) {
   const shipment = String(value || '').toLowerCase();
   const checked = (keyword) => (shipment.includes(keyword) ? '[x]' : '[ ]');
   const domesticChecked = shipment.includes('domestik') || shipment.includes('domestic');
-  return `${checked('import')} Import    ${checked('export')} Export    ${domesticChecked ? '[x]' : '[ ]'} Domestic`;
+  const repoEmptyChecked = shipment.includes('repo_empty') || shipment.includes('repo empty');
+  return `${checked('import')} Import    ${checked('export')} Export    ${domesticChecked ? '[x]' : '[ ]'} Domestic    ${repoEmptyChecked ? '[x]' : '[ ]'} Repo Empty`;
 }
 
 function loadImage(source) {
@@ -1175,7 +1176,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       label="Lampiran Biaya Lainnya"
                       value={form.spkDocument}
                       title={form.spkDocument?.name ? 'Ubah File' : 'Pilih File'}
-                      helper="PDF, JPG, PNG - Maks. 5 MB"
+                      helper="PDF maks. 5 MB, JPG/PNG maks. 10 MB"
                       accept={OPERATIONAL_FILE_ACCEPT}
                       compact
                       disabled={!canEditOtherCost}
@@ -1305,7 +1306,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       {form.eirDocument?.name || 'Belum ada file'}
                     </span>
                   </div>
-                  <small className="operational-document-helper">PDF, JPG, PNG - Maks. 5 MB</small>
+                  <small className="operational-document-helper">PDF maks. 5 MB, JPG/PNG maks. 10 MB</small>
                 </div>
                 {operationalDocumentFields.map((field) => (
                   <div className="operational-document-card" key={field.valueField}>
@@ -1349,7 +1350,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                         {form[field.fileField]?.name || 'Belum ada file'}
                       </span>
                     </div>
-                    <small className="operational-document-helper">PDF, JPG, PNG - Maks. 5 MB</small>
+                    <small className="operational-document-helper">PDF maks. 5 MB, JPG/PNG maks. 10 MB</small>
                   </div>
                 ))}
               </div>
@@ -1369,7 +1370,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       label="Dokumen tambahan"
                       value={document.file}
                         title={document.file?.name ? 'Ubah File' : 'Pilih File'}
-                      helper="PDF, JPG, atau PNG - Maksimal 5 MB"
+                      helper="PDF maks. 5 MB, JPG/PNG maks. 10 MB"
                       accept={OPERATIONAL_FILE_ACCEPT}
                       validationOptions={{
                         label: 'Dokumen tambahan',

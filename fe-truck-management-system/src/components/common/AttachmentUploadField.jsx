@@ -33,7 +33,7 @@ function AttachmentUploadField({
   value,
   label = 'Upload Dokumen',
   title = 'Pilih File',
-  helper = 'PDF, JPG, PNG',
+  helper = 'PDF maks. 5 MB, JPG/PNG maks. 10 MB',
   accept = '.pdf,.jpg,.jpeg,.png',
   compact = false,
   validationOptions = {},

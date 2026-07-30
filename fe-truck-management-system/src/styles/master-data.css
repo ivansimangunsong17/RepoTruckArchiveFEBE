@@ -239,7 +239,7 @@
 .master-form-error { margin: 18px 24px 0; border: 1px solid #efc9cb; font-weight: 700; }
 .master-fieldset { display: grid; gap: 10px; min-width: 0; margin: 10px 18px 0; padding: 14px 16px 16px; border: 1px solid #e1e2e5; border-radius: 10px; background: white; }
 .master-fieldset.accent-chassis { border-color: #f0d8c2; background: #fffaf5; }
-.master-fieldset.accent-documents { border-color: #f3d4d6; background: #fff8f8; }
+.master-fieldset.accent-documents { border-color: #ead6d8; background: #fff; }
 .master-fieldset:last-child { border-bottom: 0; }
 .master-fieldset:last-child { margin-bottom: 18px; }
 .master-fieldset legend { float: left; width: auto; margin: 0 0 10px; padding: 0 6px; color: #222326; background: white; font-size: .75rem; font-weight: 800; }
@@ -250,6 +250,11 @@
 .master-form-grid .master-field.span-quarter { grid-column: span 3; }
 .master-form-grid .master-field.span-third { grid-column: span 4; }
 .master-form-grid .master-field.span-two-thirds { grid-column: span 8; }
+.master-fieldset.accent-documents .master-form-grid { gap: 9px 10px; }
+.master-form-grid .master-field.vehicle-document-number { grid-column: span 4; }
+.master-form-grid .master-field.vehicle-document-date { grid-column: span 3; }
+.master-form-grid .master-field.vehicle-document-upload { grid-column: span 5; }
+.master-form-grid .master-field.vehicle-document-tax { grid-column: span 4; }
 .master-form-grid .master-field > span { display: block; }
 .master-fieldset.accent-chassis .master-field > span,
 .master-fieldset.accent-documents .master-field > span { color: #222326; font-weight: 800; }
@@ -263,7 +268,10 @@
 .master-fieldset.accent-chassis textarea { border-color: #e7cdb7; }
 .master-fieldset.accent-documents input,
 .master-fieldset.accent-documents select,
-.master-fieldset.accent-documents textarea { border-color: #efc9cb; }
+.master-fieldset.accent-documents textarea { border-color: #dfe3ea; }
+.master-fieldset.accent-documents input,
+.master-fieldset.accent-documents select,
+.master-fieldset.accent-documents textarea { min-height: 34px; padding: 6px 9px; }
 .master-form-grid input::placeholder, .master-form-grid textarea::placeholder { color: #a8b0bc; }
 .master-form-grid input:focus, .master-form-grid select:focus, .master-form-grid textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px #dc171f18; }
 .document-upload { display: grid; gap: 5px; }
@@ -279,11 +287,15 @@
   align-self: start;
   width: fit-content;
   max-width: 100%;
-  min-height: 30px;
+  min-height: 32px;
   padding: 5px 9px;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: 7px;
   white-space: nowrap;
+}
+.master-fieldset.accent-documents .document-upload.compact .document-upload-dropzone {
+  border-color: #e6b8bb;
+  background: #fffafa;
 }
 .document-upload.compact .document-upload-dropzone > svg {
   width: 15px;

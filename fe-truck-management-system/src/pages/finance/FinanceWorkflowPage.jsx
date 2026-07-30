@@ -773,7 +773,7 @@ function RpujTransferUploadModal({ row, file, error, busy, onFileChange, onClose
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <strong className="block text-xs text-slate-900">File Bukti Transfer</strong>
-            <span className="mt-0.5 block text-[10px] font-medium text-slate-500">PDF, JPG, atau PNG. Maksimal 5 MB.</span>
+            <span className="mt-0.5 block text-[10px] font-medium text-slate-500">PDF maks. 5 MB, JPG/PNG maks. 10 MB.</span>
           </div>
           <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-bold text-slate-700 hover:bg-slate-100">
             <Upload size={13} /> {file ? 'Ganti File' : 'Pilih File'}

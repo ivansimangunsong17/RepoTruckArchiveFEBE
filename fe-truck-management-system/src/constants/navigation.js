@@ -32,12 +32,7 @@ const nonFinanceRoles = [
   USER_ROLES.OBSERVER,
 ];
 const overviewRoles = ALL_ROLES;
-const orderRoles = [
-  USER_ROLES.ADMIN,
-  USER_ROLES.SALES,
-  USER_ROLES.OPERATIONAL,
-  USER_ROLES.OBSERVER,
-];
+const orderRoles = nonFinanceRoles;
 const operationalRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.OPERATIONAL,

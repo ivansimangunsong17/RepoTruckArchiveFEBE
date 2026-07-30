@@ -10,6 +10,7 @@ const labels = {
   pending: 'Belum Diproses',
   import: 'Import',
   export: 'Export',
+  repo_empty: 'Repo Empty',
   valid: 'Valid',
   expiring_soon: 'Segera Expired',
   expired: 'Kedaluwarsa',

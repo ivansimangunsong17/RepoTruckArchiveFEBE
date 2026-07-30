@@ -600,22 +600,31 @@ export async function getDriverPerformanceReport(options = {}) {
   const [rows, months] = await Promise.all([
     query(
       `
-        with completed_jobs as (
+        with order_job_totals as (
+          select sales_order_id, count(*)::int as total_jobs
+          from container_jobs
+          group by sales_order_id
+        ),
+        completed_jobs as (
           select cj.id,
                  nullif(cj.assignment_snapshot->>'driver', '') as driver,
-                 coalesce(cj.completed_at, so.trip_date)::date as completed_date
+                 coalesce(cj.completed_at, so.trip_date)::date as completed_date,
+                 so.price,
+                 so.total_amount,
+                 to_jsonb(so)->'line_items' as line_items,
+                 cj.container_size,
+                 greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
           from container_jobs cj
           join sales_orders so on so.id = cj.sales_order_id
+          left join order_job_totals ojt on ojt.sales_order_id = so.id
           where cj.status = 'completed'
+            and so.status <> 'cancelled'
             and nullif(cj.assignment_snapshot->>'driver', '') is not null
         )
-        select driver,
-               count(*) filter (where true ${monthCondition})::int as monthly_trips,
-               count(*) filter (where true ${weekFromCondition} ${weekToCondition})::int as weekly_trips,
-               count(*)::int as total_trips
+        select *
         from completed_jobs cj
-        group by driver
-        order by monthly_trips desc, weekly_trips desc, driver asc
+        where true ${monthCondition} ${weekFromCondition} ${weekToCondition}
+        order by completed_date desc, driver asc
       `,
       params,
     ),
@@ -629,14 +638,41 @@ export async function getDriverPerformanceReport(options = {}) {
     `),
   ]);
 
+  const drivers = new Map();
+  rows.rows.forEach((row) => {
+    const driver = row.driver || '';
+    if (!drivers.has(driver)) {
+      drivers.set(driver, {
+        driver,
+        weeklyTrips: 0,
+        monthlyTrips: 0,
+        totalTrips: 0,
+        totalRevenue: 0,
+      });
+    }
+
+    const summary = drivers.get(driver);
+    const revenue = calculateCompletedJobRevenue(row);
+    summary.weeklyTrips += 1;
+    summary.monthlyTrips += 1;
+    summary.totalTrips += 1;
+    summary.totalRevenue += revenue;
+  });
+
+  const performanceRows = Array.from(drivers.values())
+    .map((row) => ({
+      ...row,
+      averageRevenuePerTrip: row.totalTrips ? row.totalRevenue / row.totalTrips : 0,
+    }))
+    .sort((left, right) => {
+      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+      if (right.monthlyTrips !== left.monthlyTrips) return right.monthlyTrips - left.monthlyTrips;
+      return left.driver.localeCompare(right.driver);
+    });
+
   return {
-    rows: rows.rows.map((row) => ({
-      driver: row.driver,
-      weeklyTrips: Number(row.weekly_trips || 0),
-      monthlyTrips: Number(row.monthly_trips || 0),
-      totalTrips: Number(row.total_trips || 0),
-    })),
-    total: rows.rows.length,
+    rows: performanceRows,
+    total: performanceRows.length,
     months: months.rows.map((row) => ({
       value: row.value,
       label: new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' })

@@ -10,6 +10,7 @@ function formatShipment(value) {
     export: 'Export',
     'domestik inward': 'Domestik Inward',
     'domestik outward': 'Domestik Outward',
+    repo_empty: 'Repo Empty',
   };
   return shipmentMap[String(value || '').toLowerCase()] || value || '-';
 }
