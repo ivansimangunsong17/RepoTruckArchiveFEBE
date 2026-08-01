@@ -65,7 +65,7 @@ function getDriverStatus(row, activeJobs) {
 }
 
 function DriverIdentity({ row }) {
-  return <span className="driver-name-cell">{row.name}</span>;
+  return <span className="driver-name-cell" title={row.name || ''}>{row.nickname || row.name}</span>;
 }
 
 function calculateDriverAge(birthDate, referenceDate = new Date()) {
@@ -151,32 +151,38 @@ const DRIVER_DOCUMENT_FIELD_KEYS = new Set([
   'partnershipLetter',
 ]);
 
-function DriverDocumentDetail({ row }) {
+function DriverDocumentDetail({ row, renderViewerDocumentNote = null }) {
   const documents = [
-    { label: 'Foto Sopir', file: row.driverPhoto },
-    { label: 'KTP Driver', file: row.identityDocument },
-    { label: 'Dokumen SIM', file: row.licenseDocument },
-    { label: 'Surat Kemitraan', file: row.partnershipLetter },
+    { key: 'driverPhoto', label: 'Foto Sopir', file: row.driverPhoto },
+    { key: 'identityDocument', label: 'KTP Driver', file: row.identityDocument },
+    { key: 'licenseDocument', label: 'Dokumen SIM', file: row.licenseDocument },
+    { key: 'partnershipLetter', label: 'Surat Kemitraan', file: row.partnershipLetter },
   ];
+  const showNotes = typeof renderViewerDocumentNote === 'function';
 
   return (
-    <div className="driver-document-detail-table">
-      <div className="driver-document-detail-head">
-        <strong>Jenis Dokumen</strong>
-        <strong>View dan Download</strong>
-      </div>
-      {documents.map((document) => (
-        <div className="driver-document-detail-row" key={document.label}>
-          <strong>{document.label}</strong>
-          <DetailDocumentActions file={document.file} />
+    <div className="master-document-note-layout">
+      <div className={`driver-document-detail-table ${showNotes ? 'has-notes' : ''}`}>
+        <div className="driver-document-detail-head">
+          <strong>Jenis Dokumen</strong>
+          <strong>View dan Download</strong>
+          {showNotes ? <strong>Catatan</strong> : null}
         </div>
-      ))}
+        {documents.map((document) => (
+          <div className="driver-document-detail-row" key={document.key}>
+            <strong>{document.label}</strong>
+            <DetailDocumentActions file={document.file} />
+            {showNotes ? renderViewerDocumentNote(document.key, document.label) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 const fields = [
-  { key: 'name', section: 'Identitas Driver', label: 'Nama Driver', placeholder: 'Nama lengkap sesuai identitas', required: true },
+  { key: 'name', section: 'Identitas Driver', label: 'Nama Lengkap Driver', placeholder: 'Nama lengkap sesuai identitas', required: true },
+  { key: 'nickname', section: 'Identitas Driver', label: 'Nama Panggilan', placeholder: 'Contoh: Safei / Tono' },
   {
     key: 'nik',
     section: 'Identitas Driver',
@@ -274,7 +280,7 @@ async function prepareDriverSave({ payload, editingId, rows, confirmAction, acti
   return { payload: blacklistPayload };
 }
 
-function DriversPage() {
+function DriversPage({ readOnly = false }) {
   const archive = useArchiveData();
   const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : getTruckRows();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
@@ -294,7 +300,7 @@ function DriversPage() {
       key: 'driverDocumentDetail',
       label: 'Dokumen Sopir',
       full: true,
-      renderDetail: (_, row) => <DriverDocumentDetail row={row} />,
+      renderDetail: (_, row, meta) => <DriverDocumentDetail row={row} renderViewerDocumentNote={meta.renderViewerDocumentNote} />,
     },
   ];
 
@@ -308,7 +314,7 @@ function DriversPage() {
       detailFields={detailFields}
       columns={[
         { key: 'truckNumber', label: 'No', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
-        { key: 'name', label: 'Nama Sopir', render: (_, row) => <DriverIdentity row={row} /> },
+        { key: 'nickname', label: 'Nama Panggilan', render: (_, row) => <DriverIdentity row={row} /> },
         { key: 'nik', label: 'NIK', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'birthDate', label: 'Umur', render: (_, row) => <DriverAge row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (_, row) => <DriverPlate row={row} trucks={truckRows} /> },
@@ -326,7 +332,7 @@ function DriversPage() {
       pageSize={20}
       showModeChip={false}
       toolbarTitle="Daftar Sopir"
-      toolbarDescription="Cari nama, cek status, masa SIM, dan kelengkapan dokumen."
+      toolbarDescription="Cari nama panggilan, cek status, masa SIM, dan kelengkapan dokumen."
       sortRows={(rows) => sortDriversByTruck(rows, truckRows)}
       beforeSave={(args) => prepareDriverSave({ ...args, activeJobs })}
       stats={(data) => [
@@ -336,6 +342,7 @@ function DriversPage() {
         { label: 'Tidak Siap', value: data.filter((item) => ['Cuti', 'Tidak Aktif'].includes(getDriverStatus(item, activeJobs))).length, detail: 'Cuti/nonaktif' },
         { label: 'Blacklist', value: data.filter((item) => getDriverStatus(item, activeJobs) === 'Blacklist').length, detail: 'Tidak dipakai' },
       ]}
+      readOnly={readOnly}
     />
   );
 }

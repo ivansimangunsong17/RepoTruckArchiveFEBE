@@ -60,7 +60,7 @@ function DepotTypeCell({ value }) {
   );
 }
 
-function DepotsPage() {
+function DepotsPage({ readOnly = false }) {
   return (
     <LocationMasterPage
       title="Master Depo"
@@ -123,6 +123,7 @@ function DepotsPage() {
         { label: 'Lengkap', value: data.filter((item) => item.name).length, detail: 'Nama tersedia' },
       ]}
       toolbarDescription="Cari nama depo, kode, dan jenis depo."
+      readOnly={readOnly}
     />
   );
 }

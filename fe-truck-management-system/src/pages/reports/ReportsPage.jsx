@@ -646,7 +646,7 @@ function DetailTable({ columns, rows, rowRenderer }) {
 }
 
 function normalizeReportTab(tab) {
-  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'repo') return tab;
+  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'repo' || tab === 'master') return tab;
   return 'revenue';
 }
 
@@ -672,10 +672,167 @@ function getReportHeader(selectedReport) {
     };
   }
 
+  if (selectedReport === 'master') {
+    return {
+      title: 'Master Data Report',
+      description: 'Ringkasan read-only data customer, armada, sopir, chassis, depo, terminal, dan lokasi tujuan.',
+    };
+  }
+
   return {
     title: 'Revenue Report',
     description: 'Ringkasan revenue dan detail revenue per truck pada periode yang dipilih.',
   };
+}
+
+function getMasterStatus(row = {}) {
+  return String(row.status || row.contract || row.operationalStatus || row.operational_status || '').trim();
+}
+
+function isActiveMasterRow(row = {}) {
+  const status = getMasterStatus(row).toLowerCase();
+  return !['tidak aktif', 'nonaktif', 'inactive', 'blacklist', 'archived', 'arsip'].includes(status);
+}
+
+function getDriverDisplayName(row = {}) {
+  return String(row.nickname || row.name || '-').trim() || '-';
+}
+
+function formatMasterValue(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value);
+}
+
+function buildMasterReportSections(masters = {}) {
+  return [
+    {
+      key: 'customers',
+      title: 'Customer',
+      rows: masters.customers || [],
+      columns: [
+        { label: 'Customer', value: (row) => row.name },
+        { label: 'PIC', value: (row) => row.pic },
+        { label: 'Sales', value: (row) => row.salesName },
+        { label: 'Kontrak', value: (row) => row.contract },
+        { label: 'Telepon', value: (row) => row.phone },
+      ],
+    },
+    {
+      key: 'trucks',
+      title: 'Truck',
+      rows: masters.trucks || [],
+      columns: [
+        { label: 'No Lambung', value: (row) => formatTruckUnitCode(row.unitCode) },
+        { label: 'Plat', value: (row) => row.plateNumber },
+        { label: 'Ukuran', value: (row) => row.capacity },
+        { label: 'Sopir Default', value: (row) => row.defaultDriver },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+    {
+      key: 'drivers',
+      title: 'Sopir',
+      rows: masters.drivers || [],
+      columns: [
+        { label: 'Nama Panggilan', value: (row) => getDriverDisplayName(row) },
+        { label: 'Nama Lengkap', value: (row) => row.name },
+        { label: 'SIM', value: (row) => row.licenseType },
+        { label: 'Masa SIM', value: (row) => formatDate(row.licenseExpiry) },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+    {
+      key: 'kir-chassis',
+      title: 'Chassis',
+      rows: masters['kir-chassis'] || [],
+      columns: [
+        { label: 'Kode Chassis', value: (row) => row.chassisCode },
+        { label: 'Plat', value: (row) => row.plateNumber },
+        { label: 'Ukuran', value: (row) => row.capacity },
+        { label: 'No KIR', value: (row) => row.kirNumber },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+    {
+      key: 'depots',
+      title: 'Depo',
+      rows: masters.depots || [],
+      columns: [
+        { label: 'Depo', value: (row) => row.name },
+        { label: 'Perusahaan', value: (row) => row.companyName },
+        { label: 'Kode', value: (row) => row.code },
+        { label: 'Tipe', value: (row) => row.depotType },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+    {
+      key: 'terminals',
+      title: 'Terminal',
+      rows: masters.terminals || [],
+      columns: [
+        { label: 'Terminal', value: (row) => row.name },
+        { label: 'Kode', value: (row) => row.code },
+        { label: 'Area', value: (row) => row.portArea },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+    {
+      key: 'destinations',
+      title: 'Lokasi Tujuan',
+      rows: masters.destinations || [],
+      columns: [
+        { label: 'Lokasi', value: (row) => row.name },
+        { label: 'Area', value: (row) => row.area },
+        { label: 'UJ 20FT', value: (row) => row.uj20ft == null ? '-' : formatCurrency(row.uj20ft) },
+        { label: 'UJ 40FT', value: (row) => row.uj40ft == null ? '-' : formatCurrency(row.uj40ft) },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+  ];
+}
+
+function MasterReportSection({ section }) {
+  const activeCount = section.rows.filter(isActiveMasterRow).length;
+
+  return (
+    <article className="rounded-md border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2.5">
+        <div>
+          <h3 className="text-sm font-bold text-slate-950">{section.title}</h3>
+          <p className="text-xs text-slate-500">{activeCount} aktif dari {section.rows.length} data</p>
+        </div>
+        <span className="rounded-md bg-white px-2.5 py-1 text-xs font-black text-slate-800 shadow-sm">{section.rows.length}</span>
+      </div>
+      {section.rows.length ? (
+        <div className="max-h-80 overflow-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead className="sticky top-0 z-10 bg-white text-[11px] uppercase text-slate-500 shadow-sm">
+              <tr>
+                <th className="w-12 px-3 py-2 font-bold">No</th>
+                {section.columns.map((column) => (
+                  <th key={column.label} className="px-3 py-2 font-bold">{column.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {section.rows.map((row, index) => (
+                <tr key={row.id || `${section.key}-${index}`} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                  <td className="px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
+                  {section.columns.map((column) => (
+                    <td key={column.label} className="px-3 py-2 font-semibold text-slate-800">
+                      {formatMasterValue(column.value(row))}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-5 text-center text-sm text-slate-500">Belum ada data {section.title.toLowerCase()}.</div>
+      )}
+    </article>
+  );
 }
 
 function PivotCell({ cell }) {
@@ -1213,6 +1370,7 @@ function ReportsPage() {
       : 0,
   }), [driverRows]);
   const repoMonitoringRows = useMemo(() => buildRepoMonitoringRows(repoRows), [repoRows]);
+  const masterReportSections = useMemo(() => buildMasterReportSections(archive.masters || {}), [archive.masters]);
   const reportHeader = getReportHeader(selectedReport);
 
   return (
@@ -1223,6 +1381,7 @@ function ReportsPage() {
         description={reportHeader.description}
       />
 
+      {selectedReport !== 'master' ? (
       <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <label className="flex flex-1 flex-col gap-1 text-xs font-semibold text-slate-700">
@@ -1251,6 +1410,12 @@ function ReportsPage() {
           </div>
         </div>
       </section>
+      ) : (
+      <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+        <span className="block text-[11px] font-semibold uppercase text-slate-500">Mode Viewer</span>
+        <strong className="text-sm text-slate-900">Master data ditampilkan sebagai laporan read-only tanpa tombol input, edit, atau hapus.</strong>
+      </section>
+      )}
 
       <section className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <SummaryToggleCard
@@ -1291,6 +1456,16 @@ function ReportsPage() {
           onClick={() => selectReport('driver')}
         />
       </section>
+
+      {selectedReport === 'master' ? (
+        <section className="grid gap-3 xl:grid-cols-2">
+          {archive.loading ? <div className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm xl:col-span-2">Memuat laporan master data...</div> : null}
+          {archive.error ? <div className="rounded-md border border-red-100 bg-red-50 p-4 text-sm text-red-700 shadow-sm xl:col-span-2">{archive.error}</div> : null}
+          {!archive.loading && masterReportSections.map((section) => (
+            <MasterReportSection key={section.key} section={section} />
+          ))}
+        </section>
+      ) : null}
 
       {selectedReport === 'revenue' ? (
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">

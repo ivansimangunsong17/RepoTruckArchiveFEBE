@@ -95,6 +95,12 @@ function reportDateKey(value) {
   return String(value || '').replace(/[^0-9]/g, '') || 'report';
 }
 
+function addDays(dateKey, days) {
+  const date = new Date(dateKey);
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+}
+
 function WeeklyOrdersPage() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [dashboard, setDashboard] = useState({ upcomingJobs: [] });
@@ -156,21 +162,23 @@ function WeeklyOrdersPage() {
     const totalTwentyFt = days.reduce((total, item) => total + item.twentyFt, 0);
     const totalFortyFt = days.reduce((total, item) => total + item.fortyFt, 0);
     downloadPdfReport({
+      reportLabel: 'Weekly Order Planning',
       title: 'Dashboard Order Mingguan',
-      subtitle: `Mulai ${formatShortDate(currentDateKey)}`,
+      subtitle: `Periode ${formatShortDate(currentDateKey)} - ${formatShortDate(addDays(currentDateKey, 6))}`,
       filename: `dashboard-order-mingguan-${reportDateKey(currentDateKey)}.pdf`,
       meta: [
         { label: 'Total Order', value: totalOrders },
-        { label: '20FT', value: totalTwentyFt },
-        { label: '40FT', value: totalFortyFt },
+        { label: 'Total 20FT', value: totalTwentyFt },
+        { label: 'Total 40FT', value: totalFortyFt },
+        { label: 'Target Harian', value: `20FT ${orderTargets.twentyFt} / 40FT ${orderTargets.eightFt}` },
       ],
       columns: [
-        { label: 'No', width: 0.5, value: (row) => row.reportNumber },
+        { label: 'No', width: 0.45, value: (row) => row.reportNumber, align: 'center' },
         { label: 'Tanggal Jalan', width: 1.4, value: (row) => formatShortDate(row.dateKey), bold: true },
         { label: 'Customer', width: 2.6, value: (row) => (row.customerBreakdown?.length ? row.customerBreakdown.map((item) => `${item.customer}: 20FT ${item.twentyFt}, 40FT ${item.fortyFt}`).join('; ') : '-') },
-        { label: '20FT', width: 0.75, value: (row) => row.twentyFt },
-        { label: '40FT', width: 0.75, value: (row) => row.fortyFt },
-        { label: 'Catatan', width: 1.7, value: (row) => shortageText(row) },
+        { label: '20FT', width: 0.65, value: (row) => row.twentyFt, align: 'center' },
+        { label: '40FT', width: 0.65, value: (row) => row.fortyFt, align: 'center' },
+        { label: 'Kekurangan / Catatan', width: 1.9, value: (row) => shortageText(row) },
       ],
       rows: days.map((item, index) => ({ ...item, reportNumber: index + 1 })),
     });

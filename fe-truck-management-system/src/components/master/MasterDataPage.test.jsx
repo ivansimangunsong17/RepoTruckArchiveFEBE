@@ -3,8 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MasterDataPage from './MasterDataPage';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
-import { fetchMasterPage } from '../../services/master-data/masterDataService';
+import {
+  fetchMasterPage,
+  fetchMasterViewerNote,
+  saveMasterViewerNote,
+} from '../../services/master-data/masterDataService';
 import {
   createAttachmentDownloadUrl,
   deleteAttachmentFile,
@@ -16,12 +21,18 @@ vi.mock('../../hooks/useArchiveData', () => ({
   useArchiveData: vi.fn(),
 }));
 
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: vi.fn(),
+}));
+
 vi.mock('../../hooks/useFeedback', () => ({
   useFeedback: vi.fn(),
 }));
 
 vi.mock('../../services/master-data/masterDataService', () => ({
   fetchMasterPage: vi.fn(),
+  fetchMasterViewerNote: vi.fn(),
+  saveMasterViewerNote: vi.fn(),
 }));
 
 vi.mock('../../services/files/fileService', () => ({
@@ -41,7 +52,7 @@ const fields = [
 
 const rows = [{ id: 'row-1', name: 'Data Lama', status: 'Aktif' }];
 
-function renderPage({ pageFields = fields, resource = 'customers' } = {}) {
+function renderPage({ pageFields = fields, resource = 'customers', readOnly = false } = {}) {
   return render(
     <MasterDataPage
       eyebrow="Master"
@@ -59,6 +70,7 @@ function renderPage({ pageFields = fields, resource = 'customers' } = {}) {
       uniqueKeys={['name']}
       filters={[]}
       stats={(data) => [{ label: 'Total', value: data.length, detail: 'data' }]}
+      readOnly={readOnly}
     />,
   );
 }
@@ -79,6 +91,13 @@ describe('MasterDataPage database mode', () => {
     uploadAttachmentFile.mockResolvedValue(null);
     confirmAction.mockResolvedValue(true);
     fetchMasterPage.mockResolvedValue({ rows, total: rows.length });
+    fetchMasterViewerNote.mockResolvedValue([]);
+    saveMasterViewerNote.mockResolvedValue({
+      documentKey: 'identityDocument',
+      note: 'STID belum ada karena masih proses.',
+      updatedByName: 'Rina Viewer',
+      updatedAt: '2026-07-31T03:00:00.000Z',
+    });
     if (!URL.createObjectURL) {
       URL.createObjectURL = vi.fn();
       URL.revokeObjectURL = vi.fn();
@@ -91,6 +110,7 @@ describe('MasterDataPage database mode', () => {
       upsertMaster,
       removeMaster,
     });
+    useAuth.mockReturnValue({ user: { role: 'admin' } });
     useFeedback.mockReturnValue({ notify, confirmAction });
   });
 
@@ -201,6 +221,54 @@ describe('MasterDataPage database mode', () => {
 
     expect(await screen.findByRole('button', { name: 'View NPWP-Customer.pdf' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download NPWP-Customer.pdf' })).toBeInTheDocument();
+  });
+
+  it('membuka master data untuk viewer tanpa aksi edit data', async () => {
+    useAuth.mockReturnValue({ user: { role: 'observer' } });
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Lihat Data' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Input Data Baru/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Data' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Arsipkan Data' })).not.toBeInTheDocument();
+  });
+
+  it('mengizinkan viewer menyimpan catatan monitoring dari modal detail', async () => {
+    const user = userEvent.setup();
+    useAuth.mockReturnValue({ user: { role: 'observer', fullName: 'Rina Viewer' } });
+    renderPage({
+      readOnly: true,
+      pageFields: [
+        ...fields,
+        {
+          key: 'documentSummary',
+          label: 'Dokumen',
+          full: true,
+          renderDetail: (_value, _row, meta) => (
+            <div>
+              <strong>Ringkasan dokumen</strong>
+              {meta.renderViewerDocumentNote('identityDocument', 'KTP Driver')}
+            </div>
+          ),
+        },
+      ],
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Lihat Data' }));
+    const noteInput = await screen.findByRole('textbox', { name: 'Catatan KTP Driver' });
+    await user.type(noteInput, 'STID belum ada karena masih proses.');
+    await user.click(screen.getByRole('button', { name: 'Simpan catatan KTP Driver' }));
+
+    await waitFor(() => expect(saveMasterViewerNote).toHaveBeenCalledWith(
+      'customers',
+      'row-1',
+      'identityDocument',
+      'STID belum ada karena masih proses.',
+    ));
+    expect(upsertMaster).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Catatan monitoring tersimpan',
+    }));
   });
 
   it('mendownload dokumen tersimpan dari tombol detail', async () => {

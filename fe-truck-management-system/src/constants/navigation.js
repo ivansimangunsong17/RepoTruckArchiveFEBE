@@ -22,21 +22,27 @@ import {
   Truck,
   Warehouse,
 } from 'lucide-react';
-import { ALL_ROLES, USER_ROLES } from './roles';
+import { USER_ROLES } from './roles';
 
 const adminOnly = [USER_ROLES.ADMIN];
+const viewerOnly = [USER_ROLES.OBSERVER];
+const masterDataRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 const nonFinanceRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.SALES,
   USER_ROLES.OPERATIONAL,
-  USER_ROLES.OBSERVER,
 ];
-const overviewRoles = ALL_ROLES;
+const overviewRoles = [
+  USER_ROLES.ADMIN,
+  USER_ROLES.SALES,
+  USER_ROLES.OPERATIONAL,
+  USER_ROLES.OBSERVER,
+  USER_ROLES.FINANCE,
+];
 const orderRoles = nonFinanceRoles;
 const operationalRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.OPERATIONAL,
-  USER_ROLES.OBSERVER,
 ];
 const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 const financeRoles = [USER_ROLES.FINANCE];
@@ -90,15 +96,22 @@ export const navigationGroups = [
       {
         label: 'Master Data',
         icon: Database,
-        roles: adminOnly,
+        roles: masterDataRoles,
         children: [
           { to: '/clients', label: 'Data Customer', icon: Building2, roles: adminOnly },
+          { to: '/viewer/clients', label: 'Data Customer', icon: Building2, roles: viewerOnly },
           { to: '/drivers', label: 'Data Supir', icon: IdCard, roles: adminOnly },
+          { to: '/viewer/drivers', label: 'Data Supir', icon: IdCard, roles: viewerOnly },
           { to: '/trucks', label: 'Data Truck', icon: Truck, roles: adminOnly },
+          { to: '/viewer/trucks', label: 'Data Truck', icon: Truck, roles: viewerOnly },
           { to: '/kir-chassis', label: 'Data Chassis', icon: Boxes, roles: adminOnly },
+          { to: '/viewer/kir-chassis', label: 'Data Chassis', icon: Boxes, roles: viewerOnly },
           { to: '/depots', label: 'Data Depo', icon: Warehouse, roles: adminOnly },
+          { to: '/viewer/depots', label: 'Data Depo', icon: Warehouse, roles: viewerOnly },
           { to: '/terminals', label: 'Data Terminal', icon: Anchor, roles: adminOnly },
+          { to: '/viewer/terminals', label: 'Data Terminal', icon: Anchor, roles: viewerOnly },
           { to: '/destinations', label: 'Data Lokasi Tujuan', icon: Route, roles: adminOnly },
+          { to: '/viewer/destinations', label: 'Data Lokasi Tujuan', icon: Route, roles: viewerOnly },
         ],
       },
     ],
@@ -106,6 +119,7 @@ export const navigationGroups = [
   {
     label: 'Monitoring',
     items: [
+      { to: '/document-monitoring', label: 'Dokumen & OFF', icon: FileWarning, roles: adminOnly },
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
       { to: '/finance/order-verification', label: 'Verifikasi Order', icon: CheckCircle2, roles: financeRoles },
       { to: '/finance/rpuj-approval', label: 'Approval RPUJ', icon: ReceiptText, roles: financeRoles },

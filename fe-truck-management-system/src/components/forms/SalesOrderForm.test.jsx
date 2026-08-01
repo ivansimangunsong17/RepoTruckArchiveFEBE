@@ -112,6 +112,32 @@ describe('SalesOrderForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('menolak harga container kosong atau nol untuk D20/D40', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await fillBaseFields(user);
+    await fillFirstLineItem(user, {
+      serviceName: 'Jasa Angkut D20',
+      containerType: 'Dry',
+      quantity: '1',
+      price: '0',
+    });
+    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+
+    expect(screen.getByText('Harga container D20/D40 wajib diisi lebih dari 0.')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('mengirim catatan untuk rincian Jasa Lainnya', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
@@ -283,7 +309,7 @@ describe('SalesOrderForm', () => {
       origin: 'Jakarta',
       destination: 'Bandung',
       receivedAt,
-      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 0 }],
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 150000 }],
       containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending', receivedAt }],
     };
 

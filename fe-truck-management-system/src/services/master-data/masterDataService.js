@@ -84,6 +84,16 @@ export async function saveMaster(resource, row, id) {
     : httpClient.post(`/master/${resource}`, row);
 }
 
+export async function fetchMasterViewerNote(resource, id) {
+  if (!resource || !id) return [];
+  return httpClient.get(`/master/${resource}/${id}/viewer-note`);
+}
+
+export async function saveMasterViewerNote(resource, id, documentKey, note) {
+  if (!resource || !id) throw new Error('Data master belum dipilih.');
+  return httpClient.patch(`/master/${resource}/${id}/viewer-note`, { documentKey, note });
+}
+
 export async function archiveMaster(resource, id) {
   if (resource === 'users') {
     await httpClient.patch(`/users/${id}/status`, { status: 'Nonaktif' });

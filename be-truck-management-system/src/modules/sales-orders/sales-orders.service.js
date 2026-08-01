@@ -339,6 +339,14 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
       throw error;
     }
 
+    const missingContainerPrice = payload.lineItems.find((item) => isContainerService(item.serviceName) && Number(item.price || 0) <= 0);
+    if (missingContainerPrice) {
+      const error = new Error('Harga container D20/D40 wajib diisi lebih dari 0.');
+      error.statusCode = 400;
+      error.code = 'VALIDATION_ERROR';
+      throw error;
+    }
+
     const missingOtherServiceNotes = payload.lineItems.find((item) => item.serviceName === 'Jasa Lainnya' && !String(item.notes || '').trim());
     if (missingOtherServiceNotes) {
       const error = new Error('Isi catatan untuk rincian Jasa Lainnya.');

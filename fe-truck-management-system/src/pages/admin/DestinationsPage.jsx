@@ -6,7 +6,7 @@ function CurrencyCell({ value }) {
   return <span className="master-plain-cell strong">{formatCurrency(Number(value) || 0)}</span>;
 }
 
-function DestinationsPage() {
+function DestinationsPage({ readOnly = false }) {
   return (
     <LocationMasterPage
       title="Master Lokasi Tujuan"
@@ -32,6 +32,7 @@ function DestinationsPage() {
         { key: 'uj40ft', label: 'UJ 40FT', render: (value) => <CurrencyCell value={value} /> },
       ]}
       toolbarDescription="Cari nama tujuan dan status."
+      readOnly={readOnly}
     />
   );
 }

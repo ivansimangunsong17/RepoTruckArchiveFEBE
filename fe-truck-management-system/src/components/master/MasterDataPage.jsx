@@ -16,10 +16,16 @@ import {
 } from 'lucide-react';
 import { useFeedback } from '../../hooks/useFeedback';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { useAuth } from '../../hooks/useAuth';
 import PageHeader from '../common/PageHeader';
 import DocumentLink from '../common/DocumentLink';
 import FilterStatus from '../common/FilterStatus';
-import { fetchMasterPage } from '../../services/master-data/masterDataService';
+import { USER_ROLES, hasPermission } from '../../constants/roles';
+import {
+  fetchMasterPage,
+  fetchMasterViewerNote,
+  saveMasterViewerNote,
+} from '../../services/master-data/masterDataService';
 import {
   createAttachmentDownloadUrl,
   deleteAttachmentFile,
@@ -42,6 +48,7 @@ const MASTER_ATTACHMENT_ENTITY_TYPES = {
   drivers: 'driver',
   customers: 'customer',
 };
+const LOCAL_VIEWER_NOTES_KEY = 'tms-master-viewer-notes-v1';
 
 function normalizeRows(value) {
   return Array.isArray(value) ? value : EMPTY_ROWS;
@@ -101,6 +108,66 @@ function serializeFileMetadata(file) {
 
 function isStoredAttachment(file) {
   return Boolean(file?.path && ATTACHMENT_ID_PATTERN.test(String(file.path)));
+}
+
+function viewerNoteKey(resource, id, documentKey = 'general') {
+  return `${resource}:${id}:${documentKey}`;
+}
+
+function readLocalViewerNotes(resource, id) {
+  try {
+    const notes = JSON.parse(localStorage.getItem(LOCAL_VIEWER_NOTES_KEY)) || {};
+    const prefix = `${resource}:${id}:`;
+    return Object.entries(notes).reduce((result, [key, value]) => {
+      if (!key.startsWith(prefix)) return result;
+      const documentKey = key.slice(prefix.length) || 'general';
+      return { ...result, [documentKey]: { ...(value || {}), documentKey } };
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalViewerNote(resource, id, documentKey, note, user = {}) {
+  const saved = {
+    documentKey,
+    note,
+    updatedByName: user.fullName || user.name || user.email || 'Viewer',
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    const notes = JSON.parse(localStorage.getItem(LOCAL_VIEWER_NOTES_KEY)) || {};
+    localStorage.setItem(LOCAL_VIEWER_NOTES_KEY, JSON.stringify({
+      ...notes,
+      [viewerNoteKey(resource, id, documentKey)]: saved,
+    }));
+  } catch {
+    // Catatan tetap tampil selama modal terbuka meski localStorage tidak tersedia.
+  }
+  return saved;
+}
+
+function normalizeViewerNotes(value) {
+  const rows = Array.isArray(value) ? value : value ? [value] : [];
+  return rows.reduce((result, note) => {
+    const documentKey = note?.documentKey || note?.document_key || 'general';
+    return {
+      ...result,
+      [documentKey]: {
+        ...note,
+        documentKey,
+        note: note?.note || '',
+      },
+    };
+  }, {});
+}
+
+function getViewerNoteErrorMessage(error, fallback) {
+  const message = String(error?.message || '');
+  if (message.includes('master_viewer_notes') || message.includes('relation') || error?.code === 'VIEWER_NOTE_TABLE_MISSING') {
+    return 'Catatan monitoring belum siap. Jalankan migration database.';
+  }
+  return message || fallback;
 }
 
 export function DetailDocumentActions({ file }) {
@@ -292,10 +359,13 @@ function MasterDataPage({
   beforeSave,
   extraDetailContent,
   extraFormContent,
+  readOnly = false,
 }) {
   const { confirmAction, notify } = useFeedback();
+  const { user } = useAuth();
   const { isDatabaseMode, isMasterDatabaseMode, masters, upsertMaster, removeMaster } = useArchiveData();
   const masterDatabaseMode = isMasterDatabaseMode ?? isDatabaseMode;
+  const canManageMaster = !readOnly && hasPermission(user, 'master.manage');
   const [rows, setRows] = useState(() => {
     try {
       const storedRows = JSON.parse(localStorage.getItem(storageKey));
@@ -311,6 +381,12 @@ function MasterDataPage({
   const [formError, setFormError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [detailRow, setDetailRow] = useState(null);
+  const [viewerNotes, setViewerNotes] = useState({});
+  const [viewerNoteDrafts, setViewerNoteDrafts] = useState({});
+  const [viewerNoteLoading, setViewerNoteLoading] = useState(false);
+  const [viewerNoteSavingKey, setViewerNoteSavingKey] = useState('');
+  const [viewerNoteErrors, setViewerNoteErrors] = useState({});
+  const [viewerNoteEditingKeys, setViewerNoteEditingKeys] = useState({});
   const [activeFilters, setActiveFilters] = useState({});
   const [page, setPage] = useState(1);
   const [serverRows, setServerRows] = useState([]);
@@ -320,6 +396,7 @@ function MasterDataPage({
   const [listVersion, setListVersion] = useState(0);
   const safeRows = normalizeRows(rows);
   const databaseRows = resource ? normalizeRows(masters?.[resource]) : null;
+  const canWriteViewerNote = readOnly && user?.role === USER_ROLES.OBSERVER && Boolean(resource && detailRow?.id);
 
   useEffect(() => {
     if (masterDatabaseMode && resource) setRows(databaseRows);
@@ -400,6 +477,51 @@ function MasterDataPage({
   }, [detailRow]);
 
   useEffect(() => {
+    if (!canWriteViewerNote) {
+      setViewerNotes({});
+      setViewerNoteDrafts({});
+      setViewerNoteErrors({});
+      setViewerNoteEditingKeys({});
+      setViewerNoteLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setViewerNoteLoading(true);
+    setViewerNoteErrors({});
+
+    const loadNotes = masterDatabaseMode
+      ? fetchMasterViewerNote(resource, detailRow.id)
+      : Promise.resolve(readLocalViewerNotes(resource, detailRow.id));
+
+    loadNotes
+      .then((notes) => {
+        if (!active) return;
+        const nextNotes = normalizeViewerNotes(notes);
+        setViewerNotes(nextNotes);
+        setViewerNoteDrafts(Object.entries(nextNotes).reduce((result, [documentKey, note]) => ({
+          ...result,
+          [documentKey]: note.note || '',
+        }), {}));
+        setViewerNoteEditingKeys({});
+      })
+      .catch((error) => {
+        if (!active) return;
+        setViewerNotes({});
+        setViewerNoteDrafts({});
+        setViewerNoteErrors({ general: getViewerNoteErrorMessage(error, 'Catatan monitoring gagal dimuat.') });
+        setViewerNoteEditingKeys({});
+      })
+      .finally(() => {
+        if (active) setViewerNoteLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [canWriteViewerNote, detailRow, masterDatabaseMode, resource]);
+
+  useEffect(() => {
     setPage(1);
   }, [query, activeFilters]);
 
@@ -464,6 +586,7 @@ function MasterDataPage({
   }
 
   function openCreateForm() {
+    if (!canManageMaster) return;
     resetForm();
     setFormOpen(true);
   }
@@ -478,6 +601,7 @@ function MasterDataPage({
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!canManageMaster) return;
     const currentEditingRow = editingId
       ? editingRow || safeRows.find((row) => String(row.id) === String(editingId)) || null
       : null;
@@ -615,6 +739,7 @@ function MasterDataPage({
   }
 
   function handleEdit(row) {
+    if (!canManageMaster) return;
     setEditingId(row.id);
     setEditingRow(row);
     setForm(fields.reduce(
@@ -640,6 +765,7 @@ function MasterDataPage({
   }
 
   async function handleDelete(id) {
+    if (!canManageMaster) return;
     const approved = await confirmAction({
       title: `Arsipkan ${singular}?`,
       message: `Data ${singular.toLowerCase()} tidak akan tampil lagi pada daftar master aktif. Jika sudah dipakai transaksi, data akan dinonaktifkan agar histori tetap aman.`,
@@ -667,6 +793,105 @@ function MasterDataPage({
     notify({ title: `${singular} berhasil diarsipkan`, message: masterDatabaseMode ? 'Data tidak lagi tampil pada master aktif.' : 'Data telah dihapus dari mode demo.' });
   }
 
+  async function handleSaveViewerNote(documentKey) {
+    if (!canWriteViewerNote) return;
+    const noteKey = documentKey || 'general';
+    const note = String(viewerNoteDrafts[noteKey] || '').trim();
+    if (note.length > 1000) {
+      setViewerNoteErrors((current) => ({ ...current, [noteKey]: 'Catatan monitoring maksimal 1000 karakter.' }));
+      return;
+    }
+
+    setViewerNoteSavingKey(noteKey);
+    setViewerNoteErrors((current) => ({ ...current, [noteKey]: '' }));
+    try {
+      const saved = masterDatabaseMode
+        ? await saveMasterViewerNote(resource, detailRow.id, noteKey, note)
+        : writeLocalViewerNote(resource, detailRow.id, noteKey, note, user);
+      setViewerNotes((current) => ({ ...current, [noteKey]: saved }));
+      setViewerNoteDrafts((current) => ({ ...current, [noteKey]: saved.note || '' }));
+      setViewerNoteEditingKeys((current) => ({ ...current, [noteKey]: false }));
+      notify({
+        title: 'Catatan monitoring tersimpan',
+        message: 'Catatan Viewer sudah tersimpan tanpa mengubah data master.',
+      });
+    } catch (error) {
+      setViewerNoteErrors((current) => ({
+        ...current,
+        [noteKey]: getViewerNoteErrorMessage(error, 'Catatan monitoring gagal disimpan.'),
+      }));
+    } finally {
+      setViewerNoteSavingKey('');
+    }
+  }
+
+  function renderViewerDocumentNote(documentKey, label = 'Dokumen') {
+    if (!canWriteViewerNote) return null;
+    const noteKey = documentKey || 'general';
+    const note = viewerNotes[noteKey];
+    const draft = viewerNoteDrafts[noteKey] || '';
+    const error = viewerNoteErrors[noteKey] || viewerNoteErrors.general || '';
+    const isSaving = viewerNoteSavingKey === noteKey;
+    const savedNote = String(note?.note || '').trim();
+    const isEditing = viewerNoteEditingKeys[noteKey] || !savedNote;
+
+    return (
+      <div className="master-viewer-document-note">
+        {viewerNoteLoading ? (
+          <div className="master-viewer-note-loading">Memuat catatan...</div>
+        ) : isEditing ? (
+          <>
+            <div className="master-viewer-note-compact">
+              <textarea
+                aria-label={`Catatan ${label}`}
+                rows={1}
+                value={draft}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setViewerNoteDrafts((current) => ({ ...current, [noteKey]: value }));
+                  if (viewerNoteErrors[noteKey]) {
+                    setViewerNoteErrors((current) => ({ ...current, [noteKey]: '' }));
+                  }
+                }}
+                placeholder="Catatan"
+                maxLength={1000}
+              />
+              <button
+                className="primary-button note-save-button"
+                type="button"
+                aria-label={`Simpan catatan ${label}`}
+                title={isSaving ? 'Menyimpan...' : 'Simpan catatan'}
+                onClick={() => handleSaveViewerNote(noteKey)}
+                disabled={isSaving}
+              >
+                <Save size={15} />
+              </button>
+            </div>
+            {draft.length > 900 || note?.updatedAt ? (
+              <div className="master-viewer-note-actions">
+                {draft.length > 900 ? <span className={draft.length > 950 ? 'is-warning' : ''}>{draft.length}/1000</span> : <span />}
+                {note?.updatedAt ? <span>Tersimpan</span> : null}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="master-viewer-note-display">
+            <p>{savedNote}</p>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Edit catatan ${label}`}
+              onClick={() => setViewerNoteEditingKeys((current) => ({ ...current, [noteKey]: true }))}
+            >
+              <Edit3 size={15} />
+            </button>
+          </div>
+        )}
+        {error ? <div className="master-viewer-note-error">{error}</div> : null}
+      </div>
+    );
+  }
+
   return (
     <div className={`page ${pageClassName}`.trim()}>
       <PageHeader
@@ -674,12 +899,18 @@ function MasterDataPage({
         title={title}
         description={description}
         actions={
-          <div className="page-action-group">
-            {showModeChip ? <span className="dummy-chip"><Database size={14} /> {masterDatabaseMode ? 'Terhubung PostgreSQL' : 'Mode Data Dummy'}</span> : null}
-            <button className="primary-button" type="button" onClick={openCreateForm}>
-              <Plus size={17} /> Input {singular} Baru
-            </button>
-          </div>
+          showModeChip || canManageMaster
+            ? (
+              <div className="page-action-group">
+                {showModeChip ? <span className="dummy-chip"><Database size={14} /> {masterDatabaseMode ? 'Terhubung PostgreSQL' : 'Mode Data Dummy'}</span> : null}
+                {canManageMaster ? (
+                  <button className="primary-button" type="button" onClick={openCreateForm}>
+                    <Plus size={17} /> Input {singular} Baru
+                  </button>
+                ) : null}
+              </div>
+            )
+            : null
         }
       />
 
@@ -752,12 +983,16 @@ function MasterDataPage({
                         <button type="button" onClick={() => setDetailRow(row)} aria-label={`Lihat ${singular}`}>
                           <Eye size={15} />
                         </button>
-                        <button type="button" onClick={() => handleEdit(row)} aria-label={`Edit ${singular}`}>
-                          <Edit3 size={15} />
-                        </button>
-                        <button className="danger" type="button" onClick={() => handleDelete(row.id)} aria-label={`Arsipkan ${singular}`}>
-                          <Archive size={15} />
-                        </button>
+                        {canManageMaster ? (
+                          <>
+                            <button type="button" onClick={() => handleEdit(row)} aria-label={`Edit ${singular}`}>
+                              <Edit3 size={15} />
+                            </button>
+                            <button className="danger" type="button" onClick={() => handleDelete(row.id)} aria-label={`Arsipkan ${singular}`}>
+                              <Archive size={15} />
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -808,7 +1043,7 @@ function MasterDataPage({
                   <div key={field.key} className={field.full ? 'span-full' : ''}>
                     <span>{field.label}</span>
                     {field.renderDetail
-                      ? field.renderDetail(value, detailRow)
+                      ? field.renderDetail(value, detailRow, { renderViewerDocumentNote })
                       : field.type === 'file'
                         ? <DetailDocumentActions file={value} />
                         : <strong className={value ? '' : 'is-empty-value'}>{value || '-'}</strong>}
@@ -819,7 +1054,9 @@ function MasterDataPage({
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetailRow(null)}>Tutup</button>
-              <button className="primary-button" type="button" onClick={() => { setDetailRow(null); handleEdit(detailRow); }}><Edit3 size={16} /> Edit Data</button>
+              {canManageMaster ? (
+                <button className="primary-button" type="button" onClick={() => { setDetailRow(null); handleEdit(detailRow); }}><Edit3 size={16} /> Edit Data</button>
+              ) : null}
             </footer>
           </section>
         </div>

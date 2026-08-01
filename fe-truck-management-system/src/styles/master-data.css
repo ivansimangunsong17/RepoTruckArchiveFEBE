@@ -1042,9 +1042,13 @@
 .truck-document-summary-head,
 .truck-document-summary-row {
   display: grid;
-  grid-template-columns: minmax(80px, .7fr) minmax(130px, 1.2fr) minmax(130px, 1fr) minmax(150px, 1.1fr);
+  grid-template-columns: minmax(72px, .6fr) minmax(210px, 1.5fr) minmax(170px, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+}
+.truck-document-summary-table.has-notes .truck-document-summary-head,
+.truck-document-summary-table.has-notes .truck-document-summary-row {
+  grid-template-columns: 70px minmax(160px, 1.2fr) minmax(168px, .9fr) minmax(190px, 1fr);
 }
 .truck-document-summary-head {
   padding: 10px 12px;
@@ -1063,18 +1067,36 @@
   border-top: 1px solid #dfe7f2;
   background: white;
 }
+.truck-document-summary-table.has-notes .truck-document-summary-row {
+  min-height: 50px;
+  padding: 8px 12px;
+}
 .truck-document-summary-row > strong {
   color: #991b1b;
   font-size: .72rem;
   font-weight: 900;
 }
-.truck-document-summary-row > span {
+.truck-document-summary-info {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 5px;
+  min-width: 0;
+}
+.truck-document-summary-info > span {
   color: #111827;
-  font-size: .76rem;
+  font-size: .72rem;
   font-weight: 850;
   overflow-wrap: anywhere;
 }
-.truck-document-summary-row > span.is-empty {
+.truck-document-summary-info > span small {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: .58rem;
+  font-weight: 750;
+}
+.truck-document-summary-info > span.is-empty {
   display: inline-flex;
   width: fit-content;
   min-height: 22px;
@@ -1085,8 +1107,223 @@
   background: #eef2f7;
   font-size: .66rem;
 }
+.truck-document-summary-info .master-expiry-detail {
+  gap: 3px;
+}
+.truck-document-summary-info .master-expiry-detail > strong {
+  color: #334155;
+  font-size: .68rem;
+}
+.truck-document-summary-info .master-expiry-detail > small {
+  font-size: .56rem;
+}
 .truck-document-summary-row .master-detail-document-actions {
   align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.truck-document-summary-row .master-detail-document-actions .document-link {
+  min-height: 30px;
+  padding: 6px 9px;
+  font-size: .6rem;
+}
+.master-document-note-layout {
+  display: grid;
+  gap: 12px;
+}
+.master-document-note-layout.has-note-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  align-items: stretch;
+}
+.master-viewer-note-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 100%;
+  padding: 12px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+}
+.master-viewer-document-note {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+.master-viewer-note-compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.master-viewer-note-compact .primary-button {
+  width: 30px;
+  min-height: 30px;
+  border: 1px solid #e11d2e;
+  border-radius: 7px;
+  background: #e11d2e;
+  color: white;
+  padding: 0;
+  font-size: .62rem;
+  justify-content: center;
+  gap: 0;
+}
+.master-viewer-note-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  min-width: 0;
+}
+.master-viewer-note-display p {
+  min-width: 0;
+  margin: 0;
+  color: #334155;
+  font-size: .7rem;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.master-viewer-note-display .icon-button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  color: #334155;
+  background: white;
+}
+.master-viewer-note-display .icon-button:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+.master-viewer-note-heading {
+  display: grid;
+  gap: 6px;
+}
+.master-detail-grid .master-viewer-note-heading strong,
+.master-viewer-note-heading strong {
+  margin: 0;
+  color: #0f172a;
+  font-size: .78rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+.master-detail-grid .master-viewer-note-heading span,
+.master-viewer-note-heading span {
+  margin: 0;
+  color: #52647a;
+  font-size: .65rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+}
+.master-detail-grid .master-viewer-note-heading small,
+.master-viewer-note-heading small {
+  width: fit-content;
+  padding: 4px 8px;
+  border: 1px solid #dbe4ef;
+  border-radius: 999px;
+  background: white;
+  color: #64748b;
+  font-size: .6rem;
+  font-weight: 800;
+}
+.master-viewer-note-panel textarea,
+.master-viewer-document-note textarea {
+  min-height: 128px;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+  color: #172033;
+  font-size: .76rem;
+  font-weight: 750;
+  line-height: 1.45;
+  outline: none;
+  padding: 10px;
+}
+.master-viewer-document-note textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  min-height: 34px;
+  height: 34px;
+  resize: none;
+  font-size: .68rem;
+  font-weight: 750;
+  line-height: 1.25;
+  padding: 8px 9px;
+}
+.master-viewer-note-panel textarea:focus,
+.master-viewer-document-note textarea:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 3px #bae6fd80;
+}
+.master-viewer-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.master-detail-grid .master-viewer-note-actions span,
+.master-viewer-note-actions span {
+  margin: 0;
+  color: #64748b;
+  font-size: .62rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+.master-detail-grid .master-viewer-note-actions span.is-warning,
+.master-viewer-note-actions span.is-warning {
+  color: #b45309;
+}
+.master-viewer-note-actions .primary-button {
+  min-height: 34px;
+  padding: 8px 10px;
+  font-size: .68rem;
+}
+.master-viewer-document-note .master-viewer-note-actions .primary-button {
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: .62rem;
+  flex-shrink: 0;
+}
+.master-viewer-document-note > .master-viewer-note-actions {
+  min-height: 14px;
+  justify-content: flex-start;
+}
+.master-viewer-document-note > .master-viewer-note-actions span {
+  font-size: .58rem;
+}
+.master-viewer-note-loading,
+.master-viewer-note-error {
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: .72rem;
+  font-weight: 800;
+}
+.master-viewer-note-loading {
+  border: 1px solid #dbe4ef;
+  background: white;
+  color: #64748b;
+}
+.master-viewer-note-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.master-viewer-document-note .master-viewer-note-loading,
+.master-viewer-document-note .master-viewer-note-error {
+  padding: 6px 8px;
+  font-size: .62rem;
 }
 .driver-document-detail-table {
   display: grid;
@@ -1102,6 +1339,10 @@
   align-items: center;
   gap: 10px;
 }
+.driver-document-detail-table.has-notes .driver-document-detail-head,
+.driver-document-detail-table.has-notes .driver-document-detail-row {
+  grid-template-columns: minmax(128px, .85fr) minmax(166px, 1fr) minmax(220px, 1.35fr);
+}
 .driver-document-detail-head {
   padding: 10px 12px;
   background: #eaf2ff;
@@ -1114,8 +1355,8 @@
   text-transform: uppercase;
 }
 .driver-document-detail-row {
-  min-height: 58px;
-  padding: 10px 12px;
+  min-height: 46px;
+  padding: 7px 12px;
   border-top: 1px solid #dfe7f2;
   background: white;
 }
@@ -1127,6 +1368,19 @@
 .driver-document-detail-row .master-detail-document-actions {
   align-items: center;
 }
+.chassis-document-detail-table .driver-document-detail-row {
+  min-height: 50px;
+}
+.chassis-document-detail-table .master-detail-document-actions {
+  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 130px));
+  gap: 8px;
+}
+.chassis-document-detail-table .master-detail-document-actions .document-link {
+  justify-content: center;
+  width: 100%;
+}
 .chassis-data-page .master-detail-grid > div.span-full {
   min-height: 82px;
 }
@@ -1136,6 +1390,12 @@
 .chassis-data-page .master-detail-grid > div.span-full .master-detail-document-actions .document-link {
   min-width: 96px;
   justify-content: center;
+}
+
+@media (max-width: 980px) {
+  .master-document-note-layout.has-note-panel {
+    grid-template-columns: 1fr;
+  }
 }
 
 .driver-data-page {

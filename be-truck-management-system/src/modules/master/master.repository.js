@@ -150,3 +150,106 @@ export async function archiveMasterRow(resource, id) {
     throw error;
   }
 }
+
+function mapViewerNote(row) {
+  if (!row) return {
+    documentKey: 'general',
+    note: '',
+    updatedByName: '',
+    updatedAt: null,
+  };
+
+  return {
+    id: row.id,
+    resource: row.resource,
+    entityId: row.entity_id,
+    documentKey: row.document_key || 'general',
+    note: row.note || '',
+    updatedByName: row.updated_by_name || '',
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function isViewerNoteTableMissing(error) {
+  return error?.code === '42P01' && String(error.message || '').includes('master_viewer_notes');
+}
+
+function viewerNoteTableMissingError() {
+  const error = new Error('Catatan monitoring belum siap. Jalankan migration database.');
+  error.statusCode = 500;
+  error.code = 'VIEWER_NOTE_TABLE_MISSING';
+  return error;
+}
+
+export async function findMasterViewerNotes(resource, entityId) {
+  getResourceConfig(resource);
+  try {
+    const result = await query(
+      `
+        select *
+        from master_viewer_notes
+        where resource = $1
+          and entity_id = $2
+        order by document_key asc
+      `,
+      [resource, entityId],
+    );
+    return result.rows.map(mapViewerNote);
+  } catch (error) {
+    if (isViewerNoteTableMissing(error)) return [];
+    throw error;
+  }
+}
+
+export async function findMasterViewerNote(resource, entityId, documentKey = 'general') {
+  getResourceConfig(resource);
+  try {
+    const result = await query(
+      `
+        select *
+        from master_viewer_notes
+        where resource = $1
+          and entity_id = $2
+          and document_key = $3
+      `,
+      [resource, entityId, documentKey],
+    );
+    return mapViewerNote(result.rows[0]);
+  } catch (error) {
+    if (isViewerNoteTableMissing(error)) return mapViewerNote(null);
+    throw error;
+  }
+}
+
+export async function upsertMasterViewerNote(resource, entityId, documentKey, note, user = {}) {
+  getResourceConfig(resource);
+  try {
+    const result = await query(
+      `
+        insert into master_viewer_notes (
+          resource, entity_id, document_key, note, updated_by, updated_by_name
+        )
+        values ($1, $2, $3, $4, $5, $6)
+        on conflict (resource, entity_id, document_key)
+        do update set
+          note = excluded.note,
+          updated_by = excluded.updated_by,
+          updated_by_name = excluded.updated_by_name,
+          updated_at = now()
+        returning *
+      `,
+      [
+        resource,
+        entityId,
+        documentKey,
+        note,
+        user.id || user.sub || null,
+        user.name || user.fullName || user.email || null,
+      ],
+    );
+    return mapViewerNote(result.rows[0]);
+  } catch (error) {
+    if (isViewerNoteTableMissing(error)) throw viewerNoteTableMissingError();
+    throw error;
+  }
+}

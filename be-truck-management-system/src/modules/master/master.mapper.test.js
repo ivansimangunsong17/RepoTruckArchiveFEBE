@@ -31,3 +31,18 @@ test('driver mapper membaca dan menyimpan tanggal lahir', () => {
   });
   assert.equal(databaseRow.birth_date, '1988-04-12');
 });
+
+test('driver mapper membaca dan menyimpan nama panggilan', () => {
+  const mapped = resourceConfig.drivers.toApi({
+    id: 'driver-1',
+    name: 'Sopir Contoh',
+    nickname: 'Sopir',
+  });
+  assert.equal(mapped.nickname, 'Sopir');
+
+  const databaseRow = resourceConfig.drivers.toDb({
+    name: 'Sopir Contoh',
+    nickname: 'Sopir',
+  });
+  assert.equal(databaseRow.nickname, 'Sopir');
+});

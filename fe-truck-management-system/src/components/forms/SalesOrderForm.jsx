@@ -453,6 +453,8 @@ function SalesOrderForm({
     if (!lineItems.length) return setError('Tambahkan minimal 1 rincian.');
     const invalidLineItem = lineItems.find((item) => !item.serviceName || Number(item.qty || 0) < 1 || Number(item.price || 0) < 0);
     if (invalidLineItem) return setError('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.');
+    const missingContainerPrice = lineItems.find((item) => isContainerService(item.serviceName) && Number(item.price || 0) <= 0);
+    if (missingContainerPrice) return setError('Harga container D20/D40 wajib diisi lebih dari 0.');
     const requiresContainerType = lineItems.find((item) => isContainerService(item.serviceName) && !item.containerType);
     if (requiresContainerType) return setError('Pilih jenis container untuk rincian D20 atau D40.');
     const requiresOtherNotes = lineItems.find((item) => isOtherService(item.serviceName) && !item.notes.trim());

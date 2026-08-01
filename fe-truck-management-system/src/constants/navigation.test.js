@@ -26,11 +26,31 @@ describe('navigationGroups', () => {
     expect(historyItem?.roles).toContain(USER_ROLES.FINANCE);
   });
 
-  it('menampilkan menu container titip pada group operational', () => {
+  it('membatasi menu container titip untuk admin dan operational', () => {
     const operationalGroup = navigationGroups.find((group) => group.label === 'Operational');
     const repoItem = operationalGroup?.items.find((item) => item.to === '/operations/repo-storage');
 
     expect(repoItem?.label).toBe('Container Titip');
-    expect(repoItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER]);
+    expect(repoItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
+  });
+
+  it('menampilkan Viewer pada dashboard order read-only dan laporan', () => {
+    const items = navigationGroups.flatMap((group) => group.items.flatMap((item) => item.children || item));
+    const viewerItems = items.filter((item) => item.roles?.includes(USER_ROLES.OBSERVER));
+
+    expect(viewerItems.map((item) => item.to)).toEqual([
+      '/order-running',
+      '/weekly-orders',
+      '/order-history',
+      '/viewer/clients',
+      '/viewer/drivers',
+      '/viewer/trucks',
+      '/viewer/kir-chassis',
+      '/viewer/depots',
+      '/viewer/terminals',
+      '/viewer/destinations',
+      '/reports',
+    ]);
+    expect(viewerItems.map((item) => item.to)).not.toContain('/document-monitoring');
   });
 });

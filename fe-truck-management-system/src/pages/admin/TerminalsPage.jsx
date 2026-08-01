@@ -1,6 +1,6 @@
 import { LocationMasterPage, TextCell } from './LocationMasterPage';
 
-function TerminalsPage() {
+function TerminalsPage({ readOnly = false }) {
   return (
     <LocationMasterPage
       title="Master Terminal"
@@ -24,6 +24,7 @@ function TerminalsPage() {
         { key: 'code', label: 'Nama PT', render: (value) => <TextCell value={value} /> },
       ]}
       toolbarDescription="Cari nama terminal, nama PT, dan status."
+      readOnly={readOnly}
     />
   );
 }

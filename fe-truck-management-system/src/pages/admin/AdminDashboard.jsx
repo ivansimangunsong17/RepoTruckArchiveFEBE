@@ -105,7 +105,7 @@ function AdminDashboard() {
     {
       label: 'User',
       value: masters.users?.length || 0,
-      detail: 'Akun role Admin, Sales, Operational, dan Management.',
+      detail: 'Akun role Admin, Sales, Operational, Viewer, dan Finance.',
       meta: `${cancelledOrders.length} SO batal`,
       href: '/users',
       icon: Users,

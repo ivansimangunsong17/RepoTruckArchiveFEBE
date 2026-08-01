@@ -3,10 +3,12 @@ import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js
 import {
   calculateDestinationUj,
   getMasterRow,
+  getMasterViewerNote,
   listMasterRows,
   listMasterRowsPage,
   removeMasterRow,
   saveMasterRow,
+  saveMasterViewerNote,
 } from './master.service.js';
 
 function isDestinationResource(resource) {
@@ -114,4 +116,23 @@ export async function archiveMasterController(request, response) {
 export async function calculateDestinationUjController(request, response) {
   const result = await calculateDestinationUj(request.params.id, request.query);
   sendSuccess(response, result);
+}
+
+export async function getMasterViewerNoteController(request, response) {
+  const result = await getMasterViewerNote(request.params.resource, request.params.id);
+  sendSuccess(response, result);
+}
+
+export async function updateMasterViewerNoteController(request, response) {
+  const before = await getMasterViewerNote(request.params.resource, request.params.id);
+  const saved = await saveMasterViewerNote(request.params.resource, request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'UPDATE_MASTER_VIEWER_NOTE',
+    module: 'master_data',
+    entityType: request.params.resource,
+    entityId: request.params.id,
+    beforeData: before,
+    afterData: saved,
+  });
+  sendSuccess(response, saved, 'Catatan monitoring berhasil disimpan.');
 }

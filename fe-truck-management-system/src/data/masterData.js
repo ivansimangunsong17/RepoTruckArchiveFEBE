@@ -13,6 +13,6 @@ export const fallbackUsers = [
   { id: 'user-1', name: 'Andi Pratama', email: 'admin@demo.com', password: '********', role: USER_ROLES.ADMIN, status: 'Aktif' },
   { id: 'user-2', name: 'Sinta Maharani', email: 'sales@demo.com', password: '********', role: USER_ROLES.SALES, status: 'Aktif' },
   { id: 'user-3', name: 'Budi Operational', email: 'operational@demo.com', password: '********', role: USER_ROLES.OPERATIONAL, status: 'Aktif' },
-  { id: 'user-4', name: 'Rina Management', email: 'management@demo.com', password: '********', role: USER_ROLES.OBSERVER, status: 'Aktif' },
+  { id: 'user-4', name: 'Rina Viewer', email: 'viewer@demo.com', password: '********', role: USER_ROLES.OBSERVER, status: 'Aktif' },
   { id: 'user-5', name: 'Fitri Finance', email: 'finance@demo.com', password: '********', role: USER_ROLES.FINANCE, status: 'Aktif' },
 ];

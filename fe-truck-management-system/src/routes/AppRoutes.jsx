@@ -3,7 +3,7 @@ import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom';
 import App from '../App';
 import { AppErrorBoundary, PageSkeleton } from '../components/common/PageStates';
-import { ALL_ROLES, USER_ROLES } from '../constants/roles';
+import { USER_ROLES } from '../constants/roles';
 import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
 
@@ -25,6 +25,7 @@ const SettingsPage = lazy(() => import('../pages/admin/SettingsPage'));
 const ActivityLogPage = lazy(() => import('../pages/system/ActivityLogPage'));
 const ProfilePage = lazy(() => import('../pages/system/ProfilePage'));
 const ReportsPage = lazy(() => import('../pages/reports/ReportsPage'));
+const DocumentMonitoringPage = lazy(() => import('../pages/monitoring/DocumentMonitoringPage'));
 const FinanceOrderVerificationPage = lazy(() => import('../pages/finance/FinanceOrderVerificationPage'));
 const FinanceRpujApprovalPage = lazy(() => import('../pages/finance/FinanceRpujApprovalPage'));
 const FinanceInvoiceNumberPage = lazy(() => import('../pages/finance/FinanceInvoiceNumberPage'));
@@ -42,11 +43,12 @@ function LazyPage({ children }) {
   );
 }
 
-const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
-const overviewRoles = ALL_ROLES;
+const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL];
+const overviewRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const orderRoles = nonFinanceRoles;
-const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER];
+const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
 const adminRoles = [USER_ROLES.ADMIN];
+const viewerOnlyRoles = [USER_ROLES.OBSERVER];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 const financeRoles = [USER_ROLES.FINANCE];
 
@@ -83,10 +85,18 @@ export const router = createBrowserRouter([
         { path: 'depots', children: [guardedPage(adminRoles, <LazyPage><DepotsPage /></LazyPage>)] },
         { path: 'terminals', children: [guardedPage(adminRoles, <LazyPage><TerminalsPage /></LazyPage>)] },
         { path: 'destinations', children: [guardedPage(adminRoles, <LazyPage><DestinationsPage /></LazyPage>)] },
+        { path: 'viewer/trucks', children: [guardedPage(viewerOnlyRoles, <LazyPage><TrucksPage readOnly /></LazyPage>)] },
+        { path: 'viewer/drivers', children: [guardedPage(viewerOnlyRoles, <LazyPage><DriversPage readOnly /></LazyPage>)] },
+        { path: 'viewer/clients', children: [guardedPage(viewerOnlyRoles, <LazyPage><ClientsPage readOnly /></LazyPage>)] },
+        { path: 'viewer/kir-chassis', children: [guardedPage(viewerOnlyRoles, <LazyPage><KirChassisPage readOnly /></LazyPage>)] },
+        { path: 'viewer/depots', children: [guardedPage(viewerOnlyRoles, <LazyPage><DepotsPage readOnly /></LazyPage>)] },
+        { path: 'viewer/terminals', children: [guardedPage(viewerOnlyRoles, <LazyPage><TerminalsPage readOnly /></LazyPage>)] },
+        { path: 'viewer/destinations', children: [guardedPage(viewerOnlyRoles, <LazyPage><DestinationsPage readOnly /></LazyPage>)] },
         { path: 'users', children: [guardedPage(adminRoles, <LazyPage><UsersPage /></LazyPage>)] },
         { path: 'settings', children: [guardedPage(adminRoles, <LazyPage><SettingsPage /></LazyPage>)] },
         { path: 'activity-log', children: [guardedPage(adminRoles, <LazyPage><ActivityLogPage /></LazyPage>)] },
         { path: 'audit-trail', element: <Navigate to="/activity-log" replace /> },
+        { path: 'document-monitoring', children: [guardedPage(observerRoles, <LazyPage><DocumentMonitoringPage /></LazyPage>)] },
         { path: 'reports', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
         { path: 'finance', element: <Navigate to="/finance/order-verification" replace /> },
         { path: 'finance/order-verification', children: [guardedPage(financeRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },

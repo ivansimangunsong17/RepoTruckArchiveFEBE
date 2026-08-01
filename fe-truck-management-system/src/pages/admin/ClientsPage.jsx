@@ -70,7 +70,7 @@ const baseFields = [
   { key: 'contractDocument', section: 'Dokumen Pendukung', label: 'Dokumen Umbrella Contract', type: 'file', hint: 'Unggah contract yang telah ditandatangani.' },
 ];
 
-function ClientsPage() {
+function ClientsPage({ readOnly = false }) {
   const archive = useArchiveData();
   const userRows = archive.masters?.users?.length ? archive.masters.users : fallbackUsers;
   const activeSalesUsers = useMemo(() => (
@@ -138,6 +138,7 @@ function ClientsPage() {
         { label: 'Review', value: data.filter((item) => item.contract === 'Review').length, detail: 'Cek kontrak' },
         { label: 'Tidak Aktif', value: data.filter((item) => item.contract === 'Tidak Aktif').length, detail: 'Nonaktif' },
       ]}
+      readOnly={readOnly}
     />
   );
 }

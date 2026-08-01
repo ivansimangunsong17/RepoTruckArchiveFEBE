@@ -1,4 +1,4 @@
-import MasterDataPage from '../../components/master/MasterDataPage';
+import MasterDataPage, { DetailDocumentActions } from '../../components/master/MasterDataPage';
 import MasterExpiryDate from '../../components/master/MasterExpiryDate';
 import { useArchiveData } from '../../hooks/useArchiveData';
 
@@ -78,10 +78,34 @@ const fields = [
   { key: 'photoDocument', section: 'Dokumen Chassis', label: 'Foto Chassis', type: 'file', accept: '.jpg,.jpeg,.png', full: true },
 ];
 
-function KirChassisPage() {
+const CHASSIS_DOCUMENT_FIELD_KEYS = new Set(['photoDocument']);
+
+function ChassisDocumentDetail({ row, renderViewerDocumentNote = null }) {
+  const showNotes = typeof renderViewerDocumentNote === 'function';
+
+  return (
+    <div className="master-document-note-layout">
+      <div className={`driver-document-detail-table chassis-document-detail-table ${showNotes ? 'has-notes' : ''}`}>
+        <div className="driver-document-detail-head">
+          <strong>Jenis Dokumen</strong>
+          <strong>View dan Download</strong>
+          {showNotes ? <strong>Catatan</strong> : null}
+        </div>
+        <div className="driver-document-detail-row">
+          <strong>Foto Chassis</strong>
+          <DetailDocumentActions file={row.photoDocument} />
+          {showNotes ? renderViewerDocumentNote('photoDocument', 'Foto Chassis') : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KirChassisPage({ readOnly = false }) {
   const archive = useArchiveData();
   const truckRows = archive.masters?.trucks || [];
-  const detailFields = fields.map((field) => {
+  const detailFields = [
+    ...fields.filter((field) => !CHASSIS_DOCUMENT_FIELD_KEYS.has(field.key)).map((field) => {
     if (field.key === 'receivedDate') {
       return {
         ...field,
@@ -101,7 +125,14 @@ function KirChassisPage() {
       };
     }
     return field;
-  });
+    }),
+    {
+      key: 'chassisDocumentDetail',
+      label: 'Dokumen Chassis',
+      full: true,
+      renderDetail: (_, row, meta) => <ChassisDocumentDetail row={row} renderViewerDocumentNote={meta.renderViewerDocumentNote} />,
+    },
+  ];
 
   return (
     <MasterDataPage
@@ -139,6 +170,7 @@ function KirChassisPage() {
         { label: 'Perlu Perpanjang', value: data.filter((item) => item.status === 'Perlu Perpanjang').length, detail: 'Perlu dicek' },
         { label: 'Tidak Aktif', value: data.filter((item) => item.status === 'Tidak Aktif').length, detail: 'Nonaktif' },
       ]}
+      readOnly={readOnly}
     />
   );
 }

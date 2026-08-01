@@ -136,7 +136,7 @@ function ActivityLogPage() {
       <section className="panel activity-log-panel">
         <div className="filter-bar">
           <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari user, aktivitas, atau data..." /></label>
-          <select aria-label="Filter role" value={role} onChange={(event) => setRole(event.target.value)}><option value="">Semua Role</option><option value="admin">Admin</option><option value="sales">Sales</option><option value="operational">Operational</option><option value="observer">Management</option></select>
+          <select aria-label="Filter role" value={role} onChange={(event) => setRole(event.target.value)}><option value="">Semua Role</option><option value="admin">Admin</option><option value="sales">Sales</option><option value="operational">Operational</option><option value="observer">Viewer</option></select>
           <select aria-label="Filter modul" value={module} onChange={(event) => setModule(event.target.value)}>
             <option value="">Semua Modul</option>
             {moduleOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}

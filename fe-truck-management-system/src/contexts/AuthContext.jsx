@@ -12,10 +12,12 @@ const demoAccounts = {
   'ops@armada.com': { fullName: 'Ahmad Pratama', role: USER_ROLES.OPERATIONAL },
   'finance@armada.com': { fullName: 'Fitri Finance', role: USER_ROLES.FINANCE },
   'management@armada.com': { fullName: 'Andi Kusuma', role: USER_ROLES.OBSERVER },
+  'viewer@armada.com': { fullName: 'Andi Viewer', role: USER_ROLES.OBSERVER },
   'admin@demo.com': { fullName: 'Budi Santoso', role: USER_ROLES.ADMIN },
   'sales@demo.com': { fullName: 'Sarah Wijaya', role: USER_ROLES.SALES },
   'operational@demo.com': { fullName: 'Ahmad Pratama', role: USER_ROLES.OPERATIONAL },
   'finance@demo.com': { fullName: 'Fitri Finance', role: USER_ROLES.FINANCE },
+  'viewer@demo.com': { fullName: 'Rina Viewer', role: USER_ROLES.OBSERVER },
   'pengamat@demo.com': { fullName: 'Andi Kusuma', role: USER_ROLES.OBSERVER },
 };
 

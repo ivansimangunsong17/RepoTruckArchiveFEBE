@@ -33,6 +33,7 @@ export function LocationMasterPage({
   statusColumnOverride,
   filtersOverride,
   statsOverride,
+  readOnly = false,
 }) {
   const effectiveStatusField = statusFieldOverride === null ? null : statusFieldOverride || statusField;
   const effectiveStatusColumn = statusColumnOverride === null ? null : statusColumnOverride || {
@@ -69,6 +70,7 @@ export function LocationMasterPage({
       toolbarTitle={`Daftar ${singular}`}
       toolbarDescription={toolbarDescription}
       stats={effectiveStats}
+      readOnly={readOnly}
     />
   );
 }

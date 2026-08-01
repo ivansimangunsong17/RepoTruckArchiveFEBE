@@ -3,7 +3,9 @@ import {
   findAllMasterRows,
   findMasterRowById,
   findMasterRows,
+  findMasterViewerNotes,
   upsertMasterRow,
+  upsertMasterViewerNote,
 } from './master.repository.js';
 
 function parseFilters(query = {}) {
@@ -89,6 +91,39 @@ export async function saveMasterRow(resource, payload, id) {
 
 export function removeMasterRow(resource, id) {
   return archiveMasterRow(resource, id);
+}
+
+export async function getMasterViewerNote(resource, id) {
+  await getMasterRow(resource, id);
+  return findMasterViewerNotes(resource, id);
+}
+
+function assertViewerRole(user = {}) {
+  if (user.role === 'observer' || user.role === 'pengamat') return;
+  const error = new Error('Catatan monitoring hanya boleh diisi oleh Pengamat/Viewer.');
+  error.statusCode = 403;
+  error.code = 'VIEWER_NOTE_FORBIDDEN';
+  throw error;
+}
+
+export async function saveMasterViewerNote(resource, id, payload, user) {
+  assertViewerRole(user);
+  await getMasterRow(resource, id);
+  const documentKey = String(payload?.documentKey || payload?.document_key || 'general').trim() || 'general';
+  if (documentKey.length > 80 || !/^[a-zA-Z0-9_.:-]+$/.test(documentKey)) {
+    const error = new Error('Kode dokumen catatan tidak valid.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  const note = String(payload?.note || '').trim();
+  if (note.length > 1000) {
+    const error = new Error('Catatan monitoring maksimal 1000 karakter.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  return upsertMasterViewerNote(resource, id, documentKey, note, user);
 }
 
 function parseQuantity(value) {

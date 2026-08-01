@@ -12,8 +12,8 @@ export const ROLE_LABELS = {
   admin: 'Admin',
   sales: 'Sales',
   operational: 'Operational',
-  observer: 'Management',
-  audit: 'Management',
+  observer: 'Viewer',
+  audit: 'Viewer',
   finance: 'Finance',
 };
 

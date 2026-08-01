@@ -3,8 +3,10 @@ import {
   calculateDestinationUjController,
   createMasterController,
   getMasterController,
+  getMasterViewerNoteController,
   listMasterController,
   listMasterPageController,
+  updateMasterViewerNoteController,
   updateMasterController,
 } from './master.controller.js';
 
@@ -32,6 +34,18 @@ export const masterRoutes = [
     path: '/api/master/:resource/:id',
     permission: 'master_data.read',
     handler: getMasterController,
+  },
+  {
+    method: 'GET',
+    path: '/api/master/:resource/:id/viewer-note',
+    permission: 'master_data.read',
+    handler: getMasterViewerNoteController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/master/:resource/:id/viewer-note',
+    permission: 'master_data.read',
+    handler: updateMasterViewerNoteController,
   },
   {
     method: 'GET',

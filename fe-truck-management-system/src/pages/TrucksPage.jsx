@@ -460,9 +460,10 @@ const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
   'insuranceDocument',
 ]);
 
-function TruckDocumentSummary({ row }) {
+function TruckDocumentSummary({ row, renderViewerDocumentNote = null }) {
   const documents = [
     {
+      key: 'kirDocument',
       label: 'KIR',
       number: row.kirNumber,
       expiryDate: row.kirExpiryDate,
@@ -470,6 +471,7 @@ function TruckDocumentSummary({ row }) {
       file: row.kirDocument,
     },
     {
+      key: 'stnkDocument',
       label: 'STNK',
       number: row.stnkNumber,
       expiryDate: row.stnkExpiryDate,
@@ -478,6 +480,7 @@ function TruckDocumentSummary({ row }) {
       extra: row.taxPaymentDate ? `Bayar pajak: ${formatDisplayDate(row.taxPaymentDate)}` : '',
     },
     {
+      key: 'stidDocument',
       label: 'STID',
       number: row.stidCode,
       expiryDate: row.stidExpiryDate,
@@ -485,6 +488,7 @@ function TruckDocumentSummary({ row }) {
       file: row.stidDocument,
     },
     {
+      key: 'insuranceDocument',
       label: 'Asuransi',
       number: [row.insuranceType, row.insurancePolicyNumber].filter(Boolean).join(' / '),
       expiryDate: row.insuranceExpiryDate,
@@ -492,28 +496,32 @@ function TruckDocumentSummary({ row }) {
       file: row.insuranceDocument,
     },
   ];
+  const showNotes = typeof renderViewerDocumentNote === 'function';
 
   return (
-    <div className="truck-document-summary-table">
-      <div className="truck-document-summary-head">
-        <strong>Jenis</strong>
-        <strong>Nomor</strong>
-        <strong>Tanggal OFF</strong>
-        <strong>View dan Download</strong>
-      </div>
-      {documents.map((document) => (
-        <div className="truck-document-summary-row" key={document.label}>
-          <strong>{document.label}</strong>
-          <span className={document.number || document.extra ? '' : 'is-empty'}>
-            {document.number || '-'}
-            {document.extra ? <small>{document.extra}</small> : null}
-          </span>
-          <div>
-            <MasterExpiryDate value={document.expiryDate} label={document.expiryLabel} />
-          </div>
-          <DetailDocumentActions file={document.file} />
+    <div className="master-document-note-layout">
+      <div className={`truck-document-summary-table ${showNotes ? 'has-notes' : ''}`}>
+        <div className="truck-document-summary-head">
+          <strong>Jenis</strong>
+          <strong>Dokumen</strong>
+          <strong>File</strong>
+          {showNotes ? <strong>Catatan</strong> : null}
         </div>
-      ))}
+        {documents.map((document) => (
+          <div className="truck-document-summary-row" key={document.key}>
+            <strong>{document.label}</strong>
+            <div className="truck-document-summary-info">
+              <span className={document.number || document.extra ? '' : 'is-empty'}>
+                {document.number || '-'}
+                {document.extra ? <small>{document.extra}</small> : null}
+              </span>
+              <MasterExpiryDate value={document.expiryDate} label={document.expiryLabel} />
+            </div>
+            <DetailDocumentActions file={document.file} />
+            {showNotes ? renderViewerDocumentNote(document.key, document.label) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -670,7 +678,7 @@ function TruckStatus({ row, activeJobs }) {
   return <span className={`master-status-dot ${statusClass}`}><i />{status || '-'}</span>;
 }
 
-function TrucksPage() {
+function TrucksPage({ readOnly = false }) {
   const archive = useArchiveData();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
   const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
@@ -707,7 +715,7 @@ function TrucksPage() {
       key: 'truckDocumentSummary',
       label: 'Dokumen Kendaraan',
       full: true,
-      renderDetail: (_, row) => <TruckDocumentSummary row={row} />,
+      renderDetail: (_, row, meta) => <TruckDocumentSummary row={row} renderViewerDocumentNote={meta.renderViewerDocumentNote} />,
     },
   ];
 
@@ -749,6 +757,7 @@ function TrucksPage() {
         { label: 'Jalan', value: data.filter((item) => getTruckStatus(item, activeJobs) === 'Bertugas').length, detail: 'Ada job aktif' },
         { label: 'Tidak Siap', value: data.filter((item) => ['Maintenance', 'Tidak Aktif'].includes(getTruckStatus(item, activeJobs))).length, detail: 'Perawatan/nonaktif' },
       ]}
+      readOnly={readOnly}
     />
   );
 }

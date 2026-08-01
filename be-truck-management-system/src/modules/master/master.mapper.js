@@ -53,13 +53,14 @@ export const resourceConfig = {
   },
   drivers: {
     table: 'drivers',
-    searchable: ['name', 'nik', 'phone', 'birth_date', 'license_type', 'operational_status', 'bank_name', 'bank_account_number', 'emoney_provider', 'emoney_number', 'emoney_account_holder', 'blacklist_reason', 'blacklist_notes'],
+    searchable: ['name', 'nickname', 'nik', 'phone', 'birth_date', 'license_type', 'operational_status', 'bank_name', 'bank_account_number', 'emoney_provider', 'emoney_number', 'emoney_account_holder', 'blacklist_reason', 'blacklist_notes'],
     filters: { status: 'operational_status' },
     archivedColumn: 'archived_at',
     orderColumn: 'created_at',
     toApi: (row) => ({
       id: row.id,
       name: row.name,
+      nickname: row.nickname || '',
       nik: row.nik || '',
       birthDate: row.birth_date || '',
       phone: row.phone || '',
@@ -88,6 +89,7 @@ export const resourceConfig = {
     }),
     toDb: (row) => ({
       name: row.name,
+      nickname: row.nickname || null,
       nik: row.nik || null,
       birth_date: row.birthDate || null,
       phone: row.phone || null,
