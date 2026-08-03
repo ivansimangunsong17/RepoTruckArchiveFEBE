@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelSalesOrder, fetchSalesOrdersPage, saveSalesOrder } from './salesOrderService';
+import {
+  cancelSalesOrder,
+  fetchSalesOrdersPage,
+  saveSalesOrder,
+  updateSalesOrderInvoiceDeliveryStatus,
+} from './salesOrderService';
 import { httpClient } from '../api/httpClient';
 
 vi.mock('../api/httpClient', () => ({
@@ -23,9 +28,10 @@ describe('salesOrderService', () => {
       pageSize: 8,
       query: 'SO',
       status: 'running',
+      invoiceDocumentStatus: 'siap_dikirim',
     });
 
-    expect(httpClient.get).toHaveBeenCalledWith('/sales-orders?page=2&pageSize=8&query=SO&status=running');
+    expect(httpClient.get).toHaveBeenCalledWith('/sales-orders?page=2&pageSize=8&query=SO&status=running&invoiceDocumentStatus=siap_dikirim');
     expect(result).toEqual({ rows: [], total: 0 });
   });
 
@@ -133,5 +139,19 @@ describe('salesOrderService', () => {
     await cancelSalesOrder('order-1');
 
     expect(httpClient.patch).toHaveBeenCalledWith('/sales-orders/order-1/cancel', {});
+  });
+
+  it('mengirim payload status dan metadata pengiriman invoice ke backend API', async () => {
+    const payload = {
+      billingStatus: 'belum_diterima',
+      sentAt: '2026-08-02',
+      deliveryMethod: 'whatsapp',
+      deliveryNotes: 'Dikirim ke PIC customer.',
+    };
+    httpClient.patch.mockResolvedValue({ id: 'order-1' });
+
+    await updateSalesOrderInvoiceDeliveryStatus('order-1', payload);
+
+    expect(httpClient.patch).toHaveBeenCalledWith('/sales-orders/order-1/invoice-delivery-status', payload);
   });
 });

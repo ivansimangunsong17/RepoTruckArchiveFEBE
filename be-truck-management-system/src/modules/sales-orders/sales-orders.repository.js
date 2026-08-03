@@ -25,6 +25,15 @@ const salesOrderColumnCandidates = [
   'invoice_issued_at',
   'invoice_input_by_name',
   'billing_status',
+  'invoice_document_status',
+  'invoice_document_uploaded_at',
+  'invoice_document_uploaded_by_name',
+  'tax_invoice_document_uploaded_at',
+  'tax_invoice_document_uploaded_by_name',
+  'invoice_document_sent_at',
+  'invoice_document_sent_by_name',
+  'invoice_document_delivery_method',
+  'invoice_document_delivery_notes',
   'payment_type',
   'payment_term_days',
   'container_summary',
@@ -134,6 +143,7 @@ function buildOrderWhere({
   ownerUserId = '',
   ownerName = '',
   excludeCancelled = false,
+  invoiceDocumentStatus = '',
 } = {}, { hasOwnerUserIdColumn = true } = {}) {
   const clauses = [];
   const params = [];
@@ -155,6 +165,11 @@ function buildOrderWhere({
 
   if (isTruthyFilter(invoiced)) {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
+  }
+
+  if (invoiceDocumentStatus) {
+    params.push(invoiceDocumentStatus);
+    clauses.push(`coalesce(invoice_document_status, 'belum_upload') = $${params.length}`);
   }
 
   if (ownerUserId && hasOwnerUserIdColumn) {
@@ -365,7 +380,7 @@ export async function findSalesOrdersPage(options = {}) {
     query(
       `
         with filtered as (
-          select id, quantity, status, invoice_number
+          select id, quantity, status, invoice_number, coalesce(invoice_document_status, 'belum_upload') as invoice_document_status
           from sales_orders
           ${summaryWhereSql}
         )
@@ -375,6 +390,8 @@ export async function findSalesOrdersPage(options = {}) {
           (select count(*)::int from filtered where status = 'running') as running_orders,
           (select count(*)::int from filtered where status = 'completed') as completed_orders,
           (select count(*)::int from filtered where status = 'completed' and nullif(btrim(invoice_number), '') is not null) as invoiced_orders,
+          (select count(*)::int from filtered where status = 'completed' and nullif(btrim(invoice_number), '') is not null and invoice_document_status = 'siap_dikirim') as ready_invoice_documents,
+          (select count(*)::int from filtered where status = 'completed' and nullif(btrim(invoice_number), '') is not null and invoice_document_status = 'terkirim') as sent_invoice_documents,
           (select count(*)::int from filtered where status = 'cancelled') as cancelled_orders,
           (select coalesce(sum(quantity), 0)::int from filtered) as containers,
           coalesce(count(cj.id) filter (where cj.status = 'completed'), 0)::int as completed_containers,
@@ -402,6 +419,8 @@ export async function findSalesOrdersPage(options = {}) {
       runningOrders: Number(summary.running_orders || 0),
       completedOrders: Number(summary.completed_orders || 0),
       invoicedOrders: Number(summary.invoiced_orders || 0),
+      readyInvoiceDocuments: Number(summary.ready_invoice_documents || 0),
+      sentInvoiceDocuments: Number(summary.sent_invoice_documents || 0),
       cancelledOrders: Number(summary.cancelled_orders || 0),
     },
   };
@@ -595,15 +614,44 @@ export async function updateSalesOrder(id, form) {
 }
 
 export async function updateSalesOrderBillingStatus(id, patch = {}) {
+  const markInvoiceDocumentSent = Boolean(patch.markInvoiceDocumentSent);
   await query(
     `
       update sales_orders
       set billing_status = $1,
+          invoice_document_status = case
+            when $4 then 'terkirim'
+            else invoice_document_status
+          end,
+          invoice_document_sent_at = case
+            when $4 then coalesce($5::timestamptz, now())
+            else invoice_document_sent_at
+          end,
+          invoice_document_sent_by_name = case
+            when $4 then $2
+            else invoice_document_sent_by_name
+          end,
+          invoice_document_delivery_method = case
+            when $4 then $6
+            else invoice_document_delivery_method
+          end,
+          invoice_document_delivery_notes = case
+            when $4 then $7
+            else invoice_document_delivery_notes
+          end,
           updated_by_name = $2,
           updated_at = now()
       where id = $3
     `,
-    [patch.billingStatus || 'belum_dikirim', patch.updatedByName || 'Sales', id],
+    [
+      patch.billingStatus || 'belum_dikirim',
+      patch.updatedByName || 'Sales',
+      id,
+      markInvoiceDocumentSent,
+      patch.invoiceDocumentSentAt || null,
+      patch.invoiceDocumentDeliveryMethod || null,
+      patch.invoiceDocumentDeliveryNotes || null,
+    ],
   );
   return findSalesOrderById(id);
 }

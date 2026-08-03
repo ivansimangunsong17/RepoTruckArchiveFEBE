@@ -1,4 +1,8 @@
 import { normalizeSalesOrderBillingStatus } from './sales-orders.billing-status.js';
+import {
+  normalizeInvoiceDocumentDeliveryMethod,
+  normalizeInvoiceDocumentStatus,
+} from './sales-orders.invoice-documents.js';
 
 function normalizeContainerSize(size) {
   const normalized = String(size || '20FT').toUpperCase().replace(/\s/g, '');
@@ -239,6 +243,15 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     invoiceIssuedAt: row.invoice_issued_at,
     invoiceInputBy: row.invoice_input_by_name || '',
     billingStatus: normalizeSalesOrderBillingStatus(row.billing_status),
+    invoiceDocumentStatus: normalizeInvoiceDocumentStatus(row.invoice_document_status),
+    invoiceDocumentUploadedAt: row.invoice_document_uploaded_at,
+    invoiceDocumentUploadedBy: row.invoice_document_uploaded_by_name || '',
+    taxInvoiceDocumentUploadedAt: row.tax_invoice_document_uploaded_at,
+    taxInvoiceDocumentUploadedBy: row.tax_invoice_document_uploaded_by_name || '',
+    invoiceDocumentSentAt: row.invoice_document_sent_at,
+    invoiceDocumentSentBy: row.invoice_document_sent_by_name || '',
+    invoiceDocumentDeliveryMethod: row.invoice_document_delivery_method || '',
+    invoiceDocumentDeliveryNotes: row.invoice_document_delivery_notes || '',
     paymentType: normalizePaymentType(row.payment_type),
     paymentTermDays: normalizePaymentTermDays(normalizePaymentType(row.payment_type), row.payment_term_days),
     paymentTerms: normalizePaymentType(row.payment_type) === 'tempo'
@@ -311,6 +324,15 @@ export function toSalesOrderDb(form, customer) {
     job_description: form.jobDescription || form.notes || null,
     invoice_number: form.invoiceNumber || null,
     billing_status: normalizeSalesOrderBillingStatus(form.billingStatus),
+    invoice_document_status: normalizeInvoiceDocumentStatus(form.invoiceDocumentStatus),
+    invoice_document_uploaded_at: form.invoiceDocumentUploadedAt || null,
+    invoice_document_uploaded_by_name: form.invoiceDocumentUploadedBy || null,
+    tax_invoice_document_uploaded_at: form.taxInvoiceDocumentUploadedAt || null,
+    tax_invoice_document_uploaded_by_name: form.taxInvoiceDocumentUploadedBy || null,
+    invoice_document_sent_at: form.invoiceDocumentSentAt || null,
+    invoice_document_sent_by_name: form.invoiceDocumentSentBy || null,
+    invoice_document_delivery_method: normalizeInvoiceDocumentDeliveryMethod(form.invoiceDocumentDeliveryMethod),
+    invoice_document_delivery_notes: form.invoiceDocumentDeliveryNotes || null,
     payment_type: paymentType,
     payment_term_days: normalizePaymentTermDays(paymentType, form.paymentTermDays),
     container_summary: form.container || null,

@@ -49,7 +49,23 @@ describe('SalesOrdersPage billing status flow', () => {
         soDate: '2026-07-19',
         receivedAt: '2026-07-20T10:21:00.000Z',
         invoiceNumber: 'INV-001',
+        invoiceIssuedAt: '2026-07-21T08:00:00.000Z',
         billingStatus: 'menunggu_pembayaran',
+        invoiceDocumentStatus: 'siap_dikirim',
+        invoiceDocumentUploadedAt: '2026-07-21T09:00:00.000Z',
+        invoiceDocumentUploadedBy: 'Finance User',
+        taxInvoiceDocumentUploadedAt: '2026-07-21T09:15:00.000Z',
+        taxInvoiceDocumentUploadedBy: 'Finance User',
+        referenceDocuments: [
+          {
+            documentType: 'invoicePdf',
+            file: { name: 'invoice-001.pdf', path: 'attachment-invoice-1', type: 'application/pdf', size: 120 },
+          },
+          {
+            documentType: 'taxInvoicePdf',
+            file: { name: 'faktur-001.pdf', path: 'attachment-tax-1', type: 'application/pdf', size: 120 },
+          },
+        ],
         paymentType: 'tempo',
         paymentTermDays: 14,
         salesName: 'Sales A',
@@ -67,6 +83,8 @@ describe('SalesOrdersPage billing status flow', () => {
         runningOrders: 0,
         completedOrders: 1,
         invoicedOrders: 1,
+        readyInvoiceDocuments: 1,
+        sentInvoiceDocuments: 0,
         cancelledOrders: 0,
         activeContainers: 2,
         completedContainers: 2,
@@ -81,6 +99,9 @@ describe('SalesOrdersPage billing status flow', () => {
       status: 'completed',
       invoiceNumber: 'INV-001',
       billingStatus: 'menunggu_pembayaran',
+      invoiceDocumentStatus: 'terkirim',
+      invoiceDocumentSentAt: '2026-07-22T00:00:00.000Z',
+      invoiceDocumentDeliveryMethod: 'whatsapp',
       salesName: 'Sales A',
     });
   });
@@ -90,6 +111,8 @@ describe('SalesOrdersPage billing status flow', () => {
     render(<SalesOrdersPage />);
 
     expect(await screen.findByText('2/3 Aktif')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Siap Dikirim/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Dokumen Terkirim/i })).not.toBeInTheDocument();
     expect(fetchSalesOrdersPage).toHaveBeenCalledWith(expect.objectContaining({
       status: 'waiting_operational',
     }));
@@ -97,12 +120,35 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(await screen.findByText('Pembayaran: Tempo 14 hari')).toBeInTheDocument();
     expect(screen.getByText('Waktu Input Sistem')).toBeInTheDocument();
     expect(screen.getByText('Tanggal SO: 19 Jul 2026')).toBeInTheDocument();
+    expect(screen.getByText('Lama Pelunasan')).toBeInTheDocument();
+    expect(screen.getByText(/Belum dikirim customer/i)).toBeInTheDocument();
+    expect(screen.getByText('Riwayat Dokumen')).toBeInTheDocument();
+    expect(screen.getByText('Invoice diupload Finance')).toBeInTheDocument();
+    expect(screen.getByText('Faktur Pajak diupload Finance')).toBeInTheDocument();
+    expect(screen.getAllByText('invoice-001.pdf').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('faktur-001.pdf').length).toBeGreaterThan(0);
     await user.click(await screen.findByRole('button', { name: 'Simpan Status' }));
 
     await waitFor(() => expect(updateSalesOrderInvoiceDeliveryStatus).toHaveBeenCalledWith(
       'order-1',
-      'menunggu_pembayaran',
+      expect.objectContaining({
+        billingStatus: 'menunggu_pembayaran',
+        deliveryMethod: 'whatsapp',
+      }),
     ));
+  });
+
+  it('memfilter Sales Order yang dokumen Accurate-nya siap dikirim', async () => {
+    const user = userEvent.setup();
+    render(<SalesOrdersPage customerDocumentsOnly />);
+
+    await user.click(await screen.findByRole('button', { name: /Siap Dikirim/i }));
+
+    await waitFor(() => expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'completed',
+      invoiced: true,
+      invoiceDocumentStatus: 'siap_dikirim',
+    })));
   });
 
   it('mengunci status invoice lunas untuk Sales', async () => {

@@ -34,6 +34,14 @@ describe('navigationGroups', () => {
     expect(repoItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
   });
 
+  it('menampilkan Dokumen Customer hanya untuk admin dan sales', () => {
+    const salesOrderGroup = navigationGroups.find((group) => group.label === 'Sales Order');
+    const customerDocumentItem = salesOrderGroup?.items.find((item) => item.to === '/sales/customer-documents');
+
+    expect(customerDocumentItem?.label).toBe('Dokumen Customer');
+    expect(customerDocumentItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.SALES]);
+  });
+
   it('menampilkan Viewer pada dashboard order read-only dan laporan', () => {
     const items = navigationGroups.flatMap((group) => group.items.flatMap((item) => item.children || item));
     const viewerItems = items.filter((item) => item.roles?.includes(USER_ROLES.OBSERVER));

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
-const { approveFinanceCorrection, rejectFinanceCorrection, rejectRpuj } = await import('./finance.service.js');
+const { approveFinanceCorrection, rejectFinanceCorrection, rejectRpuj, saveInvoiceNumber, uploadInvoiceDocument } = await import('./finance.service.js');
 const { mapInvoiceDocuments } = await import('./finance.repository.js');
 const {
   financeCorrectionTypes,
@@ -98,6 +98,34 @@ test('dokumen tambahan operational ikut tampil di detail invoice finance', () =>
   assert.equal(otherDocuments.every((document) => document.ready), true);
 });
 
+test('dokumen Invoice dan Faktur Pajak dari Finance ikut tampil di detail invoice finance', () => {
+  const documents = mapInvoiceDocuments([
+    {
+      id: 'attachment-invoice',
+      source: 'Finance',
+      category: 'invoicePdf',
+      file_name: 'invoice-accurate.pdf',
+      file_size: 100,
+      mime_type: 'application/pdf',
+      uploaded_by_name: 'Finance Test',
+    },
+    {
+      id: 'attachment-tax',
+      source: 'Finance',
+      category: 'taxInvoicePdf',
+      file_name: 'faktur-pajak.pdf',
+      file_size: 120,
+      mime_type: 'application/pdf',
+      uploaded_by_name: 'Finance Test',
+    },
+  ]);
+
+  assert.equal(documents.length, 2);
+  assert.deepEqual(documents.map((document) => document.label), ['Invoice', 'Faktur Pajak']);
+  assert.deepEqual(documents.map((document) => document.file.path), ['attachment-invoice', 'attachment-tax']);
+  assert.equal(documents.every((document) => document.source === 'Finance' && document.ready), true);
+});
+
 test('validasi koreksi Finance mewajibkan tipe, nomor baru, dan alasan', () => {
   assert.equal(normalizeFinanceCorrectionType('soNumber'), financeCorrectionTypes.soNumber);
   assert.equal(normalizeFinanceCorrectionType('invoice_number'), financeCorrectionTypes.invoiceNumber);
@@ -138,5 +166,16 @@ test('approval koreksi Finance membatasi catatan Admin maksimal 500 karakter', a
   await assert.rejects(
     () => approveFinanceCorrection('correction-1', { reviewNote: 'a'.repeat(501) }, { name: 'Admin Test', role: 'admin' }),
     (error) => error.code === 'FINANCE_CORRECTION_REVIEW_NOTE_TOO_LONG' && error.statusCode === 400,
+  );
+});
+
+test('nomor invoice dan upload dokumen invoice ditolak untuk role Sales', async () => {
+  assert.throws(
+    () => saveInvoiceNumber('order-1', { invoiceNumber: 'INV-001' }, { name: 'Sales Test', role: 'sales' }),
+    (error) => error.code === 'FINANCE_INVOICE_NUMBER_FORBIDDEN' && error.statusCode === 403,
+  );
+  await assert.rejects(
+    () => uploadInvoiceDocument('order-1', { documentType: 'invoice', mimeType: 'application/pdf' }, { name: 'Sales Test', role: 'sales' }),
+    (error) => error.code === 'FINANCE_INVOICE_UPLOAD_FORBIDDEN' && error.statusCode === 403,
   );
 });

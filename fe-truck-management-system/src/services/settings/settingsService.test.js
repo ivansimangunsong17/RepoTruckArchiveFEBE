@@ -18,8 +18,8 @@ describe('settingsService', () => {
     expect(isSettingsDatabaseEnabled()).toBe(true);
     await expect(fetchSystemSettings()).resolves.toEqual({ companyName: 'PT API' });
     await expect(saveSystemSettings({ companyName: 'PT API' })).resolves.toEqual({ companyName: 'PT API' });
-    expect(fetch).toHaveBeenCalledWith('http://localhost:3000/api/settings', expect.objectContaining({ method: 'GET' }));
-    expect(fetch).toHaveBeenCalledWith('http://localhost:3000/api/settings', expect.objectContaining({
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/settings$/), expect.objectContaining({ method: 'GET' }));
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/settings$/), expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ companyName: 'PT API' }),
     }));

@@ -352,6 +352,7 @@ export async function fetchSalesOrdersPage({
   query = '',
   status = '',
   invoiced = false,
+  invoiceDocumentStatus = '',
 } = {}) {
   const params = new URLSearchParams({
     page: String(page),
@@ -360,6 +361,7 @@ export async function fetchSalesOrdersPage({
   });
   if (status) params.set('status', status);
   if (invoiced) params.set('invoiced', 'true');
+  if (invoiceDocumentStatus) params.set('invoiceDocumentStatus', invoiceDocumentStatus);
   return httpClient.get(`/sales-orders?${params.toString()}`);
 }
 
@@ -375,8 +377,9 @@ export function saveSalesOrder(form, user, existing) {
   }));
 }
 
-export function updateSalesOrderInvoiceDeliveryStatus(id, billingStatus) {
-  return httpClient.patch(`/sales-orders/${id}/invoice-delivery-status`, { billingStatus });
+export function updateSalesOrderInvoiceDeliveryStatus(id, payload) {
+  const body = typeof payload === 'string' ? { billingStatus: payload } : payload;
+  return httpClient.patch(`/sales-orders/${id}/invoice-delivery-status`, body);
 }
 
 export function cancelSalesOrder(id) {

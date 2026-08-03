@@ -46,6 +46,7 @@ function LazyPage({ children }) {
 const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL];
 const overviewRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const orderRoles = nonFinanceRoles;
+const customerDocumentRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES];
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
 const adminRoles = [USER_ROLES.ADMIN];
 const viewerOnlyRoles = [USER_ROLES.OBSERVER];
@@ -75,6 +76,7 @@ export const router = createBrowserRouter([
         { path: 'profile', element: <LazyPage><ProfilePage /></LazyPage> },
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },
+        { path: 'sales/customer-documents', children: [guardedPage(customerDocumentRoles, <LazyPage><SalesOrdersPage customerDocumentsOnly /></LazyPage>)] },
         { path: 'operations', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage /></LazyPage>)] },
         { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },

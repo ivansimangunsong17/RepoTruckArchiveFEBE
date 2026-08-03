@@ -1,6 +1,6 @@
 import { httpClient } from '../api/httpClient';
 import { compressImageFile } from '../../utils/imageCompression';
-import { validateFinalUploadFile } from '../../utils/fileValidation';
+import { validateArchiveFile, validateFinalUploadFile } from '../../utils/fileValidation';
 
 function buildQuery(params = {}) {
   const searchParams = new URLSearchParams();
@@ -44,13 +44,35 @@ export function rejectFinanceRpuj(id, rejectionNote = '') {
   return httpClient.patch(`/finance/rpuj-requests/${encodeURIComponent(id)}/reject`, { rejectionNote });
 }
 
-function readFileAsDataUrl(file) {
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  const chunks = [];
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
+  }
+  return btoa(chunks.join(''));
+}
+
+function readFileWithFileReader(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('File gagal dibaca.'));
+    reader.onerror = () => reject(new Error('File gagal dibaca. Tutup file dari aplikasi lain lalu pilih ulang.'));
     reader.readAsDataURL(file);
   });
+}
+
+async function readFileAsDataUrl(file) {
+  if (typeof file?.arrayBuffer === 'function') {
+    try {
+      const buffer = await file.arrayBuffer();
+      return `data:${file.type || 'application/octet-stream'};base64,${arrayBufferToBase64(buffer)}`;
+    } catch {
+      return readFileWithFileReader(file);
+    }
+  }
+  return readFileWithFileReader(file);
 }
 
 export async function uploadFinanceRpujTransferProof(id, file) {
@@ -76,6 +98,25 @@ export function fetchFinanceInvoiceDetail(id) {
 
 export function updateFinanceInvoiceNumber(id, invoiceNumber) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/number`, { invoiceNumber });
+}
+
+export async function uploadFinanceInvoiceDocument(id, documentType, file) {
+  const label = documentType === 'taxInvoice' ? 'Faktur Pajak' : 'Invoice';
+  const validationError = validateArchiveFile(file, {
+    label,
+    allowedTypes: ['application/pdf'],
+    allowedExtensions: ['pdf'],
+    allowedLabel: 'PDF',
+  }) || validateFinalUploadFile(file, { label });
+  if (validationError) throw new Error(validationError);
+
+  const fileBase64 = await readFileAsDataUrl(file);
+  return httpClient.post(`/finance/invoices/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentType)}`, {
+    fileName: file.name,
+    mimeType: file.type || 'application/pdf',
+    fileSize: file.size,
+    fileBase64,
+  });
 }
 
 export function fetchFinanceInvoiceCorrections(id) {

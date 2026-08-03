@@ -12,6 +12,7 @@ import {
   billingStatusRequiresInvoice,
   normalizeSalesOrderBillingStatus,
 } from './sales-orders.billing-status.js';
+import { normalizeInvoiceDocumentDeliveryMethod } from './sales-orders.invoice-documents.js';
 import { isSalesOrderLockedByFinanceNumber, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
 
 const SERVICE_OPTIONS = [
@@ -242,6 +243,12 @@ function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
 }
 
+function hasSalesOrderAttachment(order, category) {
+  return (order.referenceDocuments || []).some((document) => (
+    document.documentType === category && Boolean(document.file?.path)
+  ));
+}
+
 function canSalesAccessOrder(actor, order) {
   if (actor?.role !== 'sales') return true;
   if (!order) return false;
@@ -286,6 +293,15 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
       financeVerifiedBy: currentOrder.financeVerifiedBy || payload.financeVerifiedBy || null,
       financeVerifiedAt: currentOrder.financeVerifiedAt || payload.financeVerifiedAt || null,
       invoiceNumber: currentOrder.invoiceNumber || '',
+      invoiceDocumentStatus: currentOrder.invoiceDocumentStatus || 'belum_upload',
+      invoiceDocumentUploadedAt: currentOrder.invoiceDocumentUploadedAt || null,
+      invoiceDocumentUploadedBy: currentOrder.invoiceDocumentUploadedBy || null,
+      taxInvoiceDocumentUploadedAt: currentOrder.taxInvoiceDocumentUploadedAt || null,
+      taxInvoiceDocumentUploadedBy: currentOrder.taxInvoiceDocumentUploadedBy || null,
+      invoiceDocumentSentAt: currentOrder.invoiceDocumentSentAt || null,
+      invoiceDocumentSentBy: currentOrder.invoiceDocumentSentBy || null,
+      invoiceDocumentDeliveryMethod: currentOrder.invoiceDocumentDeliveryMethod || null,
+      invoiceDocumentDeliveryNotes: currentOrder.invoiceDocumentDeliveryNotes || null,
       billingStatus: actor?.role === 'sales'
         ? currentOrder.billingStatus || 'belum_invoice'
         : payload.billingStatus || currentOrder.billingStatus || 'belum_invoice',
@@ -298,6 +314,17 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
     financeVerificationStatus: 'pending_so',
     financeVerifiedBy: null,
     financeVerifiedAt: null,
+    invoiceNumber: '',
+    invoiceDocumentStatus: 'belum_upload',
+    invoiceDocumentUploadedAt: null,
+    invoiceDocumentUploadedBy: null,
+    taxInvoiceDocumentUploadedAt: null,
+    taxInvoiceDocumentUploadedBy: null,
+    invoiceDocumentSentAt: null,
+    invoiceDocumentSentBy: null,
+    invoiceDocumentDeliveryMethod: null,
+    invoiceDocumentDeliveryNotes: null,
+    billingStatus: 'belum_invoice',
     createdBy: actorName,
     createdByUserId: actor?.sub || null,
     updatedBy: actorName,
@@ -394,6 +421,7 @@ export function listSalesOrders(query) {
     query: query.query || '',
     status: query.status || '',
     invoiced: query.invoiced || '',
+    invoiceDocumentStatus: query.invoiceDocumentStatus || '',
   });
 }
 
@@ -472,9 +500,31 @@ export async function updateInvoiceDeliveryStatus(id, payload = {}, actor) {
     throw error;
   }
 
+  const isSendingDocument = billingStatus !== 'belum_dikirim';
+  if (isSendingDocument) {
+    if (!hasSalesOrderAttachment(order, 'invoicePdf') || !hasSalesOrderAttachment(order, 'taxInvoicePdf')) {
+      const error = new Error('Invoice dan Faktur Pajak belum lengkap. Tunggu Finance upload dokumen dari Accurate.');
+      error.statusCode = 409;
+      error.code = 'INVOICE_DOCUMENTS_NOT_READY';
+      throw error;
+    }
+  }
+
+  const deliveryMethod = normalizeInvoiceDocumentDeliveryMethod(payload.deliveryMethod || payload.invoiceDocumentDeliveryMethod);
+  if (isSendingDocument && !deliveryMethod) {
+    const error = new Error('Metode pengiriman dokumen wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'INVOICE_DOCUMENT_DELIVERY_METHOD_REQUIRED';
+    throw error;
+  }
+
   return updateSalesOrderBillingStatus(id, {
     billingStatus,
     updatedByName: getActorName(actor),
+    markInvoiceDocumentSent: isSendingDocument,
+    invoiceDocumentSentAt: isSendingDocument ? (payload.sentAt || payload.invoiceDocumentSentAt || new Date().toISOString()) : null,
+    invoiceDocumentDeliveryMethod: isSendingDocument ? deliveryMethod : null,
+    invoiceDocumentDeliveryNotes: isSendingDocument ? (payload.deliveryNotes || payload.invoiceDocumentDeliveryNotes || '') : null,
   });
 }
 

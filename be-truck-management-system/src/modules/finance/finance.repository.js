@@ -614,12 +614,36 @@ function buildInvoiceFilters(options = {}) {
   }
 
   if (options.status === 'need-number') {
-    clauses.push("nullif(btrim(invoice_number), '') is null");
+    clauses.push(`(
+      nullif(btrim(invoice_number), '') is null
+      or invoice_document_uploaded_at is null
+      or tax_invoice_document_uploaded_at is null
+    )`);
   } else if (options.status === 'in-progress') {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
+    clauses.push('invoice_document_uploaded_at is not null');
+    clauses.push('tax_invoice_document_uploaded_at is not null');
     clauses.push("billing_status <> 'lunas'");
   } else if (options.status === 'paid') {
     clauses.push("billing_status = 'lunas'");
+  }
+
+  if (options.invoiceDocumentFilter === 'missing-documents') {
+    clauses.push("nullif(btrim(invoice_number), '') is not null");
+    clauses.push('(invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)');
+  } else if (options.invoiceDocumentFilter === 'missing-invoice') {
+    clauses.push("nullif(btrim(invoice_number), '') is not null");
+    clauses.push('invoice_document_uploaded_at is null');
+  } else if (options.invoiceDocumentFilter === 'missing-tax-invoice') {
+    clauses.push("nullif(btrim(invoice_number), '') is not null");
+    clauses.push('tax_invoice_document_uploaded_at is null');
+  } else if (options.invoiceDocumentFilter === 'complete') {
+    clauses.push("nullif(btrim(invoice_number), '') is not null");
+    clauses.push('invoice_document_uploaded_at is not null');
+    clauses.push('tax_invoice_document_uploaded_at is not null');
+    clauses.push("coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'");
+  } else if (options.invoiceDocumentFilter === 'sent') {
+    clauses.push("coalesce(invoice_document_status, 'belum_upload') = 'terkirim'");
   }
 
   if (options.query) {
@@ -886,8 +910,88 @@ function mapRpujRequestRow(row) {
 
 function mapInvoiceStatusLabel(row) {
   if (row.billing_status === 'lunas') return 'Lunas';
-  if (row.invoice_number) return 'Menunggu Update Status';
+  if (
+    row.invoice_number
+    && row.invoice_document_uploaded_at
+    && row.tax_invoice_document_uploaded_at
+  ) return 'Menunggu Update Status';
   return 'Butuh Nomor Invoice';
+}
+
+function mapInvoiceDocumentWorkflowLabel(status) {
+  const labels = {
+    belum_upload: 'Belum Upload',
+    siap_dikirim: 'Dokumen Siap Dikirim',
+    terkirim: 'Dokumen Terkirim',
+  };
+  return labels[status] || labels.belum_upload;
+}
+
+function mapInvoiceDeliveryMethodLabel(value) {
+  const labels = {
+    email: 'Email',
+    whatsapp: 'WhatsApp',
+    lainnya: 'Lainnya',
+  };
+  return labels[String(value || '').toLowerCase()] || value || '-';
+}
+
+function toDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestDate(...values) {
+  return values
+    .map(toDate)
+    .filter(Boolean)
+    .sort((left, right) => right.getTime() - left.getTime())[0] || null;
+}
+
+function daysBetween(startValue, endValue = new Date()) {
+  const start = toDate(startValue);
+  const end = toDate(endValue);
+  if (!start || !end) return null;
+  const diff = end.getTime() - start.getTime();
+  return Math.max(0, Math.floor(diff / 86400000));
+}
+
+function mapInvoiceAging(row) {
+  const now = new Date();
+  const documentsCompletedAt = latestDate(row.invoice_document_uploaded_at, row.tax_invoice_document_uploaded_at);
+  const hasInvoiceNumber = Boolean(String(row.invoice_number || '').trim());
+  const hasInvoicePdf = Boolean(row.invoice_document_uploaded_at);
+  const hasTaxInvoicePdf = Boolean(row.tax_invoice_document_uploaded_at);
+  const hasCompleteDocuments = hasInvoicePdf && hasTaxInvoicePdf;
+  const isSent = Boolean(row.invoice_document_sent_at);
+  const isPaid = row.billing_status === 'lunas';
+  const paidAt = isPaid ? row.updated_at : null;
+
+  let currentStage = 'Belum dikirim customer';
+  let currentDays = null;
+  if (isSent && !isPaid) {
+    currentStage = 'Menunggu Pelunasan';
+    currentDays = daysBetween(row.invoice_document_sent_at, now);
+  } else if (isSent && isPaid) {
+    currentStage = 'Lunas';
+    currentDays = daysBetween(row.invoice_document_sent_at, paidAt);
+  } else if (isPaid) {
+    currentStage = 'Lunas, tanggal kirim kosong';
+  } else if (hasInvoiceNumber && hasCompleteDocuments) {
+    currentStage = 'Siap dikirim Sales';
+  } else if (hasInvoiceNumber) {
+    currentStage = 'Dokumen belum lengkap';
+  }
+
+  return {
+    currentStage,
+    currentDays,
+    completionToInvoiceDays: daysBetween(row.completed_at, row.invoice_issued_at || (hasInvoiceNumber ? now : null)),
+    invoiceToDocumentsDays: daysBetween(row.invoice_issued_at, documentsCompletedAt || (hasInvoiceNumber && !hasCompleteDocuments ? now : null)),
+    documentsToSentDays: daysBetween(documentsCompletedAt, row.invoice_document_sent_at || (hasCompleteDocuments && !isSent ? now : null)),
+    sentToPaidDays: daysBetween(row.invoice_document_sent_at, paidAt || (isSent && !isPaid ? now : null)),
+  };
 }
 
 function mapPaymentStatusLabel(status) {
@@ -925,6 +1029,29 @@ function mapInvoiceOrderRow(row) {
   if (row.completed_at) activityLogs.push(`${new Date(row.completed_at).toISOString()} - Operational menyelesaikan job`);
   if (documentStatus === 'Siap Ditagihkan') activityLogs.push(`${new Date(row.completed_at || row.updated_at).toISOString()} - Dokumen siap invoice`);
   if (invoiceNumber && row.invoice_issued_at) activityLogs.push(`${new Date(row.invoice_issued_at).toISOString()} - Finance input nomor invoice`);
+  if (row.invoice_document_uploaded_at) {
+    activityLogs.push(`${new Date(row.invoice_document_uploaded_at).toISOString()} - Finance upload Invoice${row.invoice_document_uploaded_by_name ? ` oleh ${row.invoice_document_uploaded_by_name}` : ''}`);
+  }
+  if (row.tax_invoice_document_uploaded_at) {
+    activityLogs.push(`${new Date(row.tax_invoice_document_uploaded_at).toISOString()} - Finance upload Faktur Pajak${row.tax_invoice_document_uploaded_by_name ? ` oleh ${row.tax_invoice_document_uploaded_by_name}` : ''}`);
+  }
+  if (row.invoice_document_sent_at) {
+    const deliveryMethod = mapInvoiceDeliveryMethodLabel(row.invoice_document_delivery_method);
+    activityLogs.push(`${new Date(row.invoice_document_sent_at).toISOString()} - Sales kirim dokumen ke customer via ${deliveryMethod}${row.invoice_document_sent_by_name ? ` oleh ${row.invoice_document_sent_by_name}` : ''}`);
+  }
+  if (row.billing_status && row.billing_status !== 'belum_invoice') {
+    const statusLoggedAt = row.billing_status === 'lunas'
+      ? row.updated_at || row.invoice_document_sent_at
+      : row.invoice_document_sent_at || row.updated_at;
+    if (statusLoggedAt) {
+      activityLogs.push(`${new Date(statusLoggedAt).toISOString()} - Status pembayaran: ${mapPaymentStatusLabel(row.billing_status)}`);
+    }
+  }
+  activityLogs.sort((left, right) => {
+    const leftTime = new Date(String(left).split(' - ')[0]).getTime();
+    const rightTime = new Date(String(right).split(' - ')[0]).getTime();
+    return (leftTime || 0) - (rightTime || 0);
+  });
 
   return {
     id: row.id,
@@ -932,6 +1059,17 @@ function mapInvoiceOrderRow(row) {
     soNumber: row.so_number || '-',
     invoiceNumber,
     invoiceDate: row.invoice_issued_at,
+    invoiceDocumentStatus: row.invoice_document_status || 'belum_upload',
+    invoiceDocumentStatusLabel: mapInvoiceDocumentWorkflowLabel(row.invoice_document_status),
+    invoiceDocumentUploadedAt: row.invoice_document_uploaded_at,
+    invoiceDocumentUploadedBy: row.invoice_document_uploaded_by_name || '',
+    taxInvoiceDocumentUploadedAt: row.tax_invoice_document_uploaded_at,
+    taxInvoiceDocumentUploadedBy: row.tax_invoice_document_uploaded_by_name || '',
+    invoiceDocumentSentAt: row.invoice_document_sent_at,
+    invoiceDocumentSentBy: row.invoice_document_sent_by_name || '',
+    invoiceDocumentDeliveryMethod: row.invoice_document_delivery_method || '',
+    invoiceDocumentDeliveryNotes: row.invoice_document_delivery_notes || '',
+    invoiceAging: mapInvoiceAging(row),
     customer: row.customer_name || '-',
     destination: row.destination || '-',
     completedAt: row.completed_at,
@@ -962,6 +1100,8 @@ function mapInvoiceOrderRow(row) {
 }
 
 const invoiceDocumentLabels = {
+  invoicePdf: 'Invoice',
+  taxInvoicePdf: 'Faktur Pajak',
   spkDocument: 'SPK / Lampiran Biaya',
   eirDocument: 'EIR',
   loadingVoucherDocument: 'Bon Muat / Bon Bongkar',
@@ -1014,10 +1154,30 @@ export function mapInvoiceDocuments(rows = []) {
   const containerJobs = new Map();
   const jobSequences = new Map();
   const salesDocuments = [];
+  const financeDocuments = [];
 
   rows.forEach((row) => {
+    if (row.source === 'Finance') {
+      if (row.id) {
+        const mapped = mapInvoiceDocument(row);
+        financeDocuments.push({
+          ...mapped,
+          label: invoiceDocumentLabels[row.category] || mapped.label,
+          ready: true,
+        });
+      }
+      return;
+    }
+
     if (row.source === 'Sales') {
-      if (row.id) salesDocuments.push({ ...mapInvoiceDocument(row), ready: true });
+      if (row.id) {
+        const mapped = mapInvoiceDocument(row);
+        salesDocuments.push({
+          ...mapped,
+          label: invoiceDocumentLabels[row.category] || mapped.label,
+          ready: true,
+        });
+      }
       return;
     }
 
@@ -1082,7 +1242,7 @@ export function mapInvoiceDocuments(rows = []) {
     }))
   ));
 
-  return [...operationalDocuments, ...additionalOperationalDocuments, ...salesDocuments];
+  return [...financeDocuments, ...operationalDocuments, ...additionalOperationalDocuments, ...salesDocuments];
 }
 
 function invoiceOrdersCte() {
@@ -1104,6 +1264,15 @@ function invoiceOrdersCte() {
         so.invoice_number,
         coalesce(so.billing_status, 'belum_invoice') as billing_status,
         so.invoice_issued_at,
+        coalesce(so.invoice_document_status, 'belum_upload') as invoice_document_status,
+        so.invoice_document_uploaded_at,
+        so.invoice_document_uploaded_by_name,
+        so.tax_invoice_document_uploaded_at,
+        so.tax_invoice_document_uploaded_by_name,
+        so.invoice_document_sent_at,
+        so.invoice_document_sent_by_name,
+        so.invoice_document_delivery_method,
+        so.invoice_document_delivery_notes,
         case
           when so.invoice_issued_at is null then null
           when lower(coalesce(so.payment_type, 'cash')) = 'tempo'
@@ -1259,7 +1428,53 @@ export async function getFinanceDashboard(options = {}) {
             select count(*)::int
             from invoice_orders
             where billing_status = 'lunas'
-          ) as invoice_paid
+          ) as invoice_paid,
+          (
+            select count(*)::int
+            from invoice_orders
+            where nullif(btrim(invoice_number), '') is not null
+              and (invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)
+          ) as missing_invoice_documents,
+          (
+            select count(*)::int
+            from invoice_orders
+            where nullif(btrim(invoice_number), '') is not null
+              and invoice_document_uploaded_at is null
+          ) as missing_invoice_document,
+          (
+            select count(*)::int
+            from invoice_orders
+            where nullif(btrim(invoice_number), '') is not null
+              and tax_invoice_document_uploaded_at is null
+          ) as missing_tax_invoice_document,
+          (
+            select count(*)::int
+            from invoice_orders
+            where nullif(btrim(invoice_number), '') is not null
+              and invoice_document_uploaded_at is not null
+              and tax_invoice_document_uploaded_at is not null
+              and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
+          ) as complete_invoice_documents,
+          (
+            select count(*)::int
+            from invoice_orders
+            where coalesce(invoice_document_status, 'belum_upload') = 'terkirim'
+              and billing_status <> 'lunas'
+          ) as sent_waiting_payment,
+          (
+            select count(*)::int
+            from invoice_orders
+            where nullif(btrim(invoice_number), '') is not null
+              and (invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)
+              and coalesce(invoice_issued_at::date, completed_at::date) <= current_date - interval '3 days'
+          ) as overdue_document_upload,
+          (
+            select count(*)::int
+            from invoice_orders
+            where billing_status <> 'lunas'
+              and due_date is not null
+              and due_date::date < current_date
+          ) as overdue_payment
       `,
     ),
   ]);
@@ -1291,6 +1506,16 @@ export async function getFinanceDashboard(options = {}) {
       invoiceNeedNumber: Number(queue.invoice_need_number || 0),
       invoiceWaitingSales: Number(queue.invoice_waiting_sales || 0),
       invoicePaid: Number(queue.invoice_paid || 0),
+    },
+    invoiceWorkflow: {
+      needNumber: Number(queue.invoice_need_number || 0),
+      missingInvoiceDocuments: Number(queue.missing_invoice_documents || 0),
+      missingInvoiceDocument: Number(queue.missing_invoice_document || 0),
+      missingTaxInvoiceDocument: Number(queue.missing_tax_invoice_document || 0),
+      completeInvoiceDocuments: Number(queue.complete_invoice_documents || 0),
+      sentWaitingPayment: Number(queue.sent_waiting_payment || 0),
+      overdueDocumentUpload: Number(queue.overdue_document_upload || 0),
+      overduePayment: Number(queue.overdue_payment || 0),
     },
   };
 }
@@ -2134,9 +2359,31 @@ export async function getInvoiceOrdersPage(options = {}) {
       `
         ${invoiceOrdersCte()}
         select
-          count(*) filter (where nullif(btrim(invoice_number), '') is null)::int as need_number,
-          count(*) filter (where nullif(btrim(invoice_number), '') is not null and billing_status <> 'lunas')::int as in_progress,
-          count(*) filter (where billing_status = 'lunas')::int as paid
+          count(*) filter (
+            where nullif(btrim(invoice_number), '') is null
+              or invoice_document_uploaded_at is null
+              or tax_invoice_document_uploaded_at is null
+          )::int as need_number,
+          count(*) filter (
+            where nullif(btrim(invoice_number), '') is not null
+              and invoice_document_uploaded_at is not null
+              and tax_invoice_document_uploaded_at is not null
+              and billing_status <> 'lunas'
+          )::int as in_progress,
+          count(*) filter (where billing_status = 'lunas')::int as paid,
+          count(*) filter (
+            where nullif(btrim(invoice_number), '') is not null
+              and (invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)
+          )::int as missing_invoice_documents,
+          count(*) filter (where nullif(btrim(invoice_number), '') is not null and invoice_document_uploaded_at is null)::int as missing_invoice_document,
+          count(*) filter (where nullif(btrim(invoice_number), '') is not null and tax_invoice_document_uploaded_at is null)::int as missing_tax_invoice_document,
+          count(*) filter (
+            where nullif(btrim(invoice_number), '') is not null
+              and invoice_document_uploaded_at is not null
+              and tax_invoice_document_uploaded_at is not null
+              and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
+          )::int as complete_invoice_documents,
+          count(*) filter (where coalesce(invoice_document_status, 'belum_upload') = 'terkirim')::int as sent_invoice_documents
         from invoice_orders
         ${summaryWhereSql}
       `,
@@ -2154,6 +2401,11 @@ export async function getInvoiceOrdersPage(options = {}) {
       needNumber: Number(summary.rows[0]?.need_number || 0),
       inProgress: Number(summary.rows[0]?.in_progress || 0),
       paid: Number(summary.rows[0]?.paid || 0),
+      missingInvoiceDocuments: Number(summary.rows[0]?.missing_invoice_documents || 0),
+      missingInvoiceDocument: Number(summary.rows[0]?.missing_invoice_document || 0),
+      missingTaxInvoiceDocument: Number(summary.rows[0]?.missing_tax_invoice_document || 0),
+      completeInvoiceDocuments: Number(summary.rows[0]?.complete_invoice_documents || 0),
+      sentInvoiceDocuments: Number(summary.rows[0]?.sent_invoice_documents || 0),
     },
   };
 }
@@ -2175,7 +2427,12 @@ export async function getInvoiceOrderDetail(id) {
         select
           a.id, a.category, a.reference_number, a.document_date, a.file_name,
           a.storage_path, a.mime_type, a.file_size, a.notes, a.uploaded_by_name,
-          a.created_at, 'Sales'::text as source, null::uuid as job_id,
+          a.created_at,
+          case
+            when a.category in ('invoicePdf', 'taxInvoicePdf') then 'Finance'
+            else 'Sales'
+          end as source,
+          null::uuid as job_id,
           null::text as container_number
         from attachments a
         where a.entity_type = 'sales_order'
@@ -2282,6 +2539,90 @@ export async function updateInvoiceNumber(id, payload = {}) {
         where id = $3
       `,
       [invoiceNumber, payload.actorName || 'Finance', id],
+    );
+
+    const updated = await client.query(
+      `
+        ${invoiceOrdersCte()}
+        select *
+        from invoice_orders
+        where id = $1
+        limit 1
+      `,
+      [id],
+    );
+    return updated.rows[0] ? mapInvoiceOrderRow(updated.rows[0]) : null;
+  });
+}
+
+export async function markInvoiceDocumentUploaded(id, patch = {}) {
+  const category = patch.category === 'taxInvoicePdf' ? 'taxInvoicePdf' : 'invoicePdf';
+  const actorName = patch.actorName || 'Finance';
+  const isInvoice = category === 'invoicePdf';
+
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select id
+        from sales_orders
+        where id = $1
+          and status = 'completed'
+      `,
+      [id],
+    );
+
+    if (!existing.rows[0]) {
+      const error = new Error('Sales Order selesai untuk invoice tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'FINANCE_INVOICE_ORDER_NOT_FOUND';
+      throw error;
+    }
+
+    const attachmentFlags = await client.query(
+      `
+        select
+          bool_or(category = 'invoicePdf') as has_invoice_pdf,
+          bool_or(category = 'taxInvoicePdf') as has_tax_invoice_pdf
+        from attachments
+        where entity_type = 'sales_order'
+          and entity_id = $1
+          and category in ('invoicePdf', 'taxInvoicePdf')
+      `,
+      [id],
+    );
+    const flags = attachmentFlags.rows[0] || {};
+    const hasInvoicePdf = Boolean(flags.has_invoice_pdf) || isInvoice;
+    const hasTaxInvoicePdf = Boolean(flags.has_tax_invoice_pdf) || !isInvoice;
+    const nextStatus = hasInvoicePdf && hasTaxInvoicePdf ? 'siap_dikirim' : 'belum_upload';
+
+    await client.query(
+      `
+        update sales_orders
+        set invoice_document_status = case
+              when coalesce(invoice_document_status, 'belum_upload') = 'terkirim' then invoice_document_status
+              else $1
+            end,
+            invoice_document_uploaded_at = case
+              when $2 then now()
+              else invoice_document_uploaded_at
+            end,
+            invoice_document_uploaded_by_name = case
+              when $2 then $3
+              else invoice_document_uploaded_by_name
+            end,
+            tax_invoice_document_uploaded_at = case
+              when $4 then now()
+              else tax_invoice_document_uploaded_at
+            end,
+            tax_invoice_document_uploaded_by_name = case
+              when $4 then $3
+              else tax_invoice_document_uploaded_by_name
+            end,
+            updated_by_name = $3,
+            updated_at = now()
+        where id = $5
+      `,
+      [nextStatus, isInvoice, actorName, !isInvoice, id],
     );
 
     const updated = await client.query(

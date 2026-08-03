@@ -80,6 +80,9 @@ export async function updateInvoiceDeliveryStatusController(request, response) {
     invoiceNumber: saved.invoiceNumber,
     beforeStatus: before.billingStatus,
     afterStatus: saved.billingStatus,
+    invoiceDocumentStatus: saved.invoiceDocumentStatus,
+    invoiceDocumentSentAt: saved.invoiceDocumentSentAt,
+    invoiceDocumentDeliveryMethod: saved.invoiceDocumentDeliveryMethod,
   };
   if (before.billingStatus === 'belum_dikirim' && saved.billingStatus !== 'belum_dikirim') {
     await safeRecordActivityLog(request, {

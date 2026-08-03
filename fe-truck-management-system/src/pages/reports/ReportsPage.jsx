@@ -1350,6 +1350,9 @@ function ReportsPage() {
     () => buildTruckDayUtilizationSummary(masterTruckRows || [], utilizationSourceRows, month, year),
     [masterTruckRows, month, utilizationSourceRows, year],
   );
+  const averageUsedTrucksPerDay = utilizationSummary.period.days
+    ? utilizationSummary.realizedTruckDays / utilizationSummary.period.days
+    : 0;
   const utilizationPeriodLabel = formatUtilizationPeriod(utilizationSummary.period, activeMonthLabel, year);
   const utilizationRowsWithTarget = utilizationSummary.rows;
   const utilizationPivot = useMemo(
@@ -1434,8 +1437,8 @@ function ReportsPage() {
           label="Utilization Report"
           value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
           helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
-          secondaryLabel="Truck-Hari"
-          secondaryValue={`${utilizationSummary.realizedTruckDays} / ${utilizationSummary.potentialTruckDays} truck-hari`}
+          secondaryLabel="AVG Terpakai"
+          secondaryValue={`${formatDecimal(averageUsedTrucksPerDay)} / ${utilizationSummary.activeTruckCount} truck per hari`}
           tertiaryLabel="Truck Aktif"
           tertiaryValue={`${utilizationSummary.activeTruckCount} Unit`}
           tone="sky"
@@ -1516,7 +1519,7 @@ function ReportsPage() {
               <h2 className="text-sm font-bold text-slate-950">Utilisasi Truck</h2>
               <p className="text-xs text-slate-500">
                 {utilizationSummary.period.days
-                  ? `Periode ${utilizationPeriodLabel}. Realisasi ${utilizationSummary.realizedTruckDays} dari ${utilizationSummary.potentialTruckDays} truck-hari.`
+                  ? `Periode ${utilizationPeriodLabel}. Rata-rata ${formatDecimal(averageUsedTrucksPerDay)} dari ${utilizationSummary.activeTruckCount} truck aktif terpakai per hari.`
                   : utilizationPeriodLabel}
               </p>
             </div>

@@ -17,6 +17,7 @@ import {
   requestFinanceCorrection,
   saveInvoiceNumber,
   saveOrderVerificationSoNumber,
+  uploadInvoiceDocument,
   uploadRpujTransferProof,
 } from './finance.service.js';
 
@@ -116,6 +117,28 @@ export async function updateInvoiceNumberController(request, response) {
     metadata: { soNumber: result?.soNumber, invoiceNumber: result?.invoiceNumber },
   });
   sendSuccess(response, result, 'Nomor invoice berhasil disimpan.');
+}
+
+export async function uploadInvoiceDocumentController(request, response) {
+  const result = await uploadInvoiceDocument(request.params.id, {
+    ...request.body,
+    documentType: request.params.documentType || request.body?.documentType,
+  }, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_UPLOAD_INVOICE_DOCUMENT',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      soNumber: result?.soNumber,
+      invoiceNumber: result?.invoiceNumber,
+      documentType: request.params.documentType || request.body?.documentType,
+      fileName: result?.uploadedDocument?.fileName,
+      invoiceDocumentStatus: result?.invoiceDocumentStatus,
+    },
+  });
+  sendSuccess(response, result, 'Dokumen invoice berhasil diupload.');
 }
 
 export async function financeCorrectionsController(request, response) {

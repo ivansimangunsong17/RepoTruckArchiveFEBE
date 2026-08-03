@@ -563,6 +563,18 @@
   background: #fff;
   font-weight: 800;
 }
+.order-billing-select input {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #d8dde4;
+  border-radius: 7px;
+  color: #1f2937;
+  background: #fff;
+  font-weight: 800;
+}
+.order-billing-note-field {
+  grid-column: 1 / -1;
+}
 .order-billing-note {
   grid-column: 1 / -1;
   color: #8a94a5;
@@ -577,6 +589,69 @@
   border-radius: 7px;
   color: #1f2937;
   background: #fff;
+}
+.sales-invoice-documents {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5eaf1;
+}
+.sales-invoice-documents-head,
+.sales-invoice-document-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sales-invoice-documents-head span,
+.sales-invoice-document-row span {
+  color: #687487;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.sales-invoice-documents-head strong {
+  border-radius: 999px;
+  background: #eef6ff;
+  padding: 4px 9px;
+  color: #0b6097;
+  font-size: .68rem;
+}
+.sales-invoice-document-row {
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+}
+.sales-invoice-document-row > div:first-child {
+  min-width: 0;
+}
+.sales-invoice-document-row strong {
+  display: block;
+  color: #111827;
+  font-size: .76rem;
+}
+.sales-invoice-document-row span {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sales-invoice-document-row small {
+  color: #9aa5b5;
+  font-size: .68rem;
+  font-weight: 800;
+}
+.sales-invoice-document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sales-invoice-document-button {
+  min-height: 30px;
+  padding: 6px 9px;
+  font-size: .68rem;
 }
 .invoice-save-button {
   min-height: 36px;

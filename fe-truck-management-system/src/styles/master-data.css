@@ -423,9 +423,8 @@
 .finance-invoice-total,
 .finance-invoice-number,
 .finance-invoice-actions {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  white-space: normal;
 }
 .finance-invoice-customer,
 .finance-invoice-status {
@@ -443,20 +442,20 @@
   text-align: center;
 }
 .finance-invoice-action-row {
-  display: flex;
+  display: inline-grid;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-width: 0;
+  gap: 4px;
+  min-width: 76px;
 }
 .finance-table-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 30px;
-  min-width: 74px;
-  padding: 0 10px;
+  min-height: 28px;
+  min-width: 76px;
+  padding: 0 8px;
   border: 1px solid #cbd5e1;
   border-radius: 7px;
   color: #334155;
@@ -467,8 +466,8 @@
   white-space: nowrap;
 }
 .finance-table-action-button.is-icon-only {
-  width: 30px;
-  min-width: 30px;
+  width: 76px;
+  min-width: 76px;
   padding: 0;
 }
 .finance-table-action-button:hover {
@@ -2026,6 +2025,28 @@
   align-items: center;
   min-height: 22px;
   color: #41516a;
+  font-size: .66rem;
+  font-weight: 850;
+}
+
+.master-row-number-header,
+.master-row-number-cell-wrap {
+  width: 58px;
+  min-width: 58px;
+  text-align: center;
+}
+
+.master-row-number-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid #d5deea;
+  border-radius: 6px;
+  color: #1f3554;
+  background: #f5f8fc;
   font-size: .66rem;
   font-weight: 850;
 }

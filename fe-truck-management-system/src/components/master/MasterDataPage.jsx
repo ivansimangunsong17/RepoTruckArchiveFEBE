@@ -49,6 +49,13 @@ const MASTER_ATTACHMENT_ENTITY_TYPES = {
   customers: 'customer',
 };
 const LOCAL_VIEWER_NOTES_KEY = 'tms-master-viewer-notes-v1';
+const ROW_NUMBER_COLUMN = {
+  key: '__rowNumber',
+  label: 'NO',
+  headerClassName: 'master-row-number-header',
+  cellClassName: 'master-row-number-cell-wrap',
+  render: (_value, _row, meta) => <span className="master-row-number-cell">{String(meta.rowNumber).padStart(2, '0')}</span>,
+};
 
 function normalizeRows(value) {
   return Array.isArray(value) ? value : EMPTY_ROWS;
@@ -426,6 +433,11 @@ function MasterDataPage({
     ? serverRows
     : filteredRows.slice((page - 1) * pageSize, page * pageSize);
   const hasActiveFilters = Boolean(query.trim()) || Object.values(activeFilters).some(Boolean);
+  const hasRowNumberColumn = columns.some((column) =>
+    ['rowNumber', 'number', '__rowNumber'].includes(column.key)
+    && String(column.label || '').trim().toLowerCase() === 'no',
+  );
+  const tableColumns = hasRowNumberColumn ? columns : [ROW_NUMBER_COLUMN, ...columns];
 
   const fieldSections = useMemo(
     () => fields.reduce((sections, field) => {
@@ -954,20 +966,20 @@ function MasterDataPage({
             <table className="data-table master-table responsive-data-table">
               <thead>
                 <tr>
-                  {columns.map((column) => <th key={column.key} className={column.headerClassName || ''}>{column.label}</th>)}
+                  {tableColumns.map((column) => <th key={column.key} className={column.headerClassName || ''}>{column.label}</th>)}
                   <th className="!w-32 !text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {listLoading ? (
-                  <tr className="responsive-empty-row"><td colSpan={columns.length + 1}><div className="empty-state">Memuat data...</div></td></tr>
+                  <tr className="responsive-empty-row"><td colSpan={tableColumns.length + 1}><div className="empty-state">Memuat data...</div></td></tr>
                 ) : null}
                 {!listLoading && listError ? (
-                  <tr className="responsive-empty-row"><td colSpan={columns.length + 1}><div className="empty-state">{listError}</div></td></tr>
+                  <tr className="responsive-empty-row"><td colSpan={tableColumns.length + 1}><div className="empty-state">{listError}</div></td></tr>
                 ) : null}
                 {!listLoading && !listError ? paginatedRows.map((row, rowIndex) => (
                   <tr key={row.id}>
-                    {columns.map((column, columnIndex) => (
+                    {tableColumns.map((column, columnIndex) => (
                       <td key={column.key} data-label={column.label} className={column.cellClassName || ''}>
                         {column.render
                           ? column.render(row[column.key], row, {
@@ -998,7 +1010,7 @@ function MasterDataPage({
                   </tr>
                 )) : null}
                 {!listLoading && !listError && !totalItems ? (
-                  <tr className="responsive-empty-row"><td colSpan={columns.length + 1}><div className="empty-state">Data tidak ditemukan.</div></td></tr>
+                  <tr className="responsive-empty-row"><td colSpan={tableColumns.length + 1}><div className="empty-state">Data tidak ditemukan.</div></td></tr>
                 ) : null}
               </tbody>
             </table>

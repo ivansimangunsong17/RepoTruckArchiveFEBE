@@ -16,6 +16,7 @@ import {
   rpujRequestsController,
   updateInvoiceNumberController,
   updateOrderVerificationSoNumberController,
+  uploadInvoiceDocumentController,
   uploadRpujTransferProofController,
 } from './finance.controller.js';
 
@@ -121,6 +122,12 @@ export const financeRoutes = [
     path: '/api/finance/invoices/:id/number',
     permission: 'finance.invoice.update_number',
     handler: updateInvoiceNumberController,
+  },
+  {
+    method: 'POST',
+    path: '/api/finance/invoices/:id/documents/:documentType',
+    permission: 'finance.invoice.upload',
+    handler: uploadInvoiceDocumentController,
   },
   {
     method: 'GET',

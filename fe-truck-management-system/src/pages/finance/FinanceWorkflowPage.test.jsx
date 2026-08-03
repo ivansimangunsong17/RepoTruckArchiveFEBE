@@ -15,6 +15,7 @@ import {
   requestFinanceOrderSoCorrection,
   updateFinanceInvoiceNumber,
   updateFinanceOrderSoNumber,
+  uploadFinanceInvoiceDocument,
   uploadFinanceRpujTransferProof,
 } from '../../services/finance/financeService';
 import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
@@ -32,6 +33,7 @@ vi.mock('../../services/finance/financeService', () => ({
   requestFinanceOrderSoCorrection: vi.fn(),
   updateFinanceInvoiceNumber: vi.fn(),
   updateFinanceOrderSoNumber: vi.fn(),
+  uploadFinanceInvoiceDocument: vi.fn(),
   uploadFinanceRpujTransferProof: vi.fn(),
 }));
 
@@ -92,6 +94,11 @@ const invoiceSummary = {
   needNumber: 0,
   inProgress: 1,
   paid: 2,
+  missingInvoiceDocuments: 1,
+  missingInvoiceDocument: 1,
+  missingTaxInvoiceDocument: 1,
+  completeInvoiceDocuments: 1,
+  sentInvoiceDocuments: 2,
 };
 
 beforeEach(() => {
@@ -103,6 +110,11 @@ beforeEach(() => {
   fetchFinanceInvoiceCorrections.mockResolvedValue([]);
   requestFinanceOrderSoCorrection.mockResolvedValue({ status: 'pending' });
   requestFinanceInvoiceCorrection.mockResolvedValue({ status: 'pending' });
+  uploadFinanceInvoiceDocument.mockResolvedValue({
+    ...invoiceRow,
+    invoiceDocumentStatus: 'belum_upload',
+    invoiceDocumentStatusLabel: 'Belum Upload',
+  });
   fetchFinanceInvoiceDetail.mockResolvedValue({
     ...invoiceRow,
     billingItems: ['Jasa Angkut D20 - 1 ritase', 'Bon Muat/Bongkar - 1 item'],
@@ -228,8 +240,10 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
     await screen.findByRole('tab', { name: /Menunggu Sales/i });
-    expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
-    expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
+      expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+    });
 
     await user.click(screen.getByRole('tab', { name: /Lunas/i }));
 
@@ -238,6 +252,21 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
     expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
     expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+  });
+
+  it('mengirim filter dokumen invoice ke backend finance', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await screen.findByRole('tab', { name: /Belum Nomor \/ Dokumen/i });
+    await user.click(await screen.findByRole('button', { name: /Belum Upload Invoice & Faktur Pajak/i }));
+
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
+        status: 'need-number',
+        invoiceDocumentFilter: 'missing-documents',
+      }));
+    });
   });
 
   it('menampilkan aksi view dan download untuk dokumen Sales dan Operational', async () => {
@@ -265,6 +294,90 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByRole('button', { name: /View delivery-order.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Download delivery-order.pdf/i })).toBeEnabled();
     expect(fetchFinanceInvoiceDetail).toHaveBeenCalledWith('invoice-1');
+  });
+
+  it('mengupload PDF Invoice Accurate dari detail invoice', async () => {
+    const user = userEvent.setup();
+    const detailWithoutFinanceFile = {
+      ...invoiceRow,
+      invoiceDocumentStatus: 'belum_upload',
+      invoiceDocumentStatusLabel: 'Belum Upload',
+      documents: [],
+    };
+    const detailWithInvoiceFile = {
+      ...invoiceRow,
+      invoiceDocumentStatus: 'belum_upload',
+      invoiceDocumentStatusLabel: 'Belum Upload',
+      invoiceDocumentUploadedAt: '2026-08-02T08:00:00.000Z',
+      invoiceDocumentUploadedBy: 'Finance Test',
+      documents: [{
+        id: 'finance-invoice-1',
+        category: 'invoicePdf',
+        label: 'Invoice',
+        source: 'Finance',
+        ready: true,
+        file: { name: 'invoice-accurate.pdf', path: 'finance-invoice-1', type: 'application/pdf', size: 128 },
+      }],
+    };
+    fetchFinanceInvoiceDetail
+      .mockResolvedValueOnce(detailWithoutFinanceFile)
+      .mockResolvedValueOnce(detailWithInvoiceFile);
+    uploadFinanceInvoiceDocument.mockResolvedValue({
+      ...invoiceRow,
+      invoiceDocumentStatus: 'belum_upload',
+      invoiceDocumentStatusLabel: 'Belum Upload',
+      invoiceDocumentUploadedAt: '2026-08-02T08:00:00.000Z',
+      invoiceDocumentUploadedBy: 'Finance Test',
+      uploadedDocument: {
+        id: 'finance-invoice-1',
+        category: 'invoicePdf',
+        fileName: 'invoice-accurate.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 128,
+        path: 'finance-invoice-1',
+        uploadedByName: 'Finance Test',
+        uploadedAt: '2026-08-02T08:00:00.000Z',
+      },
+    });
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    const file = new File(['%PDF-1.4'], 'invoice-accurate.pdf', { type: 'application/pdf' });
+    await user.upload(await screen.findByLabelText('Upload Invoice PDF'), file);
+
+    expect(uploadFinanceInvoiceDocument).not.toHaveBeenCalled();
+    expect(await screen.findByText('Siap disimpan: invoice-accurate.pdf')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Simpan Dokumen/i }));
+
+    await waitFor(() => {
+      expect(uploadFinanceInvoiceDocument).toHaveBeenCalledWith('invoice-1', 'invoice', file);
+    });
+    expect(await screen.findByText('Dokumen berhasil disimpan')).toBeInTheDocument();
+    expect(await screen.findByText('invoice-accurate.pdf')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /View invoice-accurate.pdf/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Download invoice-accurate.pdf/i })).toBeEnabled();
+  });
+
+  it('menampilkan modal gagal ketika upload dokumen invoice gagal dikirim', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoiceDetail.mockResolvedValueOnce({
+      ...invoiceRow,
+      invoiceDocumentStatus: 'belum_upload',
+      invoiceDocumentStatusLabel: 'Belum Upload',
+      documents: [],
+    });
+    uploadFinanceInvoiceDocument.mockRejectedValueOnce(new Error('Upload PDF gagal.'));
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    const file = new File(['%PDF-1.4'], 'invoice-error.pdf', { type: 'application/pdf' });
+    await user.upload(await screen.findByLabelText('Upload Invoice PDF'), file);
+    await user.click(screen.getByRole('button', { name: /Simpan Dokumen/i }));
+
+    expect(await screen.findByText('Sebagian dokumen gagal disimpan')).toBeInTheDocument();
+    expect(screen.getByText('Invoice: Upload PDF gagal.')).toBeInTheDocument();
   });
 
   it('mengajukan koreksi nomor invoice dari detail invoice', async () => {

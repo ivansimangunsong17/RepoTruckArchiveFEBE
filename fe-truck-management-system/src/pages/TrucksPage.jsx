@@ -728,7 +728,7 @@ function TrucksPage({ readOnly = false }) {
       fields={fields}
       detailFields={detailFields}
       columns={[
-        { key: 'unitCode', label: 'No', render: (_, row) => <TruckNumber row={row} /> },
+        { key: 'unitCode', label: 'No Lambung', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'defaultDriver', label: 'Sopir', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'capacity', label: 'Chassis / Size', render: (_, row) => <TruckChassisSize row={row} chassisRows={chassisRows} /> },

@@ -27,6 +27,7 @@ import {
   requestFinanceOrderSoCorrection,
   updateFinanceInvoiceNumber,
   updateFinanceOrderSoNumber,
+  uploadFinanceInvoiceDocument,
   uploadFinanceRpujTransferProof,
 } from '../../services/finance/financeService';
 import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
@@ -476,6 +477,24 @@ function normalizeFinanceInvoiceRow(row = {}) {
     billingItems: Array.isArray(row.billingItems) && row.billingItems.length ? row.billingItems : ['Rincian tagihan belum tersedia'],
     documentChecklist: Array.isArray(row.documentChecklist) ? row.documentChecklist : [],
     documents: Array.isArray(row.documents) ? row.documents : [],
+    invoiceDocumentStatus: row.invoiceDocumentStatus || 'belum_upload',
+    invoiceDocumentStatusLabel: row.invoiceDocumentStatusLabel || 'Belum Upload',
+    invoiceDocumentUploadedAt: row.invoiceDocumentUploadedAt || '',
+    invoiceDocumentUploadedBy: row.invoiceDocumentUploadedBy || '',
+    taxInvoiceDocumentUploadedAt: row.taxInvoiceDocumentUploadedAt || '',
+    taxInvoiceDocumentUploadedBy: row.taxInvoiceDocumentUploadedBy || '',
+    invoiceDocumentSentAt: row.invoiceDocumentSentAt || '',
+    invoiceDocumentSentBy: row.invoiceDocumentSentBy || '',
+    invoiceDocumentDeliveryMethod: row.invoiceDocumentDeliveryMethod || '',
+    invoiceDocumentDeliveryNotes: row.invoiceDocumentDeliveryNotes || '',
+    invoiceAging: row.invoiceAging || {
+      currentStage: '-',
+      currentDays: null,
+      completionToInvoiceDays: null,
+      invoiceToDocumentsDays: null,
+      documentsToSentDays: null,
+      sentToPaidDays: null,
+    },
     activityLogs: Array.isArray(row.activityLogs) ? row.activityLogs.map((log) => {
       const [timestamp, ...rest] = String(log).split(' - ');
       return `${formatDisplayDate(timestamp)} - ${rest.join(' - ') || timestamp}`;
@@ -514,6 +533,30 @@ function correctionStatusLabel(status) {
   };
   return labels[status] || status || '-';
 }
+
+function formatAgingDays(days) {
+  if (days === null || days === undefined || days === '') return '-';
+  return `${Number(days || 0)} hari`;
+}
+
+function agingToneClass(days) {
+  if (days === null || days === undefined || days === '') return 'border-slate-200 bg-slate-50 text-slate-500';
+  const value = Number(days || 0);
+  if (value >= 7) return 'border-red-200 bg-red-50 text-red-700';
+  if (value >= 3) return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-slate-200 bg-slate-50 text-slate-600';
+}
+
+const defaultInvoiceSummary = {
+  needNumber: 0,
+  inProgress: 0,
+  paid: 0,
+  missingInvoiceDocuments: 0,
+  missingInvoiceDocument: 0,
+  missingTaxInvoiceDocument: 0,
+  completeInvoiceDocuments: 0,
+  sentInvoiceDocuments: 0,
+};
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('id-ID', {
@@ -1114,20 +1157,98 @@ function RpujDetailModal({ rpuj, onClose }) {
   );
 }
 
+const financeInvoiceUploadSlots = [
+  {
+    type: 'invoice',
+    category: 'invoicePdf',
+    label: 'Invoice',
+    uploadedAtKey: 'invoiceDocumentUploadedAt',
+    uploadedByKey: 'invoiceDocumentUploadedBy',
+  },
+  {
+    type: 'taxInvoice',
+    category: 'taxInvoicePdf',
+    label: 'Faktur Pajak',
+    uploadedAtKey: 'taxInvoiceDocumentUploadedAt',
+    uploadedByKey: 'taxInvoiceDocumentUploadedBy',
+  },
+];
+
+function findInvoiceFinanceDocument(documents, category) {
+  return documents.find((document) => (
+    document.category === category
+    && document.ready !== false
+    && Boolean(document.file?.path)
+  ));
+}
+
+function mapUploadedInvoiceDocument(uploadedDocument, documentType) {
+  if (!uploadedDocument) return null;
+  const category = uploadedDocument.category || (documentType === 'taxInvoice' ? 'taxInvoicePdf' : 'invoicePdf');
+  const label = category === 'taxInvoicePdf' ? 'Faktur Pajak' : 'Invoice';
+  return {
+    id: uploadedDocument.id || uploadedDocument.path || `${category}-${Date.now()}`,
+    category,
+    label,
+    source: 'Finance',
+    ready: true,
+    uploadedAt: uploadedDocument.uploadedAt || uploadedDocument.createdAt || '',
+    uploadedBy: uploadedDocument.uploadedByName || uploadedDocument.uploadedBy || '',
+    file: {
+      name: uploadedDocument.fileName || uploadedDocument.fileNameOriginal || uploadedDocument.name || label,
+      path: uploadedDocument.path || uploadedDocument.id || uploadedDocument.storagePath || '',
+      type: uploadedDocument.mimeType || uploadedDocument.type || 'application/pdf',
+      size: Number(uploadedDocument.fileSize ?? uploadedDocument.sizeBytes ?? uploadedDocument.size ?? 0),
+    },
+  };
+}
+
+function mergeInvoiceDocument(documents = [], nextDocument) {
+  if (!nextDocument) return documents;
+  const withoutSameCategory = documents.filter((document) => document.category !== nextDocument.category);
+  return [nextDocument, ...withoutSameCategory];
+}
+
+function validateInvoicePdfFile(file, label) {
+  return validateArchiveFile(file, {
+    label,
+    allowedTypes: ['application/pdf'],
+    allowedExtensions: ['pdf'],
+    allowedLabel: 'PDF',
+  });
+}
+
 function InvoiceDetailModal({
   invoice,
   loading = false,
   error = '',
+  invoiceDocumentBusyKey = '',
+  invoiceDocumentUploadError = '',
   corrections = [],
   correctionsLoading = false,
   correctionsError = '',
   onClose,
   onOpenCorrection,
+  onUploadInvoiceDocument,
 }) {
+  const [dragUploadKey, setDragUploadKey] = useState('');
+  const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState({});
+  const [uploadResultModal, setUploadResultModal] = useState(null);
+
+  useEffect(() => {
+    setDragUploadKey('');
+    setPendingInvoiceFiles({});
+    setUploadResultModal(null);
+  }, [invoice?.id]);
+
   if (!invoice) return null;
   const documents = Array.isArray(invoice.documents) ? invoice.documents : [];
-  const availableDocumentCount = documents.filter((document) => document.ready !== false && document.file?.path).length;
-  const documentGroups = Array.from(documents.reduce((groups, document) => {
+  const supportDocuments = documents.filter((document) => document.source !== 'Finance');
+  const availableDocumentCount = supportDocuments.filter((document) => document.ready !== false && document.file?.path).length;
+  const pendingUploadSlots = financeInvoiceUploadSlots.filter((slot) => pendingInvoiceFiles[slot.type]);
+  const hasPendingInvoiceFiles = pendingUploadSlots.length > 0;
+  const isSavingInvoiceDocuments = uploadResultModal?.status === 'loading';
+  const documentGroups = Array.from(supportDocuments.reduce((groups, document) => {
     const isSalesDocument = document.source === 'Sales';
     const groupId = isSalesDocument
       ? 'sales-order'
@@ -1148,6 +1269,75 @@ function InvoiceDetailModal({
     ...group,
     readyCount: group.documents.filter((document) => document.ready !== false && document.file?.path).length,
   }));
+
+  function setPendingInvoiceFile(slotType, file) {
+    if (!file || isSavingInvoiceDocuments) return;
+    setPendingInvoiceFiles((current) => ({ ...current, [slotType]: file }));
+  }
+
+  async function savePendingInvoiceDocuments() {
+    if (!hasPendingInvoiceFiles || isSavingInvoiceDocuments) return;
+
+    const validationErrors = pendingUploadSlots
+      .map((slot) => {
+        const message = validateInvoicePdfFile(pendingInvoiceFiles[slot.type], slot.label);
+        return message ? `${slot.label}: ${message}` : '';
+      })
+      .filter(Boolean);
+
+    if (validationErrors.length) {
+      setUploadResultModal({
+        status: 'error',
+        title: 'Dokumen belum bisa disimpan',
+        message: 'Periksa kembali file yang dipilih.',
+        items: validationErrors,
+      });
+      return;
+    }
+
+    setUploadResultModal({
+      status: 'loading',
+      title: 'Mengirim dokumen',
+      message: 'Invoice dan Faktur Pajak sedang disimpan ke sistem.',
+      items: pendingUploadSlots.map((slot) => `${slot.label}: ${pendingInvoiceFiles[slot.type]?.name || 'File dipilih'}`),
+    });
+
+    const failedUploads = [];
+    const successSlotTypes = [];
+    for (const slot of pendingUploadSlots) {
+      try {
+        await onUploadInvoiceDocument?.(invoice.id, slot.type, pendingInvoiceFiles[slot.type]);
+        successSlotTypes.push(slot.type);
+      } catch (uploadError) {
+        failedUploads.push(`${slot.label}: ${uploadError.message || 'Gagal dikirim.'}`);
+      }
+    }
+
+    if (failedUploads.length) {
+      setPendingInvoiceFiles((current) => {
+        const next = { ...current };
+        successSlotTypes.forEach((slotType) => {
+          delete next[slotType];
+        });
+        return next;
+      });
+      setUploadResultModal({
+        status: 'error',
+        title: 'Sebagian dokumen gagal disimpan',
+        message: 'Dokumen yang gagal masih siap dikirim ulang.',
+        items: failedUploads,
+      });
+      return;
+    }
+
+    setPendingInvoiceFiles({});
+    setUploadResultModal({
+      status: 'success',
+      title: 'Dokumen berhasil disimpan',
+      message: `${pendingUploadSlots.length} dokumen Accurate berhasil tersimpan dan bisa dilihat oleh Sales.`,
+      items: pendingUploadSlots.map((slot) => `${slot.label}: ${pendingInvoiceFiles[slot.type]?.name || 'File tersimpan'}`),
+    });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
@@ -1190,6 +1380,7 @@ function InvoiceDetailModal({
                 ['Tgl Invoice', invoice.invoiceDate],
                 ['No. Invoice', invoice.invoiceNumber || 'Belum ada'],
                 ['Dokumen', invoice.documentStatus],
+                ['Lama Pelunasan', `${formatAgingDays(invoice.invoiceAging?.currentDays)} - ${invoice.invoiceAging?.currentStage || '-'}`],
               ].map(([label, value]) => (
                 <div className="finance-invoice-summary-item" key={label}>
                   <span>{label}</span>
@@ -1227,6 +1418,150 @@ function InvoiceDetailModal({
                   <h4 className="mb-1.5 text-xs font-black text-slate-950">Riwayat Finance</h4>
                   <ActivityLogList logs={invoice.activityLogs} />
                 </div>
+              </div>
+            </section>
+
+            <section className="finance-invoice-detail-card">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-slate-950">Dokumen Accurate</h4>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Upload PDF Invoice dan Faktur Pajak dari Accurate.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusPill value={invoice.invoiceDocumentStatusLabel} />
+                  <button
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-600 px-3 text-[10px] font-black text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
+                    disabled={!hasPendingInvoiceFiles || isSavingInvoiceDocuments}
+                    onClick={savePendingInvoiceDocuments}
+                    type="button"
+                  >
+                    <CheckCircle2 size={13} />
+                    {isSavingInvoiceDocuments ? 'Menyimpan...' : 'Simpan Dokumen'}
+                  </button>
+                </div>
+              </div>
+              {invoiceDocumentUploadError ? (
+                <div className="mb-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                  {invoiceDocumentUploadError}
+                </div>
+              ) : null}
+              <div className="grid gap-2 md:grid-cols-2">
+                {financeInvoiceUploadSlots.map((slot) => {
+                  const document = findInvoiceFinanceDocument(documents, slot.category);
+                  const busyKey = `${invoice.id}:${slot.type}`;
+                  const isBusy = invoiceDocumentBusyKey === busyKey;
+                  const pendingFile = pendingInvoiceFiles[slot.type];
+                  const uploadedAtValue = invoice[slot.uploadedAtKey];
+                  const uploadedAt = uploadedAtValue ? formatDisplayDate(uploadedAtValue) : '';
+                  const uploadedBy = invoice[slot.uploadedByKey];
+                  const isDragActive = dragUploadKey === busyKey;
+
+                  return (
+                    <div
+                      className={`rounded-md border bg-white p-2.5 transition ${
+                        isDragActive
+                          ? 'border-sky-300 bg-sky-50 ring-2 ring-sky-100'
+                          : 'border-slate-200'
+                      }`}
+                      key={slot.type}
+                      onDragEnter={(event) => {
+                        event.preventDefault();
+                        if (!isBusy) setDragUploadKey(busyKey);
+                      }}
+                      onDragLeave={(event) => {
+                        event.preventDefault();
+                        if (event.currentTarget.contains(event.relatedTarget)) return;
+                        setDragUploadKey((current) => (current === busyKey ? '' : current));
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (event.dataTransfer) event.dataTransfer.dropEffect = isBusy ? 'none' : 'copy';
+                      }}
+                      onDrop={async (event) => {
+                        event.preventDefault();
+                        setDragUploadKey('');
+                        if (isBusy) return;
+                        const file = event.dataTransfer?.files?.[0];
+                        if (file) setPendingInvoiceFile(slot.type, file);
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <strong className="block text-xs font-black text-slate-950">{slot.label}</strong>
+                          <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500">
+                            {isDragActive ? 'Lepas PDF di sini' : pendingFile?.name || document?.file?.name || 'Belum ada file PDF'}
+                          </span>
+                        </div>
+                        <label className={`inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold ${isBusy ? 'border-slate-200 bg-slate-100 text-slate-400' : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                          <Upload size={13} />
+                          {isBusy ? 'Upload...' : pendingFile || document ? 'Ganti' : 'Pilih'}
+                          <input
+                            accept="application/pdf,.pdf"
+                            aria-label={`Upload ${slot.label} PDF`}
+                            className="sr-only"
+                            disabled={isBusy}
+                            onChange={async (event) => {
+                              const input = event.currentTarget;
+                              const file = input.files?.[0];
+                              try {
+                                if (file) setPendingInvoiceFile(slot.type, file);
+                              } finally {
+                                input.value = '';
+                              }
+                            }}
+                            type="file"
+                          />
+                        </label>
+                      </div>
+                      <div className={`mt-2 rounded-md border border-dashed px-2.5 py-2 text-[10px] font-semibold ${
+                        isDragActive
+                          ? 'border-sky-300 bg-white text-sky-700'
+                          : 'border-slate-200 bg-slate-50 text-slate-500'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          <Upload size={13} className={isDragActive ? 'text-sky-600' : 'text-slate-400'} />
+                          <span>{isDragActive ? 'Lepaskan file PDF di sini.' : 'Drag & drop PDF ke area ini, lalu klik Simpan Dokumen.'}</span>
+                        </div>
+                      </div>
+                      {pendingFile ? (
+                        <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold text-amber-800">
+                          <span className="min-w-0 truncate">Siap disimpan: {pendingFile.name}</span>
+                          <button
+                            className="shrink-0 font-black text-amber-900 hover:text-red-700"
+                            onClick={() => setPendingInvoiceFiles((current) => {
+                              const next = { ...current };
+                              delete next[slot.type];
+                              return next;
+                            })}
+                            type="button"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      ) : null}
+                      {document ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <DocumentLink
+                            className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                            file={document.file}
+                            label="View"
+                          />
+                          <DocumentLink
+                            className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2.5 text-[10px] font-bold text-sky-700 hover:bg-sky-100"
+                            download
+                            file={document.file}
+                            label="Download"
+                          />
+                        </div>
+                      ) : null}
+                      {(uploadedAt || uploadedBy) ? (
+                        <p className="mt-2 text-[10px] font-semibold text-slate-500">
+                          {uploadedAt ? `Upload ${uploadedAt}` : 'Sudah upload'}{uploadedBy ? ` oleh ${uploadedBy}` : ''}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
@@ -1314,6 +1649,49 @@ function InvoiceDetailModal({
           </div>
         </div>
       </section>
+      {uploadResultModal ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 p-4" role="presentation" onMouseDown={(event) => event.stopPropagation()}>
+          <section className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-2xl" role="alertdialog" aria-modal="true">
+            <div className="flex items-start gap-3">
+              <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
+                uploadResultModal.status === 'success'
+                  ? 'bg-emerald-50 text-emerald-600'
+                  : uploadResultModal.status === 'error'
+                    ? 'bg-rose-50 text-rose-600'
+                    : 'bg-sky-50 text-sky-600'
+              }`}>
+                {uploadResultModal.status === 'success' ? <CheckCircle2 size={20} /> : uploadResultModal.status === 'error' ? <AlertTriangle size={20} /> : <Upload size={20} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-black text-slate-950">{uploadResultModal.title}</h4>
+                <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">{uploadResultModal.message}</p>
+                {uploadResultModal.items?.length ? (
+                  <div className="mt-3 grid gap-1.5">
+                    {uploadResultModal.items.map((item) => (
+                      <div className="rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700" key={item}>
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {uploadResultModal.status === 'loading' ? (
+                  <p className="mt-3 text-[11px] font-bold text-sky-700">Mohon tunggu, jangan tutup halaman ini.</p>
+                ) : (
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                      onClick={() => setUploadResultModal(null)}
+                      type="button"
+                    >
+                      Tutup
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1727,7 +2105,9 @@ function InvoiceTable({
   summary,
   query,
   activeInvoiceTab,
+  activeInvoiceDocumentFilter,
   onActiveInvoiceTabChange,
+  onActiveInvoiceDocumentFilterChange,
   periodMonth,
   periodYear,
   onPeriodMonthChange,
@@ -1740,7 +2120,7 @@ function InvoiceTable({
   const invoiceTabs = [
     {
       id: 'need-number',
-      label: 'Belum Nomor Invoice',
+      label: 'Belum Nomor / Dokumen',
       icon: FileText,
       tone: 'red',
       match: (row) => row.invoiceStatus === 'Butuh Nomor Invoice',
@@ -1760,9 +2140,32 @@ function InvoiceTable({
       match: (row) => row.invoiceStatus === 'Lunas',
     },
   ];
+  const invoiceDocumentFilters = [
+    { id: 'all', label: 'Semua Dokumen', countKey: null },
+    { id: 'missing-documents', label: 'Belum Upload Invoice & Faktur Pajak', countKey: 'missingInvoiceDocuments' },
+    { id: 'complete', label: 'Lengkap', countKey: 'completeInvoiceDocuments' },
+    { id: 'sent', label: 'Sudah Dikirim Sales', countKey: 'sentInvoiceDocuments' },
+  ];
   const currentTab = invoiceTabs.find((tab) => tab.id === activeInvoiceTab) || invoiceTabs[0];
+  const canFilterDocuments = activeInvoiceTab !== 'paid';
+  const visibleInvoiceDocumentFilters = invoiceDocumentFilters.filter((filter) => {
+    if (!canFilterDocuments) return false;
+    if (activeInvoiceTab === 'need-number') return ['all', 'missing-documents'].includes(filter.id);
+    return ['all', 'complete', 'sent'].includes(filter.id);
+  });
   const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${row.invoiceNumber} ${row.invoiceStatus}`.toLowerCase().includes(query.toLowerCase()));
-  const filteredRows = searchedRows.filter((row) => currentTab.match(row));
+  const filteredRows = searchedRows.filter((row) => {
+    if (!currentTab.match(row)) return false;
+    if (!canFilterDocuments) return true;
+    if (activeInvoiceDocumentFilter === 'missing-documents') {
+      return row.invoiceNumber && (!row.invoiceDocumentUploadedAt || !row.taxInvoiceDocumentUploadedAt);
+    }
+    if (activeInvoiceDocumentFilter === 'complete') {
+      return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.taxInvoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
+    }
+    if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
+    return true;
+  });
   const tabCounts = {
     'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[0].match(row)).length),
     'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
@@ -1832,24 +2235,47 @@ function InvoiceTable({
             />
           ) : null}
         </div>
+        {canFilterDocuments ? (
+        <div className="mt-2 flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+          {visibleInvoiceDocumentFilters.map((filter) => {
+            const active = activeInvoiceDocumentFilter === filter.id;
+            const allCount = activeInvoiceTab === 'need-number'
+              ? Number(summary?.needNumber || 0)
+              : Number(summary?.inProgress || 0);
+            const count = filter.countKey ? Number(summary?.[filter.countKey] || 0) : allCount;
+            return (
+              <button
+                className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[10px] font-bold transition ${active ? 'border-sky-200 bg-white text-sky-700 shadow-sm' : 'border-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-800'}`}
+                key={filter.id}
+                onClick={() => onActiveInvoiceDocumentFilterChange(filter.id)}
+                type="button"
+              >
+                <span>{filter.label}</span>
+                <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${active ? 'bg-sky-50 text-sky-700' : 'bg-white text-slate-500'}`}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+        ) : null}
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table finance-invoice-table min-w-[1160px] table-fixed">
+        <table className="data-table master-table finance-master-table finance-invoice-table min-w-[1360px] table-fixed">
           <colgroup>
-            <col className="w-[10%]" />
-            <col className="w-[16%]" />
+            <col className="w-[9%]" />
             <col className="w-[14%]" />
-            <col className="w-[9%]" />
-            <col className="w-[9%]" />
-            <col className="w-[9%]" />
             <col className="w-[11%]" />
-            <col className="w-[13%]" />
             <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[10%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+            <col className="w-[7%]" />
           </colgroup>
           <thead>
             <tr>
-              {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Penagihan', 'No. Invoice', 'Aksi'].map((column) => (
+              {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Penagihan', 'No. Invoice', 'Lama Pelunasan', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -1885,6 +2311,14 @@ function InvoiceTable({
                       <span className="block truncate font-semibold text-slate-900">{row.invoiceNumber}</span>
                     )}
                   </td>
+                  <td className="finance-invoice-aging">
+                    <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${agingToneClass(row.invoiceAging?.currentDays)}`}>
+                      {formatAgingDays(row.invoiceAging?.currentDays)}
+                    </span>
+                    <small className="mt-1 block truncate text-[9px] font-semibold text-slate-500" title={row.invoiceAging?.currentStage || '-'}>
+                      {row.invoiceAging?.currentStage || '-'}
+                    </small>
+                  </td>
                   <td className="finance-invoice-actions">
                     <div className="finance-invoice-action-row">
                       <button
@@ -1909,7 +2343,7 @@ function InvoiceTable({
             })}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={9}>Tidak ada data pada klasifikasi ini.</td>
+                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={10}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
@@ -1923,8 +2357,10 @@ function FinanceTable({
   activeTab,
   activeRpujTab,
   activeInvoiceTab,
+  activeInvoiceDocumentFilter,
   onActiveRpujTabChange,
   onActiveInvoiceTabChange,
+  onActiveInvoiceDocumentFilterChange,
   periodMonth,
   periodYear,
   onPeriodMonthChange,
@@ -2030,8 +2466,10 @@ function FinanceTable({
       ) : null}
       {activeTab.id === 'invoice-number' ? (
         <InvoiceTable
+          activeInvoiceDocumentFilter={activeInvoiceDocumentFilter}
           activeInvoiceTab={activeInvoiceTab}
           invoiceBusyId={invoiceBusyId}
+          onActiveInvoiceDocumentFilterChange={onActiveInvoiceDocumentFilterChange}
           onActiveInvoiceTabChange={onActiveInvoiceTabChange}
           onPeriodMonthChange={onPeriodMonthChange}
           onPeriodYearChange={onPeriodYearChange}
@@ -2053,11 +2491,12 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [periodYear, setPeriodYear] = useState(currentPeriod.year);
   const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
   const [activeInvoiceTab, setActiveInvoiceTab] = useState('need-number');
+  const [activeInvoiceDocumentFilter, setActiveInvoiceDocumentFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [orderRows, setOrderRows] = useState(initialOrderRows);
   const [rpujRows, setRpujRows] = useState(initialRpujRows);
   const [invoiceRows, setInvoiceRows] = useState(initialInvoiceRows);
-  const [invoiceSummary, setInvoiceSummary] = useState({ needNumber: 0, inProgress: 0, paid: 0 });
+  const [invoiceSummary, setInvoiceSummary] = useState(defaultInvoiceSummary);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState('');
   const [savingSoId, setSavingSoId] = useState('');
@@ -2067,6 +2506,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState('');
   const [invoiceBusyId, setInvoiceBusyId] = useState('');
+  const [invoiceDocumentBusyKey, setInvoiceDocumentBusyKey] = useState('');
+  const [invoiceDocumentUploadError, setInvoiceDocumentUploadError] = useState('');
   const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [invoiceDetailLoading, setInvoiceDetailLoading] = useState(false);
   const [invoiceDetailError, setInvoiceDetailError] = useState('');
@@ -2159,8 +2600,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       const result = await fetchFinanceInvoices({
         page: 1,
         pageSize: 100,
+        invoiceDocumentFilter: activeInvoiceTab === 'paid' ? 'all' : activeInvoiceDocumentFilter,
         ...(activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid'
           ? { status: activeInvoiceTab, ...periodRange }
+          : activeInvoiceTab === 'need-number'
+            ? { status: activeInvoiceTab }
           : {}),
       });
       setInvoiceRows((result.rows || []).map(normalizeFinanceInvoiceRow));
@@ -2168,15 +2612,26 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         needNumber: Number(result.summary?.needNumber || 0),
         inProgress: Number(result.summary?.inProgress || 0),
         paid: Number(result.summary?.paid || 0),
+        missingInvoiceDocuments: Number(
+          result.summary?.missingInvoiceDocuments
+          ?? Math.max(
+            Number(result.summary?.missingInvoiceDocument || 0),
+            Number(result.summary?.missingTaxInvoiceDocument || 0),
+          ),
+        ),
+        missingInvoiceDocument: Number(result.summary?.missingInvoiceDocument || 0),
+        missingTaxInvoiceDocument: Number(result.summary?.missingTaxInvoiceDocument || 0),
+        completeInvoiceDocuments: Number(result.summary?.completeInvoiceDocuments || 0),
+        sentInvoiceDocuments: Number(result.summary?.sentInvoiceDocuments || 0),
       });
     } catch (error) {
       setInvoiceError(error.message || 'Daftar invoice gagal dimuat.');
       setInvoiceRows([]);
-      setInvoiceSummary({ needNumber: 0, inProgress: 0, paid: 0 });
+      setInvoiceSummary(defaultInvoiceSummary);
     } finally {
       setInvoiceLoading(false);
     }
-  }, [activeInvoiceTab, activeTab.id, periodRange]);
+  }, [activeInvoiceDocumentFilter, activeInvoiceTab, activeTab.id, periodRange]);
 
   useEffect(() => {
     loadInvoiceOrders();
@@ -2250,7 +2705,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     }
     setRpujRows(initialRpujRows);
       setInvoiceRows(initialInvoiceRows);
-      setInvoiceSummary({ needNumber: 0, inProgress: 0, paid: 0 });
+      setInvoiceSummary(defaultInvoiceSummary);
     setSelectedOrderId('');
     setSelectedRpujId('');
     setSelectedInvoiceId('');
@@ -2476,6 +2931,36 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     }
   }
 
+  async function handleUploadInvoiceDocument(id, documentType, file) {
+    if (!id || !documentType || !file) return;
+    const busyKey = `${id}:${documentType}`;
+    setInvoiceDocumentBusyKey(busyKey);
+    setInvoiceDocumentUploadError('');
+    setInvoiceDetailError('');
+    try {
+      const saved = await uploadFinanceInvoiceDocument(id, documentType, file);
+      const normalized = normalizeFinanceInvoiceRow(saved);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, ...normalized } : item)));
+      const uploadedDocument = mapUploadedInvoiceDocument(saved.uploadedDocument, documentType);
+      setInvoiceDetail((current) => {
+        const currentDocuments = current?.documents || [];
+        const normalizedDocuments = Array.isArray(normalized.documents) && normalized.documents.length
+          ? normalized.documents
+          : currentDocuments;
+        const base = current ? { ...current, ...normalized } : normalized;
+        return {
+          ...base,
+          documents: mergeInvoiceDocument(normalizedDocuments, uploadedDocument),
+        };
+      });
+    } catch (error) {
+      setInvoiceDocumentUploadError(error.message || 'Dokumen invoice gagal diupload.');
+      throw error;
+    } finally {
+      setInvoiceDocumentBusyKey('');
+    }
+  }
+
   const handlers = {
     onOpenSoModal: (id) => {
       const row = orderRows.find((item) => item.id === id);
@@ -2489,6 +2974,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       setSelectedInvoiceId(id);
       setInvoiceDetail(null);
       setInvoiceDetailError('');
+      setInvoiceDocumentUploadError('');
     },
     onReject: (id) => {
       setRpujDecision({ id, type: 'reject' });
@@ -2529,6 +3015,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   return (
     <main className="min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
       <FinanceTable
+        activeInvoiceDocumentFilter={activeInvoiceDocumentFilter}
         activeInvoiceTab={activeInvoiceTab}
         activeRpujTab={activeRpujTab}
         activeTab={activeTab}
@@ -2538,7 +3025,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoiceLoading={invoiceLoading}
         invoiceRows={invoiceRows}
         invoiceSummary={invoiceSummary}
-        onActiveInvoiceTabChange={setActiveInvoiceTab}
+        onActiveInvoiceDocumentFilterChange={setActiveInvoiceDocumentFilter}
+        onActiveInvoiceTabChange={(nextTab) => {
+          setActiveInvoiceTab(nextTab);
+          setActiveInvoiceDocumentFilter('all');
+        }}
         onActiveRpujTabChange={setActiveRpujTab}
         onPeriodMonthChange={setPeriodMonth}
         onPeriodYearChange={setPeriodYear}
@@ -2575,13 +3066,17 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         correctionsLoading={correctionHistoryLoading}
         error={invoiceDetailError}
         invoice={selectedInvoice}
+        invoiceDocumentBusyKey={invoiceDocumentBusyKey}
+        invoiceDocumentUploadError={invoiceDocumentUploadError}
         loading={invoiceDetailLoading}
         onClose={() => {
           setSelectedInvoiceId('');
           setInvoiceDetail(null);
           setInvoiceDetailError('');
+          setInvoiceDocumentUploadError('');
         }}
         onOpenCorrection={openCorrectionModal}
+        onUploadInvoiceDocument={handleUploadInvoiceDocument}
       />
       <SoNumberInputModal
         busy={savingSoId === soModalId}

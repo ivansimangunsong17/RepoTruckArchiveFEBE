@@ -11,13 +11,18 @@ import {
   getInvoiceOrdersPage,
   getOrderVerificationsPage,
   getRpujRequestsPage,
+  markInvoiceDocumentUploaded,
   markRpujTransferUploaded,
   rejectRpujRequest,
   rejectFinanceCorrectionRequest,
   updateInvoiceNumber,
   updateOrderVerificationSoNumber,
 } from './finance.repository.js';
-import { createAttachment } from '../attachments/attachments.service.js';
+import {
+  createAttachment,
+  listAttachments,
+  updateAttachment,
+} from '../attachments/attachments.service.js';
 
 function normalizeFinanceQuery(query = {}) {
   return {
@@ -31,6 +36,7 @@ function normalizeFinanceQuery(query = {}) {
     documentStatus: query.documentStatus || '',
     invoiceStatus: query.invoiceStatus || '',
     query: query.query || query.search || '',
+    invoiceDocumentFilter: query.invoiceDocumentFilter || query.documentFilter || '',
   };
 }
 
@@ -116,6 +122,7 @@ export function fetchInvoiceOrders(query = {}) {
     dateTo: query.dateTo || query.endDate || '',
     query: query.query || query.search || '',
     status: query.status || '',
+    invoiceDocumentFilter: query.invoiceDocumentFilter || query.documentFilter || '',
   });
 }
 
@@ -131,10 +138,75 @@ export async function fetchInvoiceOrderDetail(id) {
 }
 
 export function saveInvoiceNumber(id, payload = {}, actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Nomor invoice hanya dapat diinput oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_INVOICE_NUMBER_FORBIDDEN';
+    throw error;
+  }
   return updateInvoiceNumber(id, {
     invoiceNumber: payload.invoiceNumber,
     actorName: actor?.name || actor?.email || 'Finance',
   });
+}
+
+function normalizeInvoiceUploadType(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['invoice', 'invoicepdf', 'invoice_pdf'].includes(normalized)) return 'invoicePdf';
+  if (['tax_invoice', 'taxinvoice', 'taxinvoicepdf', 'tax_invoice_pdf', 'faktur_pajak', 'faktur'].includes(normalized)) return 'taxInvoicePdf';
+  return '';
+}
+
+export async function uploadInvoiceDocument(id, payload = {}, actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Upload Invoice dan Faktur Pajak hanya dapat dilakukan oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_INVOICE_UPLOAD_FORBIDDEN';
+    throw error;
+  }
+
+  const category = normalizeInvoiceUploadType(payload.documentType || payload.category);
+  if (!category) {
+    const error = new Error('Jenis dokumen invoice tidak valid.');
+    error.statusCode = 400;
+    error.code = 'INVALID_INVOICE_DOCUMENT_TYPE';
+    throw error;
+  }
+
+  const mimeType = payload.mimeType || '';
+  if (mimeType !== 'application/pdf') {
+    const error = new Error('Invoice dan Faktur Pajak wajib berupa PDF.');
+    error.statusCode = 400;
+    error.code = 'INVOICE_DOCUMENT_PDF_REQUIRED';
+    throw error;
+  }
+
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const invoiceOrder = await getInvoiceOrderDetail(id);
+  if (!invoiceOrder) {
+    const error = new Error('Sales Order selesai untuk invoice tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'FINANCE_INVOICE_ORDER_NOT_FOUND';
+    throw error;
+  }
+
+  const existingAttachments = await listAttachments('sales_order', id);
+  const existing = existingAttachments
+    .filter((attachment) => attachment.category === category)
+    .sort((left, right) => new Date(right.uploadedAt || right.createdAt || 0) - new Date(left.uploadedAt || left.createdAt || 0))[0];
+  const attachmentPayload = {
+    ...payload,
+    entityType: 'sales_order',
+    entityId: id,
+    category,
+    uploadedByName: actorName,
+    notes: payload.notes || (category === 'invoicePdf' ? 'Invoice dari Accurate' : 'Faktur Pajak dari Accurate'),
+  };
+  const attachment = existing
+    ? await updateAttachment(existing.id, attachmentPayload)
+    : await createAttachment(attachmentPayload);
+  const invoice = await markInvoiceDocumentUploaded(id, { category, actorName });
+  return { ...invoice, uploadedDocument: attachment };
 }
 
 export function requestFinanceCorrection(id, payload = {}, actor) {

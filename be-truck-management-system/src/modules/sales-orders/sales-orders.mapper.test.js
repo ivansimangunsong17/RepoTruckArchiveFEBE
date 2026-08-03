@@ -1,0 +1,56 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mapSalesOrder, toSalesOrderDb } from './sales-orders.mapper.js';
+
+test('sales order mapper membaca metadata workflow dokumen invoice', () => {
+  const mapped = mapSalesOrder({
+    id: 'order-1',
+    so_number: 'SO-001',
+    customer_name: 'PT Contoh',
+    billing_status: 'belum_invoice',
+    invoice_document_status: 'siap_dikirim',
+    invoice_document_uploaded_at: '2026-08-02T02:00:00.000Z',
+    invoice_document_uploaded_by_name: 'Finance User',
+    tax_invoice_document_uploaded_at: '2026-08-02T02:05:00.000Z',
+    tax_invoice_document_uploaded_by_name: 'Finance User',
+    invoice_document_sent_at: '2026-08-02T03:00:00.000Z',
+    invoice_document_sent_by_name: 'Sales User',
+    invoice_document_delivery_method: 'email',
+    invoice_document_delivery_notes: 'Dikirim ke PIC customer.',
+    payment_type: 'cash',
+    quantity: 1,
+    price: 0,
+    total_amount: 0,
+  });
+
+  assert.equal(mapped.invoiceDocumentStatus, 'siap_dikirim');
+  assert.equal(mapped.invoiceDocumentUploadedBy, 'Finance User');
+  assert.equal(mapped.taxInvoiceDocumentUploadedBy, 'Finance User');
+  assert.equal(mapped.invoiceDocumentSentBy, 'Sales User');
+  assert.equal(mapped.invoiceDocumentDeliveryMethod, 'email');
+  assert.equal(mapped.invoiceDocumentDeliveryNotes, 'Dikirim ke PIC customer.');
+});
+
+test('sales order db mapper menyimpan metadata workflow dokumen invoice', () => {
+  const row = toSalesOrderDb({
+    customer: 'PT Contoh',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+    invoiceDocumentStatus: 'terkirim',
+    invoiceDocumentUploadedAt: '2026-08-02T02:00:00.000Z',
+    invoiceDocumentUploadedBy: 'Finance User',
+    taxInvoiceDocumentUploadedAt: '2026-08-02T02:05:00.000Z',
+    taxInvoiceDocumentUploadedBy: 'Finance User',
+    invoiceDocumentSentAt: '2026-08-02T03:00:00.000Z',
+    invoiceDocumentSentBy: 'Sales User',
+    invoiceDocumentDeliveryMethod: 'whatsapp',
+    invoiceDocumentDeliveryNotes: 'Dikirim via WA.',
+  });
+
+  assert.equal(row.invoice_document_status, 'terkirim');
+  assert.equal(row.invoice_document_uploaded_by_name, 'Finance User');
+  assert.equal(row.tax_invoice_document_uploaded_by_name, 'Finance User');
+  assert.equal(row.invoice_document_sent_by_name, 'Sales User');
+  assert.equal(row.invoice_document_delivery_method, 'whatsapp');
+  assert.equal(row.invoice_document_delivery_notes, 'Dikirim via WA.');
+});

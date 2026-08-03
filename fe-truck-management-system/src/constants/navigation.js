@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   ReceiptText,
   Route,
+  Send,
   Settings,
   ShieldCheck,
   Truck,
@@ -40,6 +41,7 @@ const overviewRoles = [
   USER_ROLES.FINANCE,
 ];
 const orderRoles = nonFinanceRoles;
+const customerDocumentRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES];
 const operationalRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.OPERATIONAL,
@@ -64,6 +66,12 @@ export const navigationGroups = [
         label: 'Daftar Sales Order',
         icon: ClipboardList,
         roles: orderRoles,
+      },
+      {
+        to: '/sales/customer-documents',
+        label: 'Dokumen Customer',
+        icon: Send,
+        roles: customerDocumentRoles,
       },
     ],
   },

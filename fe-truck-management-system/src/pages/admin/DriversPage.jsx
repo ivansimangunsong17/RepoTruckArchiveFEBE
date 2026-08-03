@@ -313,7 +313,7 @@ function DriversPage({ readOnly = false }) {
       fields={fields}
       detailFields={detailFields}
       columns={[
-        { key: 'truckNumber', label: 'No', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
+        { key: 'truckNumber', label: 'No Lambung', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
         { key: 'nickname', label: 'Nama Panggilan', render: (_, row) => <DriverIdentity row={row} /> },
         { key: 'nik', label: 'NIK', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'birthDate', label: 'Umur', render: (_, row) => <DriverAge row={row} /> },
