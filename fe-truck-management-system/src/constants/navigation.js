@@ -127,7 +127,6 @@ export const navigationGroups = [
   {
     label: 'Monitoring',
     items: [
-      { to: '/document-monitoring', label: 'Dokumen & OFF', icon: FileWarning, roles: adminOnly },
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
       { to: '/finance/order-verification', label: 'Verifikasi Order', icon: CheckCircle2, roles: financeRoles },
       { to: '/finance/rpuj-approval', label: 'Approval RPUJ', icon: ReceiptText, roles: financeRoles },

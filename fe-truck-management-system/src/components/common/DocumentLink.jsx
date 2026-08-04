@@ -97,7 +97,9 @@ function DocumentLink({ file, className = 'document-link', download = false, lab
             </header>
             <div className="document-preview-body">
               {preview.isImage ? (
-                <img src={preview.url} alt={preview.fileName} />
+                <div className="document-preview-image-scroll">
+                  <img src={preview.url} alt={preview.fileName} />
+                </div>
               ) : (
                 <iframe title={preview.fileName} src={preview.url} />
               )}

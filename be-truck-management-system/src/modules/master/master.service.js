@@ -56,10 +56,15 @@ function isSameChassis(chassis, value) {
 }
 
 async function normalizeTruckPayload(payload) {
-  if (!payload.kirChassisNumber) return payload;
+  const normalizedPayload = {
+    ...payload,
+    kirHeadNumber: payload.kirNumber || payload.kirHeadNumber || '',
+  };
+
+  if (!normalizedPayload.kirChassisNumber) return normalizedPayload;
 
   const chassisRows = await listMasterRows('kir-chassis');
-  const chassis = chassisRows.find((row) => isSameChassis(row, payload.kirChassisNumber));
+  const chassis = chassisRows.find((row) => isSameChassis(row, normalizedPayload.kirChassisNumber));
   if (!chassis) {
     const error = new Error('Chassis yang dipilih tidak ditemukan di master chassis.');
     error.statusCode = 400;
@@ -68,8 +73,8 @@ async function normalizeTruckPayload(payload) {
   }
 
   return {
-    ...payload,
-    capacity: chassis.capacity || payload.capacity || '20FT',
+    ...normalizedPayload,
+    capacity: chassis.capacity || normalizedPayload.capacity || '20FT',
   };
 }
 

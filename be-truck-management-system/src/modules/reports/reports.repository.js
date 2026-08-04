@@ -478,6 +478,9 @@ export async function getOperationReport(options = {}) {
   const whereSql = clauses.length ? `where ${clauses.join(' and ')}` : '';
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
+  const orderBySql = (isFinishedHistory || status === 'completed')
+    ? 'order by coalesce(cj.completed_at, cj.cancelled_at) desc nulls last, so.trip_date desc, cj.created_at desc'
+    : 'order by so.trip_date desc, cj.created_at desc';
   const [rows, total, summary] = await Promise.all([
     query(
       `
@@ -501,7 +504,7 @@ export async function getOperationReport(options = {}) {
         left join vehicles snapshot_vehicle on snapshot_vehicle.archived_at is null
           and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
         ${whereSql}
-        order by so.trip_date desc, cj.created_at desc
+        ${orderBySql}
         limit $${limitIndex} offset $${offsetIndex}
       `,
       [...params, pageSize, offset],

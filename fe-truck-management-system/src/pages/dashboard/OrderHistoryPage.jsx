@@ -114,6 +114,21 @@ function repoConditionLabel(value) {
   return '-';
 }
 
+function toValidDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function sortHistoryRows(rows = []) {
+  return [...rows].sort((left, right) => {
+    const rightTime = toValidDate(right.completedAt || right.cancelledAt)?.getTime() || 0;
+    const leftTime = toValidDate(left.completedAt || left.cancelledAt)?.getTime() || 0;
+    if (rightTime !== leftTime) return rightTime - leftTime;
+    return (toValidDate(right.tripDate)?.getTime() || 0) - (toValidDate(left.tripDate)?.getTime() || 0);
+  });
+}
+
 function DetailField({ label, value }) {
   return (
     <span className="rounded-md border border-slate-200 bg-white px-3 py-2">
@@ -297,7 +312,7 @@ function OrderHistoryPage() {
       dateTo: range.dateTo,
     }).then((result) => {
       if (!active) return;
-      setRows(Array.isArray(result?.rows) ? result.rows : []);
+      setRows(sortHistoryRows(Array.isArray(result?.rows) ? result.rows : []));
       setTotal(Number(result?.total || 0));
       setSummary({
         jobs: Number(result?.summary?.jobs || 0),

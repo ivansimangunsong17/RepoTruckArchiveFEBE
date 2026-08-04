@@ -242,6 +242,22 @@ function getOrderCompletedAt(order) {
   );
 }
 
+function sortOrdersForStatus(orders, selectedStatus, customerDocumentsOnly = false) {
+  const shouldSortByCompletedAt = customerDocumentsOnly
+    || selectedStatus === 'completed'
+    || selectedStatus === 'completed_invoiced'
+    || selectedStatus === 'invoice_ready'
+    || selectedStatus === 'invoice_sent';
+  if (!shouldSortByCompletedAt) return orders;
+
+  return [...orders].sort((left, right) => {
+    const rightTime = getOrderCompletedAt(right)?.getTime() || 0;
+    const leftTime = getOrderCompletedAt(left)?.getTime() || 0;
+    if (rightTime !== leftTime) return rightTime - leftTime;
+    return (toValidDate(right.tripDate)?.getTime() || 0) - (toValidDate(left.tripDate)?.getTime() || 0);
+  });
+}
+
 function getOrderInvoiceAging(order, invoiceNumber = order?.invoiceNumber || '') {
   const hasInvoiceNumber = Boolean(String(invoiceNumber || '').trim());
   const hasCompleteDocuments = Boolean(
@@ -587,10 +603,14 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
     !query || [order.soNumber, order.doNumber, order.customer].some((value) =>
       value?.toLowerCase().includes(query.toLowerCase())),
   ), [activeLocalOrders, query]);
-  const filteredDemoOrders = useMemo(() => activeLocalOrders.filter((order) =>
-    (!query || [order.soNumber, order.doNumber, order.customer].some((value) =>
-      value?.toLowerCase().includes(query.toLowerCase()))) &&
-    matchesOrderStatus(order, status, invoiceOverrides[order.id] ?? order.invoiceNumber, customerDocumentsOnly),
+  const filteredDemoOrders = useMemo(() => sortOrdersForStatus(
+    activeLocalOrders.filter((order) =>
+      (!query || [order.soNumber, order.doNumber, order.customer].some((value) =>
+        value?.toLowerCase().includes(query.toLowerCase()))) &&
+      matchesOrderStatus(order, status, invoiceOverrides[order.id] ?? order.invoiceNumber, customerDocumentsOnly),
+    ),
+    status,
+    customerDocumentsOnly,
   ), [activeLocalOrders, query, status, invoiceOverrides, customerDocumentsOnly]);
 
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoOrders.length;

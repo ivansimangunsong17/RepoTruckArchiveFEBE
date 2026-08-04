@@ -39,9 +39,10 @@
 .document-preview-modal > header h2 { overflow: hidden; max-width: min(760px, calc(100vw - 130px)); margin: 2px 0 0; color: #25272b; font-size: .92rem; text-overflow: ellipsis; white-space: nowrap; }
 .document-preview-modal > header button { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border: 1px solid #e3e7ed; border-radius: 8px; color: #6d7788; background: white; }
 .document-preview-modal > header button:hover { border-color: #efc3c5; color: var(--primary); background: #fff5f5; }
-.document-preview-body { display: grid; flex: 1; min-height: 0; place-items: center; background: #f4f6f9; }
+.document-preview-body { display: grid; flex: 1; min-height: 0; overflow: hidden; place-items: stretch; background: #f4f6f9; }
 .document-preview-body iframe { width: 100%; height: 100%; border: 0; background: white; }
-.document-preview-body img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.document-preview-image-scroll { display: grid; min-height: 0; overflow: auto; place-items: start center; padding: 16px; overscroll-behavior: contain; }
+.document-preview-image-scroll img { display: block; width: auto; max-width: none; height: auto; max-height: none; }
 .position-list > div > div strong { font-size: .68rem; }
 .position-dot { width: 8px; height: 8px; border-radius: 50%; background: #aab3c0; box-shadow: 0 0 0 4px #eef1f5; }
 .position-dot.moving { background: var(--primary); box-shadow: 0 0 0 4px #ffe8e9; }

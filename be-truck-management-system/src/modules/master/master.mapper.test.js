@@ -46,3 +46,14 @@ test('driver mapper membaca dan menyimpan nama panggilan', () => {
   });
   assert.equal(databaseRow.nickname, 'Sopir');
 });
+
+test('truck mapper menyimpan nomor KIR baru saat ada nilai lama', () => {
+  const databaseRow = resourceConfig.trucks.toDb({
+    plateNumber: 'B 1234 XYZ',
+    kirNumber: 'KIR-BARU',
+    kirHeadNumber: 'KIR-LAMA',
+  });
+
+  assert.equal(databaseRow.kir_number, 'KIR-BARU');
+  assert.equal(databaseRow.kir_head_number, 'KIR-BARU');
+});
