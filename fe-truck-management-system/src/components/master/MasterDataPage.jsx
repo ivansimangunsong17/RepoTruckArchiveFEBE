@@ -416,9 +416,11 @@ function MasterDataPage({
         const value = row[field.key];
         return typeof value !== 'object' && String(value ?? '').toLowerCase().includes(keyword);
       });
-      const matchesFilters = filters.every((filter) =>
-        !activeFilters[filter.key] || row[filter.key] === activeFilters[filter.key],
-      );
+      const matchesFilters = filters.every((filter) => {
+        if (!activeFilters[filter.key]) return true;
+        const value = typeof filter.getValue === 'function' ? filter.getValue(row) : row[filter.key];
+        return value === activeFilters[filter.key];
+      });
       return matchesQuery && matchesFilters;
     });
     return sortRows ? sortRows(result) : result;

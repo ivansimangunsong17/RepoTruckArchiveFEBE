@@ -21,6 +21,7 @@ function formatShipment(value) {
     'domestik inward': 'Domestik Inward',
     'domestik outward': 'Domestik Outward',
     repo_empty: 'Repo Empty',
+    repo_full: 'Repo Full',
   };
   return shipmentMap[String(value || '').toLowerCase()] || value || '-';
 }

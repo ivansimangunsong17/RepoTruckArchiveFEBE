@@ -11,6 +11,7 @@ const labels = {
   import: 'Import',
   export: 'Export',
   repo_empty: 'Repo Empty',
+  repo_full: 'Repo Full',
   valid: 'Valid',
   expiring_soon: 'Segera Expired',
   expired: 'Kedaluwarsa',

@@ -234,7 +234,8 @@ function formatSpkShipment(value) {
   const checked = (keyword) => (shipment.includes(keyword) ? '[x]' : '[ ]');
   const domesticChecked = shipment.includes('domestik') || shipment.includes('domestic');
   const repoEmptyChecked = shipment.includes('repo_empty') || shipment.includes('repo empty');
-  return `${checked('import')} Import    ${checked('export')} Export    ${domesticChecked ? '[x]' : '[ ]'} Domestic    ${repoEmptyChecked ? '[x]' : '[ ]'} Repo Empty`;
+  const repoFullChecked = shipment.includes('repo_full') || shipment.includes('repo full');
+  return `${checked('import')} Import    ${checked('export')} Export    ${domesticChecked ? '[x]' : '[ ]'} Domestic    ${repoEmptyChecked ? '[x]' : '[ ]'} Repo Empty    ${repoFullChecked ? '[x]' : '[ ]'} Repo Full`;
 }
 
 function loadImage(source) {

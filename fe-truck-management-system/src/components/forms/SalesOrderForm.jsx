@@ -614,6 +614,7 @@ function SalesOrderForm({
                   <option value="domestik inward">Domestik Inward</option>
                   <option value="domestik outward">Domestik Outward</option>
                   <option value="repo_empty">Repo Empty</option>
+                  <option value="repo_full">Repo Full</option>
                 </select>
               </label>
 

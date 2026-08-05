@@ -23,8 +23,13 @@ function normalizeName(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function getDriverIdentityNames(row = {}) {
+  return [row.name, row.nickname].map(normalizeName).filter(Boolean);
+}
+
 function getDriverTruck(row, trucks) {
-  return (trucks || []).find((item) => normalizeName(item.defaultDriver) === normalizeName(row.name));
+  const driverNames = getDriverIdentityNames(row);
+  return (trucks || []).find((item) => driverNames.includes(normalizeName(item.defaultDriver)));
 }
 
 function getUnitSequence(unitCode) {
@@ -49,18 +54,20 @@ function sortDriversByTruck(rows, trucks) {
 }
 
 function hasActiveDriverJob(row, activeJobs) {
+  const driverNames = getDriverIdentityNames(row);
   return (activeJobs || []).some((job) =>
     (job.driverId && row.id && job.driverId === row.id)
-    || normalizeName(job.driver) === normalizeName(row.name));
+    || driverNames.includes(normalizeName(job.driver)));
 }
 
 function getDriverBaseStatus(row) {
   return ['Cuti', 'Tidak Aktif', 'Blacklist'].includes(row.status) ? row.status : 'Aktif';
 }
 
-function getDriverStatus(row, activeJobs) {
+function getDriverStatus(row, activeJobs, trucks = []) {
   const baseStatus = getDriverBaseStatus(row);
   if (baseStatus !== 'Aktif') return baseStatus;
+  if (!getDriverTruck(row, trucks)) return 'Tidak Aktif';
   return hasActiveDriverJob(row, activeJobs) ? 'Bertugas' : 'Aktif';
 }
 
@@ -90,8 +97,8 @@ function DriverNumber({ row, trucks }) {
   return <span className="driver-number-cell">{formatTruckNumber(truck?.unitCode)}</span>;
 }
 
-function DriverStatus({ row, activeJobs }) {
-  const status = getDriverStatus(row, activeJobs);
+function DriverStatus({ row, activeJobs, trucks }) {
+  const status = getDriverStatus(row, activeJobs, trucks);
   const statusClass = status === 'Aktif' ? 'available' : status === 'Bertugas' ? 'in_use' : status === 'Blacklist' ? 'blacklist' : 'maintenance';
   return <span className={`driver-status-pill ${statusClass}`}><i />{status}</span>;
 }
@@ -294,6 +301,12 @@ function DriversPage({ readOnly = false }) {
             renderDetail: (value) => <MasterExpiryDate value={value} label="SIM" />,
           };
         }
+        if (field.key === 'status') {
+          return {
+            ...field,
+            renderDetail: (_, row) => <DriverStatus row={row} activeJobs={activeJobs} trucks={truckRows} />,
+          };
+        }
         return field;
       }),
     {
@@ -320,14 +333,19 @@ function DriversPage({ readOnly = false }) {
         { key: 'plateNumber', label: 'Plat', render: (_, row) => <DriverPlate row={row} trucks={truckRows} /> },
         { key: 'licenseExpiry', label: 'Masa SIM', render: (_, row) => <DriverLicense row={row} /> },
         { key: 'paymentMethod', label: 'Rekening / E-Money', render: (_, row) => <DriverPayment row={row} /> },
-        { key: 'status', label: 'Kondisi', render: (_, row) => <DriverStatus row={row} activeJobs={activeJobs} /> },
+        { key: 'status', label: 'Kondisi', render: (_, row) => <DriverStatus row={row} activeJobs={activeJobs} trucks={truckRows} /> },
         { key: 'licenseDocument', label: 'Dokumen', render: (_, row) => <DriverDocumentSummary row={row} /> },
       ]}
       initialRows={fallbackDrivers}
       resource="drivers"
       storageKey="tms-master-drivers-v2"
       uniqueKeys={['phone', 'nik']}
-      filters={[{ key: 'status', label: 'Semua Status Driver', options: ['Aktif', 'Bertugas', 'Cuti', 'Tidak Aktif', 'Blacklist'] }]}
+      filters={[{
+        key: 'status',
+        label: 'Semua Status Driver',
+        options: ['Aktif', 'Bertugas', 'Cuti', 'Tidak Aktif', 'Blacklist'],
+        getValue: (row) => getDriverStatus(row, activeJobs, truckRows),
+      }]}
       pageClassName="driver-data-page"
       pageSize={20}
       showModeChip={false}
@@ -337,10 +355,10 @@ function DriversPage({ readOnly = false }) {
       beforeSave={(args) => prepareDriverSave({ ...args, activeJobs })}
       stats={(data) => [
         { label: 'Total Sopir', value: data.length, detail: 'Terdaftar' },
-        { label: 'Siap', value: data.filter((item) => getDriverStatus(item, activeJobs) === 'Aktif').length, detail: 'Bisa dipakai' },
-        { label: 'Jalan', value: data.filter((item) => getDriverStatus(item, activeJobs) === 'Bertugas').length, detail: 'Ada job aktif' },
-        { label: 'Tidak Siap', value: data.filter((item) => ['Cuti', 'Tidak Aktif'].includes(getDriverStatus(item, activeJobs))).length, detail: 'Cuti/nonaktif' },
-        { label: 'Blacklist', value: data.filter((item) => getDriverStatus(item, activeJobs) === 'Blacklist').length, detail: 'Tidak dipakai' },
+        { label: 'Siap', value: data.filter((item) => getDriverStatus(item, activeJobs, truckRows) === 'Aktif').length, detail: 'Terhubung truck' },
+        { label: 'Jalan', value: data.filter((item) => getDriverStatus(item, activeJobs, truckRows) === 'Bertugas').length, detail: 'Ada job aktif' },
+        { label: 'Tidak Siap', value: data.filter((item) => ['Cuti', 'Tidak Aktif'].includes(getDriverStatus(item, activeJobs, truckRows))).length, detail: 'Belum terhubung/cuti' },
+        { label: 'Blacklist', value: data.filter((item) => getDriverStatus(item, activeJobs, truckRows) === 'Blacklist').length, detail: 'Tidak dipakai' },
       ]}
       readOnly={readOnly}
     />

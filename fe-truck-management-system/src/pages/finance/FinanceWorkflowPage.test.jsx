@@ -274,7 +274,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
     await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
-    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
 
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('CONT-TEST-001');
@@ -342,7 +342,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
     await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
-    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
     const file = new File(['%PDF-1.4'], 'invoice-accurate.pdf', { type: 'application/pdf' });
     await user.upload(await screen.findByLabelText('Upload Invoice PDF'), file);
 
@@ -371,7 +371,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
     await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
-    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
     const file = new File(['%PDF-1.4'], 'invoice-error.pdf', { type: 'application/pdf' });
     await user.upload(await screen.findByLabelText('Upload Invoice PDF'), file);
     await user.click(screen.getByRole('button', { name: /Simpan Dokumen/i }));
@@ -385,7 +385,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
     await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
-    await user.click(await screen.findByRole('button', { name: /Lihat detail invoice SO-TEST-001/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
     await user.click(await screen.findByRole('button', { name: /Ajukan Koreksi/i }));
     await user.clear(screen.getByLabelText(/Nomor Invoice Baru/i));
     await user.type(screen.getByLabelText(/Nomor Invoice Baru/i), 'INV-TEST-002');

@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Clock3,
   Eye,
@@ -32,6 +34,8 @@ import {
 } from '../../services/finance/financeService';
 import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
 import { validateArchiveFile } from '../../utils/fileValidation';
+
+const INVOICE_TABLE_PAGE_SIZE = 20;
 
 const financeTabs = [
   {
@@ -2117,6 +2121,7 @@ function InvoiceTable({
   onSaveInvoice,
   onSelectInvoice,
 }) {
+  const [invoicePage, setInvoicePage] = useState(1);
   const invoiceTabs = [
     {
       id: 'need-number',
@@ -2166,11 +2171,27 @@ function InvoiceTable({
     if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
     return true;
   });
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / INVOICE_TABLE_PAGE_SIZE));
+  const currentPage = Math.min(invoicePage, totalPages);
+  const paginatedRows = filteredRows.slice(
+    (currentPage - 1) * INVOICE_TABLE_PAGE_SIZE,
+    currentPage * INVOICE_TABLE_PAGE_SIZE,
+  );
+  const showingFrom = filteredRows.length ? (currentPage - 1) * INVOICE_TABLE_PAGE_SIZE + 1 : 0;
+  const showingTo = filteredRows.length ? Math.min(currentPage * INVOICE_TABLE_PAGE_SIZE, filteredRows.length) : 0;
   const tabCounts = {
     'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[0].match(row)).length),
     'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
     paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
   };
+
+  useEffect(() => {
+    setInvoicePage(1);
+  }, [activeInvoiceDocumentFilter, activeInvoiceTab, query, rows]);
+
+  useEffect(() => {
+    if (invoicePage > totalPages) setInvoicePage(totalPages);
+  }, [invoicePage, totalPages]);
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
@@ -2281,8 +2302,10 @@ function InvoiceTable({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((row) => {
+            {paginatedRows.map((row) => {
               const needsInvoiceNumber = row.invoiceStatus === 'Butuh Nomor Invoice';
+              const needsInvoiceDocuments = Boolean(row.invoiceNumber && (!row.invoiceDocumentUploadedAt || !row.taxInvoiceDocumentUploadedAt));
+              const documentActionLabel = needsInvoiceDocuments ? 'Upload Dokumen' : 'Detail Dokumen';
               const isBusy = invoiceBusyId === row.id;
 
               return (
@@ -2322,14 +2345,14 @@ function InvoiceTable({
                   <td className="finance-invoice-actions">
                     <div className="finance-invoice-action-row">
                       <button
-                        aria-label={`Lihat detail invoice ${row.soNumber}`}
-                        className="finance-table-action-button is-icon-only"
+                        aria-label={`${documentActionLabel} ${row.soNumber}`}
+                        className="finance-table-action-button"
                         onClick={() => onSelectInvoice(row.id)}
-                        title="Detail"
+                        title={documentActionLabel}
                         type="button"
                       >
-                        <Eye size={13} />
-                        <span className="sr-only">Detail</span>
+                        {needsInvoiceDocuments ? <Upload size={13} /> : <Eye size={13} />}
+                        <span>{documentActionLabel}</span>
                       </button>
                       {needsInvoiceNumber ? (
                         <button className="finance-table-action-button is-primary" disabled={!row.invoiceNumber || isBusy} onClick={() => onSaveInvoice(row.id)} type="button">
@@ -2348,6 +2371,20 @@ function InvoiceTable({
             ) : null}
           </tbody>
         </table>
+      </div>
+      <div className="master-pagination border-t border-slate-200 bg-slate-50">
+        <span>
+          Menampilkan {showingFrom}-{showingTo} dari {filteredRows.length} data
+        </span>
+        <div className="master-pagination-controls">
+          <button type="button" disabled={currentPage === 1} onClick={() => setInvoicePage((value) => Math.max(1, value - 1))} aria-label="Halaman sebelumnya">
+            <ChevronLeft size={15} />
+          </button>
+          <strong>Halaman {currentPage} dari {totalPages}</strong>
+          <button type="button" disabled={currentPage === totalPages} onClick={() => setInvoicePage((value) => Math.min(totalPages, value + 1))} aria-label="Halaman berikutnya">
+            <ChevronRight size={15} />
+          </button>
+        </div>
       </div>
     </div>
   );

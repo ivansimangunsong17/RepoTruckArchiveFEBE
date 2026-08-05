@@ -52,7 +52,7 @@ const fields = [
 
 const rows = [{ id: 'row-1', name: 'Data Lama', status: 'Aktif' }];
 
-function renderPage({ pageFields = fields, resource = 'customers', readOnly = false } = {}) {
+function renderPage({ pageFields = fields, resource = 'customers', readOnly = false, filters = [], sortRows = null } = {}) {
   return render(
     <MasterDataPage
       eyebrow="Master"
@@ -68,7 +68,8 @@ function renderPage({ pageFields = fields, resource = 'customers', readOnly = fa
       resource={resource}
       storageKey="test-master"
       uniqueKeys={['name']}
-      filters={[]}
+      filters={filters}
+      sortRows={sortRows}
       stats={(data) => [{ label: 'Total', value: data.length, detail: 'data' }]}
       readOnly={readOnly}
     />,
@@ -193,6 +194,36 @@ describe('MasterDataPage database mode', () => {
       query: '',
       filters: {},
     }));
+  });
+
+  it('memfilter data dengan nilai hasil hitungan filter', async () => {
+    const user = userEvent.setup();
+    const filterRows = [
+      { id: 'row-1', name: 'Data Lama', status: 'Aktif', linked: true },
+      { id: 'row-2', name: 'Data Belum Link', status: 'Aktif', linked: false },
+    ];
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { customers: filterRows },
+      upsertMaster,
+      removeMaster,
+    });
+
+    renderPage({
+      filters: [{
+        key: 'status',
+        label: 'Semua Status',
+        options: ['Aktif', 'Tidak Aktif'],
+        getValue: (row) => (row.linked ? 'Aktif' : 'Tidak Aktif'),
+      }],
+      sortRows: (data) => data,
+    });
+
+    expect(await screen.findByText('Data Lama')).toBeInTheDocument();
+    await user.selectOptions(screen.getByDisplayValue('Semua Status'), 'Tidak Aktif');
+
+    expect(screen.getByText('Data Belum Link')).toBeInTheDocument();
+    expect(screen.queryByText('Data Lama')).not.toBeInTheDocument();
   });
 
   it('menyediakan view dan download dokumen hanya dari modal detail', async () => {
