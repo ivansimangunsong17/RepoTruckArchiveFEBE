@@ -194,6 +194,9 @@ function createFields(driverOptions, chassisRows = [], truckRows = []) {
     { key: 'stidCode', section: 'Dokumen Kendaraan', label: 'Nomor STID', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'vehicle-document-field vehicle-document-number' },
     { key: 'stidExpiryDate', section: 'Dokumen Kendaraan', label: 'Tanggal STID OFF', type: 'date', className: 'vehicle-document-field vehicle-document-date', expiryAlert: { label: 'STID' } },
     { key: 'stidDocument', section: 'Dokumen Kendaraan', label: 'Dokumen STID', type: 'file', className: 'vehicle-document-field vehicle-document-upload', compactUpload: true },
+    { key: 'solarBarcodeNumber', section: 'Dokumen Kendaraan', label: 'Nomor Barcode Solar', placeholder: 'Opsional, bisa dilengkapi nanti', className: 'vehicle-document-field vehicle-document-number' },
+    { key: 'solarBarcodeDate', section: 'Dokumen Kendaraan', label: 'Tanggal Barcode Solar', type: 'date', className: 'vehicle-document-field vehicle-document-date' },
+    { key: 'solarBarcodeDocument', section: 'Dokumen Kendaraan', label: 'Dokumen Barcode Solar', type: 'file', className: 'vehicle-document-field vehicle-document-upload', compactUpload: true },
     { key: 'taxPaymentDate', section: 'Dokumen Kendaraan', label: 'Tanggal Bayar Pajak', type: 'date', className: 'vehicle-document-field vehicle-document-tax' },
     { key: 'insuranceType', section: 'Asuransi Kendaraan', label: 'Jenis Asuransi', type: 'select', defaultValue: '', options: INSURANCE_TYPE_OPTIONS, className: 'span-quarter' },
     { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Asuransi', placeholder: 'Contoh: POL-TRK-001', className: 'span-quarter' },
@@ -454,6 +457,9 @@ const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
   'stidCode',
   'stidExpiryDate',
   'stidDocument',
+  'solarBarcodeNumber',
+  'solarBarcodeDate',
+  'solarBarcodeDocument',
   'insuranceType',
   'insurancePolicyNumber',
   'insuranceExpiryDate',
@@ -488,6 +494,14 @@ function TruckDocumentSummary({ row, renderViewerDocumentNote = null }) {
       file: row.stidDocument,
     },
     {
+      key: 'solarBarcodeDocument',
+      label: 'Barcode Solar',
+      number: row.solarBarcodeNumber,
+      file: row.solarBarcodeDocument,
+      extra: row.solarBarcodeDate ? `Tanggal: ${formatDisplayDate(row.solarBarcodeDate)}` : '',
+      showExpiry: false,
+    },
+    {
       key: 'insuranceDocument',
       label: 'Asuransi',
       number: [row.insuranceType, row.insurancePolicyNumber].filter(Boolean).join(' / '),
@@ -515,7 +529,7 @@ function TruckDocumentSummary({ row, renderViewerDocumentNote = null }) {
                 {document.number || '-'}
                 {document.extra ? <small>{document.extra}</small> : null}
               </span>
-              <MasterExpiryDate value={document.expiryDate} label={document.expiryLabel} />
+              {document.showExpiry === false ? null : <MasterExpiryDate value={document.expiryDate} label={document.expiryLabel} />}
             </div>
             <DetailDocumentActions file={document.file} />
             {showNotes ? renderViewerDocumentNote(document.key, document.label) : null}

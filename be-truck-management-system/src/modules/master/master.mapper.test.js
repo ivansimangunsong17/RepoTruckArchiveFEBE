@@ -57,3 +57,29 @@ test('truck mapper menyimpan nomor KIR baru saat ada nilai lama', () => {
   assert.equal(databaseRow.kir_number, 'KIR-BARU');
   assert.equal(databaseRow.kir_head_number, 'KIR-BARU');
 });
+
+test('truck mapper membaca dan menyimpan barcode solar', () => {
+  const document = { name: 'Barcode Solar.pdf', path: 'attachment-1' };
+  const mapped = resourceConfig.trucks.toApi({
+    id: 'truck-1',
+    plate_number: 'B 1234 XYZ',
+    solar_barcode_number: 'SOLAR-001',
+    solar_barcode_date: '2026-08-05',
+    solar_barcode_document: document,
+  });
+
+  assert.equal(mapped.solarBarcodeNumber, 'SOLAR-001');
+  assert.equal(mapped.solarBarcodeDate, '2026-08-05');
+  assert.deepEqual(mapped.solarBarcodeDocument, document);
+
+  const databaseRow = resourceConfig.trucks.toDb({
+    plateNumber: 'B 1234 XYZ',
+    solarBarcodeNumber: 'SOLAR-002',
+    solarBarcodeDate: '2026-08-06',
+    solarBarcodeDocument: document,
+  });
+
+  assert.equal(databaseRow.solar_barcode_number, 'SOLAR-002');
+  assert.equal(databaseRow.solar_barcode_date, '2026-08-06');
+  assert.deepEqual(databaseRow.solar_barcode_document, document);
+});

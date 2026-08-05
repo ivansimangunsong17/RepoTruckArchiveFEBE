@@ -2280,19 +2280,19 @@ function InvoiceTable({
         ) : null}
       </div>
 
-      <div className="table-wrap">
-        <table className="data-table master-table finance-master-table finance-invoice-table min-w-[1360px] table-fixed">
+      <div className="finance-invoice-table-wrap">
+        <table className="data-table master-table finance-master-table finance-invoice-table table-fixed">
           <colgroup>
-            <col className="w-[9%]" />
+            <col className="w-[8%]" />
             <col className="w-[14%]" />
             <col className="w-[11%]" />
-            <col className="w-[9%]" />
-            <col className="w-[9%]" />
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+            <col className="w-[10%]" />
+            <col className="w-[14%]" />
             <col className="w-[9%]" />
             <col className="w-[10%]" />
-            <col className="w-[12%]" />
-            <col className="w-[10%]" />
-            <col className="w-[7%]" />
           </colgroup>
           <thead>
             <tr>
@@ -2310,19 +2310,19 @@ function InvoiceTable({
 
               return (
                 <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
-                  <td className="finance-invoice-so font-semibold text-slate-700">{row.soNumber}</td>
-                  <td className="finance-invoice-customer">
+                  <td className="finance-invoice-so font-semibold text-slate-700" data-label="Nomor SO">{row.soNumber}</td>
+                  <td className="finance-invoice-customer" data-label="Customer">
                     <span className="block truncate font-semibold text-slate-900">{row.customer}</span>
                     <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-500">{row.destination}</span>
                   </td>
-                  <td className="finance-invoice-status">
+                  <td className="finance-invoice-status" data-label="Status">
                     <StatusPill className="max-w-full overflow-hidden text-ellipsis" value={row.invoiceStatus} />
                   </td>
-                  <td className="finance-invoice-date text-slate-700">{row.completedAt}</td>
-                  <td className="finance-invoice-date text-slate-700">{row.invoiceDate}</td>
-                  <td className="finance-invoice-date text-slate-700">{row.dueDate}</td>
-                  <td className="finance-invoice-total font-semibold text-slate-900">{formatCurrency(row.billingAmount)}</td>
-                  <td className="finance-invoice-number">
+                  <td className="finance-invoice-date text-slate-700" data-label="Selesai">{row.completedAt}</td>
+                  <td className="finance-invoice-date text-slate-700" data-label="Invoice">{row.invoiceDate}</td>
+                  <td className="finance-invoice-date text-slate-700" data-label="Jatuh Tempo">{row.dueDate}</td>
+                  <td className="finance-invoice-total font-semibold text-slate-900" data-label="Total Penagihan">{formatCurrency(row.billingAmount)}</td>
+                  <td className="finance-invoice-number" data-label="No. Invoice">
                     {needsInvoiceNumber ? (
                       <input
                         className="h-8 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-400"
@@ -2334,7 +2334,7 @@ function InvoiceTable({
                       <span className="block truncate font-semibold text-slate-900">{row.invoiceNumber}</span>
                     )}
                   </td>
-                  <td className="finance-invoice-aging">
+                  <td className="finance-invoice-aging" data-label="Lama Pelunasan">
                     <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold ${agingToneClass(row.invoiceAging?.currentDays)}`}>
                       {formatAgingDays(row.invoiceAging?.currentDays)}
                     </span>
@@ -2342,7 +2342,7 @@ function InvoiceTable({
                       {row.invoiceAging?.currentStage || '-'}
                     </small>
                   </td>
-                  <td className="finance-invoice-actions">
+                  <td className="finance-invoice-actions" data-label="Aksi">
                     <div className="finance-invoice-action-row">
                       <button
                         aria-label={`${documentActionLabel} ${row.soNumber}`}
@@ -2352,7 +2352,7 @@ function InvoiceTable({
                         type="button"
                       >
                         {needsInvoiceDocuments ? <Upload size={13} /> : <Eye size={13} />}
-                        <span>{documentActionLabel}</span>
+                        <span>{needsInvoiceDocuments ? 'Upload' : 'Detail'}</span>
                       </button>
                       {needsInvoiceNumber ? (
                         <button className="finance-table-action-button is-primary" disabled={!row.invoiceNumber || isBusy} onClick={() => onSaveInvoice(row.id)} type="button">
