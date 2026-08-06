@@ -45,3 +45,17 @@ test('authorizeRoute still rejects roles without any accepted permission', () =>
     (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
   );
 });
+
+test('authorizeRoute limits historical entry management to admin', () => {
+  const route = {
+    permission: 'historical_entry.manage',
+  };
+
+  assert.equal(authorizeRoute(route, requestForRole('admin')).role, 'admin');
+  ['sales', 'operational', 'pengamat', 'observer', 'finance'].forEach((role) => {
+    assert.throws(
+      () => authorizeRoute(route, requestForRole(role)),
+      (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+    );
+  });
+});

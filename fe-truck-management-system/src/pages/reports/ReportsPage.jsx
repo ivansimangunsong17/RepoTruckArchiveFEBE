@@ -42,6 +42,12 @@ const DEFAULT_REVENUE_SUMMARY = {
   totalTrips: 0,
 };
 
+const DATA_SOURCE_OPTIONS = [
+  { value: 'all', label: 'Semua Data' },
+  { value: 'realtime', label: 'Realtime' },
+  { value: 'historical', label: 'Data Lama' },
+];
+
 function currentPeriod() {
   const now = new Date();
   return {
@@ -229,6 +235,8 @@ function buildRevenueTruckRows(masterTrucks = [], revenueRows = []) {
         plateNumber,
         totalTrips: 0,
         revenue: 0,
+        realtimeTrips: 0,
+        historicalTrips: 0,
       });
     }
   });
@@ -240,15 +248,29 @@ function buildRevenueTruckRows(masterTrucks = [], revenueRows = []) {
         plateNumber,
         totalTrips: 0,
         revenue: 0,
+        realtimeTrips: 0,
+        historicalTrips: 0,
       });
     }
 
     const truck = trucks.get(plateNumber);
+    const source = row.entrySource === 'historical' ? 'historical' : 'realtime';
     truck.totalTrips += 1;
     truck.revenue += Number(row.revenue || 0);
+    if (source === 'historical') truck.historicalTrips += 1;
+    else truck.realtimeTrips += 1;
   });
 
-  return Array.from(trucks.values()).sort((left, right) => {
+  return Array.from(trucks.values()).map((truck) => ({
+    ...truck,
+    sourceLabel: truck.historicalTrips && truck.realtimeTrips
+      ? `Realtime ${truck.realtimeTrips} / Data Lama ${truck.historicalTrips}`
+      : truck.historicalTrips
+        ? 'Data Lama'
+        : truck.totalTrips
+          ? 'Realtime'
+          : '-',
+  })).sort((left, right) => {
     if (right.revenue !== left.revenue) return right.revenue - left.revenue;
     if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
     return left.plateNumber.localeCompare(right.plateNumber);
@@ -1199,6 +1221,7 @@ function ReportsPage() {
   const [repoError, setRepoError] = useState('');
   const [publicHolidays, setPublicHolidays] = useState([]);
   const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab')));
+  const [dataSource, setDataSource] = useState('all');
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
   const [driverUtilizationModalOpen, setDriverUtilizationModalOpen] = useState(false);
   const yearOptions = useMemo(() => {
@@ -1206,6 +1229,12 @@ function ReportsPage() {
     return Array.from({ length: 7 }, (_, index) => baseYear - 3 + index);
   }, []);
   const activeMonthLabel = MONTHS.find((item) => Number(item.value) === Number(month))?.label || '-';
+  const activePeriodKey = monthKey(month, year);
+  const reportSourceParams = useMemo(() => {
+    if (dataSource === 'historical') return { entrySource: 'historical', historicalPeriod: activePeriodKey };
+    if (dataSource === 'realtime') return { entrySource: 'realtime' };
+    return {};
+  }, [activePeriodKey, dataSource]);
 
   useEffect(() => {
     setSelectedReport(normalizeReportTab(searchParams.get('tab')));
@@ -1268,6 +1297,7 @@ function ReportsPage() {
           status: 'completed',
           dateFrom: range.dateFrom,
           dateTo: range.dateTo,
+          ...reportSourceParams,
         });
         const rows = Array.isArray(result?.rows) ? result.rows : [];
         collected.push(...rows);
@@ -1280,13 +1310,14 @@ function ReportsPage() {
     }
 
     Promise.allSettled([
-      fetchMonthlyRevenueReport({ month, year }),
+      fetchMonthlyRevenueReport({ month, year, ...reportSourceParams }),
       loadUtilizationRows(),
-      fetchDriverPerformanceReport({ month: monthKey(month, year) }),
+      fetchDriverPerformanceReport({ month: activePeriodKey, ...reportSourceParams }),
       fetchOperationReport({
         page: 1,
         pageSize: 100,
         status: 'repo_stored',
+        ...reportSourceParams,
       }),
     ]).then(([revenueResult, utilizationResult, driverPerformanceResult, repoResult]) => {
       if (!active) return;
@@ -1338,7 +1369,7 @@ function ReportsPage() {
     return () => {
       active = false;
     };
-  }, [month, year]);
+  }, [activePeriodKey, month, reportSourceParams, year]);
 
   const masterTruckRows = archive.masters?.trucks;
   const masterDriverRows = archive.masters?.drivers;
@@ -1386,7 +1417,7 @@ function ReportsPage() {
 
       {selectedReport !== 'master' ? (
       <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_14rem] md:items-end">
           <label className="flex flex-1 flex-col gap-1 text-xs font-semibold text-slate-700">
             Bulan
             <select
@@ -1405,6 +1436,16 @@ function ReportsPage() {
               onChange={(event) => setYear(Number(event.target.value))}
             >
               {yearOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-1 flex-col gap-1 text-xs font-semibold text-slate-700">
+            Sumber Data
+            <select
+              className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
+              value={dataSource}
+              onChange={(event) => setDataSource(event.target.value)}
+            >
+              {DATA_SOURCE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </label>
           <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600 sm:min-w-56">
@@ -1484,6 +1525,7 @@ function ReportsPage() {
               columns={[
                 { label: 'No' },
                 { label: 'Plat' },
+                { label: 'Sumber' },
                 { label: 'Jumlah Trip', align: 'right' },
                 { label: 'Revenue', align: 'right' },
               ]}
@@ -1492,6 +1534,7 @@ function ReportsPage() {
                 <tr key={truck.plateNumber} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
                   <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
                   <td className="px-3 py-2 font-semibold text-slate-950">{truck.plateNumber}</td>
+                  <td className="px-3 py-2 text-slate-600">{truck.sourceLabel}</td>
                   <td className="px-3 py-2 text-right">
                     <span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">
                       {truck.totalTrips}

@@ -14,9 +14,10 @@ const rows = Array.from({ length: 12 }, (_, index) => ({
   time: `2026-06-${String(23 - index).padStart(2, '0')}T09:00:00+07:00`,
   user: index === 10 ? 'Sarah Sales' : 'Budi Admin',
   role: index === 10 ? 'sales' : 'admin',
-  action: index === 10 ? 'CREATE_SALES_ORDER' : `Aktivitas ${index + 1}`,
+  action: index === 9 ? 'CREATE_HISTORICAL_SALES_ORDER' : index === 10 ? 'CREATE_SALES_ORDER' : `Aktivitas ${index + 1}`,
   target: `Data ${index + 1}`,
-  module: index === 10 ? 'sales_orders' : 'auth',
+  module: index === 9 ? 'historical_entry' : index === 10 ? 'sales_orders' : 'auth',
+  metadata: index === 9 ? { soNumber: 'SO-HIST-001', historicalPeriod: '2026-07' } : {},
 }));
 
 describe('ActivityLogPage', () => {
@@ -89,5 +90,17 @@ describe('ActivityLogPage', () => {
       }));
     });
     expect(screen.getByText('Data 11')).toBeInTheDocument();
+  });
+
+  it('menampilkan activity log data lama dengan periode yang jelas', async () => {
+    const user = userEvent.setup();
+    render(<ActivityLogPage />);
+    await screen.findByText('Aktivitas 1');
+
+    await user.selectOptions(screen.getByLabelText('Filter modul'), 'historical_entry');
+    await user.selectOptions(screen.getByLabelText('Filter aksi'), 'CREATE_HISTORICAL_SALES_ORDER');
+
+    expect((await screen.findAllByText('Input SO Data Lama')).length).toBeGreaterThan(0);
+    expect(screen.getByText('SO-HIST-001 - Periode Juli 2026')).toBeInTheDocument();
   });
 });

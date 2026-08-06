@@ -68,6 +68,12 @@ export const navigationGroups = [
         roles: orderRoles,
       },
       {
+        to: '/historical-entry',
+        label: 'Input Data Lama',
+        icon: FileClock,
+        roles: adminOnly,
+      },
+      {
         to: '/sales/customer-documents',
         label: 'Dokumen Customer',
         icon: Send,

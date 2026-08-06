@@ -19,6 +19,7 @@ const joinedJobColumns = `
   cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
   cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
   cj.repo_picked_up_at, cj.repo_picked_up_by_name,
+  cj.entry_source, cj.historical_period, cj.historical_notes,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
@@ -288,6 +289,10 @@ function normalizeCancelSource(value) {
   return ['customer', 'sales', 'operational', 'other'].includes(normalized) ? normalized : 'operational';
 }
 
+function normalizeEntrySource(value) {
+  return String(value || '').trim().toLowerCase() === 'historical' ? 'historical' : 'realtime';
+}
+
 function normalizeOptionalText(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
@@ -315,7 +320,13 @@ function isAssignmentReleasedStatus(status) {
   return ['completed', 'cancelled', 'repo_stored'].includes(status);
 }
 
-function requireTripStartAllowed(nextStatus, rpujStatus) {
+function isHistoricalBackfill(form = {}, existing = {}) {
+  const source = hasOwnInput(form, 'entrySource') ? form.entrySource : existing.entry_source;
+  return normalizeEntrySource(source) === 'historical' || Boolean(normalizeOptionalText(form.historicalPeriod || existing.historical_period));
+}
+
+function requireTripStartAllowed(nextStatus, rpujStatus, options = {}) {
+  if (options.allowHistoricalBackfill) return;
   if (!['running', 'completed'].includes(nextStatus)) return;
   if (['approved', 'paid'].includes(rpujStatus)) return;
   throw validationError(
@@ -464,8 +475,9 @@ async function syncResourceAssignmentStatus(client, existing, nextAssignment = {
   if (!assignmentActive || nextVehicleId !== previousVehicleId) await releaseVehicleIfIdle(client, nextVehicleId);
 }
 
-async function requireCompletedJobReady(client, id, form, existing) {
-  if (!['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
+async function requireCompletedJobReady(client, id, form, existing, options = {}) {
+  const allowHistoricalBackfill = Boolean(options.allowHistoricalBackfill);
+  if (!allowHistoricalBackfill && !['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. UJ harus disetujui/dikirim Finance terlebih dahulu.',
       'CONTAINER_JOB_COMPLETION_INCOMPLETE',
@@ -498,6 +510,7 @@ async function requireCompletedJobReady(client, id, form, existing) {
       409,
     );
   }
+  if (allowHistoricalBackfill) return;
 
   const attachmentResult = await client.query(
     `
@@ -673,6 +686,7 @@ export async function updateContainerJob(id, form) {
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
                cj.repo_picked_up_at, cj.repo_picked_up_by_name,
+               cj.entry_source, cj.historical_period, cj.historical_notes,
                so.so_number, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -693,39 +707,41 @@ export async function updateContainerJob(id, form) {
     assertDriverAssignable(driver, existing.rows[0].driver_id);
     assertVehicleAssignable(vehicle, existing.rows[0].vehicle_id);
     assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
-    const nextStatus = form.status || existing.rows[0].status || 'received';
-    if (nextStatus === 'cancelled' && existing.rows[0].status === 'completed') {
+    const currentJob = existing.rows[0];
+    const allowHistoricalBackfill = isHistoricalBackfill(form, currentJob);
+    const nextStatus = form.status || currentJob.status || 'received';
+    if (nextStatus === 'cancelled' && currentJob.status === 'completed') {
       throw validationError(
         'Container Job yang sudah selesai tidak dapat dibatalkan.',
         'CONTAINER_JOB_COMPLETED_CANNOT_CANCEL',
         409,
       );
     }
-    const nextRpujStatus = normalizeRpujStatusForOperational(existing.rows[0], form.rpujStatus);
-    if (nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(existing.rows[0].rpuj_status)) {
+    const nextRpujStatus = normalizeRpujStatusForOperational(currentJob, form.rpujStatus);
+    if (nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(currentJob.rpuj_status)) {
       requireCompleteOperationalAssignment(
         form,
         driver,
         vehicle,
-        existing.rows[0],
+        currentJob,
         'RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    requireTripStartAllowed(nextStatus, nextRpujStatus);
+    requireTripStartAllowed(nextStatus, nextRpujStatus, { allowHistoricalBackfill });
     if (['running', 'completed'].includes(nextStatus)) {
       requireCompleteOperationalAssignment(
         form,
         driver,
         vehicle,
-        existing.rows[0],
+        currentJob,
         'Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
     await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus);
     if (nextStatus === 'completed') {
-      await requireCompletedJobReady(client, id, form, existing.rows[0]);
+      await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill });
     }
-    const requestRpujAt = nextRpujStatus === 'submitted' && existing.rows[0].rpuj_status !== 'submitted'
+    const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
       ? new Date().toISOString()
       : null;
     const nextContainerNumber = hasOwnInput(form, 'containerNumber')
@@ -797,6 +813,15 @@ export async function updateContainerJob(id, form) {
     const nextEirNumber = hasOwnInput(form, 'eirNumber') ? form.eirNumber || null : existing.rows[0].eir_number || null;
     const nextLoadingVoucher = hasOwnInput(form, 'loadingVoucher') ? form.loadingVoucher || null : existing.rows[0].loading_voucher_number || null;
     const nextTravelDocument = hasOwnInput(form, 'travelDocument') ? form.travelDocument || null : existing.rows[0].travel_document_number || null;
+    const nextEntrySource = hasOwnInput(form, 'entrySource')
+      ? normalizeEntrySource(form.entrySource)
+      : existing.rows[0].entry_source || 'realtime';
+    const nextHistoricalPeriod = nextEntrySource === 'historical'
+      ? normalizeOptionalText(hasOwnInput(form, 'historicalPeriod') ? form.historicalPeriod : existing.rows[0].historical_period)
+      : null;
+    const nextHistoricalNotes = nextEntrySource === 'historical'
+      ? normalizeOptionalText(hasOwnInput(form, 'historicalNotes') ? form.historicalNotes : existing.rows[0].historical_notes)
+      : null;
     const hasTilaInput = hasOwnInput(form, 'tilaGatepassDocument') || hasOwnInput(form, 'unloadingVoucher') || hasOwnInput(form, 'weighingDocument');
     const nextTilaGatepassDocument = hasTilaInput
       ? form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null
@@ -840,9 +865,12 @@ export async function updateContainerJob(id, form) {
             repo_created_by_name = $29,
             repo_picked_up_at = $30,
             repo_picked_up_by_name = $31,
-            updated_by_name = $32,
+            entry_source = $32,
+            historical_period = $33,
+            historical_notes = $34,
+            updated_by_name = $35,
             updated_at = now()
-        where id = $33
+        where id = $36
       `,
       [
         nextContainerNumber,
@@ -876,6 +904,9 @@ export async function updateContainerJob(id, form) {
         nextRepoCreatedByName,
         nextRepoPickedUpAt,
         nextRepoPickedUpByName,
+        nextEntrySource,
+        nextHistoricalPeriod,
+        nextHistoricalNotes,
         form.updatedBy || 'Operational',
         id,
       ],

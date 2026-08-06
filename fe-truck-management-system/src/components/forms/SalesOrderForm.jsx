@@ -289,6 +289,7 @@ function SalesOrderForm({
   depots: providedDepots = [],
   terminals: providedTerminals = [],
   destinations: providedDestinations = [],
+  historicalMode = false,
 }) {
   const customers = useMemo(() => (
     (Array.isArray(providedCustomers) ? providedCustomers : fallbackCustomers)
@@ -478,6 +479,7 @@ function SalesOrderForm({
     onSubmit({
       ...form,
       soNumber,
+      financeVerificationStatus: historicalMode && soNumber ? 'verified' : form.financeVerificationStatus,
       origin: form.origin.trim(),
       destination: form.destination.trim(),
       salesName: selectedCustomer?.salesName || form.salesName || '',
@@ -560,16 +562,22 @@ function SalesOrderForm({
 
           <div className="form-section">
             <h3>Informasi Order</h3>
-            <p className="section-helper-text">No. Invoice diisi setelah pekerjaan selesai dan invoice dibuat.</p>
+            <p className="section-helper-text">
+              {historicalMode
+                ? 'Nomor SO lama boleh langsung diisi Admin sesuai data arsip.'
+                : 'No. Invoice diisi setelah pekerjaan selesai dan invoice dibuat.'}
+            </p>
 
             <div className="order-form-grid">
-              {editing ? (
+              {editing || historicalMode ? (
                 <label>
                   No. Sales Order
                   <input
                     name="soNumber"
-                    value={form.soNumber || 'Menunggu Finance'}
-                    readOnly
+                    value={historicalMode ? form.soNumber : form.soNumber || 'Menunggu Finance'}
+                    onChange={historicalMode ? updateField : undefined}
+                    placeholder={historicalMode ? 'SO-ARM-000' : undefined}
+                    readOnly={!historicalMode}
                   />
                 </label>
               ) : null}

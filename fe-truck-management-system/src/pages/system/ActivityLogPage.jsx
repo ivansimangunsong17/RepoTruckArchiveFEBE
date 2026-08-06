@@ -14,8 +14,14 @@ const actionOptions = [
   ['CREATE_SALES_ORDER', 'Buat Sales Order'],
   ['UPDATE_SALES_ORDER', 'Ubah Sales Order'],
   ['CANCEL_SALES_ORDER', 'Batalkan Sales Order'],
+  ['CREATE_HISTORICAL_SALES_ORDER', 'Input SO Data Lama'],
+  ['UPDATE_HISTORICAL_SALES_ORDER', 'Ubah SO Data Lama'],
   ['CREATE_CONTAINER_JOB', 'Buat Container Job'],
   ['UPDATE_CONTAINER_JOB', 'Ubah Container Job'],
+  ['CREATE_HISTORICAL_CONTAINER_JOB', 'Input Container Data Lama'],
+  ['UPDATE_HISTORICAL_CONTAINER_JOB', 'Ubah Container Data Lama'],
+  ['LOCK_HISTORICAL_PERIOD', 'Kunci Periode Data Lama'],
+  ['UNLOCK_HISTORICAL_PERIOD', 'Buka Kunci Data Lama'],
   ['UPDATE_JOB_STATUS', 'Ubah Status Job'],
   ['REQUEST_CANCEL_CONTAINER_JOB', 'Ajukan Batal Container'],
   ['APPROVE_CANCEL_CONTAINER_JOB', 'Setujui Batal Container'],
@@ -34,6 +40,7 @@ const moduleOptions = [
   ['auth', 'Auth'],
   ['sales_orders', 'Sales Order'],
   ['container_jobs', 'Container Job'],
+  ['historical_entry', 'Data Lama'],
   ['attachments', 'Dokumen'],
   ['settings', 'Settings'],
   ['users', 'User'],
@@ -43,6 +50,27 @@ const actionLabels = Object.fromEntries(actionOptions);
 
 function formatActionLabel(action) {
   return actionLabels[action] || String(action || '-').replaceAll('_', ' ');
+}
+
+function formatPeriod(value) {
+  if (!value) return '';
+  const [year, month] = String(value).split('-').map(Number);
+  if (!year || !month) return value;
+  return new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
+}
+
+function formatLogTarget(item) {
+  const metadata = item.metadata || {};
+  if (item.module !== 'historical_entry') return item.target || item.module || '-';
+  const period = formatPeriod(metadata.historicalPeriod);
+  const reference = [
+    metadata.soNumber,
+    metadata.containerNumber,
+  ].filter(Boolean).join(' / ');
+  return [
+    reference || item.target || 'Data Lama',
+    period ? `Periode ${period}` : '',
+  ].filter(Boolean).join(' - ');
 }
 
 const activities = [
@@ -168,7 +196,7 @@ function ActivityLogPage() {
           {!loading && !error ? paginatedRows.map((item) => (
             <article key={item.id}>
               <span className="activity-log-icon"><Activity size={17} /></span>
-              <div><strong>{formatActionLabel(item.action)}</strong><p>{item.target || item.module || '-'}</p></div>
+              <div><strong>{formatActionLabel(item.action)}</strong><p>{formatLogTarget(item)}</p></div>
               <div className="activity-actor"><strong>{item.user}</strong><span>{item.role}</span></div>
               <time>{databaseMode ? formatDateTime(item.time) : item.time}</time>
             </article>

@@ -37,6 +37,9 @@ if (!hasDatabase) {
     cancelOrderId: '',
     cancelSoNumber: `SO-${runId}-CANCEL`.toUpperCase(),
     cancelJobSoNumber: `SO-${runId}-CANCELJOB`.toUpperCase(),
+    historicalOrderId: '',
+    historicalJobId: '',
+    historicalSoNumber: `SO-${runId}-HIST`.toUpperCase(),
     jobId: '',
     attachmentId: '',
     vehicleHeadId: '',
@@ -61,7 +64,27 @@ if (!hasDatabase) {
     await closePool();
   });
 
+  async function ensureHistoricalPeriodTable() {
+    await query(`
+      create table if not exists historical_entry_periods (
+        period text primary key,
+        status text not null default 'draft',
+        notes text,
+        locked_by_name text,
+        locked_at timestamptz,
+        unlocked_by_name text,
+        unlocked_at timestamptz,
+        updated_by_name text,
+        updated_at timestamptz not null default now(),
+        created_at timestamptz not null default now(),
+        constraint historical_entry_periods_status_check
+          check (status in ('draft', 'locked'))
+      )
+    `);
+  }
+
   async function cleanupTestData() {
+    await ensureHistoricalPeriodTable();
     const attachments = await query(
       `
         select storage_path
@@ -98,6 +121,7 @@ if (!hasDatabase) {
     );
 
     await query('delete from activity_logs where metadata::text ilike $1 or actor_name ilike $2 or target ilike $2', [`%${runId}%`, `%${runId}%`]);
+    await query('delete from historical_entry_periods where notes ilike $1', [`%${runId}%`]);
     await query('delete from storage_trash where record_data::text ilike $1 or coalesce(original_relative_path, \'\') ilike $1 or coalesce(trash_relative_path, \'\') ilike $1', [`%${runId}%`]);
     await query('delete from attachments where storage_path ilike $1 or entity_id in (select id from sales_orders where so_number ilike $2 or notes ilike $1 or customer_name ilike $1)', [`%${runId}%`, `SO-${runId}%`]);
     await query('delete from sales_orders where so_number ilike $1 or notes ilike $2 or customer_name ilike $2', [`SO-${runId}%`, `%${runId}%`]);
@@ -449,6 +473,26 @@ if (!hasDatabase) {
       assert.equal(salesScopedList.status, 200);
       assert.equal(salesScopedList.body.data.rows.some((row) => row.id === created.orderId), true);
 
+      const historicalOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: adminToken,
+        body: salesOrderPayload({
+          soNumber: created.historicalSoNumber,
+          entrySource: 'historical',
+          historicalPeriod: '2026-07',
+          historicalNotes: `Backfill test Juli 2026 ${runId}`,
+          tripDate: '2026-07-09',
+          receivedAt: '2026-07-09T00:00:00.000Z',
+          createdBy: users.admin.name,
+          updatedBy: users.admin.name,
+        }),
+      });
+      assert.equal(historicalOrder.status, 201);
+      assert.equal(historicalOrder.body.data.entrySource, 'historical');
+      assert.equal(historicalOrder.body.data.historicalPeriod, '2026-07');
+      created.historicalOrderId = historicalOrder.body.data.id;
+      created.historicalJobId = historicalOrder.body.data.containers[0].id;
+
       const blockedSalesUpdate = await api(`/api/sales-orders/${created.orderId}`, {
         method: 'PATCH',
         token: legacyToken,
@@ -523,6 +567,55 @@ if (!hasDatabase) {
       const financeApproveLog = await latestActivityForEntity('FINANCE_APPROVE_ORDER', created.orderId);
       assert.equal(financeApproveLog.action, 'FINANCE_APPROVE_ORDER');
       assert.equal(financeApproveLog.actor_role, 'finance');
+
+      const historicalOrderLog = await latestActivityForEntity('CREATE_HISTORICAL_SALES_ORDER', created.historicalOrderId);
+      assert.equal(historicalOrderLog.action, 'CREATE_HISTORICAL_SALES_ORDER');
+      assert.equal(historicalOrderLog.actor_role, 'admin');
+      assert.equal(historicalOrderLog.metadata.historicalPeriod, '2026-07');
+
+      const historicalJobLog = await latestActivityForEntity('CREATE_HISTORICAL_CONTAINER_JOB', created.historicalJobId);
+      assert.equal(historicalJobLog.action, 'CREATE_HISTORICAL_CONTAINER_JOB');
+      assert.equal(historicalJobLog.metadata.soNumber, created.historicalSoNumber);
+    });
+
+    await t.test('historical entry: periode bisa dikunci dan mencegah perubahan data lama', async () => {
+      const period = await api('/api/historical-entry/periods/2026-07', { token: adminToken });
+      assert.equal(period.status, 200);
+      assert.equal(period.body.data.status, 'draft');
+
+      const locked = await api('/api/historical-entry/periods/2026-07', {
+        method: 'PATCH',
+        token: adminToken,
+        body: { status: 'locked', notes: `Kunci periode ${runId}` },
+      });
+      assert.equal(locked.status, 200);
+      assert.equal(locked.body.data.status, 'locked');
+
+      const blockedUpdate = await api(`/api/sales-orders/${created.historicalOrderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          soNumber: created.historicalSoNumber,
+          entrySource: 'historical',
+          historicalPeriod: '2026-07',
+          destination: 'Tujuan Ditolak',
+          updatedBy: users.admin.name,
+        }),
+      });
+      assert.equal(blockedUpdate.status, 409);
+      assert.equal(blockedUpdate.body.error.code, 'HISTORICAL_PERIOD_LOCKED');
+
+      const unlocked = await api('/api/historical-entry/periods/2026-07', {
+        method: 'PATCH',
+        token: adminToken,
+        body: { status: 'draft', notes: `Buka periode ${runId}` },
+      });
+      assert.equal(unlocked.status, 200);
+      assert.equal(unlocked.body.data.status, 'draft');
+
+      const lockLog = await latestActivity('LOCK_HISTORICAL_PERIOD');
+      assert.equal(lockLog.action, 'LOCK_HISTORICAL_PERIOD');
+      assert.equal(lockLog.actor_role, 'admin');
     });
 
     await t.test('container job: list, create via sales order, update, update status', async () => {
@@ -895,7 +988,7 @@ if (!hasDatabase) {
       });
       assert.equal(financeInvoice.status, 200);
       assert.equal(financeInvoice.body.data.invoiceNumber, `INV-${runId}-001`);
-      assert.equal(financeInvoice.body.data.invoiceStatus, 'Menunggu Update Status');
+      assert.equal(financeInvoice.body.data.invoiceStatus, 'Butuh Nomor Invoice');
       assert.ok(financeInvoice.body.data.invoiceDate);
       assert.ok(financeInvoice.body.data.dueDate);
       assert.equal(
@@ -905,11 +998,35 @@ if (!hasDatabase) {
 
       const invoiceLog = await latestActivityForEntity('FINANCE_INPUT_INVOICE_NUMBER', created.orderId);
       assert.equal(invoiceLog.action, 'FINANCE_INPUT_INVOICE_NUMBER');
+      const invoicePdfBase64 = Buffer.from(`%PDF-1.4\n% invoice ${runId}\n`).toString('base64');
+      const uploadedInvoiceDocument = await api(`/api/finance/invoices/${created.orderId}/documents/invoice`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          fileName: `invoice-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: invoicePdfBase64,
+        },
+      });
+      assert.equal(uploadedInvoiceDocument.status, 200);
+      assert.equal(uploadedInvoiceDocument.body.data.invoiceDocumentStatus, 'belum_upload');
+
+      const uploadedTaxInvoiceDocument = await api(`/api/finance/invoices/${created.orderId}/documents/tax_invoice`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          fileName: `faktur-pajak-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: invoicePdfBase64,
+        },
+      });
+      assert.equal(uploadedTaxInvoiceDocument.status, 200);
+      assert.equal(uploadedTaxInvoiceDocument.body.data.invoiceDocumentStatus, 'siap_dikirim');
 
       const sentInvoice = await api(`/api/sales-orders/${created.orderId}/invoice-delivery-status`, {
         method: 'PATCH',
         token: salesToken,
-        body: { billingStatus: 'belum_diterima' },
+        body: { billingStatus: 'belum_diterima', deliveryMethod: 'whatsapp' },
       });
       assert.equal(sentInvoice.status, 200);
       assert.equal(sentInvoice.body.data.billingStatus, 'belum_diterima');
@@ -921,7 +1038,7 @@ if (!hasDatabase) {
       const updatedBilling = await api(`/api/sales-orders/${created.orderId}/invoice-delivery-status`, {
         method: 'PATCH',
         token: salesToken,
-        body: { billingStatus: 'menunggu_pembayaran' },
+        body: { billingStatus: 'menunggu_pembayaran', deliveryMethod: 'whatsapp' },
       });
       assert.equal(updatedBilling.status, 200);
       assert.equal(updatedBilling.body.data.billingStatus, 'menunggu_pembayaran');
@@ -960,7 +1077,7 @@ if (!hasDatabase) {
         }),
       });
       assert.equal(blockedInvoiceNumberMutation.status, 403);
-      assert.equal(blockedInvoiceNumberMutation.body.error.code, 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY');
+      assert.equal(blockedInvoiceNumberMutation.body.error.code, 'SALES_ORDER_FINANCE_NUMBER_LOCKED_ADMIN_ONLY');
 
       const blockedCancellationAfterRpuj = await api(`/api/sales-orders/${created.orderId}/cancel-request`, {
         method: 'PATCH',
@@ -968,7 +1085,7 @@ if (!hasDatabase) {
         body: { cancelRequestNote: 'Customer meminta pembatalan setelah RPUJ dikirim' },
       });
       assert.equal(blockedCancellationAfterRpuj.status, 403);
-      assert.equal(blockedCancellationAfterRpuj.body.error.code, 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY');
+      assert.equal(blockedCancellationAfterRpuj.body.error.code, 'SALES_ORDER_FINANCE_NUMBER_LOCKED_ADMIN_ONLY');
 
       const blockedDirectCancellationAfterRpuj = await api(`/api/sales-orders/${created.orderId}/cancel`, {
         method: 'PATCH',
@@ -976,7 +1093,7 @@ if (!hasDatabase) {
         body: {},
       });
       assert.equal(blockedDirectCancellationAfterRpuj.status, 403);
-      assert.equal(blockedDirectCancellationAfterRpuj.body.error.code, 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY');
+      assert.equal(blockedDirectCancellationAfterRpuj.body.error.code, 'SALES_ORDER_FINANCE_NUMBER_LOCKED_ADMIN_ONLY');
 
       const blockedContainerCancellationAfterRpuj = await api(`/api/container-jobs/${created.jobId}/cancel-request`, {
         method: 'PATCH',
@@ -1206,8 +1323,8 @@ if (!hasDatabase) {
       assert.equal(kirHead.status, 201);
       assert.equal(kirHead.body.data.documentType, 'KIR_HEAD');
       assert.equal(kirHead.body.data.status, 'Akan Habis');
-      assert.match(kirHead.body.data.relativePath, /^Master Data[\\/]+Truck[\\/]+[0-9a-f-]{36}[\\/]+KIR dan Uji Berkala[\\/]+/);
-      assert.equal(kirHead.body.data.relativePath.split(/[\\/]+/)[2], created.vehicleHeadId);
+      assert.match(kirHead.body.data.relativePath, /^Master Data[\\/]+Truck[\\/]+[^\\/]+[\\/]+KIR dan Uji Berkala[\\/]+/);
+      assert.match(kirHead.body.data.relativePath.split(/[\\/]+/)[2], /^HEAD-.+__[0-9a-f]{8}$/);
       assert.equal(kirHead.body.data.relativePath.includes('..'), false);
       created.kirHeadDocumentId = kirHead.body.data.id;
 
@@ -1228,7 +1345,7 @@ if (!hasDatabase) {
       assert.equal(kirBuntut.status, 201);
       assert.equal(kirBuntut.body.data.documentType, 'KIR_BUNTUT');
       assert.equal(kirBuntut.body.data.status, 'Segera Habis');
-      assert.match(kirBuntut.body.data.relativePath, /^Master Data[\\/]+Chassis[\\/]+[0-9a-f-]{36}[\\/]+KIR dan Uji Berkala[\\/]+/);
+      assert.match(kirBuntut.body.data.relativePath, /^Master Data[\\/]+Chassis[\\/]+[^\\/]+[\\/]+KIR dan Uji Berkala[\\/]+/);
       created.kirBuntutDocumentId = kirBuntut.body.data.id;
 
       const list = await api(`/api/vehicles/${created.vehicleChassisId}/documents`, { token: adminToken });

@@ -13,6 +13,15 @@ function normalizePaymentType(value) {
   return String(value || '').trim().toLowerCase() === 'tempo' ? 'tempo' : 'cash';
 }
 
+function normalizeEntrySource(value) {
+  return String(value || '').trim().toLowerCase() === 'historical' ? 'historical' : 'realtime';
+}
+
+function normalizeHistoricalValue(value) {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
 function normalizePaymentTermDays(paymentType, value) {
   const days = Math.max(0, Number(value || 0));
   return paymentType === 'tempo' ? Math.max(1, days || 30) : 0;
@@ -205,6 +214,9 @@ export function mapContainerJob(row, attachments = []) {
     repoCreatedByName: row.repo_created_by_name || '',
     repoPickedUpAt: row.repo_picked_up_at,
     repoPickedUpByName: row.repo_picked_up_by_name || '',
+    entrySource: row.entry_source || 'realtime',
+    historicalPeriod: row.historical_period || '',
+    historicalNotes: row.historical_notes || '',
     createdBy: row.created_by_name,
     updatedBy: row.updated_by_name,
     updatedAt: row.updated_at,
@@ -273,6 +285,9 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     status: row.status,
     notes: row.notes,
     salesName: row.sales_name,
+    entrySource: row.entry_source || 'realtime',
+    historicalPeriod: row.historical_period || '',
+    historicalNotes: row.historical_notes || '',
     createdBy: row.created_by_name,
     createdByUserId: row.created_by_user_id,
     updatedBy: row.updated_by_name,
@@ -303,6 +318,7 @@ export function toSalesOrderDb(form, customer) {
   const totalAmount = Number(form.totalAmount || price * quantity || 0);
   const lineItems = Array.isArray(form.lineItems) ? form.lineItems.map(normalizeLineItem) : [];
   const paymentType = normalizePaymentType(form.paymentType);
+  const entrySource = normalizeEntrySource(form.entrySource);
 
   return {
     so_number: String(form.soNumber || '').trim() || null,
@@ -350,6 +366,9 @@ export function toSalesOrderDb(form, customer) {
     destination: form.destination,
     status: form.status || 'waiting_operational',
     sales_name: customer?.sales_name || form.salesName || null,
+    entry_source: entrySource,
+    historical_period: entrySource === 'historical' ? normalizeHistoricalValue(form.historicalPeriod) : null,
+    historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(form.historicalNotes) : null,
     created_by_name: form.createdBy || form.salesName || 'Sales',
     created_by_user_id: form.createdByUserId || null,
     updated_by_name: form.updatedBy || form.createdBy || form.salesName || 'Sales',
@@ -360,6 +379,7 @@ export function toSalesOrderDb(form, customer) {
 }
 
 export function toContainerJobDb(container, order, actorName = 'Operational') {
+  const entrySource = normalizeEntrySource(container.entrySource || order.entry_source || order.entrySource);
   return {
     sales_order_id: order.id,
     container_number: String(container.containerNumber || '').trim().toUpperCase() || null,
@@ -389,6 +409,9 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
     repo_created_by_name: container.repoCreatedByName || null,
     repo_picked_up_at: container.repoPickedUpAt || null,
     repo_picked_up_by_name: container.repoPickedUpByName || null,
+    entry_source: entrySource,
+    historical_period: entrySource === 'historical' ? normalizeHistoricalValue(container.historicalPeriod || order.historical_period || order.historicalPeriod) : null,
+    historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(container.historicalNotes || order.historical_notes || order.historicalNotes) : null,
     created_by_name: order.created_by_name || actorName,
     updated_by_name: container.updatedBy || actorName,
   };

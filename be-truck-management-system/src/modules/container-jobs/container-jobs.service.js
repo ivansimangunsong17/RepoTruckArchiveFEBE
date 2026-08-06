@@ -8,6 +8,8 @@ import {
 } from './container-jobs.repository.js';
 import { findSalesOrderById } from '../sales-orders/sales-orders.repository.js';
 import { hasContainerSentRpuj } from '../sales-orders/sales-orders.rpuj-lock.js';
+import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-entry.permissions.js';
+import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
 
 function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
@@ -406,6 +408,15 @@ export async function saveContainerJob(id, payload, actor) {
   }
 
   const currentJob = await getContainerJob(id);
+  ensureCanManageHistoricalEntry(actor, {
+    payload: normalizedPayload,
+    currentRecord: currentJob,
+    entityLabel: 'Data historis Container Job',
+  });
+  await ensureHistoricalPeriodEditable(
+    normalizedPayload.historicalPeriod || currentJob.historicalPeriod,
+    'Container data lama',
+  );
   ensureRepoPickupOtherCostLocked(currentJob, normalizedPayload);
   ensureRepoHistoryCanCancel(actor, currentJob, normalizedPayload);
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);

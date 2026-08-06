@@ -9,6 +9,35 @@ import {
   reviewSalesOrderCancellation,
   updateInvoiceDeliveryStatus,
 } from './sales-orders.service.js';
+import {
+  HISTORICAL_ENTRY_PERMISSION,
+  payloadRequestsHistoricalEntry,
+} from '../historical-entry/historical-entry.permissions.js';
+import { actorHasPermission } from '../../utils/permissions.js';
+
+function isHistoricalRecord(record = {}) {
+  return record?.entrySource === 'historical' || Boolean(record?.historicalPeriod);
+}
+
+function historicalMetadata(record = {}) {
+  return {
+    entrySource: record.entrySource || 'historical',
+    historicalPeriod: record.historicalPeriod || '',
+    historicalNotes: record.historicalNotes || '',
+    soNumber: record.soNumber || record.so_number || '',
+  };
+}
+
+function historicalContainerMetadata(order = {}, container = {}) {
+  return {
+    salesOrderId: order.id,
+    soNumber: order.soNumber || order.so_number || container.soNumber || container.so_number || '',
+    containerNumber: container.containerNumber || container.container_number || '',
+    entrySource: container.entrySource || order.entrySource || 'historical',
+    historicalPeriod: container.historicalPeriod || order.historicalPeriod || '',
+    historicalNotes: container.historicalNotes || order.historicalNotes || '',
+  };
+}
 
 export async function listSalesOrdersController(request, response) {
   const result = await listSalesOrders(request.query);
@@ -16,8 +45,11 @@ export async function listSalesOrdersController(request, response) {
 }
 
 export async function createSalesOrderController(request, response) {
-  if (request.user?.role !== 'sales') {
-    const error = new Error('Input Sales Order hanya dapat dilakukan oleh user Sales.');
+  const canCreateSalesOrder = request.user?.role === 'sales';
+  const canCreateHistoricalOrder = payloadRequestsHistoricalEntry(request.body)
+    && actorHasPermission(request.user, HISTORICAL_ENTRY_PERMISSION);
+  if (!canCreateSalesOrder && !canCreateHistoricalOrder) {
+    const error = new Error('Input Sales Order hanya dapat dilakukan oleh Sales. Data bulan sebelumnya hanya dapat diinput oleh Admin.');
     error.statusCode = 403;
     error.code = 'SALES_ORDER_CREATE_SALES_ONLY';
     throw error;
@@ -31,6 +63,16 @@ export async function createSalesOrderController(request, response) {
     entityId: saved.id,
     afterData: saved,
   });
+  if (isHistoricalRecord(saved)) {
+    await safeRecordActivityLog(request, {
+      action: 'CREATE_HISTORICAL_SALES_ORDER',
+      module: 'historical_entry',
+      entityType: 'sales_order',
+      entityId: saved.id,
+      afterData: saved,
+      metadata: historicalMetadata(saved),
+    });
+  }
   await Promise.all((saved.containers || []).map((container) => safeRecordActivityLog(request, {
     action: 'CREATE_CONTAINER_JOB',
     module: 'container_jobs',
@@ -39,6 +81,16 @@ export async function createSalesOrderController(request, response) {
     afterData: container,
     metadata: { salesOrderId: saved.id, soNumber: saved.soNumber },
   })));
+  await Promise.all((saved.containers || [])
+    .filter((container) => isHistoricalRecord(container) || isHistoricalRecord(saved))
+    .map((container) => safeRecordActivityLog(request, {
+      action: 'CREATE_HISTORICAL_CONTAINER_JOB',
+      module: 'historical_entry',
+      entityType: 'container_job',
+      entityId: container.id,
+      afterData: container,
+      metadata: historicalContainerMetadata(saved, container),
+    })));
   sendSuccess(response, saved, 'Sales Order berhasil disimpan.', 201);
 }
 
@@ -58,6 +110,17 @@ export async function updateSalesOrderController(request, response) {
     beforeData: before,
     afterData: saved,
   });
+  if (isHistoricalRecord(before) || isHistoricalRecord(saved)) {
+    await safeRecordActivityLog(request, {
+      action: 'UPDATE_HISTORICAL_SALES_ORDER',
+      module: 'historical_entry',
+      entityType: 'sales_order',
+      entityId: saved.id,
+      beforeData: before,
+      afterData: saved,
+      metadata: historicalMetadata(saved),
+    });
+  }
   const beforeContainerIds = new Set((before.containers || []).map((container) => container.id));
   await Promise.all((saved.containers || [])
     .filter((container) => !beforeContainerIds.has(container.id))
@@ -68,6 +131,16 @@ export async function updateSalesOrderController(request, response) {
       entityId: container.id,
       afterData: container,
       metadata: { salesOrderId: saved.id, soNumber: saved.soNumber },
+    })));
+  await Promise.all((saved.containers || [])
+    .filter((container) => !beforeContainerIds.has(container.id) && (isHistoricalRecord(container) || isHistoricalRecord(saved)))
+    .map((container) => safeRecordActivityLog(request, {
+      action: 'CREATE_HISTORICAL_CONTAINER_JOB',
+      module: 'historical_entry',
+      entityType: 'container_job',
+      entityId: container.id,
+      afterData: container,
+      metadata: historicalContainerMetadata(saved, container),
     })));
   sendSuccess(response, saved, 'Sales Order berhasil diperbarui.');
 }

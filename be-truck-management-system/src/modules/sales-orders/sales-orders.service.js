@@ -14,6 +14,8 @@ import {
 } from './sales-orders.billing-status.js';
 import { normalizeInvoiceDocumentDeliveryMethod } from './sales-orders.invoice-documents.js';
 import { isSalesOrderLockedByFinanceNumber, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
+import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-entry.permissions.js';
+import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
 
 const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
@@ -281,17 +283,30 @@ function ensureSalesOrderUnlockedForSales(actor, order) {
 
 function applyActorToPayload(payload, actor, currentOrder = null) {
   const actorName = getActorName(actor);
+  const isHistoricalPayload = String(payload.entrySource || '').trim().toLowerCase() === 'historical'
+    || Boolean(String(payload.historicalPeriod || '').trim());
   if (currentOrder) {
+    const nextSoNumber = currentOrder.soNumber || payload.soNumber || '';
+    const shouldVerifyHistoricalSo = isHistoricalPayload
+      && nextSoNumber
+      && String(currentOrder.financeVerificationStatus || '').trim().toLowerCase() === 'pending_so';
+    const verifiedAt = shouldVerifyHistoricalSo ? new Date().toISOString() : null;
     return {
       ...payload,
       createdBy: currentOrder.createdBy || actorName,
       createdByUserId: currentOrder.createdByUserId || null,
       updatedBy: actorName,
       updatedByUserId: actor?.sub || null,
-      soNumber: currentOrder.soNumber || payload.soNumber || '',
-      financeVerificationStatus: currentOrder.financeVerificationStatus || payload.financeVerificationStatus || 'pending_so',
-      financeVerifiedBy: currentOrder.financeVerifiedBy || payload.financeVerifiedBy || null,
-      financeVerifiedAt: currentOrder.financeVerifiedAt || payload.financeVerifiedAt || null,
+      soNumber: nextSoNumber,
+      financeVerificationStatus: shouldVerifyHistoricalSo
+        ? 'verified'
+        : currentOrder.financeVerificationStatus || payload.financeVerificationStatus || (nextSoNumber ? 'verified' : 'pending_so'),
+      financeVerifiedBy: shouldVerifyHistoricalSo
+        ? actorName
+        : currentOrder.financeVerifiedBy || payload.financeVerifiedBy || null,
+      financeVerifiedAt: shouldVerifyHistoricalSo
+        ? verifiedAt
+        : currentOrder.financeVerifiedAt || payload.financeVerifiedAt || null,
       invoiceNumber: currentOrder.invoiceNumber || '',
       invoiceDocumentStatus: currentOrder.invoiceDocumentStatus || 'belum_upload',
       invoiceDocumentUploadedAt: currentOrder.invoiceDocumentUploadedAt || null,
@@ -310,10 +325,10 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
 
   return {
     ...payload,
-    soNumber: '',
-    financeVerificationStatus: 'pending_so',
-    financeVerifiedBy: null,
-    financeVerifiedAt: null,
+    soNumber: isHistoricalPayload ? payload.soNumber || '' : '',
+    financeVerificationStatus: isHistoricalPayload && payload.soNumber ? 'verified' : 'pending_so',
+    financeVerifiedBy: isHistoricalPayload && payload.soNumber ? actorName : null,
+    financeVerifiedAt: isHistoricalPayload && payload.soNumber ? new Date().toISOString() : null,
     invoiceNumber: '',
     invoiceDocumentStatus: 'belum_upload',
     invoiceDocumentUploadedAt: null,
@@ -422,6 +437,8 @@ export function listSalesOrders(query) {
     status: query.status || '',
     invoiced: query.invoiced || '',
     invoiceDocumentStatus: query.invoiceDocumentStatus || '',
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
   });
 }
 
@@ -449,6 +466,15 @@ export async function saveSalesOrder(payload, id, actor) {
     ensureCanAccessSalesOrder(actor, currentOrder);
     ensureSalesOrderUnlockedForSales(actor, currentOrder);
   }
+  ensureCanManageHistoricalEntry(actor, {
+    payload: normalizedPayload,
+    currentRecord: currentOrder,
+    entityLabel: 'Data historis Sales Order',
+  });
+  await ensureHistoricalPeriodEditable(
+    normalizedPayload.historicalPeriod || currentOrder?.historicalPeriod,
+    'Sales Order data lama',
+  );
   const payloadWithActor = applyActorToPayload(normalizedPayload, actor, currentOrder);
   validateSalesOrderPayload(payloadWithActor, currentOrder);
   return id ? updateSalesOrder(id, payloadWithActor) : createSalesOrder(payloadWithActor);

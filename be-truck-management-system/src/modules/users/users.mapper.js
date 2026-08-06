@@ -7,6 +7,7 @@ export const ROLE_PERMISSIONS = {
     'sales_order.update',
     'sales_order.cancel',
     'sales_order.cancel_review',
+    'historical_entry.manage',
     'container_job.read',
     'container_job.assign',
     'container_job.update',

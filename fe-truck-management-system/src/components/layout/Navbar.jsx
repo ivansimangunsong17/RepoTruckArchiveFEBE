@@ -12,6 +12,7 @@ const routeLabels = {
   'order-history': 'Riwayat Order',
   profile: 'Profil Saya',
   'sales-orders': 'Sales Order',
+  'historical-entry': 'Input Data Lama',
   operations: 'Container Job',
   'repo-storage': 'Container Titip',
   clients: 'Master Client',

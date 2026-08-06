@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import('../pages/Dashboard'));
 const WeeklyOrdersPage = lazy(() => import('../pages/dashboard/WeeklyOrdersPage'));
 const OrderHistoryPage = lazy(() => import('../pages/dashboard/OrderHistoryPage'));
 const SalesOrdersPage = lazy(() => import('../pages/sales-orders/SalesOrdersPage'));
+const HistoricalEntryPage = lazy(() => import('../pages/admin/HistoricalEntryPage'));
 const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
 const ClientsPage = lazy(() => import('../pages/admin/ClientsPage'));
@@ -76,6 +77,7 @@ export const router = createBrowserRouter([
         { path: 'profile', element: <LazyPage><ProfilePage /></LazyPage> },
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },
+        { path: 'historical-entry', children: [guardedPage(adminRoles, <LazyPage><HistoricalEntryPage /></LazyPage>)] },
         { path: 'sales/customer-documents', children: [guardedPage(customerDocumentRoles, <LazyPage><SalesOrdersPage customerDocumentsOnly /></LazyPage>)] },
         { path: 'operations', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage /></LazyPage>)] },
         { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },

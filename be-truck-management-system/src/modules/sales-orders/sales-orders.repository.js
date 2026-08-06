@@ -51,6 +51,9 @@ const salesOrderColumnCandidates = [
   'destination',
   'status',
   'sales_name',
+  'entry_source',
+  'historical_period',
+  'historical_notes',
   'created_by_user_id',
   'created_by_name',
   'updated_by_user_id',
@@ -118,7 +121,8 @@ const jobColumns = `
   cancel_requested_at, cancel_reviewed_by_name, cancel_reviewed_at, cancel_review_note,
   repo_location, repo_stored_at, repo_eir_number, repo_reason, repo_notes, repo_container_condition,
   repo_released_driver_id, repo_released_vehicle_id, repo_created_by_name,
-  repo_picked_up_at, repo_picked_up_by_name
+  repo_picked_up_at, repo_picked_up_by_name,
+  entry_source, historical_period, historical_notes
 `;
 
 const attachmentColumns = `
@@ -144,6 +148,8 @@ function buildOrderWhere({
   ownerName = '',
   excludeCancelled = false,
   invoiceDocumentStatus = '',
+  entrySource = '',
+  historicalPeriod = '',
 } = {}, { hasOwnerUserIdColumn = true } = {}) {
   const clauses = [];
   const params = [];
@@ -170,6 +176,16 @@ function buildOrderWhere({
   if (invoiceDocumentStatus) {
     params.push(invoiceDocumentStatus);
     clauses.push(`coalesce(invoice_document_status, 'belum_upload') = $${params.length}`);
+  }
+
+  if (entrySource) {
+    params.push(String(entrySource).trim().toLowerCase());
+    clauses.push(`coalesce(entry_source, 'realtime') = $${params.length}`);
+  }
+
+  if (historicalPeriod) {
+    params.push(String(historicalPeriod).trim());
+    clauses.push(`historical_period = $${params.length}`);
   }
 
   if (ownerUserId && hasOwnerUserIdColumn) {
@@ -360,6 +376,8 @@ export async function findSalesOrdersPage(options = {}) {
     query: options.query,
     ownerUserId: options.ownerUserId,
     ownerName: options.ownerName,
+    entrySource: options.entrySource,
+    historicalPeriod: options.historicalPeriod,
   }, ownerColumnOptions);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -557,6 +575,9 @@ export async function updateSalesOrder(id, form) {
           container_size: jobPayload.container_size,
           container_type: jobPayload.container_type,
           container_notes: jobPayload.container_notes,
+          entry_source: jobPayload.entry_source,
+          historical_period: jobPayload.historical_period,
+          historical_notes: jobPayload.historical_notes,
           updated_by_name: jobPayload.updated_by_name,
         };
         const jobEntries = Object.entries(salesJobPayload);

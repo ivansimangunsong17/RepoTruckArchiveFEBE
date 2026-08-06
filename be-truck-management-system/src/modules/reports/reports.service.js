@@ -27,6 +27,8 @@ export function fetchMonthlyRevenueReport(query) {
   return getMonthlyRevenueReport({
     month: query.month,
     year: query.year,
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
   });
 }
 
@@ -38,6 +40,8 @@ export function fetchOperationReport(query) {
     dateTo: query.dateTo || query.endDate || '',
     status: query.status || '',
     query: query.query || query.search || '',
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
   });
 }
 
@@ -56,5 +60,7 @@ export function fetchDriverPerformanceReport(query) {
     month: query.month || '',
     weekFrom: query.weekFrom || query.week_from || '',
     weekTo: query.weekTo || query.week_to || '',
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
   });
 }

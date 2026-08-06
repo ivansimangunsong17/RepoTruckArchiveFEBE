@@ -54,3 +54,35 @@ test('sales order db mapper menyimpan metadata workflow dokumen invoice', () => 
   assert.equal(row.invoice_document_delivery_method, 'whatsapp');
   assert.equal(row.invoice_document_delivery_notes, 'Dikirim via WA.');
 });
+
+test('sales order mapper membaca dan menyimpan metadata input historis', () => {
+  const mapped = mapSalesOrder({
+    id: 'order-1',
+    so_number: 'SO-HIST-001',
+    customer_name: 'PT Arsip',
+    entry_source: 'historical',
+    historical_period: '2026-07',
+    historical_notes: 'Input dari arsip Juli.',
+    payment_type: 'cash',
+    quantity: 1,
+    price: 0,
+    total_amount: 0,
+  });
+
+  assert.equal(mapped.entrySource, 'historical');
+  assert.equal(mapped.historicalPeriod, '2026-07');
+  assert.equal(mapped.historicalNotes, 'Input dari arsip Juli.');
+
+  const row = toSalesOrderDb({
+    customer: 'PT Arsip',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+    entrySource: 'historical',
+    historicalPeriod: '2026-07',
+    historicalNotes: 'Input dari arsip Juli.',
+  });
+
+  assert.equal(row.entry_source, 'historical');
+  assert.equal(row.historical_period, '2026-07');
+  assert.equal(row.historical_notes, 'Input dari arsip Juli.');
+});

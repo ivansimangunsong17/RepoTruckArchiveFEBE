@@ -9,6 +9,21 @@ import {
   saveContainerJob,
 } from './container-jobs.service.js';
 
+function isHistoricalRecord(record = {}) {
+  return record?.entrySource === 'historical' || Boolean(record?.historicalPeriod);
+}
+
+function historicalMetadata(job = {}) {
+  return {
+    entrySource: job.entrySource || 'historical',
+    historicalPeriod: job.historicalPeriod || '',
+    historicalNotes: job.historicalNotes || '',
+    salesOrderId: job.orderId,
+    soNumber: job.soNumber,
+    containerNumber: job.containerNumber,
+  };
+}
+
 export async function listContainerJobsController(request, response) {
   const result = await listContainerJobs(request.query);
   sendSuccess(response, result);
@@ -30,6 +45,17 @@ export async function updateContainerJobController(request, response) {
     beforeData: before,
     afterData: saved,
   });
+  if (isHistoricalRecord(before) || isHistoricalRecord(saved)) {
+    await safeRecordActivityLog(request, {
+      action: 'UPDATE_HISTORICAL_CONTAINER_JOB',
+      module: 'historical_entry',
+      entityType: 'container_job',
+      entityId: saved.id,
+      beforeData: before,
+      afterData: saved,
+      metadata: historicalMetadata(saved),
+    });
+  }
   if (before.status !== saved.status) {
     await safeRecordActivityLog(request, {
       action: 'UPDATE_JOB_STATUS',

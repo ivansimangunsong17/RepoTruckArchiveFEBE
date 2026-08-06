@@ -411,7 +411,7 @@ function OrderHistoryPage() {
 
       <section className="overflow-hidden rounded-md border border-slate-300 bg-white shadow-[0_10px_28px_rgba(15,23,42,0.08)]">
         <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
               Bulan
               <select

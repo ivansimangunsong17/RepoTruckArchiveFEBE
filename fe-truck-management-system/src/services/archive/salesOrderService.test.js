@@ -29,9 +29,11 @@ describe('salesOrderService', () => {
       query: 'SO',
       status: 'running',
       invoiceDocumentStatus: 'siap_dikirim',
+      entrySource: 'historical',
+      historicalPeriod: '2026-07',
     });
 
-    expect(httpClient.get).toHaveBeenCalledWith('/sales-orders?page=2&pageSize=8&query=SO&status=running&invoiceDocumentStatus=siap_dikirim');
+    expect(httpClient.get).toHaveBeenCalledWith('/sales-orders?page=2&pageSize=8&query=SO&status=running&invoiceDocumentStatus=siap_dikirim&entrySource=historical&historicalPeriod=2026-07');
     expect(result).toEqual({ rows: [], total: 0 });
   });
 

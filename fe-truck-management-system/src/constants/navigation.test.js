@@ -42,6 +42,14 @@ describe('navigationGroups', () => {
     expect(customerDocumentItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.SALES]);
   });
 
+  it('membatasi Input Data Lama hanya untuk admin', () => {
+    const salesOrderGroup = navigationGroups.find((group) => group.label === 'Sales Order');
+    const historicalEntryItem = salesOrderGroup?.items.find((item) => item.to === '/historical-entry');
+
+    expect(historicalEntryItem?.label).toBe('Input Data Lama');
+    expect(historicalEntryItem?.roles).toEqual([USER_ROLES.ADMIN]);
+  });
+
   it('menampilkan Viewer pada dashboard order read-only dan laporan', () => {
     const items = navigationGroups.flatMap((group) => group.items.flatMap((item) => item.children || item));
     const viewerItems = items.filter((item) => item.roles?.includes(USER_ROLES.OBSERVER));

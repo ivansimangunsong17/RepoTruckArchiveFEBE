@@ -24,6 +24,25 @@ function buildDateWhere(column, { dateFrom = '', dateTo = '' } = {}, startIndex 
   return { clauses, params };
 }
 
+function normalizeEntrySourceFilter(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'historical' || normalized === 'realtime') return normalized;
+  return '';
+}
+
+function appendEntrySourceFilters(clauses, params, options = {}, alias = 'cj') {
+  const entrySource = normalizeEntrySourceFilter(options.entrySource);
+  if (entrySource) {
+    params.push(entrySource);
+    clauses.push(`coalesce(${alias}.entry_source, 'realtime') = $${params.length}`);
+  }
+
+  if (options.historicalPeriod) {
+    params.push(String(options.historicalPeriod).trim());
+    clauses.push(`${alias}.historical_period = $${params.length}`);
+  }
+}
+
 export function calculateCompletedJobRevenue(row = {}) {
   const lineItems = row.line_items ?? row.lineItems;
   const financialItems = splitFinancialLineItems(lineItems);
@@ -367,6 +386,10 @@ function parseRevenuePeriod(options = {}) {
 
 export async function getMonthlyRevenueReport(options = {}) {
   const period = parseRevenuePeriod(options);
+  const clauses = [];
+  const params = [period.dateFrom, period.dateToExclusive];
+  appendEntrySourceFilters(clauses, params, options, 'cj');
+  const sourceWhereSql = clauses.length ? `and ${clauses.join(' and ')}` : '';
   const result = await query(
     `
       with order_job_totals as (
@@ -387,6 +410,8 @@ export async function getMonthlyRevenueReport(options = {}) {
           cj.container_number,
           cj.container_size,
           cj.completed_at::date as completed_date,
+          coalesce(cj.entry_source, 'realtime') as entry_source,
+          cj.historical_period,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
           coalesce(v.unit_code, snapshot_vehicle.unit_code, nullif(cj.assignment_snapshot->>'unitCode', '')) as unit_code,
           nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
@@ -399,6 +424,7 @@ export async function getMonthlyRevenueReport(options = {}) {
           and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
         where so.status <> 'cancelled'
           and cj.status = 'completed'
+          ${sourceWhereSql}
       )
       select *
       from completed_jobs
@@ -406,7 +432,7 @@ export async function getMonthlyRevenueReport(options = {}) {
         and completed_date < $2::date
       order by completed_date desc, plate_number asc nulls last, so_number asc, job_id asc
     `,
-    [period.dateFrom, period.dateToExclusive],
+    params,
   );
 
   const rows = result.rows.map((row) => ({
@@ -423,6 +449,8 @@ export async function getMonthlyRevenueReport(options = {}) {
     plateNumber: row.plate_number || '',
     totalContainers: Number(row.total_containers || 0),
     revenue: calculateCompletedJobRevenue(row),
+    entrySource: row.entry_source || 'realtime',
+    historicalPeriod: row.historical_period || '',
   }));
 
   return {
@@ -474,6 +502,7 @@ export async function getOperationReport(options = {}) {
       or cj.assignment_snapshot::text ilike $${params.length}
     )`);
   }
+  appendEntrySourceFilters(clauses, params, options, 'cj');
 
   const whereSql = clauses.length ? `where ${clauses.join(' and ')}` : '';
   const limitIndex = params.length + 1;
@@ -494,6 +523,7 @@ export async function getOperationReport(options = {}) {
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id,
                cj.repo_created_by_name, cj.repo_picked_up_at, cj.repo_picked_up_by_name,
+               coalesce(cj.entry_source, 'realtime') as entry_source, cj.historical_period, cj.historical_notes,
                so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
                so.sales_name, so.created_by_name,
                so.origin, so.destination,
@@ -577,6 +607,9 @@ export async function getOperationReport(options = {}) {
       repoCreatedByName: row.repo_created_by_name || '',
       repoPickedUpAt: row.repo_picked_up_at,
       repoPickedUpByName: row.repo_picked_up_by_name || '',
+      entrySource: row.entry_source || 'realtime',
+      historicalPeriod: row.historical_period || '',
+      historicalNotes: row.historical_notes || '',
     })),
     total: total.rows[0]?.total || 0,
     summary: summary.rows[0] || { jobs: 0, completed: 0, cancelled: 0, running: 0, received: 0, repo_stored: 0 },
@@ -599,6 +632,9 @@ export async function getDriverPerformanceReport(options = {}) {
   const weekToCondition = weekTo
     ? `and completed_date <= $${params.push(weekTo)}`
     : '';
+  const sourceClauses = [];
+  appendEntrySourceFilters(sourceClauses, params, options, 'cj');
+  const sourceCondition = sourceClauses.length ? `and ${sourceClauses.join(' and ')}` : '';
 
   const [rows, months] = await Promise.all([
     query(
@@ -623,6 +659,7 @@ export async function getDriverPerformanceReport(options = {}) {
           where cj.status = 'completed'
             and so.status <> 'cancelled'
             and nullif(cj.assignment_snapshot->>'driver', '') is not null
+            ${sourceCondition}
         )
         select *
         from completed_jobs cj

@@ -353,6 +353,8 @@ export async function fetchSalesOrdersPage({
   status = '',
   invoiced = false,
   invoiceDocumentStatus = '',
+  entrySource = '',
+  historicalPeriod = '',
 } = {}) {
   const params = new URLSearchParams({
     page: String(page),
@@ -362,6 +364,8 @@ export async function fetchSalesOrdersPage({
   if (status) params.set('status', status);
   if (invoiced) params.set('invoiced', 'true');
   if (invoiceDocumentStatus) params.set('invoiceDocumentStatus', invoiceDocumentStatus);
+  if (entrySource) params.set('entrySource', entrySource);
+  if (historicalPeriod) params.set('historicalPeriod', historicalPeriod);
   return httpClient.get(`/sales-orders?${params.toString()}`);
 }
 
