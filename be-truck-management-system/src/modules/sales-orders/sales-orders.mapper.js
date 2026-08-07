@@ -22,6 +22,12 @@ function normalizeHistoricalValue(value) {
   return normalized || null;
 }
 
+function historicalPeriodFromDate(dateValue, fallback = '') {
+  const normalizedDate = normalizeDateOnly(dateValue);
+  const datePeriod = normalizedDate.match(/^(\d{4}-\d{2})-/)?.[1] || '';
+  return normalizeHistoricalValue(datePeriod || fallback);
+}
+
 function normalizePaymentTermDays(paymentType, value) {
   const days = Math.max(0, Number(value || 0));
   return paymentType === 'tempo' ? Math.max(1, days || 30) : 0;
@@ -319,6 +325,10 @@ export function toSalesOrderDb(form, customer) {
   const lineItems = Array.isArray(form.lineItems) ? form.lineItems.map(normalizeLineItem) : [];
   const paymentType = normalizePaymentType(form.paymentType);
   const entrySource = normalizeEntrySource(form.entrySource);
+  const tripDate = normalizeDateOnly(form.tripDate || form.plannedDate || form.soDate) || new Date().toISOString().slice(0, 10);
+  const historicalPeriod = entrySource === 'historical'
+    ? historicalPeriodFromDate(tripDate, form.historicalPeriod)
+    : null;
 
   return {
     so_number: String(form.soNumber || '').trim() || null,
@@ -327,7 +337,7 @@ export function toSalesOrderDb(form, customer) {
     finance_verified_at: form.financeVerifiedAt || null,
     do_number: form.doNumber || null,
     so_date: normalizeDateOnly(form.soDate) || new Date().toISOString().slice(0, 10),
-    trip_date: normalizeDateOnly(form.tripDate || form.plannedDate || form.soDate) || new Date().toISOString().slice(0, 10),
+    trip_date: tripDate,
     received_at: form.receivedAt || new Date().toISOString(),
     customer_id: customer?.id || form.customerId || null,
     customer_name: customer?.name || form.customer,
@@ -367,7 +377,7 @@ export function toSalesOrderDb(form, customer) {
     status: form.status || 'waiting_operational',
     sales_name: customer?.sales_name || form.salesName || null,
     entry_source: entrySource,
-    historical_period: entrySource === 'historical' ? normalizeHistoricalValue(form.historicalPeriod) : null,
+    historical_period: historicalPeriod,
     historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(form.historicalNotes) : null,
     created_by_name: form.createdBy || form.salesName || 'Sales',
     created_by_user_id: form.createdByUserId || null,
@@ -380,6 +390,9 @@ export function toSalesOrderDb(form, customer) {
 
 export function toContainerJobDb(container, order, actorName = 'Operational') {
   const entrySource = normalizeEntrySource(container.entrySource || order.entry_source || order.entrySource);
+  const historicalPeriod = entrySource === 'historical'
+    ? historicalPeriodFromDate(order.trip_date || order.tripDate || container.tripDate, container.historicalPeriod || order.historical_period || order.historicalPeriod)
+    : null;
   return {
     sales_order_id: order.id,
     container_number: String(container.containerNumber || '').trim().toUpperCase() || null,
@@ -410,7 +423,7 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
     repo_picked_up_at: container.repoPickedUpAt || null,
     repo_picked_up_by_name: container.repoPickedUpByName || null,
     entry_source: entrySource,
-    historical_period: entrySource === 'historical' ? normalizeHistoricalValue(container.historicalPeriod || order.historical_period || order.historicalPeriod) : null,
+    historical_period: historicalPeriod,
     historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(container.historicalNotes || order.historical_notes || order.historicalNotes) : null,
     created_by_name: order.created_by_name || actorName,
     updated_by_name: container.updatedBy || actorName,

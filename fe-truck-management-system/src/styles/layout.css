@@ -82,6 +82,12 @@ h1, h2, p { margin-top: 0; }
 .notification-panel button:hover { background: #f7f7f8; }
 .notification-panel button strong { color: #303237; font-size: .67rem; }
 .notification-panel button span { color: #777a80; font-size: .59rem; }
+.repo-storage-topbar-alert { display: inline-flex; align-items: center; gap: 9px; min-height: 40px; max-width: 220px; padding: 0 12px; border: 1px solid #f4b43d; border-radius: 8px; color: #8a4b00; background: #fff7df; box-shadow: 0 6px 18px #d9770614; }
+.repo-storage-topbar-alert:hover { border-color: #e09a14; background: #ffefc2; }
+.repo-storage-topbar-alert svg { flex: none; }
+.repo-storage-topbar-alert span { display: grid; gap: 1px; min-width: 0; text-align: left; }
+.repo-storage-topbar-alert strong { overflow: hidden; color: #7a3e00; font-size: .68rem; font-weight: 850; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+.repo-storage-topbar-alert small { overflow: hidden; color: #9a650d; font-size: .58rem; font-weight: 700; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
 .user-menu { gap: 9px; padding-left: 18px; border-left: 1px solid var(--border); }
 .user-menu { position: relative; }
 .avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: #b41118; background: #ffe1e2; font-size: .74rem; font-weight: 800; }

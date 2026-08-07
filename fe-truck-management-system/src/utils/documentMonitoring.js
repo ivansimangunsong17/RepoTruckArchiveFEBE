@@ -50,7 +50,8 @@ export const DOCUMENT_MONITORING_RESOURCES = [
     category: 'Chassis',
     getName: (row) => String(row.chassisCode || row.kirNumber || row.plateNumber || '-').trim() || '-',
     documents: [
-      { key: 'photoDocument', label: 'Foto Chassis' },
+      { key: 'kirDocument', label: 'Dokumen KIR Chassis' },
+      { key: 'photoDocument', label: 'Foto Unit Chassis' },
     ],
     dates: [
       { key: 'kirExpiryDate', label: 'KIR Chassis OFF' },

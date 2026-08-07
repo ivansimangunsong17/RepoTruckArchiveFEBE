@@ -77,6 +77,7 @@ test('sales order mapper membaca dan menyimpan metadata input historis', () => {
     customer: 'PT Arsip',
     origin: 'Jakarta',
     destination: 'Bekasi',
+    tripDate: '2026-07-15',
     entrySource: 'historical',
     historicalPeriod: '2026-07',
     historicalNotes: 'Input dari arsip Juli.',
@@ -85,4 +86,18 @@ test('sales order mapper membaca dan menyimpan metadata input historis', () => {
   assert.equal(row.entry_source, 'historical');
   assert.equal(row.historical_period, '2026-07');
   assert.equal(row.historical_notes, 'Input dari arsip Juli.');
+});
+
+test('sales order historis memakai periode dari tanggal jalan', () => {
+  const row = toSalesOrderDb({
+    customer: 'PT Arsip',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+    tripDate: '2026-05-07',
+    entrySource: 'historical',
+    historicalPeriod: '2026-08',
+  });
+
+  assert.equal(row.trip_date, '2026-05-07');
+  assert.equal(row.historical_period, '2026-05');
 });

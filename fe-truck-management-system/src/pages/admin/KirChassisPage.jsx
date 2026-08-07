@@ -60,8 +60,10 @@ const fields = [
     ],
   },
   { key: 'receivedDate', section: 'Identitas Chassis', label: 'Tanggal Unit Diterima', type: 'date', hint: 'Tanggal chassis resmi masuk ke armada. Bisa dikosongkan jika belum diketahui.' },
-  { key: 'kirNumber', section: 'Dokumen Chassis', label: 'Nomor Chassis', placeholder: 'Contoh: CHS-DOC-2026-001' },
-  { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'KIR OFF', type: 'date', expiryAlert: { label: 'KIR Chassis' } },
+  { key: 'kirNumber', section: 'Dokumen Chassis', label: 'Nomor KIR Chassis', placeholder: 'Contoh: KIR-CHS-2026-001' },
+  { key: 'kirExpiryDate', section: 'Dokumen Chassis', label: 'Tanggal KIR OFF', type: 'date', expiryAlert: { label: 'KIR Chassis' } },
+  { key: 'kirDocument', section: 'Dokumen Chassis', label: 'Dokumen KIR Chassis', type: 'file', accept: '.pdf,.jpg,.jpeg,.png', full: true },
+  { key: 'photoDocument', section: 'Dokumen Chassis', label: 'Foto Unit Chassis', type: 'file', accept: '.jpg,.jpeg,.png', full: true },
   {
     key: 'status',
     section: 'Status',
@@ -75,10 +77,14 @@ const fields = [
     ],
   },
   { key: 'notes', section: 'Catatan', label: 'Catatan', type: 'textarea', placeholder: 'Catatan tambahan', full: true },
-  { key: 'photoDocument', section: 'Dokumen Chassis', label: 'Foto Chassis', type: 'file', accept: '.jpg,.jpeg,.png', full: true },
 ];
 
-const CHASSIS_DOCUMENT_FIELD_KEYS = new Set(['photoDocument']);
+const CHASSIS_DOCUMENT_FIELD_KEYS = new Set(['kirDocument', 'photoDocument']);
+
+const chassisDocumentRows = [
+  { key: 'kirDocument', label: 'Dokumen KIR Chassis' },
+  { key: 'photoDocument', label: 'Foto Unit Chassis' },
+];
 
 function ChassisDocumentDetail({ row, renderViewerDocumentNote = null }) {
   const showNotes = typeof renderViewerDocumentNote === 'function';
@@ -91,11 +97,13 @@ function ChassisDocumentDetail({ row, renderViewerDocumentNote = null }) {
           <strong>View dan Download</strong>
           {showNotes ? <strong>Catatan</strong> : null}
         </div>
-        <div className="driver-document-detail-row">
-          <strong>Foto Chassis</strong>
-          <DetailDocumentActions file={row.photoDocument} />
-          {showNotes ? renderViewerDocumentNote('photoDocument', 'Foto Chassis') : null}
-        </div>
+        {chassisDocumentRows.map((documentRow) => (
+          <div className="driver-document-detail-row" key={documentRow.key}>
+            <strong>{documentRow.label}</strong>
+            <DetailDocumentActions file={row[documentRow.key]} />
+            {showNotes ? renderViewerDocumentNote(documentRow.key, documentRow.label) : null}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -147,7 +155,7 @@ function KirChassisPage({ readOnly = false }) {
         { key: 'plateNumber', label: 'Plat / Identitas', render: (_, row) => <ConnectedTruckPlate row={row} trucks={truckRows} /> },
         { key: 'capacity', label: 'Size', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'receivedDate', label: 'Diterima', render: (value) => <span className="master-plain-cell">{formatDisplayDate(value)}</span> },
-        { key: 'kirNumber', label: 'Nomor Chassis', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
+        { key: 'kirNumber', label: 'Nomor KIR', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
         { key: 'kirExpiryDate', label: 'KIR OFF', render: (value) => <MasterExpiryDate value={value} /> },
         { key: 'status', label: 'Status', render: (value) => <ChassisStatus value={value} /> },
       ]}

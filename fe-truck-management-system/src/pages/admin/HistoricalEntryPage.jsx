@@ -36,6 +36,11 @@ function formatPeriod(value) {
   return new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
 }
 
+function periodFromDate(value, fallback = '') {
+  const dateKey = String(value || '').trim().match(/^(\d{4}-\d{2})-/)?.[1] || '';
+  return dateKey || fallback;
+}
+
 function getContainerSummary(order) {
   const containers = Array.isArray(order?.containers) ? order.containers : [];
   const total = containers.length || Number(order?.quantity || 0);
@@ -497,24 +502,26 @@ function HistoricalEntryPage() {
   }, [auditRows, selectedOrder?.id]);
 
   async function saveHistoricalOrder(form) {
-    if (periodLocked) {
+    const targetPeriod = periodFromDate(form.tripDate || form.plannedDate || form.soDate, period);
+    if (periodLocked && targetPeriod === period) {
       notify({ type: 'error', title: 'Periode terkunci', message: 'Buka kunci periode terlebih dahulu untuk menambah data lama.' });
       return;
     }
-    const receivedAt = form.receivedAt || `${form.tripDate || `${period}-01`}T00:00:00.000Z`;
+    const receivedAt = form.receivedAt || `${form.tripDate || `${targetPeriod}-01`}T00:00:00.000Z`;
     try {
       await archive.upsertOrder({
         ...form,
         receivedAt,
         entrySource: 'historical',
-        historicalPeriod: period,
+        historicalPeriod: targetPeriod,
         historicalNotes: notes.trim(),
       });
       setFormOpen(false);
+      if (targetPeriod && targetPeriod !== period) setPeriod(targetPeriod);
       setListVersion((value) => value + 1);
       notify({
         title: 'Data lama disimpan',
-        message: `Sales Order periode ${formatPeriod(period)} berhasil ditambahkan.`,
+        message: `Sales Order periode ${formatPeriod(targetPeriod)} berhasil ditambahkan.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Data lama gagal disimpan', message: requestError.message });
@@ -555,16 +562,18 @@ function HistoricalEntryPage() {
 
     try {
       setSoNumberSaving(true);
+      const targetPeriod = periodFromDate(soNumberOrder.tripDate, soNumberOrder.historicalPeriod || period);
       await archive.upsertOrder({
         ...soNumberOrder,
         soNumber,
         financeVerificationStatus: 'verified',
         entrySource: 'historical',
-        historicalPeriod: period,
+        historicalPeriod: targetPeriod,
         historicalNotes: soNumberOrder.historicalNotes || notes.trim(),
       }, soNumberOrder);
       setSoNumberOrder(null);
       setSoNumberForm('');
+      if (targetPeriod && targetPeriod !== period) setPeriod(targetPeriod);
       setListVersion((value) => value + 1);
       archive.refresh?.();
       notify({ title: 'Nomor SO disimpan', message: `${soNumber} berhasil dipasang ke data lama.` });
@@ -675,6 +684,7 @@ function HistoricalEntryPage() {
 
     const truck = truckOptions.find((item) => String(item.id) === String(jobForm.vehicleId));
     const driver = driverOptions.find((item) => String(item.id) === String(jobForm.driverId));
+    const targetPeriod = periodFromDate(selectedOrder?.tripDate || editingJob.tripDate, selectedOrder?.historicalPeriod || period);
     const payload = {
       ...editingJob,
       containerNumber: String(jobForm.containerNumber || '').trim().toUpperCase(),
@@ -690,7 +700,7 @@ function HistoricalEntryPage() {
       cancelledAt: status === 'cancelled' ? new Date().toISOString() : editingJob.cancelledAt || null,
       cancelReason: status === 'cancelled' ? jobForm.cancelReason || 'Pembatalan data lama' : editingJob.cancelReason || '',
       entrySource: 'historical',
-      historicalPeriod: period,
+      historicalPeriod: targetPeriod,
       historicalNotes: String(jobForm.historicalNotes || notes || selectedOrder?.historicalNotes || '').trim(),
     };
 
@@ -698,6 +708,7 @@ function HistoricalEntryPage() {
       setJobSaving(true);
       const saved = await archive.updateJob(editingJob.id, payload);
       if (archive.isDatabaseMode) {
+        if (targetPeriod && targetPeriod !== period) setPeriod(targetPeriod);
         setListVersion((value) => value + 1);
         archive.refresh?.();
       } else {

@@ -60,6 +60,7 @@
   .master-form-grid .master-field.vehicle-document-number,
   .master-form-grid .master-field.vehicle-document-date,
   .master-form-grid .master-field.vehicle-document-upload,
+  .master-form-grid .master-field.vehicle-document-photo,
   .master-form-grid .master-field.vehicle-document-tax { grid-column: span 1; }
   .fuel-strip { grid-template-columns: 1fr 1fr; }
   .fuel-strip > div:nth-child(2) { border-right: 0; }
@@ -110,6 +111,8 @@
   .page-skeleton { padding: 22px 16px 35px; }
   .skeleton-stats { grid-template-columns: 1fr 1fr; }
   .topbar-context, .user-menu > div:not(.avatar), .user-menu > button { display: none; }
+  .repo-storage-topbar-alert { min-width: 40px; width: 40px; max-width: 40px; justify-content: center; padding: 0; }
+  .repo-storage-topbar-alert span { display: none; }
   .page-header { display: grid; }
   .page-actions > * { width: 100%; }
   .stats-grid.five { grid-template-columns: 1fr 1fr; }
@@ -121,6 +124,7 @@
   .master-form-grid .master-field.vehicle-document-number,
   .master-form-grid .master-field.vehicle-document-date,
   .master-form-grid .master-field.vehicle-document-upload,
+  .master-form-grid .master-field.vehicle-document-photo,
   .master-form-grid .master-field.vehicle-document-tax { grid-column: auto; }
   .trucking-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
   .trucking-tabs button { width: 100%; }

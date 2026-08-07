@@ -198,6 +198,7 @@ function createFields(driverOptions, chassisRows = [], truckRows = []) {
     { key: 'solarBarcodeDate', section: 'Dokumen Kendaraan', label: 'Tanggal Barcode Solar', type: 'date', className: 'vehicle-document-field vehicle-document-date' },
     { key: 'solarBarcodeDocument', section: 'Dokumen Kendaraan', label: 'Dokumen Barcode Solar', type: 'file', className: 'vehicle-document-field vehicle-document-upload', compactUpload: true },
     { key: 'taxPaymentDate', section: 'Dokumen Kendaraan', label: 'Tanggal Bayar Pajak', type: 'date', className: 'vehicle-document-field vehicle-document-tax' },
+    { key: 'photoDocument', section: 'Dokumen Kendaraan', label: 'Foto Unit Truck', type: 'file', accept: '.jpg,.jpeg,.png', className: 'vehicle-document-field vehicle-document-photo', compactUpload: true },
     { key: 'insuranceType', section: 'Asuransi Kendaraan', label: 'Jenis Asuransi', type: 'select', defaultValue: '', options: INSURANCE_TYPE_OPTIONS, className: 'span-quarter' },
     { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Asuransi', placeholder: 'Contoh: POL-TRK-001', className: 'span-quarter' },
     { key: 'insuranceExpiryDate', section: 'Asuransi Kendaraan', label: 'Tanggal Berakhir', type: 'date', className: 'span-quarter', expiryAlert: { label: 'Asuransi Truck' } },
@@ -447,6 +448,7 @@ function DateDetail({ value }) {
 }
 
 const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
+  'photoDocument',
   'kirNumber',
   'kirExpiryDate',
   'kirDocument',
@@ -468,6 +470,13 @@ const TRUCK_DOCUMENT_FIELD_KEYS = new Set([
 
 function TruckDocumentSummary({ row, renderViewerDocumentNote = null }) {
   const documents = [
+    {
+      key: 'photoDocument',
+      label: 'Foto Unit',
+      number: 'Foto unit truck',
+      file: row.photoDocument,
+      showExpiry: false,
+    },
     {
       key: 'kirDocument',
       label: 'KIR',

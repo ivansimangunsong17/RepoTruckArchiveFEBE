@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search, UserRound } from 'lucide-react';
+import { AlertTriangle, Bell, ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search, UserRound } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { ROLE_LABELS, USER_ROLES } from '../../constants/roles';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { fetchOperationReport } from '../../services/reports/reportService';
 
 const routeLabels = {
   dashboard: 'Order Berjalan',
@@ -37,6 +38,8 @@ function Navbar({ sidebarCollapsed, onMenuClick, onSidebarToggle }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [repoStorageAlert, setRepoStorageAlert] = useState({ count: 0, latest: null });
+  const canSeeRepoStorageAlert = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL].includes(user?.role);
 
   const searchItems = useMemo(() => {
     const orderItems = salesOrders.flatMap((order) => [
@@ -84,7 +87,38 @@ function Navbar({ sidebarCollapsed, onMenuClick, onSidebarToggle }) {
     return () => window.removeEventListener('keydown', focusSearch);
   }, []);
 
+  useEffect(() => {
+    if (!canSeeRepoStorageAlert) {
+      setRepoStorageAlert({ count: 0, latest: null });
+      return undefined;
+    }
+
+    let active = true;
+
+    async function loadRepoStorageAlert() {
+      try {
+        const result = await fetchOperationReport({ status: 'repo_stored', page: 1, pageSize: 1 });
+        if (!active) return;
+        setRepoStorageAlert({
+          count: Number(result?.total || result?.summary?.repo_stored || 0),
+          latest: result?.rows?.[0] || null,
+        });
+      } catch {
+        if (active) setRepoStorageAlert({ count: 0, latest: null });
+      }
+    }
+
+    loadRepoStorageAlert();
+    const intervalId = window.setInterval(loadRepoStorageAlert, 60000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [canSeeRepoStorageAlert, location.pathname]);
+
   const pathSegments = location.pathname.split('/').filter(Boolean);
+  const showRepoStorageAlert = canSeeRepoStorageAlert && repoStorageAlert.count > 0;
 
   return (
     <header className="topbar">
@@ -130,6 +164,20 @@ function Navbar({ sidebarCollapsed, onMenuClick, onSidebarToggle }) {
         </div>
       </div>
       <div className="topbar-actions">
+        {showRepoStorageAlert ? (
+          <button
+            className="repo-storage-topbar-alert"
+            type="button"
+            onClick={() => navigate('/operations/repo-storage')}
+            title="Lihat container yang sedang dititipkan"
+          >
+            <AlertTriangle size={17} />
+            <span>
+              <strong>{repoStorageAlert.count} Container Titip</strong>
+              <small>{repoStorageAlert.latest?.containerNumber || repoStorageAlert.latest?.customer || 'Perlu dipantau'}</small>
+            </span>
+          </button>
+        ) : null}
         <div className="notification-area">
           <button className="notification-button" aria-label="Notifikasi" onClick={() => setNotificationsOpen((open) => !open)}>
             <Bell size={20} /><span />

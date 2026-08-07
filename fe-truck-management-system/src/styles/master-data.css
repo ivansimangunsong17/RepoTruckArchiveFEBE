@@ -255,6 +255,7 @@
 .master-form-grid .master-field.vehicle-document-date { grid-column: span 3; }
 .master-form-grid .master-field.vehicle-document-upload { grid-column: span 5; }
 .master-form-grid .master-field.vehicle-document-tax { grid-column: span 4; }
+.master-form-grid .master-field.vehicle-document-photo { grid-column: span 8; }
 .master-form-grid .master-field > span { display: block; }
 .master-fieldset.accent-chassis .master-field > span,
 .master-fieldset.accent-documents .master-field > span { color: #344054; font-size: .62rem; font-weight: 850; letter-spacing: .01em; }

@@ -257,7 +257,7 @@ function normalizeMasterOptions(rows = []) {
     .sort((left, right) => left.localeCompare(right, 'id'));
 }
 
-function SelectWithCurrentValue({
+function SearchableInput({
   name,
   value,
   onChange,
@@ -265,13 +265,26 @@ function SelectWithCurrentValue({
   placeholder,
   required = false,
 }) {
-  const hasCurrentValue = value && !options.includes(value);
+  const datalistId = `sales-order-${name}-options`;
+  const normalizedOptions = [...new Set([
+    ...(value && !options.includes(value) ? [value] : []),
+    ...options,
+  ])];
   return (
-    <select name={name} value={value} onChange={onChange} required={required}>
-      <option value="">{placeholder}</option>
-      {hasCurrentValue ? <option value={value}>{value}</option> : null}
-      {options.map((option) => <option key={option} value={option}>{option}</option>)}
-    </select>
+    <>
+      <input
+        name={name}
+        value={value}
+        onChange={onChange}
+        list={datalistId}
+        placeholder={placeholder}
+        required={required}
+        autoComplete="off"
+      />
+      <datalist id={datalistId}>
+        {normalizedOptions.map((option) => <option key={option} value={option} />)}
+      </datalist>
+    </>
   );
 }
 
@@ -312,7 +325,7 @@ function SalesOrderForm({
   }, [order]);
 
   const selectedCustomer = useMemo(
-    () => customers.find((customer) => customer.name === form.customer),
+    () => customers.find((customer) => String(customer.name || '').toLowerCase() === String(form.customer || '').toLowerCase()),
     [customers, form.customer],
   );
 
@@ -385,11 +398,12 @@ function SalesOrderForm({
   }
 
   function updateCustomer(event) {
-    const customer = customers.find((item) => item.name === event.target.value);
+    const value = event.target.value;
+    const customer = customers.find((item) => String(item.name || '').toLowerCase() === String(value || '').toLowerCase());
 
     setForm((current) => ({
       ...current,
-      customer: customer?.name || '',
+      customer: customer?.name || value,
       customerPic: customer?.pic || '',
       customerPhone: customer?.phone || '',
       customerAddress: customer?.address || '',
@@ -533,14 +547,14 @@ function SalesOrderForm({
             <div className="order-form-grid">
               <label>
                 Customer
-                <select name="customer" value={form.customer} onChange={updateCustomer} required>
-                  <option value="">Pilih customer</option>
-                  {customers.map((customer) => (
-                    <option key={customer.id} value={customer.name}>
-                      {customer.name}
-                    </option>
-                  ))}
-                </select>
+                <SearchableInput
+                  name="customer"
+                  value={form.customer}
+                  onChange={updateCustomer}
+                  options={customers.map((customer) => customer.name).filter(Boolean)}
+                  placeholder="Ketik nama customer"
+                  required
+                />
               </label>
 
               <label>
@@ -661,7 +675,7 @@ function SalesOrderForm({
 
               <label>
                 Depo
-                <SelectWithCurrentValue
+                <SearchableInput
                   name="origin"
                   value={form.origin}
                   onChange={updateField}
@@ -673,7 +687,7 @@ function SalesOrderForm({
 
               <label>
                 Lokasi Tujuan
-                <SelectWithCurrentValue
+                <SearchableInput
                   name="destination"
                   value={form.destination}
                   onChange={updateField}
@@ -685,7 +699,7 @@ function SalesOrderForm({
 
               <label>
                 Terminal
-                <SelectWithCurrentValue
+                <SearchableInput
                   name="terminal"
                   value={form.terminal}
                   onChange={updateField}

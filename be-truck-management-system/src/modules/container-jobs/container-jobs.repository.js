@@ -50,6 +50,11 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
+function periodFromDate(value, fallback = '') {
+  const datePeriod = String(value || '').trim().match(/^(\d{4}-\d{2})-/)?.[1] || '';
+  return normalizeOptionalText(datePeriod || fallback);
+}
+
 function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', includeRpujStage = true, excludeCancelledJobs = false } = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
@@ -687,7 +692,7 @@ export async function updateContainerJob(id, form) {
                cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
                cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                cj.entry_source, cj.historical_period, cj.historical_notes,
-               so.so_number, so.finance_verification_status
+               so.so_number, so.trip_date, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         where cj.id = $1
@@ -817,7 +822,7 @@ export async function updateContainerJob(id, form) {
       ? normalizeEntrySource(form.entrySource)
       : existing.rows[0].entry_source || 'realtime';
     const nextHistoricalPeriod = nextEntrySource === 'historical'
-      ? normalizeOptionalText(hasOwnInput(form, 'historicalPeriod') ? form.historicalPeriod : existing.rows[0].historical_period)
+      ? periodFromDate(existing.rows[0].trip_date, hasOwnInput(form, 'historicalPeriod') ? form.historicalPeriod : existing.rows[0].historical_period)
       : null;
     const nextHistoricalNotes = nextEntrySource === 'historical'
       ? normalizeOptionalText(hasOwnInput(form, 'historicalNotes') ? form.historicalNotes : existing.rows[0].historical_notes)
