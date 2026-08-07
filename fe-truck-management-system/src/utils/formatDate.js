@@ -22,7 +22,7 @@ export function formatDate(value, options = {}) {
   if (!parsed) return '-';
   return new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
-    month: 'short',
+    month: 'long',
     year: 'numeric',
     ...options,
   }).format(parsed);
@@ -30,11 +30,19 @@ export function formatDate(value, options = {}) {
 
 export function formatDateTime(value) {
   if (!value) return '-';
-  return new Intl.DateTimeFormat('id-ID', {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  const date = new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
-    month: 'short',
+    month: 'long',
     year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  }).format(parsed);
+  const time = new Intl.DateTimeFormat('id-ID', {
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+    hourCycle: 'h23',
+    timeZone: 'Asia/Jakarta',
+  }).format(parsed).replace('.', ':');
+  return `${date} ${time} WIB`;
 }

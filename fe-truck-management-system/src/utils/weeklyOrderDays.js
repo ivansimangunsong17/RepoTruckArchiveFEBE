@@ -17,7 +17,7 @@ function formatDayLabel(dateKey) {
   return new Intl.DateTimeFormat('id-ID', {
     weekday: 'short',
     day: '2-digit',
-    month: 'short',
+    month: 'long',
   }).format(date);
 }
 

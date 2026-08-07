@@ -54,7 +54,7 @@ export function formatMasterExpiryDate(value) {
   if (!parsed) return '-';
   return new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
-    month: 'short',
+    month: 'long',
     year: 'numeric',
   }).format(parsed);
 }

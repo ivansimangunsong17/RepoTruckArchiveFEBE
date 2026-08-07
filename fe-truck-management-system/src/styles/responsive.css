@@ -37,6 +37,8 @@
   .sidebar.collapsed .nav-dropdown-chevron { display: block; }
   .sidebar.collapsed .sidebar-help { display: grid; }
   .sidebar.collapsed .nav-link { justify-content: flex-start; width: auto; min-height: 41px; margin: 2px 0; padding: 0 12px; }
+  .sidebar-mobile-account { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; margin-top: auto; padding: 12px; border: 1px solid #343b49; border-radius: 10px; background: #20242d; }
+  .sidebar-mobile-account + .sidebar-help { margin-top: 10px; }
   .sidebar.open { transform: translateX(0); }
   .sidebar-close, .mobile-menu { display: grid; }
   .sidebar-toggle-button { display: none; }

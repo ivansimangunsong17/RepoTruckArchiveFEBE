@@ -114,6 +114,14 @@ function repoConditionLabel(value) {
   return '-';
 }
 
+function getJobPlateNumber(job) {
+  return job?.plateNumber || job?.truck || job?.truckPlate || job?.vehiclePlate || '-';
+}
+
+function getJobDriverName(job) {
+  return job?.driver || job?.driverName || job?.driver_name || '-';
+}
+
 function toValidDate(value) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
@@ -479,6 +487,7 @@ function OrderHistoryPage() {
                   <th>No.</th>
                   <th>Tanggal Selesai</th>
                   <th>Nomor Container</th>
+                  <th>Unit / Sopir</th>
                   <th>Customer</th>
                   <th>Jenis</th>
                   <th>Size</th>
@@ -497,6 +506,10 @@ function OrderHistoryPage() {
                     <td data-label="Nomor Container">
                       <strong className="block text-slate-950">{job.containerNumber || '-'}</strong>
                       <span className="block text-[11px] text-slate-500">{job.soNumber || '-'}</span>
+                    </td>
+                    <td data-label="Unit / Sopir">
+                      <strong className="block text-slate-950">{getJobPlateNumber(job)}</strong>
+                      <span className="block text-[11px] font-semibold text-slate-500">{getJobDriverName(job)}</span>
                     </td>
                     <td data-label="Customer"><strong className="text-slate-800">{job.customer || '-'}</strong></td>
                     <td data-label="Jenis">{job.type || '-'}</td>

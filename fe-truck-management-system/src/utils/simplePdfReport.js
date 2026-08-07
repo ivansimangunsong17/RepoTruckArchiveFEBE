@@ -62,7 +62,7 @@ function drawStrokeRect(x, y, width, height, color = COLORS.line) {
 function formatGeneratedAt(date = new Date()) {
   return new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
-    month: 'short',
+    month: 'long',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',

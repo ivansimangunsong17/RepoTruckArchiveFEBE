@@ -48,6 +48,13 @@ h1, h2, p { margin-top: 0; }
 .sidebar-help span { color: #ff7b80; font-size: .7rem; }
 .sidebar-help strong { color: white; font-size: .8rem; }
 .sidebar-help small { color: #8c9ab0; font-size: .68rem; }
+.sidebar-mobile-account { display: none; }
+.sidebar-mobile-avatar { display: grid; flex: none; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: #b41118; background: #ffe1e2; font-size: .72rem; font-weight: 850; }
+.sidebar-mobile-account > div:nth-child(2) { min-width: 0; }
+.sidebar-mobile-account strong, .sidebar-mobile-account span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-mobile-account strong { color: #f8fafc; font-size: .76rem; }
+.sidebar-mobile-account span { color: #9ca8ba; font-size: .62rem; }
+.sidebar-mobile-account button { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 38px; border: 1px solid #f3b6ba; border-radius: 8px; color: #a8141a; background: #fff4f5; font-size: .72rem; font-weight: 850; }
 .sidebar-backdrop { display: none; }
 
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; height: 68px; padding: 0 30px; border-bottom: 1px solid var(--border); background: #ffffffed; backdrop-filter: blur(10px); }

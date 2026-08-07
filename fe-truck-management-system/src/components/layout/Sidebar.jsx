@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, LogOut, X } from 'lucide-react';
 import { navigationGroups } from '../../constants/navigation';
 import { useAuth } from '../../hooks/useAuth';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
@@ -32,7 +32,7 @@ function isNavigationItemActive(item, pathname) {
 }
 
 function Sidebar({ open, collapsed, onClose }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const location = useLocation();
   const [openDropdowns, setOpenDropdowns] = useState({});
 
@@ -112,6 +112,18 @@ function Sidebar({ open, collapsed, onClose }) {
           );
         })}
       </nav>
+
+      <div className="sidebar-mobile-account">
+        <div className="sidebar-mobile-avatar">{user?.fullName?.slice(0, 2).toUpperCase()}</div>
+        <div>
+          <strong>{user?.fullName || '-'}</strong>
+          <span>{user?.email || '-'}</span>
+        </div>
+        <button type="button" onClick={signOut}>
+          <LogOut size={16} />
+          Keluar
+        </button>
+      </div>
 
       <div className="sidebar-help">
         <span>Pusat bantuan</span>

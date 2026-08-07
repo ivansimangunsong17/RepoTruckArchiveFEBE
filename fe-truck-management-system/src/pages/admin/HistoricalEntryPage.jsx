@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCheck, Download, Lock, PencilLine, Plus, RefreshCw, Save, Unlock, X } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import EmptyState from '../../components/common/EmptyState';
+import DateTimeWibInput from '../../components/common/DateTimeWibInput';
 import SalesOrderForm from '../../components/forms/SalesOrderForm';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { useFeedback } from '../../hooks/useFeedback';
@@ -1076,11 +1077,11 @@ function HistoricalEntryPage() {
                       </label>
                       <label>
                         Mulai Jalan
-                        <input type="datetime-local" value={jobForm.runningAt} onChange={(event) => setJobForm((current) => ({ ...current, runningAt: event.target.value }))} />
+                        <DateTimeWibInput value={jobForm.runningAt} onChange={(value) => setJobForm((current) => ({ ...current, runningAt: value }))} dateLabel="Tanggal mulai jalan" timeLabel="Jam mulai jalan WIB" />
                       </label>
                       <label>
                         Selesai
-                        <input type="datetime-local" value={jobForm.completedAt} onChange={(event) => setJobForm((current) => ({ ...current, completedAt: event.target.value }))} />
+                        <DateTimeWibInput value={jobForm.completedAt} onChange={(value) => setJobForm((current) => ({ ...current, completedAt: value }))} dateLabel="Tanggal selesai" timeLabel="Jam selesai WIB" />
                       </label>
                     </div>
                     {jobForm.status === 'cancelled' ? (

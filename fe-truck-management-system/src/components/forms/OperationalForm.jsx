@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Plus, Send, Trash2, X } from 'lucide-react';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
+import DateTimeWibInput from '../common/DateTimeWibInput';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
 import { calculateUjRecommendation } from '../../utils/ujRecommendation';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -1431,8 +1432,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     </small>
                   ) : null}
                 </label>
-                <label className="operational-date-field operational-date-start">Waktu Mulai<input name="runningAt" type="datetime-local" value={form.runningAt} onChange={updateField} disabled={!canEditTimeline} /></label>
-                <label className="operational-date-field operational-date-end">Waktu Selesai<input name="completedAt" type="datetime-local" value={form.completedAt} onChange={updateField} disabled={!canEditTimeline} /></label>
+                <label className="operational-date-field operational-date-start">
+                  Waktu Mulai
+                  <DateTimeWibInput value={form.runningAt} onChange={(value) => setForm((current) => ({ ...current, runningAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal mulai" timeLabel="Jam mulai WIB" />
+                </label>
+                <label className="operational-date-field operational-date-end">
+                  Waktu Selesai
+                  <DateTimeWibInput value={form.completedAt} onChange={(value) => setForm((current) => ({ ...current, completedAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal selesai" timeLabel="Jam selesai WIB" />
+                </label>
               </div>
             </div>
           </>

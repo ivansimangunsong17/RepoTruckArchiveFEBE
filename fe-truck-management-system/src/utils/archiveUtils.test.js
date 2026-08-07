@@ -41,10 +41,14 @@ describe('formatting', () => {
   });
 
   it('memformat tanggal valid menggunakan locale Indonesia', () => {
-    expect(formatDate('2026-06-23')).toMatch(/23.*Jun.*2026/i);
+    expect(formatDate('2026-06-23')).toMatch(/23.*Juni.*2026/i);
   });
 
   it('tidak menggeser tanggal saat menerima format YYYY-MM-DD', () => {
-    expect(formatDate('2026-07-17')).toMatch(/17.*Jul.*2026/i);
+    expect(formatDate('2026-07-17')).toMatch(/17.*Juli.*2026/i);
+  });
+
+  it('memformat tanggal dan jam dengan keterangan WIB', () => {
+    expect(formatDateTime('2026-08-07T10:35:00+07:00')).toMatch(/07.*Agustus.*2026.*10:35.*WIB/i);
   });
 });
