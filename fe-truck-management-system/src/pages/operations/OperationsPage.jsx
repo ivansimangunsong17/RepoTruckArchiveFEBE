@@ -30,6 +30,7 @@ import { parseOtherCost } from '../../utils/otherCost';
 import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
+const DATABASE_FETCH_PAGE_SIZE = 200;
 const STATUS_ORDER = { received: 0, running: 1, repo_stored: 2, completed: 3, cancelled: 4 };
 const EMPTY_STATUS_COUNTS = { received: 0, running: 0, repo_stored: 0, completed: 0, cancelled: 0 };
 const CANCEL_SOURCE_OPTIONS = [
@@ -212,6 +213,50 @@ function groupJobsBySo(rows = []) {
   return Array.from(groups.values());
 }
 
+function formatSoGroupSummary(group) {
+  const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
+  const completed = jobs.filter((job) => job.status === 'completed').length;
+  const running = jobs.filter((job) => job.status === 'running' || isRepoStoredJob(job)).length;
+  const cancelled = jobs.filter((job) => job.status === 'cancelled').length;
+  const waiting = Math.max(0, jobs.length - completed - running - cancelled);
+  const parts = [
+    `Total ${jobs.length}`,
+    `Sudah jalan ${completed + running}`,
+    `Belum ${waiting}`,
+  ];
+  if (cancelled) parts.push(`Batal ${cancelled}`);
+  return parts.join(' | ');
+}
+
+async function fetchAllContainerJobs(params = {}) {
+  const firstResult = await fetchContainerJobsPage({
+    ...params,
+    page: 1,
+    pageSize: DATABASE_FETCH_PAGE_SIZE,
+  });
+  const total = Number(firstResult?.total || 0);
+  const rows = Array.isArray(firstResult?.rows) ? [...firstResult.rows] : [];
+  let page = 2;
+
+  while (rows.length < total) {
+    const nextResult = await fetchContainerJobsPage({
+      ...params,
+      page,
+      pageSize: DATABASE_FETCH_PAGE_SIZE,
+    });
+    const nextRows = Array.isArray(nextResult?.rows) ? nextResult.rows : [];
+    if (!nextRows.length) break;
+    rows.push(...nextRows);
+    page += 1;
+  }
+
+  return {
+    ...firstResult,
+    rows,
+    total,
+  };
+}
+
 function flattenDemoJobs(orders) {
   return orders.filter((order) => order.status !== 'cancelled').flatMap((order) => order.containers.map((container) => ({
     qty20ft: order.containers.filter((item) => String(item.size || '').toUpperCase().replace(/\s/g, '') === '20FT').length,
@@ -359,10 +404,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     return matchesQuery && matchesStatus && matchesRpujStage && matchesRepoStorage && matchesDocumentFollowUp;
   })), [demoJobs, documentFollowUp, effectiveStatus, query, repoStorageOnly, rpujStage]);
 
-  const jobs = archive.isDatabaseMode
-    ? sortOperationalJobs(databaseJobs)
-    : filteredDemoJobs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const groupedJobs = useMemo(() => groupJobsBySo(jobs), [jobs]);
+  const visibleJobs = archive.isDatabaseMode ? sortOperationalJobs(databaseJobs) : filteredDemoJobs;
+  const allGroupedJobs = useMemo(() => groupJobsBySo(visibleJobs), [visibleJobs]);
   const counts = archive.isDatabaseMode ? statusCounts : {
     received: demoJobs.filter((job) => job.status === 'received').length,
     running: demoJobs.filter((job) => job.status === 'running').length,
@@ -377,8 +420,14 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   };
   const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoJobs.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const totalGroups = allGroupedJobs.length;
+  const totalPages = Math.max(1, Math.ceil(totalGroups / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
+  const groupedJobs = useMemo(() => (
+    allGroupedJobs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  ), [allGroupedJobs, currentPage]);
+  const groupShowingFrom = totalGroups ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
+  const groupShowingTo = Math.min(currentPage * PAGE_SIZE, totalGroups);
   const pendingCancelJobs = useMemo(() => (
     (archive.isDatabaseMode ? pendingDatabaseJobs : flattenPendingCancelJobs(archive.orders || []))
       .filter((job) => job && job.cancelRequestStatus === 'submitted')
@@ -389,6 +438,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   }, [query, rpujStage, status]);
 
   useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
 
     let active = true;
@@ -396,9 +449,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       setLoading(true);
       setError('');
       try {
-        const result = await fetchContainerJobsPage({
-          page,
-          pageSize: PAGE_SIZE,
+        const result = await fetchAllContainerJobs({
           query,
           status: documentFollowUp ? 'completed' : effectiveStatus,
           rpujStage: documentFollowUp || repoStorageOnly ? '' : rpujStage,
@@ -425,7 +476,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive.isDatabaseMode, documentFollowUp, effectiveStatus, listVersion, page, query, repoStorageOnly, rpujStage]);
+  }, [archive.isDatabaseMode, documentFollowUp, effectiveStatus, listVersion, query, repoStorageOnly, rpujStage]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -654,7 +705,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   }
 
   return (
-    <div className={`page ${documentFollowUp ? 'operational-document-followup-page' : ''} ${repoStorageOnly ? 'operational-repo-storage-page' : ''}`.trim()}>
+    <div className={`page operations-page ${documentFollowUp ? 'operational-document-followup-page' : ''} ${repoStorageOnly ? 'operational-repo-storage-page' : ''}`.trim()}>
       <PageHeader
         eyebrow="Operational"
         title={repoStorageOnly ? 'Container Titip' : documentFollowUp ? 'Dokumen Container Belum Lengkap' : 'Container Job'}
@@ -755,7 +806,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               );
             })}
           </div>
-          <small>Menampilkan {totalItems} dari {totalJobs} container job</small>
+          <small>Menampilkan {totalGroups} SO dari {totalItems} container job</small>
           {query.trim() || effectiveStatus || rpujStage ? (
             <button className="filter-reset-link" type="button" onClick={() => {
               setQuery('');
@@ -777,13 +828,18 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           {!loading && !error ? groupedJobs.map((group, groupIndex) => (
             <section className="operational-so-group" key={group.key}>
               <header className="operational-so-header">
-                <span className="operational-so-number">SO {groupIndex + 1}</span>
-                <div>
-                  <span>Sales Order</span>
-                  <strong>{group.soNumber}</strong>
-                  <small>{group.customer} - {group.route}</small>
+                <span className="operational-so-number">SO {groupShowingFrom + groupIndex}</span>
+                <div className="operational-so-identity">
+                  <div className="operational-so-title">
+                    <span>Sales Order</span>
+                    <strong>{group.soNumber}</strong>
+                  </div>
+                  <div className="operational-so-meta">
+                    <small><b>Customer</b>{group.customer}</small>
+                    <small><b>Rute</b>{group.route}</small>
+                  </div>
                 </div>
-                <em>{group.jobs.length} container</em>
+                <em>{formatSoGroupSummary(group)}</em>
               </header>
               <div className="operational-container-list">
                 {group.jobs.map((job) => {
@@ -842,7 +898,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               </div>
             </section>
           )) : null}
-          {!loading && !error && !totalItems ? (
+          {!loading && !error && !totalGroups ? (
             <div className="archive-empty-wrapper">
               <EmptyState
                 title={repoStorageOnly ? 'Belum ada container titip' : documentFollowUp ? 'Semua dokumen sudah lengkap' : 'Belum ada Container Job'}
@@ -855,11 +911,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
             </div>
           ) : null}
         </div>
-        {!loading && !error && totalItems ? (
+        {!loading && !error && totalGroups ? (
           <div className="master-pagination">
             <span>
-              Menampilkan {(currentPage - 1) * PAGE_SIZE + 1}-
-              {Math.min(currentPage * PAGE_SIZE, totalItems)} dari {totalItems} container job
+              Menampilkan {groupShowingFrom}-{groupShowingTo} dari {totalGroups} SO ({totalItems} container job)
             </span>
             <div>
               <button type="button" aria-label="Halaman sebelumnya" disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>

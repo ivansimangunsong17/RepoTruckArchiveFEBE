@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { fallbackCustomers } from '../../data/masterData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
+import { formatDate } from '../../utils/formatDate';
 
 const REFERENCE_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
 
@@ -293,6 +294,48 @@ function preventNumberWheelChange(event) {
   event.currentTarget.blur();
 }
 
+function preventEnterSubmit(event) {
+  if (event.key !== 'Enter') return;
+  const tagName = String(event.target?.tagName || '').toLowerCase();
+  const inputType = String(event.target?.type || '').toLowerCase();
+  if (tagName === 'textarea' || inputType === 'button' || inputType === 'submit') return;
+  event.preventDefault();
+}
+
+function validateSalesOrderDraft({
+  form,
+  lineItems,
+  selectedCustomer,
+  existingOrders,
+  order,
+}) {
+  const soNumber = form.soNumber.trim();
+  const duplicates = soNumber && existingOrders.some((item) =>
+    item.id !== order?.id &&
+    String(item.soNumber || '').toLowerCase() === soNumber.toLowerCase(),
+  );
+
+  if (duplicates) return 'Nomor Sales Order sudah digunakan.';
+  if (!selectedCustomer) return 'Pilih customer dari Master Customer.';
+  if (!form.soDate) return 'Tanggal Sales Order wajib diisi.';
+  if (!form.tripDate) return 'Tanggal Jalan wajib diisi.';
+  if (!form.origin.trim()) return 'Depo wajib diisi.';
+  if (!form.destination.trim()) return 'Lokasi tujuan wajib diisi.';
+  if (!lineItems.length) return 'Tambahkan minimal 1 rincian.';
+  const invalidLineItem = lineItems.find((item) => !item.serviceName || Number(item.qty || 0) < 1 || Number(item.price || 0) < 0);
+  if (invalidLineItem) return 'Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.';
+  const missingContainerPrice = lineItems.find((item) => isContainerService(item.serviceName) && Number(item.price || 0) <= 0);
+  if (missingContainerPrice) return 'Harga container D20/D40 wajib diisi lebih dari 0.';
+  const requiresContainerType = lineItems.find((item) => isContainerService(item.serviceName) && !item.containerType);
+  if (requiresContainerType) return 'Pilih jenis container untuk rincian D20 atau D40.';
+  const requiresOtherNotes = lineItems.find((item) => isOtherService(item.serviceName) && !item.notes.trim());
+  if (requiresOtherNotes) return 'Isi catatan untuk rincian Jasa Lainnya.';
+  if (form.paymentType === 'tempo' && Number(form.paymentTermDays || 0) < 1) {
+    return 'Termin pembayaran wajib diisi minimal 1 hari untuk pembayaran Tempo.';
+  }
+  return '';
+}
+
 function SalesOrderForm({
   onClose,
   onSubmit,
@@ -315,14 +358,28 @@ function SalesOrderForm({
   const terminalOptions = useMemo(() => normalizeMasterOptions(providedTerminals), [providedTerminals]);
   const destinationOptions = useMemo(() => normalizeMasterOptions(providedDestinations), [providedDestinations]);
 
-  const [form, setForm] = useState(() => createInitialForm(order));
+  function createFormDraft() {
+    const draft = createInitialForm(order);
+    if (historicalMode && !order) {
+      return {
+        ...draft,
+        soDate: '',
+        tripDate: '',
+      };
+    }
+    return draft;
+  }
+
+  const [form, setForm] = useState(createFormDraft);
   const [error, setError] = useState('');
+  const [reviewPayload, setReviewPayload] = useState(null);
   const editing = Boolean(order);
 
   useEffect(() => {
-    setForm(createInitialForm(order));
+    setForm(createFormDraft());
     setError('');
-  }, [order]);
+    setReviewPayload(null);
+  }, [order, historicalMode]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => String(customer.name || '').toLowerCase() === String(form.customer || '').toLowerCase()),
@@ -456,26 +513,16 @@ function SalesOrderForm({
     event.preventDefault();
 
     const soNumber = form.soNumber.trim();
-    const duplicates = soNumber && existingOrders.some((item) =>
-      item.id !== order?.id &&
-      String(item.soNumber || '').toLowerCase() === soNumber.toLowerCase(),
-    );
-
-    if (duplicates) return setError('Nomor Sales Order sudah digunakan.');
-    if (!selectedCustomer) return setError('Pilih customer dari Master Customer.');
-    if (!form.origin.trim()) return setError('Depo wajib diisi.');
-    if (!form.destination.trim()) return setError('Lokasi tujuan wajib diisi.');
-    if (!lineItems.length) return setError('Tambahkan minimal 1 rincian.');
-    const invalidLineItem = lineItems.find((item) => !item.serviceName || Number(item.qty || 0) < 1 || Number(item.price || 0) < 0);
-    if (invalidLineItem) return setError('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.');
-    const missingContainerPrice = lineItems.find((item) => isContainerService(item.serviceName) && Number(item.price || 0) <= 0);
-    if (missingContainerPrice) return setError('Harga container D20/D40 wajib diisi lebih dari 0.');
-    const requiresContainerType = lineItems.find((item) => isContainerService(item.serviceName) && !item.containerType);
-    if (requiresContainerType) return setError('Pilih jenis container untuk rincian D20 atau D40.');
-    const requiresOtherNotes = lineItems.find((item) => isOtherService(item.serviceName) && !item.notes.trim());
-    if (requiresOtherNotes) return setError('Isi catatan untuk rincian Jasa Lainnya.');
-    if (form.paymentType === 'tempo' && Number(form.paymentTermDays || 0) < 1) {
-      return setError('Termin pembayaran wajib diisi minimal 1 hari untuk pembayaran Tempo.');
+    const validationError = validateSalesOrderDraft({
+      form,
+      lineItems,
+      selectedCustomer,
+      existingOrders,
+      order,
+    });
+    if (validationError) {
+      setReviewPayload(null);
+      return setError(validationError);
     }
 
     setError('');
@@ -490,7 +537,7 @@ function SalesOrderForm({
     const serviceSummary = summarizeLineItems(normalizedLineItems);
     const containerSummary = normalizedLineItems.map(formatLineItemLabel).join(' + ');
     const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt, order?.containers || []);
-    onSubmit({
+    setReviewPayload({
       ...form,
       soNumber,
       financeVerificationStatus: historicalMode && soNumber ? 'verified' : form.financeVerificationStatus,
@@ -517,6 +564,12 @@ function SalesOrderForm({
     });
   }
 
+  function confirmSubmit() {
+    if (!reviewPayload) return;
+    onSubmit(reviewPayload);
+    setReviewPayload(null);
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -538,7 +591,7 @@ function SalesOrderForm({
           </button>
         </header>
 
-        <form onSubmit={handleSubmit} noValidate>
+        <form onSubmit={handleSubmit} onKeyDown={preventEnterSubmit} noValidate>
           {error ? <div className="alert error sales-order-error">{error}</div> : null}
 
           <div className="form-section">
@@ -913,10 +966,63 @@ function SalesOrderForm({
             </button>
 
             <button className="primary-button" type="submit">
-              {editing ? 'Simpan Perubahan' : 'Simpan Sales Order'}
+              {editing ? 'Cek Perubahan' : 'Cek Sales Order'}
             </button>
           </footer>
         </form>
+
+        {reviewPayload ? (
+          <div className="sales-order-review-backdrop" role="presentation" onMouseDown={() => setReviewPayload(null)}>
+            <section className="sales-order-review-modal" role="dialog" aria-modal="true" aria-labelledby="sales-order-review-title" onMouseDown={(event) => event.stopPropagation()}>
+              <header>
+                <div>
+                  <span>Validasi Sales Order</span>
+                  <h3 id="sales-order-review-title">Cek data sebelum disimpan</h3>
+                </div>
+                <button type="button" aria-label="Tutup validasi" onClick={() => setReviewPayload(null)}>
+                  <X size={18} />
+                </button>
+              </header>
+
+              <div className="sales-order-review-body">
+                <div className="sales-order-review-grid">
+                  <div><span>Customer</span><strong>{reviewPayload.customer || '-'}</strong></div>
+                  <div><span>No. SO</span><strong>{reviewPayload.soNumber || 'Menunggu Finance'}</strong></div>
+                  <div><span>Tanggal SO</span><strong>{formatDate(reviewPayload.soDate)}</strong></div>
+                  <div><span>Tanggal Jalan</span><strong>{formatDate(reviewPayload.tripDate)}</strong></div>
+                  <div><span>Depo</span><strong>{reviewPayload.origin || '-'}</strong></div>
+                  <div><span>Tujuan</span><strong>{reviewPayload.destination || '-'}</strong></div>
+                  <div><span>Shipment</span><strong>{reviewPayload.shipment || '-'}</strong></div>
+                  <div><span>Pembayaran</span><strong>{reviewPayload.paymentType === 'tempo' ? `Tempo ${reviewPayload.paymentTermDays} hari` : 'Cash'}</strong></div>
+                </div>
+
+                <div className="sales-order-review-lines">
+                  <span>Rincian Order</span>
+                  {reviewPayload.lineItems.map((item, index) => (
+                    <div key={item.id || `${item.serviceName}-${index}`}>
+                      <strong>{formatLineItemLabel(item)}</strong>
+                      <span>{Number(item.total || 0).toLocaleString('id-ID')}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="sales-order-review-total">
+                  <span>{reviewPayload.containers.length} container job akan dibuat</span>
+                  <strong>Rp {Number(reviewPayload.totalAmount || 0).toLocaleString('id-ID')}</strong>
+                </div>
+              </div>
+
+              <footer>
+                <button className="secondary-button" type="button" onClick={() => setReviewPayload(null)}>
+                  Kembali Edit
+                </button>
+                <button className="primary-button" type="button" onClick={confirmSubmit}>
+                  {editing ? 'Simpan Perubahan' : 'Simpan Sales Order'}
+                </button>
+              </footer>
+            </section>
+          </div>
+        ) : null}
       </section>
     </div>
   );

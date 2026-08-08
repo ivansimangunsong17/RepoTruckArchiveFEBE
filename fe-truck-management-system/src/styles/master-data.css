@@ -580,6 +580,255 @@
     justify-content: flex-start;
   }
 }
+
+@media (max-width: 760px) {
+  .finance-workflow-page {
+    padding: 8px !important;
+  }
+
+  .finance-workflow-panel {
+    border-radius: 10px !important;
+  }
+
+  .finance-workflow-panel > div:first-child {
+    padding: 12px !important;
+  }
+
+  .finance-workflow-panel > div:first-child > div {
+    gap: 10px !important;
+  }
+
+  .finance-workflow-panel > div:first-child > div > div:first-child,
+  .finance-workflow-panel > div:first-child > div > div:last-child {
+    width: 100%;
+  }
+
+  .finance-workflow-panel > div:first-child > div > div:last-child {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-workflow-panel > div:first-child > div > div:last-child > * {
+    justify-content: center;
+    min-height: 34px;
+  }
+
+  .finance-workflow-panel h2 {
+    font-size: .9rem !important;
+    line-height: 1.25;
+  }
+
+  .finance-workflow-panel [role="tablist"] {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .finance-workflow-panel [role="tablist"] > button {
+    justify-content: space-between;
+    width: 100%;
+    min-height: 38px;
+  }
+
+  .finance-order-verification > div:first-child {
+    padding: 10px 12px !important;
+  }
+
+  .finance-order-verification > div:first-child .max-w-sm {
+    max-width: none;
+  }
+
+  .finance-order-verification > div:nth-child(2),
+  .finance-rpuj-workflow > div:first-child,
+  .finance-invoice-table-wrap + .master-pagination,
+  .finance-workflow-panel .master-pagination {
+    padding-inline: 10px !important;
+  }
+
+  .finance-rpuj-workflow > div:first-child {
+    align-items: stretch !important;
+  }
+
+  .finance-rpuj-workflow > div:first-child > div:first-child,
+  .finance-rpuj-workflow > div:first-child > div:last-child {
+    width: 100%;
+  }
+
+  .finance-rpuj-workflow > div:first-child > div:last-child,
+  .finance-invoice-table-wrap ~ .master-pagination {
+    justify-content: stretch;
+  }
+
+  .finance-rpuj-workflow .flex.flex-wrap.items-end.gap-1\.5,
+  .finance-invoice-table-wrap ~ .master-pagination,
+  .finance-workflow-panel .master-pagination {
+    width: 100%;
+  }
+
+  .finance-rpuj-workflow select,
+  .finance-workflow-panel select {
+    min-width: 0 !important;
+  }
+
+  .finance-workflow-page .table-wrap,
+  .finance-rpuj-workflow .table-wrap {
+    overflow: visible;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    border-collapse: separate;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) colgroup,
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) thead {
+    position: absolute;
+    overflow: hidden;
+    width: 1px;
+    height: 1px;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) tbody {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) tbody tr {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid #dbe3ef;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 2px 8px #14213d0a;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) tr[aria-hidden="true"] {
+    display: none;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) .finance-group-row {
+    margin-top: 2px;
+    border-color: #cbd5e1;
+    background: #eef4fb;
+    box-shadow: none;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) .finance-group-row td {
+    display: block;
+    padding: 10px 12px !important;
+    border: 0;
+    background: transparent;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) td {
+    display: grid;
+    grid-template-columns: minmax(104px, .38fr) minmax(0, 1fr);
+    align-items: center;
+    min-height: 42px;
+    max-width: none;
+    padding: 9px 12px !important;
+    border-top: 1px solid #eef2f7;
+    text-align: left !important;
+    white-space: normal;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) td:first-child {
+    border-top: 0;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) td::before {
+    padding-right: 12px;
+    color: #64748b;
+    font-size: .62rem;
+    font-weight: 850;
+    text-transform: uppercase;
+    content: attr(data-label);
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) .finance-group-row td::before,
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table) tr[aria-hidden="true"] td::before {
+    display: none;
+  }
+
+  .finance-workflow-page .finance-rpuj-action-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    min-width: 0 !important;
+  }
+
+  .finance-workflow-page .finance-rpuj-action-grid > button:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .finance-workflow-page .finance-rpuj-action-grid .col-span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .finance-workflow-page .finance-rpuj-action-grid button,
+  .finance-workflow-page .finance-rpuj-action-grid a,
+  .finance-workflow-page .finance-rpuj-action-grid span {
+    min-width: 0;
+    min-height: 36px;
+  }
+
+  .finance-invoice-table-wrap {
+    overflow: visible;
+  }
+
+  .finance-invoice-table tbody {
+    padding: 10px;
+  }
+
+  .finance-invoice-table td {
+    grid-template-columns: minmax(104px, .38fr) minmax(0, 1fr);
+    min-height: 42px;
+  }
+
+  .finance-invoice-so {
+    color: #991b1b !important;
+    font-weight: 900 !important;
+  }
+
+  .finance-invoice-customer span:first-child {
+    font-size: .78rem;
+    white-space: normal;
+  }
+
+  .finance-invoice-action-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    width: 100%;
+  }
+
+  .finance-table-action-button,
+  .finance-table-action-button.is-icon-only {
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+  }
+
+  .finance-invoice-number input {
+    min-height: 38px;
+  }
+
+  .finance-workflow-panel .master-pagination {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .finance-workflow-panel .master-pagination > div,
+  .finance-workflow-panel .master-pagination-controls {
+    justify-content: space-between;
+  }
+}
 .finance-table-action-button:disabled {
   cursor: not-allowed;
   opacity: .42;

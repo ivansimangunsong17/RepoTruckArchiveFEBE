@@ -19,15 +19,21 @@ const locationMasters = {
 };
 
 async function fillBaseFields(user, overrides = {}) {
-  await user.selectOptions(screen.getByLabelText('Customer'), 'PT Armada Test');
+  fireEvent.change(screen.getByLabelText('Customer'), {
+    target: { value: 'PT Armada Test' },
+  });
   const soInput = screen.queryByLabelText('No. Sales Order');
   if (soInput) {
     fireEvent.change(soInput, {
       target: { value: overrides.soNumber || 'SO-2026-TEST' },
     });
   }
-  await user.selectOptions(screen.getByLabelText('Depo'), overrides.origin || 'Jakarta');
-  await user.selectOptions(screen.getByLabelText('Lokasi Tujuan'), overrides.destination || 'Bandung');
+  fireEvent.change(screen.getByLabelText('Depo'), {
+    target: { value: overrides.origin || 'Jakarta' },
+  });
+  fireEvent.change(screen.getByLabelText('Lokasi Tujuan'), {
+    target: { value: overrides.destination || 'Bandung' },
+  });
 }
 
 async function fillFirstLineItem(user, overrides = {}) {
@@ -48,6 +54,14 @@ async function fillFirstLineItem(user, overrides = {}) {
   fireEvent.change(priceInput, {
     target: { value: overrides.price || '0' },
   });
+}
+
+async function openReview(user, editing = false) {
+  await user.click(screen.getByRole('button', { name: editing ? 'Cek Perubahan' : 'Cek Sales Order' }));
+}
+
+async function confirmReview(user, editing = false) {
+  await user.click(screen.getByRole('button', { name: editing ? 'Simpan Perubahan' : 'Simpan Sales Order' }));
 }
 
 describe('SalesOrderForm', () => {
@@ -81,9 +95,12 @@ describe('SalesOrderForm', () => {
 
     await fillBaseFields(user);
     await fillFirstLineItem(user, { serviceName: 'Bon Muat/Bongkar', quantity: '1', price: '50000' });
-    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    await openReview(user);
 
     expect(screen.queryByLabelText('No. Sales Order')).not.toBeInTheDocument();
+    expect(screen.getByText('Cek data sebelum disimpan')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await confirmReview(user);
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ soNumber: '' }));
   });
 
@@ -106,7 +123,7 @@ describe('SalesOrderForm', () => {
       quantity: '0',
       price: '50000',
     });
-    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    await openReview(user);
 
     expect(screen.getByText('Setiap rincian wajib memiliki layanan, qty minimal 1, dan price tidak boleh negatif.')).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
@@ -132,7 +149,7 @@ describe('SalesOrderForm', () => {
       quantity: '1',
       price: '0',
     });
-    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    await openReview(user);
 
     expect(screen.getByText('Harga container D20/D40 wajib diisi lebih dari 0.')).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
@@ -158,12 +175,15 @@ describe('SalesOrderForm', () => {
       price: '25000',
     });
 
-    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    await openReview(user);
     expect(screen.getByText('Isi catatan untuk rincian Jasa Lainnya.')).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText('Catatan Jasa Lainnya'), 'Biaya seal');
-    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    await openReview(user);
+    expect(screen.getByText('Cek data sebelum disimpan')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await confirmReview(user);
 
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -213,7 +233,10 @@ describe('SalesOrderForm', () => {
     fireEvent.change(qtyInputs[1], { target: { value: '1' } });
     fireEvent.change(priceInputs[1], { target: { value: '50000' } });
 
-    await user.click(screen.getByRole('button', { name: 'Simpan Sales Order' }));
+    await openReview(user);
+    expect(screen.getByText('Cek data sebelum disimpan')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await confirmReview(user);
 
     expect(onSubmit).toHaveBeenCalledOnce();
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -266,11 +289,39 @@ describe('SalesOrderForm', () => {
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText('Customer'), 'PT Armada Test');
+    fireEvent.change(screen.getByLabelText('Customer'), {
+      target: { value: 'PT Armada Test' },
+    });
 
     expect(screen.getByLabelText('PIC Customer')).toHaveValue('Budi');
     expect(screen.getByLabelText('Kontak PIC')).toHaveValue('021-123456');
     expect(screen.getByLabelText('Alamat Customer')).toHaveValue('Jakarta');
+  });
+
+  it('mode data lama tidak otomatis tersimpan saat Enter dan tanggal wajib dipilih manual', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        historicalMode
+      />,
+    );
+
+    expect(screen.getByLabelText('Tanggal Sales Order')).toHaveValue('');
+    expect(screen.getByLabelText('Tanggal Jalan')).toHaveValue('');
+
+    await fillBaseFields(user, { soNumber: 'SO-HIST-001' });
+    await user.keyboard('{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await openReview(user);
+    expect(screen.getByText('Tanggal Sales Order wajib diisi.')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('menampilkan tanggal edit sesuai tanggal kalender dari DB', () => {
@@ -324,7 +375,8 @@ describe('SalesOrderForm', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));
+    await openReview(user, true);
+    await confirmReview(user, true);
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       receivedAt,
@@ -369,7 +421,8 @@ describe('SalesOrderForm', () => {
       />,
     );
 
-    await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));
+    await openReview(user, true);
+    await confirmReview(user, true);
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       containers: [

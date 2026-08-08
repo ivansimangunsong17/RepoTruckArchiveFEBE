@@ -3721,6 +3721,82 @@
   }
 }
 
+@media (max-width: 640px) {
+  .operations-page .page-header {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .operations-page .page-header h1 {
+    margin-bottom: 4px;
+    font-size: 1.22rem;
+    line-height: 1.18;
+  }
+
+  .operations-page .page-header p:not(.eyebrow) {
+    font-size: .72rem;
+    line-height: 1.45;
+  }
+
+  .operations-page .quick-stats.operational-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .operations-page .quick-stats.operational-stats > div {
+    min-height: 78px;
+    padding: 12px;
+  }
+
+  .operations-page .quick-stats.operational-stats strong {
+    font-size: 1.15rem;
+  }
+
+  .operations-page .operational-workspace {
+    overflow: hidden;
+    border-radius: 10px;
+  }
+
+  .operations-page .operational-filter-strip {
+    padding: 11px 12px 8px;
+  }
+
+  .operations-page .job-status-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .operations-page .job-status-tabs button {
+    justify-content: space-between;
+    min-height: 40px;
+    padding-inline: 10px;
+    font-size: .64rem;
+  }
+
+  .operations-page .operational-filter-substrip {
+    gap: 8px;
+    padding: 0 12px 11px;
+  }
+
+  .operations-page .rpuj-filter-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .operations-page .rpuj-filter-tabs button {
+    justify-content: space-between;
+    min-height: 36px;
+    padding-inline: 10px;
+  }
+
+  .operations-page .operational-filter-substrip small {
+    font-size: .63rem;
+  }
+}
+
 /* Grouped SO work queue */
 .operational-so-list {
   display: grid;
@@ -3739,12 +3815,12 @@
 
 .operational-so-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) minmax(250px, auto);
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   position: relative;
   min-height: 48px;
-  padding: 9px 13px 9px 10px;
+  padding: 10px 13px 10px 10px;
   border-bottom: 1px solid #d7e0eb;
   background: #f4f7fb;
 }
@@ -3774,15 +3850,21 @@
   text-transform: uppercase;
 }
 
-.operational-so-header div {
+.operational-so-identity {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.operational-so-title {
+  display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
 
-.operational-so-header span {
+.operational-so-header span,
+.operational-so-meta b {
   color: #7a8391;
   font-size: .55rem;
   font-weight: 900;
@@ -3801,7 +3883,18 @@
   font-weight: 900;
 }
 
+.operational-so-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  min-width: 0;
+}
+
 .operational-so-header small {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
   overflow: hidden;
   color: #64748b;
   font-size: .62rem;
@@ -3810,16 +3903,29 @@
   white-space: nowrap;
 }
 
+.operational-so-header small:first-child {
+  color: #1e293b;
+  font-weight: 900;
+}
+
+.operational-so-meta b {
+  flex: none;
+}
+
 .operational-so-header em {
+  justify-self: end;
   min-height: 22px;
-  padding: 4px 8px;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  color: #334155;
-  background: #fff;
-  font-size: .56rem;
+  padding: 5px 9px;
+  border: 1px solid #bae6fd;
+  border-radius: 7px;
+  color: #075985;
+  background: #f0f9ff;
+  font-size: .58rem;
   font-style: normal;
   font-weight: 900;
+  line-height: 1.25;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .operational-container-list {
@@ -4299,9 +4405,19 @@
 }
 
 @media (max-width: 920px) {
-  .operational-so-header div {
-    grid-template-columns: 1fr;
-    gap: 2px;
+  .operational-so-header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .operational-so-header em {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .operational-so-meta {
+    gap: 3px 8px;
   }
 
   .operational-container-row {
@@ -4320,5 +4436,269 @@
 
   .cancel-review-actions {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .operations-page .operational-so-list {
+    gap: 11px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .operations-page .operational-so-group {
+    border-color: #dbe4ef;
+    border-radius: 10px;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, .05);
+  }
+
+  .operations-page .operational-so-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    min-height: 0;
+    padding: 11px 12px 10px;
+    background: #f4f7fb;
+  }
+
+  .operations-page .operational-so-header::before {
+    width: 3px;
+  }
+
+  .operations-page .operational-so-number {
+    justify-self: start;
+    min-width: 50px;
+    min-height: 28px;
+    padding-inline: 9px;
+    font-size: .58rem;
+  }
+
+  .operations-page .operational-so-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .operations-page .operational-so-title strong {
+    font-size: .82rem;
+  }
+
+  .operations-page .operational-so-meta {
+    display: grid;
+    gap: 4px;
+  }
+
+  .operations-page .operational-so-header small {
+    display: grid;
+    gap: 2px;
+    white-space: normal;
+  }
+
+  .operations-page .operational-so-header small:first-child {
+    color: #111827;
+  }
+
+  .operations-page .operational-so-header em {
+    grid-column: auto;
+    justify-self: stretch;
+    min-height: 30px;
+    padding: 7px 9px;
+    border-color: #bae6fd;
+    border-radius: 8px;
+    background: #f0f9ff;
+    font-size: .62rem;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .operations-page .operational-container-list {
+    gap: 9px;
+    padding: 10px;
+    background: #fff;
+  }
+
+  .operations-page .operational-container-row,
+  .operations-page .operational-container-row.is-repo-stored {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 8px;
+    min-height: 0;
+    padding: 10px;
+    border: 1px solid #e5edf6;
+    border-radius: 10px;
+    background: #fbfdff;
+  }
+
+  .operations-page .operational-container-row:first-child {
+    border-top: 1px solid #e5edf6;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored {
+    border-left: 3px solid #2563eb;
+    background: #f8fbff;
+  }
+
+  .operations-page .container-row-main {
+    grid-column: 1 / -1;
+    gap: 4px;
+    padding-bottom: 2px;
+  }
+
+  .operations-page .container-row-main strong {
+    font-size: .86rem;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-main small {
+    font-size: .62rem;
+    line-height: 1.35;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-status,
+  .operations-page .container-rpuj-status,
+  .operations-page .container-row-assignment,
+  .operations-page .container-row-docs {
+    min-height: 58px;
+    padding: 9px 10px;
+    border: 1px solid #e5edf6;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored .container-row-status {
+    display: none;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored .container-rpuj-status,
+  .operations-page .operational-container-row.is-repo-stored .container-row-assignment {
+    grid-column: auto;
+  }
+
+  .operations-page .container-row-status {
+    align-content: start;
+  }
+
+  .operations-page .container-row-status::before,
+  .operations-page .container-row-assignment::before,
+  .operations-page .container-row-docs::before {
+    display: block;
+    color: #8a94a5;
+    font-size: .56rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    content: attr(data-mobile-label);
+  }
+
+  .operations-page .container-row-status::before {
+    content: "Status";
+  }
+
+  .operations-page .container-row-assignment::before {
+    content: "Unit / Sopir";
+  }
+
+  .operations-page .container-row-docs::before {
+    content: "Dokumen";
+  }
+
+  .operations-page .container-row-status .status-badge {
+    width: fit-content;
+    min-height: 24px;
+    font-size: .61rem;
+  }
+
+  .operations-page .container-action-hint {
+    min-height: 21px;
+    font-size: .56rem;
+    white-space: normal;
+  }
+
+  .operations-page .container-rpuj-status {
+    grid-template-columns: 6px minmax(0, 1fr);
+    align-content: start;
+    gap: 3px 7px;
+  }
+
+  .operations-page .container-rpuj-status span {
+    font-size: .56rem;
+  }
+
+  .operations-page .container-rpuj-status strong {
+    font-size: .68rem;
+    line-height: 1.25;
+  }
+
+  .operations-page .container-rpuj-status small {
+    font-size: .58rem;
+    line-height: 1.35;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-assignment span {
+    align-items: flex-start;
+    font-size: .62rem;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-docs {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+  }
+
+  .operations-page .container-row-docs > span {
+    display: none;
+  }
+
+  .operations-page .container-row-docs::before {
+    grid-column: 1 / -1;
+  }
+
+  .operations-page .container-row-docs div {
+    align-self: center;
+    height: 6px;
+  }
+
+  .operations-page .container-row-docs strong {
+    font-size: .66rem;
+  }
+
+  .operations-page .container-row-docs small {
+    font-size: .58rem;
+    line-height: 1.35;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .operations-page .container-row-actions .secondary-button,
+  .operations-page .container-row-actions .primary-button,
+  .operations-page .container-row-actions .operational-primary-action {
+    min-height: 39px;
+    font-size: .66rem;
+  }
+
+  .operations-page .container-row-actions .operational-primary-action:last-child:nth-child(odd),
+  .operations-page .container-row-actions .repo:last-child:nth-child(odd),
+  .operations-page .container-row-actions .secondary-button:only-child {
+    grid-column: 1 / -1;
+  }
+
+  .operations-page .master-pagination {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .operations-page .master-pagination > div {
+    justify-content: space-between;
   }
 }

@@ -872,7 +872,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   }
 
   return (
-    <div className="page">
+    <div className={`page sales-orders-page ${customerDocumentsOnly ? 'customer-documents-page' : ''}`}>
       <PageHeader
         eyebrow="Sales"
         title={customerDocumentsOnly ? 'Dokumen Customer' : 'Daftar Sales Order'}
@@ -947,18 +947,21 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                         <span>Nomor SO</span>
                         <strong>{order.soNumber || 'Menunggu Finance'}</strong>
                       </div>
-                      <div>
+                      <div className="order-customer-summary">
                         <span>Customer</span>
                         <strong>{order.customer}</strong>
                       </div>
-                      <div>
+                      <div className="order-shipment-summary">
                         <span>Jenis Order</span>
                         <strong>{shipmentLabel}</strong>
                       </div>
                       <div className="order-container-summary">
                         <span>Container</span>
                         <strong>{containerProgress.active}/{containerProgress.total || 0} Aktif</strong>
-                        {containerProgress.cancelled ? <small>{containerProgress.cancelled} batal</small> : null}
+                        <small>
+                          Selesai {containerProgress.completed} | Jalan {containerProgress.running} | Belum {containerProgress.waiting}
+                          {containerProgress.cancelled ? ` | Batal ${containerProgress.cancelled}` : ''}
+                        </small>
                       </div>
                       <div className="order-billing-summary">
                         <span>Status</span>

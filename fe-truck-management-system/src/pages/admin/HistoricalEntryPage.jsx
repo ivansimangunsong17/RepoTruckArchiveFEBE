@@ -362,6 +362,14 @@ function getHistoricalEditableStatus(status) {
   return status === 'cancelled' ? 'cancelled' : 'completed';
 }
 
+function preventEnterSubmit(event) {
+  if (event.key !== 'Enter') return;
+  const tagName = String(event.target?.tagName || '').toLowerCase();
+  const inputType = String(event.target?.type || '').toLowerCase();
+  if (tagName === 'textarea' || inputType === 'button' || inputType === 'submit') return;
+  event.preventDefault();
+}
+
 function HistoricalEntryPage() {
   const archive = useArchiveData();
   const { notify } = useFeedback();
@@ -373,6 +381,7 @@ function HistoricalEntryPage() {
   const [loading, setLoading] = useState(archive.isDatabaseMode);
   const [error, setError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [orderFormOrder, setOrderFormOrder] = useState(null);
   const [listVersion, setListVersion] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingJob, setEditingJob] = useState(null);
@@ -503,30 +512,47 @@ function HistoricalEntryPage() {
   }, [auditRows, selectedOrder?.id]);
 
   async function saveHistoricalOrder(form) {
+    const existingOrder = orderFormOrder;
     const targetPeriod = periodFromDate(form.tripDate || form.plannedDate || form.soDate, period);
-    if (periodLocked && targetPeriod === period) {
-      notify({ type: 'error', title: 'Periode terkunci', message: 'Buka kunci periode terlebih dahulu untuk menambah data lama.' });
+    const currentOrderPeriod = existingOrder ? periodFromDate(existingOrder.tripDate || existingOrder.soDate, existingOrder.historicalPeriod || period) : period;
+    if (periodLocked && (targetPeriod === period || currentOrderPeriod === period)) {
+      notify({ type: 'error', title: 'Periode terkunci', message: 'Buka kunci periode terlebih dahulu untuk mengubah data lama.' });
       return;
     }
-    const receivedAt = form.receivedAt || `${form.tripDate || `${targetPeriod}-01`}T00:00:00.000Z`;
+    const receivedAt = form.receivedAt || existingOrder?.receivedAt || `${form.tripDate || `${targetPeriod}-01`}T00:00:00.000Z`;
     try {
       await archive.upsertOrder({
         ...form,
         receivedAt,
         entrySource: 'historical',
         historicalPeriod: targetPeriod,
-        historicalNotes: notes.trim(),
-      });
+        historicalNotes: form.historicalNotes || existingOrder?.historicalNotes || notes.trim(),
+      }, existingOrder);
       setFormOpen(false);
+      setOrderFormOrder(null);
       if (targetPeriod && targetPeriod !== period) setPeriod(targetPeriod);
       setListVersion((value) => value + 1);
       notify({
-        title: 'Data lama disimpan',
-        message: `Sales Order periode ${formatPeriod(targetPeriod)} berhasil ditambahkan.`,
+        title: existingOrder ? 'Data lama diperbarui' : 'Data lama disimpan',
+        message: `Sales Order periode ${formatPeriod(targetPeriod)} berhasil ${existingOrder ? 'diperbarui' : 'ditambahkan'}.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Data lama gagal disimpan', message: requestError.message });
     }
+  }
+
+  function openHistoricalOrderForm(order = null) {
+    if (periodLocked) {
+      notify({ type: 'error', title: 'Periode terkunci', message: 'Buka kunci periode terlebih dahulu untuk mengubah data lama.' });
+      return;
+    }
+    setOrderFormOrder(order);
+    setFormOpen(true);
+  }
+
+  function closeHistoricalOrderForm() {
+    setFormOpen(false);
+    setOrderFormOrder(null);
   }
 
   function openSoNumberForm(order) {
@@ -604,7 +630,7 @@ function HistoricalEntryPage() {
 
   function handleReadinessAction() {
     if (periodReadiness.status === 'empty') {
-      setFormOpen(true);
+      openHistoricalOrderForm();
       return;
     }
     if (periodReadiness.status === 'needs_action') {
@@ -772,7 +798,7 @@ function HistoricalEntryPage() {
         title="Input Data Lama"
         description="Gunakan halaman ini untuk memasukkan order bulan sebelumnya tanpa mengganggu input operasional harian."
         actions={(
-          <button className="primary-button" type="button" disabled={periodLocked} onClick={() => setFormOpen(true)}>
+          <button className="primary-button" type="button" disabled={periodLocked} onClick={() => openHistoricalOrderForm()}>
             <Plus size={18} /> Input Data Lama
           </button>
         )}
@@ -909,9 +935,14 @@ function HistoricalEntryPage() {
                     </td>
                     <td>{formatCurrency(order.totalAmount || 0)}</td>
                     <td>
-                      <button className="secondary-button historical-entry-action" type="button" disabled={periodLocked} onClick={() => openRealization(order)}>
-                        <ClipboardCheck size={15} /> Realisasi
-                      </button>
+                      <div className="historical-entry-actions">
+                        <button className="secondary-button historical-entry-action" type="button" disabled={periodLocked} onClick={() => openHistoricalOrderForm(order)}>
+                          <PencilLine size={15} /> Edit Data
+                        </button>
+                        <button className="secondary-button historical-entry-action" type="button" disabled={periodLocked} onClick={() => openRealization(order)}>
+                          <ClipboardCheck size={15} /> Realisasi
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -952,7 +983,8 @@ function HistoricalEntryPage() {
           depots={archive.masters.depots}
           terminals={archive.masters.terminals}
           destinations={archive.masters.destinations}
-          onClose={() => setFormOpen(false)}
+          order={orderFormOrder}
+          onClose={closeHistoricalOrderForm}
           onSubmit={saveHistoricalOrder}
           historicalMode
         />
@@ -1038,7 +1070,7 @@ function HistoricalEntryPage() {
                 </table>
               </div>
 
-              <form className="historical-job-form" onSubmit={saveJobRealization}>
+              <form className="historical-job-form" onSubmit={saveJobRealization} onKeyDown={preventEnterSubmit}>
                 {editingJob && jobForm ? (
                   <>
                     <div className="historical-job-form-head">

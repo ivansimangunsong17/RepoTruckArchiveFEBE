@@ -1718,7 +1718,7 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
   }, {});
 
   return (
-    <div className="space-y-0">
+    <div className="finance-order-verification space-y-0">
       <div className="border-b border-slate-200 bg-slate-50 px-2 py-1">
         <div className="max-w-sm">
           <SearchBar query={query} onChange={onQueryChange} />
@@ -1773,7 +1773,7 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table min-w-[1220px]">
+        <table className="data-table master-table finance-master-table finance-order-table min-w-[1220px]">
           <thead>
             <tr>
               {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Status SO', 'Alasan Batal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
@@ -1804,24 +1804,24 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
                       const isCancelled = isCancelledFinanceOrder(row);
                       return (
                     <tr className="align-middle hover:bg-slate-50">
-                      <td className="px-2 py-1 font-semibold text-slate-700">{row.orderDate}</td>
-                      <td className="px-2 py-1 font-black text-slate-900">{row.destination}</td>
-                      <td className="px-2 py-1 text-slate-700">{row.orderType}</td>
-                      <td className="px-2 py-1">
+                      <td className="px-2 py-1 font-semibold text-slate-700" data-label="Order Dibuat">{row.orderDate}</td>
+                      <td className="px-2 py-1 font-black text-slate-900" data-label="Tujuan">{row.destination}</td>
+                      <td className="px-2 py-1 text-slate-700" data-label="Jenis Order">{row.orderType}</td>
+                      <td className="px-2 py-1" data-label="Payment Terms">
                         <StatusPill value={row.paymentTerms} />
                       </td>
-                      <td className="px-2 py-1 font-semibold text-slate-800">{row.runningDate}</td>
-                      <td className="px-2 py-1">
+                      <td className="px-2 py-1 font-semibold text-slate-800" data-label="Tanggal Jalan">{row.runningDate}</td>
+                      <td className="px-2 py-1" data-label="Status SO">
                         <StatusPill value={row.status} />
                       </td>
-                      <td className="max-w-[220px] px-2 py-1 text-[10px] font-semibold text-slate-600">
+                      <td className="max-w-[220px] px-2 py-1 text-[10px] font-semibold text-slate-600" data-label="Alasan Batal">
                         {isCancelled ? (
                           <span className="block max-h-8 overflow-hidden leading-4">{row.cancelReason || '-'}</span>
                         ) : (
                           <span className="text-slate-300">-</span>
                         )}
                       </td>
-                      <td className="px-2 py-1">
+                      <td className="px-2 py-1" data-label="Nomor SO Accurate">
                         {activeOrderTab === 'need-so' && !isCancelled ? (
                           <button
                             className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40"
@@ -1843,7 +1843,7 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
                           </div>
                         )}
                       </td>
-                      <td className="px-2 py-1">
+                      <td className="px-2 py-1" data-label="Aksi">
                         <button className="rounded-md bg-slate-900 px-1.5 py-1 text-[10px] font-semibold text-white hover:bg-slate-800" onClick={() => onSelectOrder(row.id)} type="button">Detail</button>
                       </td>
                     </tr>
@@ -1908,7 +1908,7 @@ function RpujApprovalTable({
   }, {});
 
   return (
-    <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
+    <div className="finance-rpuj-workflow overflow-hidden rounded-b-lg border border-slate-200 bg-white">
       <div className="flex flex-wrap items-end justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
         <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter RPUJ Finance">
           {tabs.map((tab) => {
@@ -1970,7 +1970,7 @@ function RpujApprovalTable({
       </div>
 
       <div className="table-wrap">
-          <table className="data-table master-table finance-master-table min-w-[1180px] table-fixed">
+          <table className="data-table master-table finance-master-table finance-rpuj-table min-w-[1180px] table-fixed">
             <colgroup>
               <col className="w-[25%]" />
               <col className="w-[18%]" />
@@ -2023,24 +2023,24 @@ function RpujApprovalTable({
                       return (
                         <Fragment key={row.id}>
                           <tr className="align-middle hover:bg-slate-50">
-                            <td className="finance-wrap-cell px-2 py-2">
+                            <td className="finance-wrap-cell px-2 py-2" data-label="Job / Container">
                               <strong className="block break-words text-[11px] font-semibold leading-snug text-slate-900">{row.jobNumber}</strong>
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-500">{row.container}</span>
                               <span className="mt-0.5 block text-[9px] font-medium text-slate-400">{row.departureDate}</span>
                             </td>
-                            <td className="finance-wrap-cell px-2 py-2">
+                            <td className="finance-wrap-cell px-2 py-2" data-label="Pengajuan">
                               <strong className="block text-[12px] font-black text-slate-900">{formatCurrency(rowTotal)}</strong>
                               <span className="mt-0.5 block text-[9px] font-medium leading-snug text-slate-500">UJ {formatCurrency(row.totalUj)} + Tambahan {formatCurrency(row.additionalCost)}</span>
                             </td>
-                            <td className="finance-wrap-cell px-2 py-2">
+                            <td className="finance-wrap-cell px-2 py-2" data-label="Status">
                               <StatusPill value={compactRpujStatus(row.status)} />
                             </td>
-                            <td className="finance-wrap-cell px-2 py-2">
+                            <td className="finance-wrap-cell px-2 py-2" data-label="Driver / Rekening">
                               <span className="block break-words text-[11px] font-semibold leading-snug text-slate-800">{row.driver}</span>
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-600">{row.driverBankAccount}</span>
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-400">{row.truck}</span>
                             </td>
-                            <td className="finance-rpuj-actions-cell px-2 py-2">
+                            <td className="finance-rpuj-actions-cell px-2 py-2" data-label="Aksi">
                               <div className="finance-rpuj-action-grid grid min-w-[230px] grid-cols-3 gap-1.5">
                                 <button className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50" onClick={() => onSelectRpuj(row.id)} type="button">Detail</button>
                                 {activeRpujTab === 'need-approval' ? (
@@ -2425,7 +2425,7 @@ function FinanceTable({
   const isInvoiceNumber = activeTab.id === 'invoice-number';
 
   return (
-    <section className="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+    <section className="finance-workflow-panel overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 p-2.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
@@ -3050,7 +3050,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
+    <main className="finance-workflow-page min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
       <FinanceTable
         activeInvoiceDocumentFilter={activeInvoiceDocumentFilter}
         activeInvoiceTab={activeInvoiceTab}

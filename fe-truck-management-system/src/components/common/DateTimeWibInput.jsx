@@ -17,9 +17,14 @@ function splitDateTime(value) {
 }
 
 function cleanTimeInput(value) {
-  return String(value || '')
+  const sanitized = String(value || '')
     .replace(/[^\d:]/g, '')
     .slice(0, 5);
+  if (sanitized.includes(':')) return sanitized;
+
+  const digits = sanitized.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
 }
 
 function normalizeTime(value) {
@@ -65,12 +70,13 @@ function DateTimeWibInput({ value, onChange, disabled = false, dateLabel = 'Tang
           disabled={disabled}
           inputMode="numeric"
           maxLength={5}
-          placeholder="HH:mm"
+          placeholder="08:30"
+          title="Format jam 24 jam, contoh 08:30"
           value={current.time}
           onBlur={normalizeTimeOnBlur}
           onChange={(event) => updateTime(event.target.value)}
         />
-        <span>WIB</span>
+        <span aria-hidden="true">WIB</span>
       </div>
     </div>
   );

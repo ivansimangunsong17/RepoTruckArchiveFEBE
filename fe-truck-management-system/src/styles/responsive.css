@@ -316,4 +316,437 @@
 
 
 
+@media (max-width: 620px) {
+  .modal-backdrop,
+  .master-modal-backdrop,
+  .document-preview-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .order-modal,
+  .sales-order-modal,
+  .container-job-detail-modal,
+  .container-cancel-modal,
+  .container-repo-modal,
+  .invoice-confirm-modal,
+  .finance-rpuj-detail-modal,
+  .finance-invoice-detail-modal,
+  .master-detail-modal,
+  .document-preview-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(94vh, calc(100dvh - 10px));
+    border-radius: 16px 16px 0 0;
+  }
+
+  .document-preview-modal {
+    height: min(94vh, calc(100dvh - 10px));
+  }
+
+  .order-modal > header,
+  .container-job-detail-modal > header,
+  .container-cancel-modal > header,
+  .container-repo-modal > header,
+  .invoice-confirm-modal > header,
+  .finance-rpuj-detail-header,
+  .finance-invoice-detail-header,
+  .master-detail-modal > header,
+  .document-preview-modal > header {
+    position: sticky;
+    z-index: 8;
+    top: 0;
+    gap: 12px;
+    padding: 13px 16px;
+  }
+
+  .order-modal > header button,
+  .container-job-detail-modal > header button,
+  .container-cancel-modal > header button,
+  .container-repo-modal > header button,
+  .invoice-confirm-modal > header button,
+  .finance-rpuj-detail-header button,
+  .finance-invoice-detail-header button,
+  .master-detail-modal > header button,
+  .document-preview-modal > header button {
+    flex: none;
+    width: 38px;
+    height: 38px;
+  }
+
+  .order-modal > header h2,
+  .container-job-detail-modal h2,
+  .container-cancel-modal h2,
+  .container-repo-modal h2,
+  .invoice-confirm-modal > header h2,
+  .finance-rpuj-detail-header h2,
+  .finance-invoice-detail-header h2,
+  .master-detail-modal > header h2,
+  .document-preview-modal > header h2 {
+    max-width: calc(100vw - 92px);
+    font-size: 1rem;
+    line-height: 1.25;
+  }
+
+  .order-modal form,
+  .sales-order-detail-body,
+  .container-job-detail-body,
+  .container-cancel-modal form,
+  .container-repo-modal form,
+  .invoice-confirm-modal form,
+  .finance-rpuj-detail-body,
+  .finance-invoice-detail-body,
+  .master-detail-grid,
+  .document-preview-body {
+    max-height: calc(94dvh - 126px);
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px;
+    overscroll-behavior: contain;
+  }
+
+  .document-preview-body {
+    padding: 0;
+  }
+
+  .document-preview-image-scroll {
+    padding: 10px;
+  }
+
+  .document-preview-image-scroll img {
+    max-width: none;
+    max-height: none;
+  }
+
+  .order-modal footer,
+  .container-job-detail-modal > footer,
+  .container-cancel-modal footer,
+  .container-repo-modal footer,
+  .invoice-confirm-modal > footer,
+  .finance-rpuj-detail-footer,
+  .finance-invoice-detail-footer,
+  .master-detail-modal > footer {
+    position: sticky;
+    z-index: 9;
+    bottom: 0;
+    align-items: stretch;
+    flex-direction: column-reverse;
+    gap: 9px;
+    padding: 12px 16px;
+    background: white;
+  }
+
+  .order-modal footer button,
+  .container-job-detail-modal > footer button,
+  .container-cancel-modal footer button,
+  .container-repo-modal footer button,
+  .invoice-confirm-modal > footer button,
+  .finance-rpuj-detail-footer button,
+  .finance-invoice-detail-footer button,
+  .master-detail-modal > footer button {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .sales-order-detail-body .order-meta,
+  .sales-order-detail-body .order-detail-sections,
+  .sales-order-detail-body .commercial-grid,
+  .container-job-detail-body section > div:not(.job-timeline-detail),
+  .finance-rpuj-focus-grid,
+  .finance-rpuj-assignment-grid,
+  .finance-rpuj-support-grid,
+  .finance-rpuj-info-grid,
+  .finance-rpuj-amount-grid,
+  .finance-rpuj-note-grid,
+  .finance-invoice-summary-strip,
+  .finance-invoice-support-grid,
+  .finance-invoice-container-grid,
+  .master-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-order-detail-body .order-meta > div,
+  .sales-order-detail-body .order-meta > div:last-child,
+  .finance-rpuj-focus-field.is-date,
+  .finance-rpuj-detail-field.span-2 {
+    grid-column: auto;
+  }
+
+  .sales-order-detail-body .order-container-progress-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sales-order-detail-body .container-detail,
+  .finance-invoice-document-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .sales-order-detail-body .container-detail-head {
+    align-items: flex-start;
+  }
+
+  .sales-order-detail-body .container-detail-head strong,
+  .container-job-detail-body strong,
+  .finance-invoice-detail-body strong,
+  .master-detail-grid strong {
+    white-space: normal;
+  }
+
+  .container-job-detail-body section,
+  .finance-rpuj-detail-body section,
+  .finance-invoice-detail-body section,
+  .master-detail-card {
+    padding: 12px;
+  }
+
+  .detail-documents {
+    grid-template-columns: 1fr;
+  }
+
+  .job-timeline-detail {
+    gap: 8px;
+  }
+
+  .job-timeline-detail > span {
+    min-height: 48px;
+  }
+
+  .finance-invoice-document-row > div:last-child {
+    align-items: stretch;
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .form-section,
+  .master-fieldset {
+    margin-inline: 10px;
+    padding: 14px 12px;
+    border-radius: 10px;
+  }
+
+  .form-section h3,
+  .master-fieldset legend {
+    font-size: .78rem;
+    line-height: 1.25;
+  }
+
+  .form-section-heading {
+    gap: 4px;
+  }
+
+  .form-section-heading p {
+    padding-left: 0;
+    font-size: .64rem;
+  }
+
+  .order-form-grid,
+  .master-form-grid,
+  .historical-job-form-grid,
+  .historical-job-timeline {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .order-form-grid label,
+  .master-form-grid .master-field,
+  .historical-job-form label {
+    gap: 6px;
+    font-size: .68rem;
+    line-height: 1.25;
+  }
+
+  .order-form-grid input,
+  .order-form-grid select,
+  .order-form-grid textarea,
+  .master-form-grid input,
+  .master-form-grid select,
+  .master-form-grid textarea,
+  .historical-job-form input,
+  .historical-job-form select,
+  .historical-job-form textarea {
+    min-height: 44px;
+    font-size: .82rem;
+  }
+
+  .datetime-wib-input {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .datetime-wib-time {
+    grid-template-columns: minmax(0, 1fr) 48px;
+  }
+
+  .datetime-wib-time input {
+    min-height: 44px;
+    font-size: .86rem;
+  }
+
+  .datetime-wib-time span {
+    min-height: 44px;
+    min-width: 48px;
+  }
+
+  .document-upload,
+  .operational-rpuj-upload .document-upload {
+    gap: 6px;
+  }
+
+  .document-upload-dropzone,
+  .document-upload.compact .document-upload-dropzone,
+  .operational-rpuj-upload .document-upload-dropzone {
+    justify-content: flex-start;
+    min-height: 46px;
+    padding: 9px 11px;
+    white-space: normal;
+  }
+
+  .document-upload-dropzone > svg,
+  .document-upload.compact .document-upload-dropzone > svg,
+  .operational-rpuj-upload .document-upload-dropzone svg {
+    flex: none;
+  }
+
+  .document-upload-dropzone strong,
+  .document-upload.compact .document-upload-dropzone strong,
+  .operational-rpuj-upload .document-upload-dropzone strong {
+    font-size: .68rem;
+    line-height: 1.25;
+  }
+
+  .document-upload-dropzone small,
+  .operational-rpuj-upload .document-upload-dropzone small {
+    font-size: .58rem;
+    line-height: 1.3;
+  }
+
+  .selected-document {
+    grid-template-columns: 34px minmax(0, 1fr) 32px;
+    min-height: 46px;
+    padding: 8px;
+  }
+
+  .selected-document strong {
+    font-size: .66rem;
+    white-space: normal;
+  }
+
+  .selected-document button {
+    width: 32px;
+    height: 32px;
+  }
+
+  .line-item-row {
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+    gap: 9px;
+  }
+
+  .line-item-row label,
+  .line-item-field {
+    min-width: 0;
+  }
+
+  .line-item-row input,
+  .line-item-row select {
+    min-width: 0;
+  }
+
+  .rincian-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .historical-realization-modal {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .historical-realization-body {
+    grid-template-columns: 1fr;
+    max-height: calc(94dvh - 126px);
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .historical-realization-context,
+  .historical-job-form {
+    padding: 12px;
+  }
+
+  .historical-job-form-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .historical-job-list table,
+  .historical-job-list tbody,
+  .historical-job-list tr,
+  .historical-job-list td {
+    display: block;
+  }
+
+  .historical-job-list thead {
+    position: absolute;
+    overflow: hidden;
+    width: 1px;
+    height: 1px;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .historical-job-list tbody {
+    display: grid;
+    gap: 9px;
+    padding: 10px;
+  }
+
+  .historical-job-list tr {
+    overflow: hidden;
+    border: 1px solid #dbe4ef;
+    border-radius: 9px;
+    background: white;
+  }
+
+  .historical-job-list td {
+    display: grid;
+    grid-template-columns: 102px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    text-align: right;
+  }
+
+  .historical-job-list td::before {
+    color: #64748b;
+    font-size: .58rem;
+    font-weight: 950;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .historical-job-list td:nth-child(1)::before { content: "Container"; }
+  .historical-job-list td:nth-child(2)::before { content: "Truck"; }
+  .historical-job-list td:nth-child(3)::before { content: "Sopir"; }
+  .historical-job-list td:nth-child(4)::before { content: "Status"; }
+  .historical-job-list td:nth-child(5)::before { content: "Aksi"; }
+
+  .historical-job-list td > * {
+    justify-self: end;
+    max-width: 100%;
+  }
+
+  .historical-job-list td > button,
+  .historical-job-form footer button {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .historical-job-form footer {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}
 
