@@ -17,6 +17,7 @@ import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { storageRoutes } from './modules/storage/storage.routes.js';
 import { isStorageBackupInProgress } from './modules/storage/storage-files.js';
 import { userRoutes } from './modules/users/users.routes.js';
+import { utilizationNoteRoutes } from './modules/utilization-notes/utilization-notes.routes.js';
 import { vehicleDocumentRoutes } from './modules/vehicle-documents/vehicle-documents.routes.js';
 import { sendSuccess, sendError } from './utils/apiResponse.js';
 
@@ -56,6 +57,7 @@ const routes = [
   ...masterRoutes,
   ...vehicleDocumentRoutes,
   ...reportRoutes,
+  ...utilizationNoteRoutes,
   ...storageRoutes,
   ...settingsRoutes,
 ];

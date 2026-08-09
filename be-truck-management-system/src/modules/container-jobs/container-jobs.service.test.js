@@ -4,7 +4,7 @@ import test from 'node:test';
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
 const { ensureRepoStoragePayload, hasCompletedTimelineChange, hasOperationalDocumentChange, isContainerNumberLockedForOperational, isInitialContainerNumberInput, isOtherCostLockedForRepoPickup, isRepoCancellationLockedForOperational } = await import('./container-jobs.service.js');
-const { hasCompleteOperationalAssignment, hasRequiredRepoCompletionDocuments } = await import('./container-jobs.repository.js');
+const { hasCompleteOperationalAssignment, hasRequiredRepoCompletionDocuments, shouldValidateVehicleContainerSize } = await import('./container-jobs.repository.js');
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
   assert.equal(isInitialContainerNumberInput(
@@ -101,6 +101,12 @@ test('assignment operational lengkap dari payload atau snapshot tersimpan', () =
       driver: 'Budi',
     },
   }), true);
+});
+
+test('data lama tidak mengunci mismatch ukuran truck dan container', () => {
+  assert.equal(shouldValidateVehicleContainerSize({ entrySource: 'historical' }, { entry_source: 'realtime' }), false);
+  assert.equal(shouldValidateVehicleContainerSize({}, { entry_source: 'historical' }), false);
+  assert.equal(shouldValidateVehicleContainerSize({}, { entry_source: 'realtime' }), true);
 });
 
 test('completion job biasa tidak membutuhkan EIR Titip', () => {

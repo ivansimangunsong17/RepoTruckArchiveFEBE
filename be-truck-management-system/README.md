@@ -1,4 +1,4 @@
-# BE Truck Management System
+# BE Transportation Management System
 
 Backend awal untuk transisi sistem dari Supabase data menuju Node.js API dan PostgreSQL.
 Supabase tetap dipakai untuk auth pada fase ini.

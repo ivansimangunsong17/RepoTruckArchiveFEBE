@@ -330,6 +330,10 @@ function isHistoricalBackfill(form = {}, existing = {}) {
   return normalizeEntrySource(source) === 'historical' || Boolean(normalizeOptionalText(form.historicalPeriod || existing.historical_period));
 }
 
+export function shouldValidateVehicleContainerSize(form = {}, existing = {}) {
+  return !isHistoricalBackfill(form, existing);
+}
+
 function requireTripStartAllowed(nextStatus, rpujStatus, options = {}) {
   if (options.allowHistoricalBackfill) return;
   if (!['running', 'completed'].includes(nextStatus)) return;
@@ -707,13 +711,15 @@ export async function updateContainerJob(id, form) {
     }
     ensureSalesOrderVerifiedForOperational(existing.rows[0]);
 
-    const driver = await findDriver(client, form);
-    const vehicle = await findVehicle(client, form);
-    assertDriverAssignable(driver, existing.rows[0].driver_id);
-    assertVehicleAssignable(vehicle, existing.rows[0].vehicle_id);
-    assertVehicleMatchesContainer(vehicle, existing.rows[0].container_size);
     const currentJob = existing.rows[0];
     const allowHistoricalBackfill = isHistoricalBackfill(form, currentJob);
+    const driver = await findDriver(client, form);
+    const vehicle = await findVehicle(client, form);
+    assertDriverAssignable(driver, currentJob.driver_id);
+    assertVehicleAssignable(vehicle, currentJob.vehicle_id);
+    if (shouldValidateVehicleContainerSize(form, currentJob)) {
+      assertVehicleMatchesContainer(vehicle, currentJob.container_size);
+    }
     const nextStatus = form.status || currentJob.status || 'received';
     if (nextStatus === 'cancelled' && currentJob.status === 'completed') {
       throw validationError(
