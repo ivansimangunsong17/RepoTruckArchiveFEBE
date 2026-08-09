@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Archive, CheckCircle2, ChevronLeft, ChevronRight, Eye, Maximize2, X, XCircle } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
+import { USER_ROLES, hasPermission } from '../../constants/roles';
+import { useAuth } from '../../contexts/AuthContext';
+import { useFeedback } from '../../contexts/FeedbackContext';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { fetchOperationReport } from '../../services/reports/reportService';
+import { deleteUtilizationNote, fetchUtilizationNotes, saveUtilizationNote } from '../../services/reports/utilizationNoteService';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { buildMonthlyUtilizationPivot, MonthlyUtilizationModal } from '../reports/ReportsPage';
 
@@ -49,6 +53,10 @@ function monthRange(month, year) {
 
 function monthKey(month, year) {
   return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function utilizationNoteKey(resourceId, date) {
+  return `${String(resourceId || '').trim()}|${String(date || '').trim().slice(0, 10)}`;
 }
 
 function statusLabel(value) {
@@ -285,6 +293,8 @@ async function loadMonthlyUtilizationRows(range) {
 
 function OrderHistoryPage() {
   const archive = useArchiveData();
+  const { user } = useAuth();
+  const { notify } = useFeedback();
   const initialPeriod = useMemo(() => currentPeriod(), []);
   const [month, setMonth] = useState(initialPeriod.month);
   const [year, setYear] = useState(initialPeriod.year);
@@ -299,8 +309,18 @@ function OrderHistoryPage() {
   const [utilizationLoading, setUtilizationLoading] = useState(true);
   const [utilizationError, setUtilizationError] = useState('');
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
+  const [utilizationNotes, setUtilizationNotes] = useState([]);
+  const [utilizationNoteSuggestions, setUtilizationNoteSuggestions] = useState([]);
+  const [utilizationNoteSaving, setUtilizationNoteSaving] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const activeMonthLabel = MONTHS.find((item) => item.value === Number(month))?.label || '-';
+  const activePeriodKey = monthKey(month, year);
+  const canReadUtilizationNotes = user?.role === USER_ROLES.ADMIN
+    || user?.role === USER_ROLES.OPERATIONAL
+    || user?.role === USER_ROLES.OBSERVER
+    || hasPermission(user, 'reports.read')
+    || hasPermission(user, 'operations.read');
+  const canEditUtilizationNotes = user?.role === USER_ROLES.ADMIN || hasPermission(user, 'operations.update');
   const range = useMemo(() => monthRange(month, year), [month, year]);
   const yearOptions = useMemo(() => {
     const baseYear = currentPeriod().year;
@@ -367,6 +387,33 @@ function OrderHistoryPage() {
   }, [range]);
 
   useEffect(() => {
+    let active = true;
+    if (!canReadUtilizationNotes) {
+      setUtilizationNotes([]);
+      setUtilizationNoteSuggestions([]);
+      return () => {
+        active = false;
+      };
+    }
+
+    fetchUtilizationNotes({ resourceType: 'truck', period: activePeriodKey })
+      .then((result) => {
+        if (!active) return;
+        setUtilizationNotes(Array.isArray(result?.rows) ? result.rows : []);
+        setUtilizationNoteSuggestions(Array.isArray(result?.suggestions) ? result.suggestions : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setUtilizationNotes([]);
+        setUtilizationNoteSuggestions([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activePeriodKey, canReadUtilizationNotes]);
+
+  useEffect(() => {
     if (!selectedJob) return undefined;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -380,6 +427,13 @@ function OrderHistoryPage() {
     () => buildMonthlyUtilizationPivot(archive.masters?.trucks || [], utilizationRows, month, year),
     [archive.masters?.trucks, month, utilizationRows, year],
   );
+  const utilizationNotesByKey = useMemo(() => {
+    const map = new Map();
+    utilizationNotes.forEach((note) => {
+      map.set(utilizationNoteKey(note.resourceId, note.date), note);
+    });
+    return map;
+  }, [utilizationNotes]);
   const showingFrom = total ? (page - 1) * pageSize + 1 : 0;
   const showingTo = total ? Math.min(page * pageSize, total) : 0;
 
@@ -396,6 +450,55 @@ function OrderHistoryPage() {
   function updatePageSize(nextPageSize) {
     setPageSize(Number(nextPageSize));
     setPage(1);
+  }
+
+  async function reloadUtilizationNotes() {
+    if (!canReadUtilizationNotes) return;
+    const result = await fetchUtilizationNotes({ resourceType: 'truck', period: activePeriodKey });
+    setUtilizationNotes(Array.isArray(result?.rows) ? result.rows : []);
+    setUtilizationNoteSuggestions(Array.isArray(result?.suggestions) ? result.suggestions : []);
+  }
+
+  async function handleSaveUtilizationNote(payload) {
+    try {
+      setUtilizationNoteSaving(true);
+      const saved = await saveUtilizationNote(payload);
+      setUtilizationNotes((current) => {
+        const key = utilizationNoteKey(saved.resourceId, saved.date);
+        const withoutCurrent = current.filter((note) => utilizationNoteKey(note.resourceId, note.date) !== key);
+        return [...withoutCurrent, saved];
+      });
+      setUtilizationNoteSuggestions((current) => {
+        const label = String(saved.reasonLabel || '').trim();
+        if (!label) return current;
+        const withoutCurrent = current.filter((item) => String(item.label || '').toUpperCase() !== label.toUpperCase());
+        return [{ label, usageCount: 1 }, ...withoutCurrent].slice(0, 20);
+      });
+      await reloadUtilizationNotes();
+      notify({ title: 'Catatan utilisasi disimpan', message: `${saved.resourceLabel} ${formatDate(saved.date)}: ${saved.reasonLabel}` });
+      return saved;
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Catatan gagal disimpan', message: requestError.message });
+      throw requestError;
+    } finally {
+      setUtilizationNoteSaving(false);
+    }
+  }
+
+  async function handleDeleteUtilizationNote(note) {
+    if (!note?.id) return;
+    try {
+      setUtilizationNoteSaving(true);
+      await deleteUtilizationNote(note.id);
+      setUtilizationNotes((current) => current.filter((item) => item.id !== note.id));
+      await reloadUtilizationNotes();
+      notify({ title: 'Catatan utilisasi dihapus', message: `${note.resourceLabel} ${formatDate(note.date)}` });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Catatan gagal dihapus', message: requestError.message });
+      throw requestError;
+    } finally {
+      setUtilizationNoteSaving(false);
+    }
   }
 
   return (
@@ -589,6 +692,12 @@ function OrderHistoryPage() {
         pivot={utilizationPivot}
         activeMonthLabel={activeMonthLabel}
         year={year}
+        utilizationNotesByKey={utilizationNotesByKey}
+        utilizationNoteSuggestions={utilizationNoteSuggestions}
+        canEditNotes={canEditUtilizationNotes}
+        noteSaving={utilizationNoteSaving}
+        onSaveNote={handleSaveUtilizationNote}
+        onDeleteNote={handleDeleteUtilizationNote}
       />
       {utilizationError ? (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">

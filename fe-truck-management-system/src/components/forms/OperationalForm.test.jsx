@@ -162,7 +162,8 @@ describe('OperationalForm', () => {
       />,
     );
 
-    expect(screen.getByLabelText(/waktu mulai/i)).toHaveValue(expectedInputValue);
+    expect(screen.getByLabelText(/tanggal mulai/i)).toHaveValue(expectedInputValue.slice(0, 10));
+    expect(screen.getByLabelText(/jam mulai/i)).toHaveValue(expectedInputValue.slice(11, 16));
 
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 

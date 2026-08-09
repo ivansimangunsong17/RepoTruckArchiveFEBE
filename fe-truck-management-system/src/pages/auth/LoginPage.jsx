@@ -37,7 +37,7 @@ function LoginPage() {
   return (
     <main className="login-page">
       <section className="login-brand-panel">
-        <div className="login-brand"><span><img src={armadaLogo} alt="Armada" /></span><p><strong>ARMADA</strong><small>Truck Management System</small></p></div>
+        <div className="login-brand"><span><img src={armadaLogo} alt="Armada" /></span><p><strong>ARMADA</strong><small>Transportation Management System</small></p></div>
         <div className="login-copy">
           <span className="login-kicker">Data archive system</span>
           <h1>Data trucking lebih rapi, mudah dicari, dan aman tersimpan.</h1>
@@ -57,7 +57,7 @@ function LoginPage() {
           <label>Password<div className="password-field"><input type={showPassword ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /><button type="button" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>
           <div className="login-options"><label><input type="checkbox" /> Ingat saya</label><button type="button">Lupa password?</button></div>
           <button className="primary-button full" disabled={loading}>{loading ? 'Memproses...' : 'Masuk ke Aplikasi'}</button>
-          <small className="login-footer">© 2026 Trucking Management System</small>
+          <small className="login-footer">© 2026 Transportation Management System</small>
         </form>
       </section>
     </main>

@@ -10,6 +10,7 @@ import {
   FileText,
   X,
   Search,
+  SlidersHorizontal,
   Truck,
   UserRound,
 } from 'lucide-react';
@@ -213,18 +214,31 @@ function groupJobsBySo(rows = []) {
   return Array.from(groups.values());
 }
 
-function formatSoGroupSummary(group) {
+function getSoGroupStats(group) {
   const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
   const completed = jobs.filter((job) => job.status === 'completed').length;
   const running = jobs.filter((job) => job.status === 'running' || isRepoStoredJob(job)).length;
   const cancelled = jobs.filter((job) => job.status === 'cancelled').length;
   const waiting = Math.max(0, jobs.length - completed - running - cancelled);
+  return {
+    total: jobs.length,
+    completed,
+    running,
+    waiting,
+    cancelled,
+    handled: completed + running,
+  };
+}
+
+function formatSoGroupSummary(group) {
+  const stats = getSoGroupStats(group);
   const parts = [
-    `Total ${jobs.length}`,
-    `Sudah jalan ${completed + running}`,
-    `Belum ${waiting}`,
+    `${stats.total} container`,
+    `${stats.completed} selesai`,
+    `${stats.running} jalan`,
+    `${stats.waiting} belum`,
   ];
-  if (cancelled) parts.push(`Batal ${cancelled}`);
+  if (stats.cancelled) parts.push(`${stats.cancelled} batal`);
   return parts.join(' | ');
 }
 
@@ -311,6 +325,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [rpujStage, setRpujStage] = useState('');
+  const [mobileRpujFilterOpen, setMobileRpujFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [listVersion, setListVersion] = useState(0);
   const [loading, setLoading] = useState(archive.isDatabaseMode);
@@ -334,10 +349,13 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const canReviewCancel = canEdit || user?.role === USER_ROLES.ADMIN;
   const canViewDocuments = hasPermission(user, 'documents.operational.read');
   const detailOtherCost = otherCostValue(detail);
+  const detailDocuments = detail ? documentState(detail) : { completed: 0, total: 0, missing: [] };
+  const detailRpuj = detail ? rpujDetail(detail) : { label: '-', helper: '' };
   const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
   const repoMissing = getRepoStorageMissing(repoTarget);
   const depotOptions = useMemo(() => normalizeDepotOptions(archive.masters?.depots), [archive.masters?.depots]);
   const hasCurrentDepot = Boolean(repoForm.repoLocation && !depotOptions.includes(repoForm.repoLocation));
+  const activeRpujFilterLabel = rpujStageOptions.find((option) => option.value === rpujStage)?.label || 'Filter UJ';
   const repoLocationValid = repoForm.repoLocation.trim().length >= 3;
   const repoReasonValid = repoForm.repoReason.trim().length >= 8;
   const repoConditionValid = ['empty', 'loaded'].includes(repoForm.repoContainerCondition);
@@ -786,7 +804,17 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
             <div className="operational-document-followup-summary"><Archive size={17} /><strong>{totalItems}</strong><span>container sedang dititipkan</span></div>
           ) : <div className="operational-document-followup-summary"><FileText size={17} /><strong>{totalItems}</strong><span>container perlu dilengkapi</span></div>}
         </div>
-        {!documentFollowUp && !repoStorageOnly ? <div className="operational-filter-substrip">
+        {!documentFollowUp && !repoStorageOnly ? <div className={`operational-filter-substrip ${mobileRpujFilterOpen ? 'is-mobile-open' : ''}`.trim()}>
+          <button
+            className={`rpuj-mobile-toggle ${rpujStage ? 'active' : ''}`.trim()}
+            type="button"
+            onClick={() => setMobileRpujFilterOpen((value) => !value)}
+            aria-expanded={mobileRpujFilterOpen}
+          >
+            <SlidersHorizontal size={15} />
+            {activeRpujFilterLabel}
+            {rpujStage ? <strong>{activeRpujCounts[rpujStage] || 0}</strong> : null}
+          </button>
           <span>RPUJ</span>
           <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
             {rpujStageOptions.map((option) => {
@@ -796,7 +824,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   aria-selected={active}
                   className={active ? 'active' : ''}
                   key={option.value}
-                  onClick={() => setRpujStage(active ? '' : option.value)}
+                  onClick={() => {
+                    setRpujStage(active ? '' : option.value);
+                    setMobileRpujFilterOpen(false);
+                  }}
                   role="tab"
                   title={option.description}
                   type="button"
@@ -812,6 +843,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               setQuery('');
               setStatus('');
               setRpujStage('');
+              setMobileRpujFilterOpen(false);
             }}>Reset</button>
           ) : null}
         </div> : null}
@@ -825,7 +857,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               <button className="secondary-button" type="button" onClick={() => setListVersion((value) => value + 1)}>Muat Ulang</button>
             </div>
           ) : null}
-          {!loading && !error ? groupedJobs.map((group, groupIndex) => (
+          {!loading && !error ? groupedJobs.map((group, groupIndex) => {
+            const groupStats = getSoGroupStats(group);
+            return (
             <section className="operational-so-group" key={group.key}>
               <header className="operational-so-header">
                 <span className="operational-so-number">SO {groupShowingFrom + groupIndex}</span>
@@ -840,9 +874,16 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   </div>
                 </div>
                 <em>{formatSoGroupSummary(group)}</em>
+                <div className="operational-so-progress" aria-label={`Progress ${group.soNumber}`}>
+                  <span><b>{groupStats.total}</b> Container</span>
+                  <span className="waiting"><b>{groupStats.waiting}</b> Belum</span>
+                  <span className="running"><b>{groupStats.running}</b> Jalan</span>
+                  <span className="completed"><b>{groupStats.completed}</b> Selesai</span>
+                  {groupStats.cancelled ? <span className="cancelled"><b>{groupStats.cancelled}</b> Batal</span> : null}
+                </div>
               </header>
               <div className="operational-container-list">
-                {group.jobs.map((job) => {
+                {group.jobs.map((job, jobIndex) => {
                   const documents = documentState(job);
                   const shipmentLabel = formatShipmentLabel(job.shipment || job.jobType);
                   const hasContainerNumber = Boolean(job.containerNumber);
@@ -854,6 +895,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   return (
                     <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''}`} key={job.id}>
                       <div className="container-row-main">
+                        <span className="container-sequence">Container {jobIndex + 1} dari {group.jobs.length}</span>
                         <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
                         <small>{repoSummary ? `Container Titip - ${repoSummary.reason}` : `${shipmentLabel} - ${sizeTypeLabel}`}</small>
                         {repoSummary && actionHint ? <em className={`container-action-hint ${actionHint.tone}`}>{actionHint.label}</em> : null}
@@ -867,11 +909,11 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         <strong>{rpuj.label}</strong>
                         <small>{rpuj.helper}</small>
                       </div>
-                      <div className="container-row-assignment">
+                      <div className={`container-row-assignment ${repoSummary ? 'is-repo-summary' : ''}`}>
                         {repoSummary ? (
                           <>
-                    <span><Archive size={13} /> {repoSummary.location}</span>
-                            <span><Truck size={13} /> {repoSummary.storedAt} - {repoContainerConditionLabel(job.repoContainerCondition)}</span>
+                            <span><Archive size={13} /> <b>Depo</b>{repoSummary.location}</span>
+                            <span><Truck size={13} /> <b>Titip</b>{repoSummary.storedAt} - {repoContainerConditionLabel(job.repoContainerCondition)}</span>
                           </>
                         ) : (
                           <>
@@ -897,7 +939,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                 })}
               </div>
             </section>
-          )) : null}
+          );
+          }) : null}
           {!loading && !error && !totalGroups ? (
             <div className="archive-empty-wrapper">
               <EmptyState
@@ -936,12 +979,17 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               <div><span>{detail.soNumber}</span><h2>{containerLabel(detail)}</h2><p>{detail.customer} - {detail.origin} - {detail.destination}</p></div>
               <button className="modal-close-button" type="button" aria-label="Tutup detail Container Job" onClick={() => setDetail(null)}><X size={19} /></button>
             </header>
+            <div className="container-job-mobile-summary" aria-label="Ringkasan detail container">
+              <div><span>Status</span><StatusBadge status={detail.status} /></div>
+              <div><span>Dokumen</span><strong>{detailDocuments.completed}/{detailDocuments.total}</strong></div>
+              <div><span>Jenis</span><strong>{formatShipmentLabel(detail.shipment || detail.jobType)} / {detail.size || '-'}</strong></div>
+            </div>
             <div className="container-job-detail-body">
-              <section><h3>Penugasan</h3><div><span>No. Container<strong>{detail.containerNumber || '-'}</strong></span><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
-              <section><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>Status RPUJ<strong>{rpujDetail(detail).label}</strong><small>{detail.rpujRejectionNote || rpujDetail(detail).helper}</small></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
-              <section><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
-              {canViewDocuments ? <section><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
-              <section><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
+              <section className="container-detail-assignment"><h3>Penugasan</h3><div><span>No. Container<strong>{detail.containerNumber || '-'}</strong></span><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
+              <section className="container-detail-billing"><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>Status RPUJ<strong>{detailRpuj.label}</strong><small>{detail.rpujRejectionNote || detailRpuj.helper}</small></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
+              <section className="container-detail-uj"><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
+              {canViewDocuments ? <section className="container-detail-documents"><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
+              <section className="container-detail-timeline"><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
               {isRepoStoredJob(detail) || detail.repoLocation || detail.repoStoredAt ? (
                 <section className="container-repo-summary">
                   <h3>Penitipan Container</h3>
@@ -969,7 +1017,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   </div>
                 </section>
               ) : null}
-              <section><h3>Riwayat Perubahan</h3><div><span>Dibuat oleh<strong>{detail.createdBy || '-'}</strong></span><span>Diperbarui oleh<strong>{detail.updatedBy || '-'}</strong></span><span>Waktu pembaruan<strong>{formatDateTime(detail.updatedAt)}</strong></span></div></section>
+              <section className="container-detail-history"><h3>Riwayat Perubahan</h3><div><span>Dibuat oleh<strong>{detail.createdBy || '-'}</strong></span><span>Diperbarui oleh<strong>{detail.updatedBy || '-'}</strong></span><span>Waktu pembaruan<strong>{formatDateTime(detail.updatedAt)}</strong></span></div></section>
             </div>
             <footer>
               <button className="secondary-button" type="button" onClick={() => setDetail(null)}>Tutup</button>
@@ -1094,7 +1142,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   placeholder="EIR-TITIP-2026-001"
                 />
               </label>
-              <div>
+              <div className="repo-document-field">
                 <span className="repo-field-label">Dokumen EIR Titip</span>
                 <AttachmentUploadField
                   id="repo-eir-document"

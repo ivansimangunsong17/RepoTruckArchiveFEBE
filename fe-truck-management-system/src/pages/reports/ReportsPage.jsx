@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BarChart3, Maximize2, Truck, Users, X } from 'lucide-react';
+import { BarChart3, Maximize2, Save, Trash2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
+import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useFeedback } from '../../hooks/useFeedback';
 import { buildHolidayMap, fetchIndonesiaPublicHolidays } from '../../services/reports/holidayService';
 import { fetchDriverPerformanceReport, fetchMonthlyRevenueReport, fetchOperationReport } from '../../services/reports/reportService';
+import { deleteUtilizationNote, fetchUtilizationNotes, saveUtilizationNote } from '../../services/reports/utilizationNoteService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 
@@ -47,6 +51,10 @@ const DATA_SOURCE_OPTIONS = [
   { value: 'realtime', label: 'Realtime' },
   { value: 'historical', label: 'Data Lama' },
 ];
+
+function utilizationNoteKey(resourceId, date) {
+  return `${String(resourceId || '').trim()}|${String(date || '').trim().slice(0, 10)}`;
+}
 
 function currentPeriod() {
   const now = new Date();
@@ -100,6 +108,36 @@ function formatTruckUnitCode(unitCode) {
   const value = String(unitCode || '').trim();
   if (!value) return '-';
   return value.replace(/^TRK-?/i, '').replace(/^0+(\d)/, '$1') || value;
+}
+
+const UTILIZATION_NOTE_ABBREVIATIONS = {
+  'TUNGGU DO': 'TD',
+  'TGG DO': 'TD',
+  'TGGU DO': 'TD',
+  'MUAT SIANG': 'MSI',
+  'MUAT SORE': 'MSO',
+  'MUAT MALAM': 'MML',
+  INAP: 'INP',
+  'ANTRI BONGKAR': 'AB',
+  'BONGKAR DI GUDANG': 'BG',
+  'BONGKAR D GUDANG': 'BG',
+  'BATAL DO': 'BD',
+  TITIP: 'TTP',
+  'GANTI DRIVER': 'GD',
+  'TUNGGU DRIVER': 'TDR',
+  'DRIVER PULANG': 'DP',
+  'SAMPAI GUDANG MALAM': 'SGM',
+};
+
+function formatUtilizationNoteCode(note = {}) {
+  const label = String(note.reasonLabel || note.notes || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!label) return 'CT';
+  if (UTILIZATION_NOTE_ABBREVIATIONS[label]) return UTILIZATION_NOTE_ABBREVIATIONS[label];
+
+  const words = label.split(/[^A-Z0-9]+/).filter(Boolean);
+  if (!words.length) return 'CT';
+  if (words.length === 1) return words[0].slice(0, 3);
+  return words.map((word) => word[0]).join('').slice(0, 4);
 }
 
 function getDriverName(row = {}) {
@@ -412,6 +450,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     const plateNumber = getTruckPlate(truck);
     if (!trucks.has(plateNumber)) {
       trucks.set(plateNumber, {
+        id: getTruckId(truck) || plateNumber,
         plateNumber,
         unitCode: getTruckUnitCode(truck),
         size: getTruckSize(truck),
@@ -429,6 +468,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     const plateNumber = getTruckPlate(row);
     if (!trucks.has(plateNumber)) {
       trucks.set(plateNumber, {
+        id: getTruckId(row) || plateNumber,
         plateNumber,
         unitCode: getTruckUnitCode(row),
         size: getTruckSize(row),
@@ -857,20 +897,155 @@ function MasterReportSection({ section }) {
   );
 }
 
-function PivotCell({ cell }) {
-  if (!cell?.count) return <span className="text-[8px] text-slate-300">-</span>;
+function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
+  const hasCount = Boolean(cell?.count);
+  const hasNote = Boolean(note?.reasonLabel || note?.notes);
+  const title = [
+    hasCount
+      ? cell.labels?.length
+        ? `${cell.count} trip - ${cell.labels.join(', ')}`
+        : `${cell.count} trip`
+      : 'Tidak ada trip',
+    hasNote ? `Catatan: ${note.reasonLabel}${note.notes ? ` - ${note.notes}` : ''}` : '',
+  ].filter(Boolean).join('\n');
 
-  const title = cell.labels?.length
-    ? `${cell.count} trip - ${cell.labels.join(', ')}`
-    : `${cell.count} trip`;
-
-  return (
-    <span
-      className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-sky-100 px-1 text-[9px] font-black leading-none text-sky-900"
-      title={title}
-    >
+  const content = hasCount ? (
+    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-sky-100 px-1 text-[9px] font-black leading-none text-sky-900">
       {cell.count}
     </span>
+  ) : hasNote ? (
+    <span className="inline-flex h-4 min-w-6 items-center justify-center rounded-sm bg-amber-100 px-1 text-[7px] font-black leading-none text-amber-800">
+      {formatUtilizationNoteCode(note)}
+    </span>
+  ) : (
+    <span className="text-[8px] text-slate-300">-</span>
+  );
+
+  if (!hasNote && !canEditNote) return content;
+
+  return (
+    <button
+      type="button"
+      className={`group relative inline-grid min-h-5 min-w-7 place-items-center rounded-sm border-0 bg-transparent px-0.5 shadow-none outline-none ${hasNote ? 'ring-1 ring-amber-300' : canEditNote ? 'hover:bg-amber-50 focus-visible:ring-1 focus-visible:ring-amber-300' : ''}`}
+      title={title}
+      onClick={onOpenNote}
+    >
+      {content}
+      {!hasNote && canEditNote ? (
+        <span className="pointer-events-none absolute inset-0 hidden place-items-center text-[9px] font-black text-amber-700 group-hover:grid group-focus-visible:grid" aria-hidden="true">
+          +
+        </span>
+      ) : null}
+      {hasNote ? <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+    </button>
+  );
+}
+
+function UtilizationNoteModal({
+  target,
+  suggestions = [],
+  canEdit = false,
+  saving = false,
+  onClose,
+  onSave,
+  onDelete,
+}) {
+  const [reasonLabel, setReasonLabel] = useState('');
+  const [notes, setNotes] = useState('');
+
+  useEffect(() => {
+    setReasonLabel(target?.note?.reasonLabel || '');
+    setNotes(target?.note?.notes || '');
+  }, [target]);
+
+  if (!target) return null;
+
+  const datalistId = `utilization-note-reasons-${target.resourceId}-${target.date}`;
+  const hasExistingNote = Boolean(target.note?.id);
+  const readonly = !canEdit;
+
+  function submit(event) {
+    event.preventDefault();
+    if (readonly) return;
+    onSave({
+      resourceType: 'truck',
+      resourceId: target.resourceId,
+      resourceLabel: target.resourceLabel,
+      date: target.date,
+      reasonLabel,
+      notes,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-[260] grid place-items-center bg-slate-950/35 px-3 py-5" role="presentation" onMouseDown={onClose}>
+      <form className="w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="min-w-0">
+            <span className="text-[10px] font-black uppercase text-amber-700">Catatan Utilisasi</span>
+            <h3 className="mt-0.5 text-sm font-black text-slate-950">{target.resourceLabel}</h3>
+            <p className="text-xs text-slate-500">{formatDate(target.date)} {target.cell?.count ? `- ${target.cell.count} trip` : '- Tidak ada trip'}</p>
+          </div>
+          <button type="button" className="grid h-8 w-8 place-items-center rounded border border-slate-300 bg-white text-slate-600" onClick={onClose} aria-label="Tutup catatan utilisasi">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="grid gap-3 px-4 py-3">
+          <label className="grid gap-1.5 text-xs font-black text-slate-700">
+            Alasan / Catatan Cepat
+            <input
+              className="min-h-10 rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 disabled:bg-slate-100"
+              list={datalistId}
+              value={reasonLabel}
+              onChange={(event) => setReasonLabel(event.target.value)}
+              placeholder="Contoh: MUAT SORE, TGG DO, INAP"
+              disabled={readonly || saving}
+            />
+            <datalist id={datalistId}>
+              {suggestions.map((item) => <option key={item.label || item} value={item.label || item} />)}
+            </datalist>
+          </label>
+          <label className="grid gap-1.5 text-xs font-black text-slate-700">
+            Catatan Tambahan
+            <textarea
+              className="min-h-20 resize-y rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 disabled:bg-slate-100"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Opsional, isi detail lokasi/nama customer jika perlu."
+              disabled={readonly || saving}
+              maxLength={1000}
+            />
+          </label>
+          {readonly ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Mode lihat saja. Catatan hanya bisa diisi oleh Operational/Admin.
+            </div>
+          ) : null}
+          {hasExistingNote ? (
+            <div className="rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+              Terakhir disimpan oleh {target.note.updatedBy || target.note.createdBy || '-'}.
+            </div>
+          ) : null}
+        </div>
+        <footer className="flex flex-col-reverse gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:flex-row sm:justify-between">
+          <div>
+            {canEdit && hasExistingNote ? (
+              <button type="button" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 text-xs font-black text-red-700" disabled={saving} onClick={() => onDelete(target.note)}>
+                <Trash2 size={15} /> Hapus
+              </button>
+            ) : null}
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <button type="button" className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-xs font-black text-slate-700" disabled={saving} onClick={onClose}>Tutup</button>
+            {canEdit ? (
+              <button type="submit" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-red-600 px-3 text-xs font-black text-white disabled:opacity-60" disabled={saving || !reasonLabel.trim()}>
+                <Save size={15} /> {saving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            ) : null}
+          </div>
+        </footer>
+      </form>
+    </div>
   );
 }
 
@@ -896,7 +1071,15 @@ export function MonthlyUtilizationModal({
   pivot,
   activeMonthLabel,
   year,
+  utilizationNotesByKey = new Map(),
+  utilizationNoteSuggestions = [],
+  canEditNotes = false,
+  noteSaving = false,
+  onSaveNote,
+  onDeleteNote,
 }) {
+  const [noteTarget, setNoteTarget] = useState(null);
+
   useEffect(() => {
     if (!open) return undefined;
     const previousOverflow = document.body.style.overflow;
@@ -904,6 +1087,10 @@ export function MonthlyUtilizationModal({
     return () => {
       document.body.style.overflow = previousOverflow;
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setNoteTarget(null);
   }, [open]);
 
   if (!open) return null;
@@ -1011,7 +1198,18 @@ export function MonthlyUtilizationModal({
                             day.isRedDate ? 'border-x-red-200 bg-red-50/80' : 'border-x-slate-200'
                           }`}
                         >
-                          <PivotCell cell={truck.cells[day.key]} />
+                          <PivotCell
+                            cell={truck.cells[day.key]}
+                            note={utilizationNotesByKey.get(utilizationNoteKey(truck.id || truck.plateNumber, day.key))}
+                            canEditNote={canEditNotes}
+                            onOpenNote={() => setNoteTarget({
+                              resourceId: truck.id || truck.plateNumber,
+                              resourceLabel: truck.plateNumber,
+                              date: day.key,
+                              cell: truck.cells[day.key],
+                              note: utilizationNotesByKey.get(utilizationNoteKey(truck.id || truck.plateNumber, day.key)),
+                            })}
+                          />
                         </td>
                       ))}
                       <td className="sticky right-0 z-10 border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-950 shadow-[inset_0_-1px_0_#94a3b8]">
@@ -1051,6 +1249,21 @@ export function MonthlyUtilizationModal({
             </div>
           </div>
         )}
+        <UtilizationNoteModal
+          target={noteTarget}
+          suggestions={utilizationNoteSuggestions}
+          canEdit={canEditNotes}
+          saving={noteSaving}
+          onClose={() => setNoteTarget(null)}
+          onSave={async (payload) => {
+            await onSaveNote?.(payload);
+            setNoteTarget(null);
+          }}
+          onDelete={async (note) => {
+            await onDeleteNote?.(note);
+            setNoteTarget(null);
+          }}
+        />
       </section>
     </div>
   );
@@ -1202,6 +1415,8 @@ export function DriverMonthlyUtilizationModal({
 
 function ReportsPage() {
   const archive = useArchiveData();
+  const { user } = useAuth();
+  const { notify } = useFeedback();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialPeriod = useMemo(() => currentPeriod(), []);
   const [month, setMonth] = useState(initialPeriod.month);
@@ -1224,12 +1439,16 @@ function ReportsPage() {
   const [dataSource, setDataSource] = useState('all');
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
   const [driverUtilizationModalOpen, setDriverUtilizationModalOpen] = useState(false);
+  const [utilizationNotes, setUtilizationNotes] = useState([]);
+  const [utilizationNoteSuggestions, setUtilizationNoteSuggestions] = useState([]);
+  const [utilizationNoteSaving, setUtilizationNoteSaving] = useState(false);
   const yearOptions = useMemo(() => {
     const baseYear = currentPeriod().year;
     return Array.from({ length: 7 }, (_, index) => baseYear - 3 + index);
   }, []);
   const activeMonthLabel = MONTHS.find((item) => Number(item.value) === Number(month))?.label || '-';
   const activePeriodKey = monthKey(month, year);
+  const canEditUtilizationNotes = user?.role === USER_ROLES.ADMIN || hasPermission(user, 'operations.update');
   const reportSourceParams = useMemo(() => {
     if (dataSource === 'historical') return { entrySource: 'historical', historicalPeriod: activePeriodKey };
     if (dataSource === 'realtime') return { entrySource: 'realtime' };
@@ -1259,6 +1478,25 @@ function ReportsPage() {
       active = false;
     };
   }, [year]);
+
+  useEffect(() => {
+    let active = true;
+    fetchUtilizationNotes({ resourceType: 'truck', period: activePeriodKey })
+      .then((result) => {
+        if (!active) return;
+        setUtilizationNotes(Array.isArray(result?.rows) ? result.rows : []);
+        setUtilizationNoteSuggestions(Array.isArray(result?.suggestions) ? result.suggestions : []);
+      })
+      .catch(() => {
+        if (!active) return;
+        setUtilizationNotes([]);
+        setUtilizationNoteSuggestions([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activePeriodKey]);
 
   function selectReport(report) {
     const normalized = normalizeReportTab(report);
@@ -1390,6 +1628,13 @@ function ReportsPage() {
     () => buildMonthlyUtilizationPivot(masterTruckRows || [], utilizationSourceRows, month, year, holidaysByDate),
     [holidaysByDate, masterTruckRows, month, utilizationSourceRows, year],
   );
+  const utilizationNotesByKey = useMemo(() => {
+    const map = new Map();
+    utilizationNotes.forEach((note) => {
+      map.set(utilizationNoteKey(note.resourceId, note.date), note);
+    });
+    return map;
+  }, [utilizationNotes]);
   const driverUtilizationPivot = useMemo(
     () => buildMonthlyDriverUtilizationPivot(masterDriverRows || [], utilizationSourceRows, month, year, holidaysByDate),
     [holidaysByDate, masterDriverRows, month, utilizationSourceRows, year],
@@ -1406,6 +1651,46 @@ function ReportsPage() {
   const repoMonitoringRows = useMemo(() => buildRepoMonitoringRows(repoRows), [repoRows]);
   const masterReportSections = useMemo(() => buildMasterReportSections(archive.masters || {}), [archive.masters]);
   const reportHeader = getReportHeader(selectedReport);
+
+  async function handleSaveUtilizationNote(payload) {
+    try {
+      setUtilizationNoteSaving(true);
+      const saved = await saveUtilizationNote(payload);
+      setUtilizationNotes((current) => {
+        const key = utilizationNoteKey(saved.resourceId, saved.date);
+        const withoutCurrent = current.filter((note) => utilizationNoteKey(note.resourceId, note.date) !== key);
+        return [...withoutCurrent, saved];
+      });
+      setUtilizationNoteSuggestions((current) => {
+        const label = String(saved.reasonLabel || '').trim();
+        if (!label) return current;
+        const withoutCurrent = current.filter((item) => String(item.label || '').toUpperCase() !== label.toUpperCase());
+        return [{ label, usageCount: 1 }, ...withoutCurrent].slice(0, 20);
+      });
+      notify({ title: 'Catatan utilisasi disimpan', message: `${saved.resourceLabel} ${formatDate(saved.date)}: ${saved.reasonLabel}` });
+      return saved;
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Catatan gagal disimpan', message: requestError.message });
+      throw requestError;
+    } finally {
+      setUtilizationNoteSaving(false);
+    }
+  }
+
+  async function handleDeleteUtilizationNote(note) {
+    if (!note?.id) return;
+    try {
+      setUtilizationNoteSaving(true);
+      await deleteUtilizationNote(note.id);
+      setUtilizationNotes((current) => current.filter((item) => item.id !== note.id));
+      notify({ title: 'Catatan utilisasi dihapus', message: `${note.resourceLabel} ${formatDate(note.date)}` });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Catatan gagal dihapus', message: requestError.message });
+      throw requestError;
+    } finally {
+      setUtilizationNoteSaving(false);
+    }
+  }
 
   return (
     <div className="page">
@@ -1625,6 +1910,12 @@ function ReportsPage() {
         pivot={utilizationPivot}
         activeMonthLabel={activeMonthLabel}
         year={year}
+        utilizationNotesByKey={utilizationNotesByKey}
+        utilizationNoteSuggestions={utilizationNoteSuggestions}
+        canEditNotes={canEditUtilizationNotes}
+        noteSaving={utilizationNoteSaving}
+        onSaveNote={handleSaveUtilizationNote}
+        onDeleteNote={handleDeleteUtilizationNote}
       />
 
       {selectedReport === 'repo' ? (

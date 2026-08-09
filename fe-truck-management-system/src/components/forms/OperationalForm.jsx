@@ -1040,13 +1040,32 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           <div><p className="eyebrow">Container Job</p><h2>{form.containerNumber || container.containerNumber}</h2><span>{container.soNumber} - {container.customer} - {container.origin} - {container.destination}</span></div>
           <button type="button" onClick={onClose} aria-label="Tutup form"><X size={20} /></button>
         </header>
-        <form onSubmit={handleSubmit}>
+        <form className="operational-update-form" onSubmit={handleSubmit}>
           {error ? <div className="alert error operational-form-error">{error}</div> : null}
           {isRepoPickupMode ? (
             <div className="alert operational-form-repo-pickup">
               Container sedang diambil dari depo penitipan. Pilih truck dan sopir baru untuk melanjutkan perjalanan ke tujuan akhir.
             </div>
           ) : null}
+
+          <div className="operational-mobile-job-summary" aria-label="Ringkasan container job">
+            <div>
+              <span>Customer</span>
+              <strong>{container.customer || '-'}</strong>
+            </div>
+            <div>
+              <span>Tujuan</span>
+              <strong>{container.destination || '-'}</strong>
+            </div>
+            <div>
+              <span>Truck</span>
+              <strong>{form.plateNumber || '-'}</strong>
+            </div>
+            <div>
+              <span>Sopir</span>
+              <strong>{form.driver || '-'}</strong>
+            </div>
+          </div>
 
           <div className="operational-phase-tabs" role="tablist" aria-label="Phase Operational">
             {operationalPhaseOptions.map((phase, index) => (
@@ -1231,8 +1250,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           ) : null}
 
           {activePhase === 'closing' ? (
-          <>
-            <div className="form-section">
+          <div className="operational-closing-phase">
+            <div className="form-section operational-documents-section">
               <div className="form-section-heading">
                 <div>
                   <h3>Dokumen Operasional</h3>
@@ -1256,7 +1275,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       />
                     </label>
                     <div className="operational-document-upload-row">
-                      <span className="operational-file-name">
+                      <span className={`operational-file-name ${container.repoEirDocument ? 'has-file' : 'is-empty'}`}>
                         {container.repoEirDocument?.name || 'Belum ada file'}
                       </span>
                     </div>
@@ -1301,10 +1320,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                         event.target.value = '';
                       }}
                     />
-                    <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker('eirDocument')} disabled={!canEditDocumentFile('eirDocument')}>
+                    <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker('eirDocument')} disabled={!canEditDocumentFile('eirDocument')} aria-label="Pilih lampiran EIR">
                       {form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
                     </button>
-                    <span className="operational-file-name">
+                    <span className={`operational-file-name ${form.eirDocument ? 'has-file' : 'is-empty'}`}>
                       {form.eirDocument?.name || 'Belum ada file'}
                     </span>
                   </div>
@@ -1345,10 +1364,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                           event.target.value = '';
                         }}
                       />
-                      <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)} disabled={!canEditDocumentFile(field.fileField)}>
+                      <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)} disabled={!canEditDocumentFile(field.fileField)} aria-label={`Pilih ${field.label}`}>
                         {form[field.fileField]?.name ? 'Ubah File' : 'Pilih File'}
                       </button>
-                      <span className="operational-file-name">
+                      <span className={`operational-file-name ${form[field.fileField] ? 'has-file' : 'is-empty'}`}>
                         {form[field.fileField]?.name || 'Belum ada file'}
                       </span>
                     </div>
@@ -1402,7 +1421,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               </div>
             </div>
 
-            <div className="form-section">
+            <div className="form-section operational-timeline-section">
               <h3>Status & Timeline</h3>
               <div className="operational-closing-checklist" aria-label="Checklist closing sebelum selesai">
                 {closingChecklist.map((item) => (
@@ -1442,10 +1461,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                 </label>
               </div>
             </div>
-          </>
+          </div>
           ) : null}
 
-          <footer><button className="secondary-button" type="button" onClick={onClose}>Batal</button><button className="primary-button" type="submit" aria-label={`Simpan Container Job - ${primaryActionLabel}`}>{primaryActionLabel}</button></footer>
+          <footer className="operational-form-footer"><button className="secondary-button" type="button" onClick={onClose}>Batal</button><button className="primary-button" type="submit" aria-label={`Simpan Container Job - ${primaryActionLabel}`}>{primaryActionLabel}</button></footer>
         </form>
       </section>
 

@@ -34,6 +34,7 @@
 .container-job-detail-modal header > div > span { color: #9f141a; font-size: .61rem; font-weight: 800; }
 .container-job-detail-modal h2 { margin: 2px 0; font-size: 1rem; }
 .container-job-detail-modal header p { margin: 0; color: #6f7278; font-size: .65rem; }
+.container-job-mobile-summary { display: none; }
 .container-job-detail-body { display: grid; overflow-y: auto; min-height: 0; gap: 12px; padding: 16px 20px; background: #f7f7f8; overscroll-behavior: contain; }
 .container-job-detail-body section { padding: 14px; border: 1px solid #e0e1e4; border-radius: 9px; background: white; }
 .container-job-detail-body h3 { margin: 0 0 11px; font-size: .72rem; }
@@ -208,6 +209,12 @@
   border-color: #bfdbfe;
   color: #1e40af;
   background: #eff6ff;
+}
+.operational-mobile-job-summary {
+  display: none;
+}
+.operational-closing-phase {
+  display: contents;
 }
 .repo-action-button {
   color: #1d4ed8 !important;
@@ -3630,6 +3637,10 @@
   letter-spacing: .08em;
 }
 
+.rpuj-mobile-toggle {
+  display: none;
+}
+
 .operational-workspace .job-rpuj-tabs {
   display: inline-flex;
   flex-wrap: nowrap;
@@ -3739,13 +3750,19 @@
   }
 
   .operations-page .quick-stats.operational-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
     gap: 8px;
+    margin: 0 -14px 10px;
+    padding: 0 14px 2px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
   }
 
   .operations-page .quick-stats.operational-stats > div {
+    flex: 0 0 136px;
     min-height: 78px;
     padding: 12px;
+    scroll-snap-align: start;
   }
 
   .operations-page .quick-stats.operational-stats strong {
@@ -3763,37 +3780,114 @@
 
   .operations-page .job-status-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .operations-page .job-status-tabs button {
+    display: none;
     justify-content: space-between;
-    min-height: 40px;
-    padding-inline: 10px;
-    font-size: .64rem;
+    min-height: 38px;
+    padding-inline: 8px;
+    border-color: #dbe3ee;
+    background: #fff;
+    font-size: .6rem;
+  }
+
+  .operations-page .job-status-tabs button:first-child,
+  .operations-page .job-status-tabs button.is-received,
+  .operations-page .job-status-tabs button.is-running,
+  .operations-page .job-status-tabs button.is-completed {
+    display: inline-flex;
+  }
+
+  .operations-page .job-status-tabs button span {
+    min-width: 18px;
+    height: 18px;
+    padding-inline: 4px;
   }
 
   .operations-page .operational-filter-substrip {
+    display: grid;
+    grid-template-columns: 1fr auto;
     gap: 8px;
-    padding: 0 12px 11px;
+    padding: 0 12px 10px;
+    overflow: visible;
   }
 
-  .operations-page .rpuj-filter-tabs {
+  .operations-page .operational-filter-substrip > span {
+    display: none;
+  }
+
+  .operations-page .rpuj-mobile-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 0 11px;
+    border: 1px solid #cbd5e1;
+    border-radius: 9px;
+    color: #334155;
+    background: #fff;
+    font-size: .62rem;
+    font-weight: 900;
+  }
+
+  .operations-page .rpuj-mobile-toggle.active {
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    background: #eff6ff;
+  }
+
+  .operations-page .rpuj-mobile-toggle strong {
     display: grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    color: #fff;
+    background: #2563eb;
+    font-size: .52rem;
+  }
+
+  .operations-page .job-rpuj-tabs {
+    display: none;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-column: 1 / -1;
+    gap: 7px;
     width: 100%;
   }
 
-  .operations-page .rpuj-filter-tabs button {
+  .operations-page .operational-filter-substrip.is-mobile-open .job-rpuj-tabs {
+    display: grid;
+  }
+
+  .operations-page .job-rpuj-tabs button {
     justify-content: space-between;
     min-height: 36px;
     padding-inline: 10px;
+    border-radius: 9px;
+    font-size: .6rem;
   }
 
   .operations-page .operational-filter-substrip small {
+    align-self: center;
     font-size: .63rem;
+    text-align: right;
+  }
+
+  .operations-page .filter-reset-link {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    min-height: 34px;
+    border-radius: 9px;
   }
 }
 
@@ -3926,6 +4020,11 @@
   line-height: 1.25;
   text-align: right;
   white-space: nowrap;
+}
+
+.operational-so-progress,
+.container-sequence {
+  display: none;
 }
 
 .operational-container-list {
@@ -4155,6 +4254,9 @@
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.container-row-assignment span b {
+  display: none;
 }
 
 .container-row-assignment svg {
@@ -4510,6 +4612,59 @@
     white-space: normal;
   }
 
+  .operations-page .operational-so-progress {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .operations-page .operational-so-progress span {
+    display: flex;
+    min-width: 0;
+    min-height: 30px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    color: #475569;
+    background: #fff;
+    font-size: .58rem;
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .operations-page .operational-so-progress b {
+    color: #0f172a;
+    font-size: .72rem;
+    font-weight: 950;
+  }
+
+  .operations-page .operational-so-progress .waiting {
+    border-color: #fde68a;
+    color: #854d0e;
+    background: #fffbeb;
+  }
+
+  .operations-page .operational-so-progress .running {
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+    background: #eff6ff;
+  }
+
+  .operations-page .operational-so-progress .completed {
+    border-color: #bbf7d0;
+    color: #047857;
+    background: #f0fdf4;
+  }
+
+  .operations-page .operational-so-progress .cancelled {
+    border-color: #fecdd3;
+    color: #9f1239;
+    background: #fff1f2;
+  }
+
   .operations-page .operational-container-list {
     gap: 9px;
     padding: 10px;
@@ -4526,7 +4681,8 @@
     padding: 10px;
     border: 1px solid #e5edf6;
     border-radius: 10px;
-    background: #fbfdff;
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, .04);
   }
 
   .operations-page .operational-container-row:first-child {
@@ -4535,13 +4691,29 @@
 
   .operations-page .operational-container-row.is-repo-stored {
     border-left: 3px solid #2563eb;
+    border-color: #bfdbfe;
     background: #f8fbff;
   }
 
   .operations-page .container-row-main {
     grid-column: 1 / -1;
     gap: 4px;
-    padding-bottom: 2px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #edf2f7;
+  }
+
+  .operations-page .container-sequence {
+    display: inline-flex;
+    width: fit-content;
+    min-height: 20px;
+    align-items: center;
+    padding: 0 7px;
+    border: 1px solid #dbeafe;
+    border-radius: 999px;
+    color: #1d4ed8;
+    background: #eff6ff;
+    font-size: .55rem;
+    font-weight: 950;
   }
 
   .operations-page .container-row-main strong {
@@ -4560,11 +4732,11 @@
   .operations-page .container-rpuj-status,
   .operations-page .container-row-assignment,
   .operations-page .container-row-docs {
-    min-height: 58px;
-    padding: 9px 10px;
-    border: 1px solid #e5edf6;
+    min-height: 52px;
+    padding: 8px 9px;
+    border: 1px solid #eef2f7;
     border-radius: 8px;
-    background: #fff;
+    background: #f8fafc;
   }
 
   .operations-page .operational-container-row.is-repo-stored .container-row-status {
@@ -4574,6 +4746,20 @@
   .operations-page .operational-container-row.is-repo-stored .container-rpuj-status,
   .operations-page .operational-container-row.is-repo-stored .container-row-assignment {
     grid-column: auto;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored .container-row-main {
+    border-bottom-color: #dbeafe;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored .container-row-main strong {
+    color: #1d4ed8;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored .container-action-hint.repo {
+    min-height: 24px;
+    padding-inline: 9px;
+    font-size: .6rem;
   }
 
   .operations-page .container-row-status {
@@ -4643,6 +4829,37 @@
     white-space: normal;
   }
 
+  .operations-page .container-row-assignment.is-repo-summary {
+    grid-column: 1 / -1;
+    gap: 8px;
+    border-color: #bfdbfe;
+    background: #eff6ff;
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary::before {
+    content: "Data Titipan";
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary span {
+    display: grid;
+    grid-template-columns: 16px 52px minmax(0, 1fr);
+    align-items: start;
+    gap: 5px;
+    color: #1e3a8a;
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary span b {
+    display: inline;
+    color: #64748b;
+    font-size: .56rem;
+    font-weight: 950;
+    text-transform: uppercase;
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary svg {
+    margin-top: 1px;
+  }
+
   .operations-page .container-row-docs {
     grid-template-columns: minmax(0, 1fr) auto;
     align-content: start;
@@ -4675,7 +4892,7 @@
     grid-column: 1 / -1;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
-    margin-top: 2px;
+    margin-top: 4px;
   }
 
   .operations-page .container-row-actions .secondary-button,
@@ -4685,10 +4902,19 @@
     font-size: .66rem;
   }
 
-  .operations-page .container-row-actions .operational-primary-action:last-child:nth-child(odd),
-  .operations-page .container-row-actions .repo:last-child:nth-child(odd),
+  .operations-page .container-row-actions .operational-primary-action {
+    order: -1;
+    grid-column: 1 / -1;
+  }
+
   .operations-page .container-row-actions .secondary-button:only-child {
     grid-column: 1 / -1;
+  }
+
+  .operations-page .container-row-actions .secondary-button {
+    min-height: 36px;
+    color: #475569;
+    background: #fff;
   }
 
   .operations-page .master-pagination {

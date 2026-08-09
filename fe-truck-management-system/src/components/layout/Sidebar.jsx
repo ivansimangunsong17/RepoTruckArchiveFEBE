@@ -44,7 +44,7 @@ function Sidebar({ open, collapsed, onClose }) {
     <aside className={`sidebar ${open ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
       <div className="brand">
         <div className="brand-mark"><img src={armadaLogo} alt="Armada" /></div>
-        <div><strong>ARMADA</strong><span>Truck Management System</span></div>
+        <div><strong>ARMADA</strong><span>Transportation Management System</span></div>
         <button className="sidebar-close" onClick={onClose} aria-label="Tutup menu">
           <X size={20} />
         </button>

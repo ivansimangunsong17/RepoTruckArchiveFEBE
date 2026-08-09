@@ -1504,6 +1504,19 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.operational-file-name.is-empty {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #667085;
+  background: #eef2f6;
+  font-weight: 800;
+}
+.operational-file-name.has-file {
+  color: #1f4e79;
+  font-weight: 850;
+}
 .operational-document-helper {
   color: #8a94a5;
   font-size: .54rem;

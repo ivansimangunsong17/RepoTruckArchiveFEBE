@@ -331,11 +331,11 @@ function getContainerJobSize(job) {
   return normalizeContainerSize(job?.containerSize || job?.container_size || job?.size);
 }
 
-function truckMatchesContainerJob(truck, job) {
+function truckSizeMismatchForJob(truck, job) {
   const truckCapacity = getTruckCapacity(truck);
   const jobSize = getContainerJobSize(job);
-  if (!jobSize) return true;
-  return truckCapacity === 'COMBO' || truckCapacity === jobSize;
+  if (!truck || !jobSize || !truckCapacity || truckCapacity === 'COMBO') return false;
+  return truckCapacity !== jobSize;
 }
 
 function getDriverName(driver) {
@@ -408,9 +408,12 @@ function HistoricalEntryPage() {
     (archive.masters?.drivers || []).filter((driver) => !driver.archivedAt && !driver.archived_at)
   ), [archive.masters?.drivers]);
 
-  const filteredTruckOptions = useMemo(() => (
-    editingJob ? truckOptions.filter((truck) => truckMatchesContainerJob(truck, editingJob)) : truckOptions
-  ), [editingJob, truckOptions]);
+  const selectedTruck = useMemo(() => (
+    truckOptions.find((truck) => String(truck.id) === String(jobForm?.vehicleId || '')) || null
+  ), [jobForm?.vehicleId, truckOptions]);
+  const selectedTruckSizeMismatch = useMemo(() => (
+    editingJob ? truckSizeMismatchForJob(selectedTruck, editingJob) : false
+  ), [editingJob, selectedTruck]);
 
   const auditRows = useMemo(() => (
     sourceRows.map((order) => ({
@@ -651,16 +654,13 @@ function HistoricalEntryPage() {
   }
 
   function openJobForm(job) {
-    const currentTruckMatches = job.vehicleId
-      ? truckOptions.some((truck) => String(truck.id) === String(job.vehicleId) && truckMatchesContainerJob(truck, job))
-      : true;
     const status = getHistoricalEditableStatus(job.status);
     setEditingJob(job);
     setJobForm({
       containerNumber: job.containerNumber || '',
       status,
       driverId: job.driverId || '',
-      vehicleId: currentTruckMatches ? job.vehicleId || '' : '',
+      vehicleId: job.vehicleId || '',
       runningAt: toDateTimeLocalValue(job.runningAt),
       completedAt: toDateTimeLocalValue(job.completedAt),
       cancelReason: job.cancelReason || '',
@@ -1091,12 +1091,18 @@ function HistoricalEntryPage() {
                       <label>
                         Truck {getContainerJobSize(editingJob) ? `(${getContainerJobSize(editingJob)})` : ''}
                         <select value={jobForm.vehicleId} onChange={(event) => setJobForm((current) => ({ ...current, vehicleId: event.target.value }))}>
-                          <option value="">Pilih truck sesuai ukuran</option>
-                          {filteredTruckOptions.map((truck) => (
-                            <option key={truck.id || getTruckPlate(truck)} value={truck.id || ''}>{getTruckPlate(truck)} {getTruckUnitCode(truck) ? `- ${getTruckUnitCode(truck)}` : ''}</option>
-                          ))}
+                          <option value="">Pilih truck/unit</option>
+                          {truckOptions.map((truck) => {
+                            const capacity = getTruckCapacity(truck);
+                            const mismatch = truckSizeMismatchForJob(truck, editingJob);
+                            return (
+                              <option key={truck.id || getTruckPlate(truck)} value={truck.id || ''}>
+                                {getTruckPlate(truck)} {getTruckUnitCode(truck) ? `- ${getTruckUnitCode(truck)}` : ''}{capacity ? ` (${capacity})` : ''}{mismatch ? ' - beda ukuran' : ''}
+                              </option>
+                            );
+                          })}
                         </select>
-                        {!filteredTruckOptions.length ? <small>Tidak ada truck yang cocok untuk ukuran container ini.</small> : null}
+                        {selectedTruckSizeMismatch ? <small>Ukuran truck berbeda dari container. Untuk data lama tetap boleh, misalnya karena tukar chassis.</small> : null}
                       </label>
                       <label>
                         Sopir

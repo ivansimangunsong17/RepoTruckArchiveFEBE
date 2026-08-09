@@ -155,7 +155,7 @@ function buildPageContent({
 
   commands.push(drawLine(MARGIN, FOOTER_HEIGHT + 10, PAGE_WIDTH - MARGIN, FOOTER_HEIGHT + 10, COLORS.line));
   commands.push(drawText(`Halaman ${pageIndex + 1} dari ${pageTotal}`, PAGE_WIDTH - MARGIN - 75, FOOTER_HEIGHT, { size: 7, color: '0.45 0.48 0.54' }));
-  commands.push(drawText('Armada Truck Management System', MARGIN, FOOTER_HEIGHT, { size: 7, color: '0.45 0.48 0.54' }));
+  commands.push(drawText('Armada Transportation Management System', MARGIN, FOOTER_HEIGHT, { size: 7, color: '0.45 0.48 0.54' }));
 
   return commands.join('\n');
 }

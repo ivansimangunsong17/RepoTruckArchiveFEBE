@@ -409,6 +409,566 @@
     padding: 0;
   }
 
+  .operational-modal {
+    max-height: min(96vh, calc(100dvh - 8px));
+  }
+
+  .operational-modal > header {
+    padding: 12px 14px;
+  }
+
+  .operational-modal > header .eyebrow {
+    margin-bottom: 2px;
+    font-size: .58rem;
+  }
+
+  .operational-modal > header span {
+    display: -webkit-box;
+    overflow: hidden;
+    max-width: calc(100vw - 92px);
+    font-size: .64rem;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .operational-update-form {
+    padding: 0;
+    background: #f8fafc;
+  }
+
+  .operational-update-form .operational-form-error,
+  .operational-update-form .operational-form-repo-pickup {
+    margin: 10px 12px 0;
+  }
+
+  .operational-mobile-job-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 10px 12px 0;
+    padding: 10px;
+    border: 1px solid #dce5f1;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .operational-mobile-job-summary div {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .operational-mobile-job-summary span {
+    color: #64748b;
+    font-size: .56rem;
+    font-weight: 950;
+    text-transform: uppercase;
+  }
+
+  .operational-mobile-job-summary strong {
+    overflow: hidden;
+    color: #0f172a;
+    font-size: .72rem;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .operational-update-form .operational-phase-tabs {
+    position: sticky;
+    z-index: 7;
+    top: 0;
+    grid-template-columns: repeat(3, minmax(108px, 1fr));
+    gap: 7px;
+    overflow-x: auto;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+  }
+
+  .operational-update-form .operational-phase-tabs button {
+    min-height: 38px;
+    padding: 0 9px;
+    border-radius: 8px;
+  }
+
+  .operational-update-form .operational-phase-tabs span {
+    width: 20px;
+    height: 20px;
+    font-size: .58rem;
+  }
+
+  .operational-update-form .operational-phase-tabs strong {
+    font-size: .62rem;
+  }
+
+  .operational-closing-phase {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .operational-timeline-section {
+    order: -1;
+  }
+
+  .operational-timeline-section .operational-closing-checklist {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .operational-timeline-section .operational-closing-checklist > div {
+    min-height: 38px;
+    padding: 8px;
+  }
+
+  .operational-timeline-section .operational-closing-checklist span {
+    width: 19px;
+    height: 19px;
+    font-size: .58rem;
+  }
+
+  .operational-timeline-section .operational-closing-checklist strong {
+    white-space: normal;
+  }
+
+  .operational-timeline-grid {
+    gap: 10px;
+  }
+
+  .operational-status-field,
+  .operational-date-field {
+    gap: 6px;
+    font-size: .68rem;
+  }
+
+  .operational-status-field select,
+  .operational-date-field input {
+    min-height: 44px;
+    font-size: .82rem;
+  }
+
+  .operational-document-upload-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .operational-documents-section {
+    padding-bottom: 12px;
+  }
+
+  .operational-documents-section .order-form-grid {
+    gap: 9px;
+  }
+
+  .operational-documents-section .operational-document-card {
+    gap: 8px;
+    padding: 11px;
+    border-radius: 9px;
+  }
+
+  .operational-documents-section .operational-document-card > span {
+    font-size: .72rem;
+    line-height: 1.25;
+  }
+
+  .operational-documents-section .operational-eir-note {
+    font-size: .62rem;
+  }
+
+  .operational-documents-section .operational-inline-label,
+  .operational-documents-section .operational-document-helper {
+    font-size: .62rem;
+  }
+
+  .operational-documents-section .operational-document-input,
+  .operational-documents-section .operational-inline-label input {
+    min-height: 42px;
+    font-size: .8rem;
+  }
+
+  .operational-upload-button {
+    width: 100%;
+    min-height: 38px;
+    font-size: .66rem;
+  }
+
+  .operational-file-name {
+    padding: 0 2px;
+    font-size: .64rem;
+    white-space: normal;
+  }
+
+  .operational-file-name.is-empty {
+    padding: 5px 9px;
+    font-size: .62rem;
+  }
+
+  .operational-file-name.has-file {
+    display: block;
+    padding: 7px 9px;
+    border: 1px solid #d7e4f2;
+    border-radius: 8px;
+    background: #f8fbff;
+    word-break: break-word;
+  }
+
+  .operational-documents-section .other-document-section {
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+
+  .operational-documents-section .other-document-section .form-section-heading {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .operational-documents-section .other-document-section .form-section-heading p {
+    display: none;
+  }
+
+  .operational-documents-section .other-document-section .form-section-heading .secondary-button {
+    flex: none;
+    min-height: 36px;
+    padding-inline: 11px;
+  }
+
+  .operational-documents-section .other-document-row {
+    grid-template-columns: minmax(0, 1fr) 40px;
+    align-items: stretch;
+    gap: 8px;
+    padding: 9px;
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    background: #fff;
+  }
+
+  .operational-documents-section .other-document-row > input {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 42px;
+    font-size: .78rem;
+  }
+
+  .operational-documents-section .other-document-row .document-upload {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .operational-documents-section .other-document-row > button {
+    grid-column: 2;
+    grid-row: 2;
+    width: 40px;
+    height: 46px;
+    align-self: start;
+  }
+
+  .operational-documents-section .other-document-row .document-upload-dropzone {
+    min-height: 46px;
+  }
+
+  .operational-form-footer {
+    box-shadow: 0 -12px 24px rgba(15, 23, 42, .12);
+  }
+
+  .container-repo-modal {
+    max-height: min(96vh, calc(100dvh - 8px));
+    border-radius: 16px 16px 0 0;
+  }
+
+  .container-repo-modal > header {
+    grid-template-columns: 34px minmax(0, 1fr) 38px;
+    gap: 10px;
+    padding: 13px 14px;
+  }
+
+  .container-repo-modal > header > span {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+  }
+
+  .container-repo-modal h2 {
+    font-size: .96rem;
+    line-height: 1.2;
+  }
+
+  .container-repo-modal p {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: .64rem;
+    line-height: 1.35;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .container-repo-modal form {
+    gap: 10px;
+    max-height: calc(96dvh - 124px);
+    padding: 12px;
+    background: #f8fafc;
+  }
+
+  .container-repo-modal .repo-assignment-snapshot {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .container-repo-modal .repo-assignment-snapshot span {
+    display: grid;
+    grid-template-columns: 70px minmax(0, 1fr);
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 10px;
+    background: #fff;
+  }
+
+  .container-repo-modal .repo-assignment-snapshot strong {
+    margin-top: 0;
+    text-align: right;
+  }
+
+  .container-repo-warning {
+    align-items: start;
+    padding: 10px;
+    font-size: .64rem;
+  }
+
+  .container-repo-modal label,
+  .repo-field-label {
+    gap: 6px;
+    font-size: .68rem;
+  }
+
+  .container-repo-modal input,
+  .container-repo-modal select {
+    min-height: 44px;
+    font-size: .82rem;
+  }
+
+  .container-repo-modal textarea {
+    min-height: 92px;
+    font-size: .82rem;
+  }
+
+  .container-repo-modal .repo-document-field {
+    padding: 10px;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .container-repo-modal .repo-document-field .document-upload-dropzone {
+    justify-content: flex-start;
+    min-height: 48px;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+    background: #eff6ff;
+    white-space: normal;
+  }
+
+  .container-repo-modal .repo-document-field .selected-document {
+    grid-template-columns: 34px minmax(0, 1fr) 32px;
+    padding: 8px;
+  }
+
+  .container-repo-modal footer {
+    margin: 0 -12px -12px;
+    padding: 12px;
+    box-shadow: 0 -12px 24px rgba(15, 23, 42, .12);
+  }
+
+  .container-job-detail-modal {
+    max-height: min(96vh, calc(100dvh - 8px));
+  }
+
+  .container-job-detail-modal > header {
+    padding: 13px 14px;
+  }
+
+  .container-job-detail-modal > header p {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: .64rem;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .container-job-mobile-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff;
+  }
+
+  .container-job-mobile-summary > div {
+    display: grid;
+    align-content: center;
+    min-width: 0;
+    min-height: 44px;
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    background: #f8fafc;
+  }
+
+  .container-job-mobile-summary span {
+    color: #64748b;
+    font-size: .54rem;
+    font-weight: 950;
+    text-transform: uppercase;
+  }
+
+  .container-job-mobile-summary strong {
+    overflow: hidden;
+    color: #0f172a;
+    font-size: .68rem;
+    font-weight: 950;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .container-job-mobile-summary .status-badge {
+    width: fit-content;
+    max-width: 100%;
+    min-height: 22px;
+    padding: 3px 7px;
+    font-size: .56rem;
+  }
+
+  .container-job-detail-body {
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .container-job-detail-body section {
+    padding: 12px;
+    border-color: #dfe7f1;
+    border-radius: 10px;
+  }
+
+  .container-job-detail-body h3 {
+    margin-bottom: 9px;
+    color: #0f172a;
+    font-size: .72rem;
+    line-height: 1.25;
+  }
+
+  .container-job-detail-body section > div:not(.job-timeline-detail):not(.detail-documents) {
+    gap: 8px;
+  }
+
+  .container-job-detail-body section > div:not(.job-timeline-detail):not(.detail-documents) > span {
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid #edf2f7;
+    border-radius: 8px;
+    background: #f8fafc;
+    font-size: .6rem;
+    font-weight: 900;
+  }
+
+  .container-job-detail-body section > div:not(.job-timeline-detail):not(.detail-documents) > span strong {
+    margin-top: 4px;
+    color: #0f172a;
+    font-size: .74rem;
+    line-height: 1.3;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .container-job-detail-body section > div > span small {
+    display: block;
+    margin-top: 3px;
+    color: #64748b;
+    font-size: .6rem;
+    line-height: 1.35;
+  }
+
+  .container-detail-timeline {
+    order: -2;
+  }
+
+  .container-detail-assignment {
+    order: -1;
+  }
+
+  .job-timeline-detail {
+    gap: 7px;
+  }
+
+  .job-timeline-detail > span {
+    grid-template-columns: 12px minmax(0, 1fr);
+    min-height: 46px;
+    padding: 9px 10px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+  }
+
+  .job-timeline-detail i {
+    width: 10px;
+    height: 10px;
+  }
+
+  .job-timeline-detail strong {
+    font-size: .66rem;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  .detail-documents {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .detail-documents span {
+    grid-template-columns: 20px minmax(0, 1fr);
+    padding: 10px;
+    border-color: #dfe7f1;
+  }
+
+  .detail-documents strong {
+    font-size: .68rem;
+    white-space: normal;
+  }
+
+  .detail-documents .document-link {
+    width: fit-content;
+    min-height: 30px;
+    align-items: center;
+    padding: 5px 8px;
+    border: 1px solid #fecdd3;
+    border-radius: 8px;
+    background: #fff7f7;
+    font-size: .62rem;
+  }
+
+  .container-job-detail-modal > footer {
+    flex-direction: column;
+    box-shadow: 0 -12px 24px rgba(15, 23, 42, .12);
+  }
+
+  .container-job-detail-modal > footer .operational-primary-action,
+  .container-job-detail-modal > footer .repo-action-button {
+    order: -1;
+  }
+
+  .container-job-detail-modal > footer .secondary-button:first-child {
+    order: 10;
+  }
+
+  .container-job-detail-modal > footer .danger-button {
+    background: #fff1f2;
+  }
+
   .document-preview-image-scroll {
     padding: 10px;
   }
@@ -519,6 +1079,45 @@
 }
 
 @media (max-width: 620px) {
+  .operations-page,
+  .operations-page *,
+  .operational-modal,
+  .operational-modal *,
+  .container-job-detail-modal,
+  .container-job-detail-modal *,
+  .container-repo-modal,
+  .container-repo-modal * {
+    box-sizing: border-box;
+  }
+
+  .operations-page {
+    overflow-x: hidden;
+  }
+
+  .operations-page .panel,
+  .operations-page .operational-workspace,
+  .operations-page .operational-so-list,
+  .operations-page .operational-so-group,
+  .operations-page .operational-so-header,
+  .operations-page .operational-container-list,
+  .operations-page .operational-container-row,
+  .operational-modal,
+  .operational-update-form,
+  .container-job-detail-modal,
+  .container-job-detail-body,
+  .container-repo-modal,
+  .container-repo-modal form {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .operational-modal button,
+  .container-job-detail-modal button,
+  .container-repo-modal button,
+  .operations-page .container-row-actions button {
+    white-space: normal;
+  }
+
   .form-section,
   .master-fieldset {
     margin-inline: 10px;
@@ -747,6 +1346,26 @@
   .historical-job-form footer {
     align-items: stretch;
     flex-direction: column-reverse;
+  }
+}
+
+@media (max-width: 380px) {
+  .operational-mobile-job-summary,
+  .container-job-mobile-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-page .job-status-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operations-page .container-row-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-page .container-row-actions .secondary-button,
+  .operations-page .container-row-actions .operational-primary-action {
+    grid-column: 1 / -1;
   }
 }
 

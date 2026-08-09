@@ -127,7 +127,7 @@ export function buildReportExcelHtml({
   <table>
     <colgroup>${colgroup}</colgroup>
     <tr><td class="title" colspan="${columnCount}">${escapeHtml(title)}</td></tr>
-    <tr><td class="subtitle" colspan="${columnCount}">Armada Truck Management System</td></tr>
+    <tr><td class="subtitle" colspan="${columnCount}">Armada Transportation Management System</td></tr>
     ${metadataRows.map(([label, value]) => `<tr><td class="label">${escapeHtml(label)}</td><td class="value" colspan="${columnCount - 1}">${escapeHtml(value)}</td></tr>`).join('')}
     <tr class="spacer"><td colspan="${columnCount}"></td></tr>
     <tr class="header">${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
