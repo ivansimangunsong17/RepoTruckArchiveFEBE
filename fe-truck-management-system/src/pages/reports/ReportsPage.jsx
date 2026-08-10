@@ -418,26 +418,28 @@ export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], mo
   const utilizationRows = Array.from(rowsByTruck.values())
     .map((truck) => ({
       ...truck,
-      utilizationPercent: truck.targetTruckDays ? (truck.activeTruckDays / truck.targetTruckDays) * 100 : 0,
+      utilizationPercent: truck.targetTruckDays ? (truck.totalTrips / truck.targetTruckDays) * 100 : 0,
     }))
     .sort((left, right) => {
-      if (right.activeTruckDays !== left.activeTruckDays) return right.activeTruckDays - left.activeTruckDays;
+      if (right.utilizationPercent !== left.utilizationPercent) return right.utilizationPercent - left.utilizationPercent;
       if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+      if (right.activeTruckDays !== left.activeTruckDays) return right.activeTruckDays - left.activeTruckDays;
       return left.plateNumber.localeCompare(right.plateNumber);
     });
 
   const activeTruckCount = activeTrucks.length;
   const potentialTruckDays = activeTruckCount * period.days;
   const realizedTruckDays = truckDayKeys.size;
+  const totalTrips = utilizationRows.reduce((total, truck) => total + truck.totalTrips, 0);
 
   return {
     period,
     rows: utilizationRows,
-    totalTrips: utilizationRows.reduce((total, truck) => total + truck.totalTrips, 0),
+    totalTrips,
     activeTruckCount,
     realizedTruckDays,
     potentialTruckDays,
-    utilizationPercent: potentialTruckDays ? (realizedTruckDays / potentialTruckDays) * 100 : 0,
+    utilizationPercent: potentialTruckDays ? (totalTrips / potentialTruckDays) * 100 : 0,
   };
 }
 

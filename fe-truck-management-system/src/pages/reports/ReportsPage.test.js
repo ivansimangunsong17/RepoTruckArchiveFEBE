@@ -168,7 +168,7 @@ describe('buildMonthlyDriverUtilizationPivot', () => {
 });
 
 describe('buildTruckDayUtilizationSummary', () => {
-  it('menghitung utilisasi truck-hari dari tanggal 1 sampai H-1', () => {
+  it('menghitung utilisasi dari jumlah trip terhadap target 1 trip per truck per hari', () => {
     const trucks = Array.from({ length: 10 }, (_, index) => ({
       id: `truck-${index + 1}`,
       plateNumber: `B 91${String(index + 1).padStart(2, '0')} BEL`,
@@ -224,8 +224,10 @@ describe('buildTruckDayUtilizationSummary', () => {
     expect(summary.activeTruckCount).toBe(10);
     expect(summary.realizedTruckDays).toBe(18);
     expect(summary.potentialTruckDays).toBe(20);
-    expect(summary.utilizationPercent).toBe(90);
+    expect(summary.utilizationPercent).toBe(95);
+    expect(summary.rows[0].totalTrips).toBe(3);
     expect(summary.rows[0].activeTruckDays).toBe(2);
+    expect(summary.rows[0].utilizationPercent).toBe(150);
     expect(summary.rows.find((truck) => truck.id === 'truck-9').activeTruckDays).toBe(1);
   });
 
@@ -265,6 +267,31 @@ describe('buildTruckDayUtilizationSummary', () => {
       activeTruckDays: 3,
       targetTruckDays: 3,
       utilizationPercent: 100,
+    });
+  });
+
+  it('bisa menghasilkan lebih dari 100 persen saat trip melebihi jumlah hari periode', () => {
+    const summary = buildTruckDayUtilizationSummary(
+      [{ id: 'truck-1', plateNumber: 'B 9101 BEL', unitCode: 'TRK-001', status: 'Aktif' }],
+      [
+        { vehicleId: 'truck-1', plateNumber: 'B 9101 BEL', completedAt: '2026-07-01T10:00:00.000Z', status: 'completed' },
+        { vehicleId: 'truck-1', plateNumber: 'B 9101 BEL', completedAt: '2026-07-01T15:00:00.000Z', status: 'completed' },
+        { vehicleId: 'truck-1', plateNumber: 'B 9101 BEL', completedAt: '2026-07-02T10:00:00.000Z', status: 'completed' },
+      ],
+      7,
+      2026,
+      new Date('2026-07-03T08:00:00.000Z'),
+    );
+
+    expect(summary.period.days).toBe(2);
+    expect(summary.realizedTruckDays).toBe(2);
+    expect(summary.potentialTruckDays).toBe(2);
+    expect(summary.utilizationPercent).toBe(150);
+    expect(summary.rows[0]).toMatchObject({
+      totalTrips: 3,
+      activeTruckDays: 2,
+      targetTruckDays: 2,
+      utilizationPercent: 150,
     });
   });
 });
