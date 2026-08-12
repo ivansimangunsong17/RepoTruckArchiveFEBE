@@ -3687,6 +3687,57 @@
   background: #2563eb;
 }
 
+.operational-date-filter {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 7px;
+  min-height: 29px;
+  padding: 0 8px;
+  border: 1px solid #cfd8e5;
+  border-radius: 9px;
+  color: #405166;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.operational-date-filter.active {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.operational-date-filter svg {
+  flex: none;
+  color: currentColor;
+}
+
+.operational-date-filter span {
+  color: currentColor;
+  font-size: .56rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.operational-date-filter input {
+  width: 126px;
+  height: 25px;
+  min-width: 0;
+  padding: 0 0 0 8px;
+  border: 0;
+  border-left: 1px solid #dbe3ee;
+  color: #0f172a;
+  background: transparent;
+  font: inherit;
+  font-size: .6rem;
+  font-weight: 850;
+  outline: 0;
+}
+
+.operational-date-filter input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
 .operational-filter-substrip small {
   margin-left: auto;
   color: #64748b;
@@ -3867,6 +3918,19 @@
 
   .operations-page .operational-filter-substrip.is-mobile-open .job-rpuj-tabs {
     display: grid;
+  }
+
+  .operations-page .operational-date-filter {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 38px;
+    padding-inline: 10px;
+  }
+
+  .operations-page .operational-date-filter input {
+    width: auto;
+    min-width: 138px;
+    margin-left: auto;
   }
 
   .operations-page .job-rpuj-tabs button {
@@ -4497,12 +4561,19 @@
 }
 
 @media (max-width: 1180px) {
-  .operational-container-row {
-    grid-template-columns: minmax(190px, 1fr) 100px minmax(140px, .86fr) minmax(180px, 1fr) 122px;
+  .operational-container-row,
+  .operational-container-row.is-repo-stored {
+    grid-template-columns: minmax(170px, 1fr) 100px minmax(132px, .86fr) minmax(160px, 1fr);
   }
 
   .container-row-docs {
     display: none;
+  }
+
+  .container-row-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(112px, 132px));
+    justify-content: end;
   }
 }
 
@@ -4926,5 +4997,285 @@
 
   .operations-page .master-pagination > div {
     justify-content: space-between;
+  }
+}
+
+/* Phase 3: mobile polish for Operational workflows */
+@media (max-width: 920px) {
+  .operations-page,
+  .operations-page *,
+  .operational-modal,
+  .operational-modal *,
+  .container-job-detail-modal,
+  .container-job-detail-modal *,
+  .container-repo-modal,
+  .container-repo-modal *,
+  .container-cancel-modal,
+  .container-cancel-modal * {
+    box-sizing: border-box;
+  }
+
+  .operations-page,
+  .operations-page .operational-workspace,
+  .operations-page .operational-so-list,
+  .operations-page .operational-so-group,
+  .operations-page .operational-container-row,
+  .operations-page .operational-filter-strip,
+  .operations-page .operational-filter-substrip {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .operations-page {
+    overflow-x: hidden;
+  }
+
+  .operational-workspace .operational-filter-strip {
+    align-items: stretch;
+  }
+
+  .operational-workspace .operational-filter-strip .search-field {
+    width: 100%;
+    max-width: none;
+  }
+
+  .operational-workspace .job-status-tabs {
+    justify-content: flex-start;
+    width: 100%;
+    max-width: 100%;
+    scrollbar-width: thin;
+  }
+
+  .operational-workspace .job-status-tabs button,
+  .operational-workspace .job-rpuj-tabs button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .container-job-detail-modal,
+  .operational-modal,
+  .container-repo-modal,
+  .container-cancel-modal {
+    width: min(100%, calc(100vw - 28px));
+  }
+
+  .container-job-detail-body section > div:not(.job-timeline-detail),
+  .container-repo-summary > div,
+  .container-cancel-summary > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .operations-page .quick-stats.operational-stats {
+    gap: 8px;
+  }
+
+  .operations-page .quick-stats.operational-stats > div {
+    min-width: 0;
+    min-height: 88px;
+    padding: 12px;
+  }
+
+  .operations-page .quick-stats.operational-stats small {
+    line-height: 1.35;
+    white-space: normal;
+  }
+
+  .operations-page .operational-workspace {
+    border-color: #dbe4ef;
+    background: #f8fafc;
+  }
+
+  .operations-page .operational-filter-strip {
+    gap: 9px;
+    padding: 11px 12px 10px;
+    background: #fff;
+  }
+
+  .operations-page .job-status-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operations-page .job-status-tabs button {
+    justify-content: space-between;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .operations-page .job-status-tabs button span {
+    flex: none;
+  }
+
+  .operations-page .operational-filter-substrip {
+    gap: 8px;
+    padding: 9px 12px 10px;
+    background: #fff;
+  }
+
+  .operations-page .job-rpuj-tabs {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .operations-page .filter-reset-link {
+    width: 100%;
+    min-height: 36px;
+    border-radius: 8px;
+  }
+
+  .operations-page .operational-document-followup-summary {
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 42px;
+    white-space: normal;
+  }
+
+  .operations-page .operational-so-title strong,
+  .operations-page .operational-so-header small,
+  .operations-page .container-row-main strong,
+  .operations-page .container-row-main small,
+  .operations-page .container-row-assignment span,
+  .operations-page .container-rpuj-status strong,
+  .operations-page .container-rpuj-status small {
+    overflow-wrap: anywhere;
+  }
+
+  .operations-page .operational-container-row,
+  .operations-page .operational-container-row.is-repo-stored {
+    gap: 9px;
+    padding: 11px;
+  }
+
+  .operations-page .container-row-status,
+  .operations-page .container-rpuj-status,
+  .operations-page .container-row-assignment,
+  .operations-page .container-row-docs {
+    min-width: 0;
+  }
+
+  .operations-page .container-row-actions .secondary-button,
+  .operations-page .container-row-actions .primary-button,
+  .operations-page .container-row-actions .operational-primary-action,
+  .container-job-detail-modal > footer button,
+  .operational-form-footer button,
+  .container-repo-modal footer button,
+  .container-cancel-modal footer button {
+    min-height: 42px;
+    white-space: normal;
+  }
+
+  .container-job-detail-modal > header p,
+  .container-repo-modal p,
+  .container-cancel-modal p {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .container-job-mobile-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .container-job-mobile-summary strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .container-job-detail-body section > div:not(.job-timeline-detail),
+  .container-repo-summary > div,
+  .container-cancel-summary > div {
+    grid-template-columns: 1fr;
+  }
+
+  .container-job-detail-body section > div > span strong,
+  .detail-documents strong,
+  .job-timeline-detail strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .job-timeline-detail {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .container-job-detail-modal > footer {
+    gap: 8px;
+  }
+
+  .container-job-detail-modal > footer .operational-primary-action,
+  .container-job-detail-modal > footer .repo-action-button {
+    order: -2;
+  }
+
+  .container-job-detail-modal > footer .danger-button {
+    order: -1;
+  }
+
+  .operational-update-form .operational-phase-tabs {
+    scrollbar-width: thin;
+  }
+
+  .operational-rpuj-actions,
+  .operational-spk-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .operational-rpuj-actions small,
+  .operational-spk-note {
+    max-width: none;
+  }
+}
+
+@media (max-width: 430px) {
+  .operations-page .quick-stats.operational-stats,
+  .operations-page .job-status-tabs,
+  .operations-page .operational-so-progress,
+  .operations-page .operational-container-row,
+  .operations-page .operational-container-row.is-repo-stored,
+  .operations-page .container-row-actions,
+  .container-job-mobile-summary,
+  .operational-mobile-job-summary,
+  .operational-timeline-section .operational-closing-checklist {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-page .container-row-actions .operational-primary-action,
+  .operations-page .container-row-actions .secondary-button,
+  .operations-page .container-row-actions .repo-action-button {
+    grid-column: 1;
+  }
+
+  .operations-page .container-row-status,
+  .operations-page .container-rpuj-status,
+  .operations-page .container-row-assignment,
+  .operations-page .container-row-docs {
+    min-height: 0;
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary span {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary span b {
+    grid-column: 2;
+  }
+
+  .operations-page .master-pagination > div {
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
+  }
+
+  .container-repo-modal > header,
+  .container-cancel-modal > header {
+    grid-template-columns: 34px minmax(0, 1fr) 36px;
+    padding-inline: 14px;
+  }
+
+  .container-repo-modal > header > span,
+  .container-cancel-modal > header > span {
+    width: 34px;
+    height: 34px;
   }
 }

@@ -305,7 +305,7 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
   if (!canRead) return null;
 
   return (
-    <div className="span-full rounded-lg border border-slate-200 bg-white p-4">
+    <div className="vehicle-documents-panel span-full rounded-lg border border-slate-200 bg-white p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="m-0 text-sm font-black text-slate-900">Dokumen Kendaraan</h3>
@@ -371,8 +371,8 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
         <p className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">Simpan data kendaraan terlebih dahulu sebelum upload dokumen.</p>
       ) : null}
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200">
-        <table className="w-full min-w-[760px] border-collapse bg-white text-left text-sm">
+      <div className="vehicle-documents-table-wrap table-wrap overflow-x-auto rounded-lg border border-slate-200">
+        <table className="vehicle-documents-table responsive-data-table w-full min-w-[760px] border-collapse bg-white text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-3 py-2">Jenis Dokumen</th>
@@ -385,23 +385,23 @@ function VehicleDocumentsPanel({ vehicle, editable = false }) {
             </tr>
           </thead>
           <tbody>
-            {loading ? <tr><td className="px-3 py-4 text-slate-500" colSpan="7">Memuat dokumen...</td></tr> : null}
-            {!loading && !rows.length ? <tr><td className="px-3 py-4 text-slate-500" colSpan="7">Belum ada dokumen kendaraan.</td></tr> : null}
+            {loading ? <tr className="responsive-empty-row"><td className="px-3 py-4 text-slate-500" colSpan="7">Memuat dokumen...</td></tr> : null}
+            {!loading && !rows.length ? <tr className="responsive-empty-row"><td className="px-3 py-4 text-slate-500" colSpan="7">Belum ada dokumen kendaraan.</td></tr> : null}
             {rows.map((row) => (
               <tr className="border-t border-slate-200" key={row.id}>
                 {(() => {
                   const documentFile = toVehicleDocumentFile(vehicleId, row);
                   return (
                     <>
-                <td className="px-3 py-2 font-bold text-slate-900">{documentTypeLabel(row.documentType)}</td>
-                <td className="px-3 py-2 text-slate-700">{row.documentNumber || '-'}</td>
-                <td className="px-3 py-2 text-slate-700">{row.issuedDate || '-'}</td>
-                <td className="px-3 py-2 text-slate-700">{row.expiredDate || '-'}</td>
-                <td className="px-3 py-2"><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-bold ${statusClass(row.status)}`}>{row.status}</span></td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 font-bold text-slate-900" data-label="Jenis Dokumen">{documentTypeLabel(row.documentType)}</td>
+                <td className="px-3 py-2 text-slate-700" data-label="Nomor Dokumen">{row.documentNumber || '-'}</td>
+                <td className="px-3 py-2 text-slate-700" data-label="Tanggal Terbit">{row.issuedDate || '-'}</td>
+                <td className="px-3 py-2 text-slate-700" data-label="Tanggal Expired">{row.expiredDate || '-'}</td>
+                <td className="px-3 py-2" data-label="Status"><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-bold ${statusClass(row.status)}`}>{row.status}</span></td>
+                <td className="px-3 py-2" data-label="File">
                   {documentFile ? <DocumentLink file={documentFile} className="font-bold text-slate-700 underline" label="" /> : '-'}
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2" data-label="Aksi">
                   <div className="flex gap-2">
                     {documentFile ? <DocumentLink file={documentFile} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" label="Download" download iconOnly /> : null}
                     {editable && canUpdate ? <button className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 text-slate-700" type="button" onClick={() => { setEditing(row); setForm({ documentType: row.documentType, documentNumber: row.documentNumber || '', issuedDate: row.issuedDate || '', expiredDate: row.expiredDate || '', file: null, notes: row.notes || '' }); }} aria-label="Edit dokumen"><Edit3 size={14} /></button> : null}
@@ -704,11 +704,13 @@ function TruckStatus({ row, activeJobs }) {
 function TrucksPage({ readOnly = false }) {
   const archive = useArchiveData();
   const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
-  const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
+  const truckRows = archive.isMasterDatabaseMode
+    ? archive.masters?.trucks || []
+    : archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
   const chassisRows = archive.masters?.['kir-chassis'] || [];
   const driverOptions = archive.masters?.drivers?.length
     ? getDriverOptions(archive.masters.drivers, activeJobs, truckRows)
-    : getLocalDriverOptions(activeJobs, truckRows);
+    : archive.isMasterDatabaseMode ? [] : getLocalDriverOptions(activeJobs, truckRows);
   const fields = createFields(driverOptions, chassisRows, truckRows);
   const detailFields = [
     ...fields

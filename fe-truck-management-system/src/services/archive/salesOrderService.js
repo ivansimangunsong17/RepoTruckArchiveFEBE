@@ -6,9 +6,12 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Jasa Handling',
+  'Stevedoring and Port Service',
   'Jasa Lainnya',
 ];
+const SERVICE_ALIASES = {
+  'Jasa Handling': 'Stevedoring and Port Service',
+};
 
 function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
@@ -18,8 +21,14 @@ function isOtherService(serviceName) {
   return serviceName === 'Jasa Lainnya';
 }
 
+function normalizeServiceName(value) {
+  const serviceName = String(value || '').trim();
+  const canonical = SERVICE_ALIASES[serviceName] || serviceName;
+  return SERVICE_OPTIONS.includes(canonical) ? canonical : '';
+}
+
 function normalizeLineItem(item = {}) {
-  const serviceName = SERVICE_OPTIONS.includes(item.serviceName) ? item.serviceName : 'Jasa Angkut D20';
+  const serviceName = normalizeServiceName(item.serviceName) || 'Jasa Angkut D20';
   const qty = Math.max(1, Number(item.qty || 0));
   const price = Math.max(0, Number(item.price || 0));
   return {

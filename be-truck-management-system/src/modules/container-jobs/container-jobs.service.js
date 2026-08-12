@@ -31,6 +31,7 @@ export function listContainerJobs(query) {
     requestStatus: query.requestStatus || '',
     rpujStage: query.rpujStage || '',
     documentStatus: query.documentStatus || '',
+    tripDate: query.tripDate || '',
   });
 }
 

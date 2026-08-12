@@ -56,9 +56,46 @@ const ROW_NUMBER_COLUMN = {
   cellClassName: 'master-row-number-cell-wrap',
   render: (_value, _row, meta) => <span className="master-row-number-cell">{String(meta.rowNumber).padStart(2, '0')}</span>,
 };
+const MOBILE_PRIMARY_COLUMN_KEYS = [
+  'name',
+  'nickname',
+  'plateNumber',
+  'chassisCode',
+  'unitCode',
+  'email',
+  'code',
+  'kirNumber',
+];
+const MOBILE_STATUS_COLUMN_KEYS = ['status', 'condition', 'kondisi', 'depotType'];
 
 function normalizeRows(value) {
   return Array.isArray(value) ? value : EMPTY_ROWS;
+}
+
+function toCellClassName(prefix, value) {
+  return `${prefix}-${String(value || 'unknown')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'unknown'}`;
+}
+
+function isRowNumberColumn(column) {
+  const key = String(column?.key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const label = String(column?.label || '').trim().toLowerCase();
+  return ['rownumber', 'number'].includes(key) && ['no', 'nomor', '#'].includes(label);
+}
+
+function isStatusColumn(column) {
+  const key = String(column?.key || '');
+  const label = String(column?.label || '').trim().toLowerCase();
+  return MOBILE_STATUS_COLUMN_KEYS.includes(key) || ['status', 'kondisi', 'jenis depo'].includes(label);
+}
+
+function formatFallbackCellValue(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (typeof value === 'object') return value.name || value.label || '-';
+  return value;
 }
 
 function createEmptyForm(fields) {
@@ -374,6 +411,7 @@ function MasterDataPage({
   const masterDatabaseMode = isMasterDatabaseMode ?? isDatabaseMode;
   const canManageMaster = !readOnly && hasPermission(user, 'master.manage');
   const [rows, setRows] = useState(() => {
+    if (masterDatabaseMode && resource) return [];
     try {
       const storedRows = JSON.parse(localStorage.getItem(storageKey));
       return normalizeRows(storedRows).length ? normalizeRows(storedRows) : normalizeRows(initialRows);
@@ -440,6 +478,110 @@ function MasterDataPage({
     && String(column.label || '').trim().toLowerCase() === 'no',
   );
   const tableColumns = hasRowNumberColumn ? columns : [ROW_NUMBER_COLUMN, ...columns];
+  const rowNumberColumn = tableColumns.find(isRowNumberColumn);
+
+  function renderColumnValue(column, row, meta) {
+    return column.render
+      ? column.render(row[column.key], row, meta)
+      : formatFallbackCellValue(row[column.key]);
+  }
+
+  function renderRowActions(row, className = 'justify-center') {
+    return (
+      <div className={`table-actions ${className}`.trim()}>
+        <button type="button" onClick={() => setDetailRow(row)} aria-label={`Lihat ${singular}`}>
+          <Eye size={15} />
+        </button>
+        {canManageMaster ? (
+          <>
+            <button type="button" onClick={() => handleEdit(row)} aria-label={`Edit ${singular}`}>
+              <Edit3 size={15} />
+            </button>
+            <button className="danger" type="button" onClick={() => handleDelete(row.id)} aria-label={`Arsipkan ${singular}`}>
+              <Archive size={15} />
+            </button>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  function getMobileColumnGroups() {
+    const contentColumns = tableColumns.filter((column) => !isRowNumberColumn(column));
+    const statusColumn = contentColumns.find(isStatusColumn);
+    const primaryColumn = contentColumns.find((column) => MOBILE_PRIMARY_COLUMN_KEYS.includes(column.key))
+      || contentColumns.find((column) => column !== statusColumn)
+      || contentColumns[0];
+    const subtitleColumns = contentColumns
+      .filter((column) => column !== primaryColumn && column !== statusColumn)
+      .slice(0, 2);
+    const detailColumns = contentColumns
+      .filter((column) => column !== primaryColumn && column !== statusColumn && !subtitleColumns.includes(column));
+
+    return {
+      primaryColumn,
+      statusColumn,
+      subtitleColumns,
+      detailColumns,
+    };
+  }
+
+  function renderMobileCard(row, rowIndex) {
+    const rowNumber = (page - 1) * pageSize + rowIndex + 1;
+    const columnGroups = getMobileColumnGroups();
+    const createMeta = (column) => ({
+      rowNumber,
+      rowIndex,
+      columnIndex: tableColumns.indexOf(column),
+    });
+
+    return (
+      <article className="master-mobile-card" key={row.id}>
+        <div className="master-mobile-card-top">
+          {rowNumberColumn ? (
+            <span className="master-mobile-index">{String(rowNumber).padStart(2, '0')}</span>
+          ) : null}
+          <div className="master-mobile-identity">
+            {columnGroups.primaryColumn ? <span className="master-mobile-eyebrow">{columnGroups.primaryColumn.label}</span> : null}
+            <div className="master-mobile-primary-value">
+              {columnGroups.primaryColumn
+                ? renderColumnValue(columnGroups.primaryColumn, row, createMeta(columnGroups.primaryColumn))
+                : '-'}
+            </div>
+            {columnGroups.subtitleColumns.length ? (
+              <div className="master-mobile-subtitle">
+                {columnGroups.subtitleColumns.map((column) => (
+                  <span key={column.key}>
+                    {renderColumnValue(column, row, createMeta(column))}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {columnGroups.statusColumn ? (
+            <div className="master-mobile-status">
+              {renderColumnValue(columnGroups.statusColumn, row, createMeta(columnGroups.statusColumn))}
+            </div>
+          ) : null}
+        </div>
+
+        {columnGroups.detailColumns.length ? (
+          <dl className="master-mobile-field-list">
+            {columnGroups.detailColumns.map((column) => (
+              <div className="master-mobile-field" key={column.key}>
+                <dt>{column.label}</dt>
+                <dd>{renderColumnValue(column, row, createMeta(column))}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
+        <div className="master-mobile-card-actions">
+          {renderRowActions(row, 'master-mobile-action-group')}
+        </div>
+      </article>
+    );
+  }
 
   const fieldSections = useMemo(
     () => fields.reduce((sections, field) => {
@@ -982,32 +1124,18 @@ function MasterDataPage({
                 {!listLoading && !listError ? paginatedRows.map((row, rowIndex) => (
                   <tr key={row.id}>
                     {tableColumns.map((column, columnIndex) => (
-                      <td key={column.key} data-label={column.label} className={column.cellClassName || ''}>
-                        {column.render
-                          ? column.render(row[column.key], row, {
+                      <td key={column.key} data-label={column.label} className={[toCellClassName('master-cell', column.key), column.cellClassName || ''].filter(Boolean).join(' ')}>
+                        <div className="master-cell-value">
+                          {renderColumnValue(column, row, {
                             rowNumber: (page - 1) * pageSize + rowIndex + 1,
                             rowIndex,
                             columnIndex,
-                          })
-                          : row[column.key] || '-'}
+                          })}
+                        </div>
                       </td>
                     ))}
-                    <td data-label="Aksi" className="!w-32">
-                      <div className="table-actions justify-center">
-                        <button type="button" onClick={() => setDetailRow(row)} aria-label={`Lihat ${singular}`}>
-                          <Eye size={15} />
-                        </button>
-                        {canManageMaster ? (
-                          <>
-                            <button type="button" onClick={() => handleEdit(row)} aria-label={`Edit ${singular}`}>
-                              <Edit3 size={15} />
-                            </button>
-                            <button className="danger" type="button" onClick={() => handleDelete(row.id)} aria-label={`Arsipkan ${singular}`}>
-                              <Archive size={15} />
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
+                    <td data-label="Aksi" className="master-cell-actions !w-32">
+                      {renderRowActions(row)}
                     </td>
                   </tr>
                 )) : null}
@@ -1016,6 +1144,12 @@ function MasterDataPage({
                 ) : null}
               </tbody>
             </table>
+          </div>
+          <div className="master-mobile-list" aria-live="polite">
+            {listLoading ? <div className="master-mobile-state">Memuat data...</div> : null}
+            {!listLoading && listError ? <div className="master-mobile-state">{listError}</div> : null}
+            {!listLoading && !listError ? paginatedRows.map((row, rowIndex) => renderMobileCard(row, rowIndex)) : null}
+            {!listLoading && !listError && !totalItems ? <div className="master-mobile-state">Data tidak ditemukan.</div> : null}
           </div>
           {hasActiveFilters ? (
             <FilterStatus

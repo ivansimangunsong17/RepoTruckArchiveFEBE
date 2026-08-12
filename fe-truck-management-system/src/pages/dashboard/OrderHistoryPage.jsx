@@ -584,7 +584,7 @@ function OrderHistoryPage() {
 
         {!loading && !error && rows.length ? (
           <div className="table-wrap">
-            <table className="data-table responsive-data-table border-separate border-spacing-0">
+            <table className="data-table order-history-table responsive-data-table border-separate border-spacing-0">
               <thead>
                 <tr className="bg-slate-100">
                   <th>No.</th>
@@ -595,8 +595,8 @@ function OrderHistoryPage() {
                   <th>Jenis</th>
                   <th>Size</th>
                   <th>Sales</th>
-                  <th className="!w-[84px] !px-2 !text-center">
-                    <span className="mx-auto flex w-12 items-center justify-center">Status</span>
+                  <th className="order-history-status-heading">
+                    <span className="order-history-status-head">Status</span>
                   </th>
                   <th>Aksi</th>
                 </tr>
@@ -618,8 +618,8 @@ function OrderHistoryPage() {
                     <td data-label="Jenis">{job.type || '-'}</td>
                     <td data-label="Size"><strong className="text-slate-900">{job.size || '-'}</strong></td>
                     <td data-label="Sales">{job.salesName || '-'}</td>
-                    <td data-label="Status" className="!w-[84px] !px-2 text-center align-middle">
-                      <div className="mx-auto flex w-12 items-center justify-center">
+                    <td data-label="Status" className="order-history-status-cell">
+                      <div className="order-history-status-icon">
                         {(() => {
                           const meta = statusIconMeta(job.status);
                           const Icon = meta.Icon;
@@ -649,7 +649,7 @@ function OrderHistoryPage() {
                     <td data-label="Aksi">
                       <button
                         type="button"
-                        className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-[11px] font-black text-slate-700 hover:border-slate-400 hover:bg-slate-100"
+                        className="order-history-action-button inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-[11px] font-black text-slate-700 hover:border-slate-400 hover:bg-slate-100"
                         onClick={() => setSelectedJob(job)}
                       >
                         <Eye size={13} />

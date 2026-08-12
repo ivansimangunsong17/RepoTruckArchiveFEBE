@@ -279,7 +279,7 @@ const initialInvoiceRows = [
     paymentTerms: 'Credit 30 Hari',
     invoiceDate: '15 Jul 2026',
     dueDate: '14 Agu 2026',
-    billingItems: ['Jasa Angkut D40 - 1 ritase', 'Jasa Handling'],
+    billingItems: ['Jasa Angkut D40 - 1 ritase', 'Stevedoring and Port Service'],
     documentChecklist: [
       { label: 'Nomor SO', ready: true },
       { label: 'Job selesai', ready: true },
@@ -678,8 +678,8 @@ function FinanceActionModal({ children, title, description, tone = 'neutral', bu
       : 'bg-slate-900 hover:bg-slate-800';
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={busy ? undefined : onClose}>
-      <section className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="finance-action-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="finance-action-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={busy ? undefined : onClose}>
+      <section className="finance-action-modal w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="finance-action-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <form onSubmit={onConfirm}>
           <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
             <div>
@@ -976,8 +976,8 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
   const isCancelled = isCancelledFinanceOrder(order);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="finance-order-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
+      <section className="finance-order-detail-modal max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Request Order</p>

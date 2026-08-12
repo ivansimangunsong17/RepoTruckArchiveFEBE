@@ -223,6 +223,7 @@ function financeRowsCte() {
           when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) in (
             lower('Bon Muat/Bongkar'),
             lower('Tila/Gatepass'),
+            lower('Stevedoring and Port Service'),
             lower('Jasa Handling'),
             lower('Jasa Lainnya')
           )
@@ -1333,6 +1334,7 @@ function invoiceOrdersCte() {
             where lower(btrim(coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', ''))) in (
               lower('Bon Muat/Bongkar'),
               lower('Tila/Gatepass'),
+              lower('Stevedoring and Port Service'),
               lower('Jasa Handling'),
               lower('Jasa Lainnya')
             )

@@ -5,6 +5,10 @@
 @import './styles/operational.css';
 @import './styles/master-data.css';
 @import './styles/responsive.css';
+@import './styles/operational-mobile.css';
+@import './styles/master-mobile.css';
+@import './styles/workflow-mobile.css';
+@import './styles/final-mobile.css';
 
 @tailwind components;
 @tailwind utilities;

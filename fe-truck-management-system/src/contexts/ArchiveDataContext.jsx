@@ -179,8 +179,8 @@ export function ArchiveDataProvider({ children }) {
   const apiDataMode = masterDatabaseMode || salesOrderDatabaseMode;
   const archiveDisabled = apiDataMode && user?.role === USER_ROLES.FINANCE;
   const canReadUsers = hasPermission(user, 'users.manage');
-  const [masters, setMasters] = useState(() => readLocalMasters());
-  const [orders, setOrders] = useState(() => readLocalOrders());
+  const [masters, setMasters] = useState(() => (masterDatabaseMode ? emptyApiMasters() : readLocalMasters()));
+  const [orders, setOrders] = useState(() => (salesOrderDatabaseMode ? [] : readLocalOrders()));
   const [loading, setLoading] = useState(masterDatabaseMode || salesOrderDatabaseMode);
   const [error, setError] = useState('');
 

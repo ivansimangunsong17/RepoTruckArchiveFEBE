@@ -232,8 +232,8 @@ function TruckUtilizationPage() {
         {!loading && error ? <div className="p-4 text-sm text-red-600">{error}</div> : null}
 
         {!loading && !error && utilizationRows.length ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
+          <div className="truck-utilization-table-wrap table-wrap overflow-x-auto">
+            <table className="truck-utilization-table responsive-data-table min-w-full text-left text-xs">
               <thead className="bg-slate-900 text-[11px] uppercase text-white">
                 <tr>
                   <th className="px-3 py-2 font-bold">Truck</th>
@@ -248,13 +248,13 @@ function TruckUtilizationPage() {
               <tbody className="divide-y divide-slate-100">
                 {utilizationRows.map((truck) => (
                   <tr key={truck.plateNumber} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                    <td className="px-3 py-2 font-semibold text-slate-950">{truck.plateNumber}</td>
-                    <td className="px-3 py-2 font-semibold text-slate-700">{formatTruckUnitCode(truck.unitCode)}</td>
-                    <td className="px-3 py-2">{truck.driver}</td>
-                    <td className="px-3 py-2 text-right"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{truck.completedTrips}</span></td>
-                    <td className="px-3 py-2 text-right">{truck.qty20ft}</td>
-                    <td className="px-3 py-2 text-right">{truck.qty40ft}</td>
-                    <td className="px-3 py-2">{formatDateTime(truck.lastCompletedAt)}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-950" data-label="Truck">{truck.plateNumber}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-700" data-label="No Lambung">{formatTruckUnitCode(truck.unitCode)}</td>
+                    <td className="px-3 py-2" data-label="Driver Terakhir">{truck.driver}</td>
+                    <td className="px-3 py-2 text-right" data-label="Trip Selesai"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{truck.completedTrips}</span></td>
+                    <td className="px-3 py-2 text-right" data-label="20FT">{truck.qty20ft}</td>
+                    <td className="px-3 py-2 text-right" data-label="40FT">{truck.qty40ft}</td>
+                    <td className="px-3 py-2" data-label="Terakhir Selesai">{formatDateTime(truck.lastCompletedAt)}</td>
                   </tr>
                 ))}
               </tbody>

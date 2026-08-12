@@ -9,6 +9,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
 import { parseOtherCost, serializeOtherCost } from '../../utils/otherCost';
 import { formatDate } from '../../utils/formatDate';
+import { isApiDataSource } from '../../services/config/dataSource';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
 
 const documentFields = [
@@ -387,14 +388,17 @@ function createSpkPdfBlob(documentData, logoImage = null) {
 }
 
 function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDrivers, masterDestinations, activeJobs = [], currentUser, initialPhase = 'preparation' }) {
+  const apiDataMode = isApiDataSource();
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
   const [fallbackDriverRows] = useState(() => getMasterData('tms-master-drivers-v2', fallbackDrivers));
   const fileInputRefs = useRef({});
-  const trucks = (Array.isArray(masterTrucks) ? masterTrucks : fallbackTruckRows)
-    .map((truck) => normalizeTruck(truck, fallbackTruckRows));
-  const drivers = Array.isArray(masterDrivers) ? masterDrivers : fallbackDriverRows;
+  const localTruckRows = apiDataMode ? [] : fallbackTruckRows;
+  const localDriverRows = apiDataMode ? [] : fallbackDriverRows;
+  const trucks = (Array.isArray(masterTrucks) ? masterTrucks : localTruckRows)
+    .map((truck) => normalizeTruck(truck, localTruckRows));
+  const drivers = Array.isArray(masterDrivers) ? masterDrivers : localDriverRows;
   const findDriverByName = (name) => drivers.find((driver) => normalizeName(driver.name) === normalizeName(name));
-  const isTruckDefaultDriverBlacklisted = (truck) => isDriverBlacklisted(findDriverByName(getTruckDefaultDriver(truck, fallbackTruckRows)));
+  const isTruckDefaultDriverBlacklisted = (truck) => isDriverBlacklisted(findDriverByName(getTruckDefaultDriver(truck, localTruckRows)));
   const containerSize = normalizeSize(container.size || container.containerSize);
   const initialOtherCost = parseOtherCost(container.rpujNotes);
   const initialDriver = findDriverByName(container.driver);
@@ -579,7 +583,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       setError(`Truck ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }
-    const driverName = getTruckDefaultDriver(truck, fallbackTruckRows);
+    const driverName = getTruckDefaultDriver(truck, localTruckRows);
     const selectedDriver = findDriverByName(driverName);
     if (truck && isDriverBlacklisted(selectedDriver) && truck.plateNumber !== container.plateNumber) {
       setError(`Sopir ${selectedDriver.name} masuk blacklist dan tidak bisa di-assign.`);
@@ -1084,6 +1088,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             ))}
           </div>
 
+          <div className="operational-form-content">
           {activePhase === 'preparation' ? (
           <div className="form-section">
             <h3>Assignment</h3>
@@ -1463,6 +1468,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             </div>
           </div>
           ) : null}
+          </div>
 
           <footer className="operational-form-footer"><button className="secondary-button" type="button" onClick={onClose}>Batal</button><button className="primary-button" type="submit" aria-label={`Simpan Container Job - ${primaryActionLabel}`}>{primaryActionLabel}</button></footer>
         </form>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { fallbackCustomers } from '../../data/masterData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
@@ -11,9 +11,12 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Jasa Handling',
+  'Stevedoring and Port Service',
   'Jasa Lainnya',
 ];
+const SERVICE_ALIASES = {
+  'Jasa Handling': 'Stevedoring and Port Service',
+};
 
 const CONTAINER_TYPE_OPTIONS = ['Dry', 'Reefer', 'Special'];
 const DEFAULT_LINE_ITEM_SERVICE = 'Jasa Angkut D20';
@@ -73,10 +76,17 @@ function isOtherService(serviceName) {
   return serviceName === 'Jasa Lainnya';
 }
 
+function normalizeServiceName(value) {
+  const serviceName = String(value || '').trim();
+  const canonical = SERVICE_ALIASES[serviceName] || serviceName;
+  return SERVICE_OPTIONS.includes(canonical) ? canonical : '';
+}
+
 function createLineItemDraft(item = {}) {
+  const serviceName = normalizeServiceName(item.serviceName) || DEFAULT_LINE_ITEM_SERVICE;
   return {
     id: item.id || `line-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-    serviceName: item.serviceName || DEFAULT_LINE_ITEM_SERVICE,
+    serviceName,
     containerType: item.containerType || '',
     qty: item.qty == null ? '1' : String(item.qty),
     price: item.price == null ? '0' : String(item.price),
@@ -90,7 +100,7 @@ function normalizeLineItems(order) {
   }
 
   const legacyItems = [];
-  const serviceName = SERVICE_OPTIONS.includes(order?.serviceName) ? order.serviceName : '';
+  const serviceName = normalizeServiceName(order?.serviceName);
   if (serviceName) {
     legacyItems.push(createLineItemDraft({
       serviceName,
@@ -358,7 +368,7 @@ function SalesOrderForm({
   const terminalOptions = useMemo(() => normalizeMasterOptions(providedTerminals), [providedTerminals]);
   const destinationOptions = useMemo(() => normalizeMasterOptions(providedDestinations), [providedDestinations]);
 
-  function createFormDraft() {
+  const createFormDraft = useCallback(() => {
     const draft = createInitialForm(order);
     if (historicalMode && !order) {
       return {
@@ -368,7 +378,7 @@ function SalesOrderForm({
       };
     }
     return draft;
-  }
+  }, [historicalMode, order]);
 
   const [form, setForm] = useState(createFormDraft);
   const [error, setError] = useState('');
@@ -379,7 +389,7 @@ function SalesOrderForm({
     setForm(createFormDraft());
     setError('');
     setReviewPayload(null);
-  }, [order, historicalMode]);
+  }, [createFormDraft]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => String(customer.name || '').toLowerCase() === String(form.customer || '').toLowerCase()),
@@ -592,6 +602,7 @@ function SalesOrderForm({
         </header>
 
         <form onSubmit={handleSubmit} onKeyDown={preventEnterSubmit} noValidate>
+          <div className="sales-order-form-content">
           {error ? <div className="alert error sales-order-error">{error}</div> : null}
 
           <div className="form-section">
@@ -959,6 +970,7 @@ function SalesOrderForm({
               ))}
             </div>
           </div>
+          </div>
 
           <footer>
             <button className="secondary-button" type="button" onClick={onClose}>
@@ -1017,7 +1029,7 @@ function SalesOrderForm({
                   Kembali Edit
                 </button>
                 <button className="primary-button" type="button" onClick={confirmSubmit}>
-                  {editing ? 'Simpan Perubahan' : 'Simpan Sales Order'}
+                  {editing ? 'Simpan Update' : 'Simpan Sales Order'}
                 </button>
               </footer>
             </section>

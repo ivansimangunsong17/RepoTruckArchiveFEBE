@@ -1,0 +1,674 @@
+.sales-order-form-content {
+  display: contents;
+}
+
+@media (max-width: 640px) {
+  .sales-orders-page {
+    gap: 10px;
+    overflow-x: hidden;
+  }
+
+  .sales-orders-page .page-header {
+    gap: 8px;
+  }
+
+  .sales-orders-page .page-header h1 {
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+
+  .sales-orders-page .page-header p {
+    font-size: .68rem;
+    line-height: 1.35;
+  }
+
+  .sales-orders-page .page-action-group,
+  .sales-orders-page .page-action-group .primary-button {
+    width: 100%;
+  }
+
+  .sales-orders-page .panel {
+    overflow: hidden;
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .sales-orders-page .filter-bar {
+    padding: 9px 10px;
+  }
+
+  .sales-orders-page .search-field {
+    min-height: 38px;
+    border-radius: 8px;
+  }
+
+  .sales-orders-page .search-field input {
+    font-size: .72rem;
+  }
+
+  .sales-orders-page .sales-order-status-nav,
+  .customer-documents-page .sales-order-status-nav {
+    display: flex;
+    grid-template-columns: none;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 0 10px 9px;
+    scrollbar-width: thin;
+  }
+
+  .sales-orders-page .sales-order-status-tab {
+    flex: 0 0 auto;
+    min-width: 116px;
+    min-height: 34px;
+    gap: 6px;
+    border-radius: 8px;
+    padding: 7px 8px;
+  }
+
+  .sales-orders-page .sales-order-status-tab span {
+    font-size: .58rem;
+    line-height: 1.1;
+  }
+
+  .sales-orders-page .sales-order-status-tab strong {
+    font-size: .7rem;
+  }
+
+  .sales-orders-page .orders-list {
+    gap: 9px;
+    padding: 0 10px 10px;
+  }
+
+  .sales-order-group {
+    overflow: hidden;
+    border-radius: 9px;
+  }
+
+  .sales-order-group-header {
+    padding: 8px 10px;
+  }
+
+  .sales-order-group-header span,
+  .sales-order-group-header small {
+    font-size: .55rem;
+  }
+
+  .sales-order-group-header strong {
+    font-size: .75rem;
+  }
+
+  .sales-orders-page .order-card {
+    border-radius: 0;
+  }
+
+  .sales-orders-page .order-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 6px 9px;
+    min-height: 0;
+    padding: 9px 10px;
+  }
+
+  .sales-orders-page .order-row-number {
+    position: static !important;
+    grid-row: 1 / span 2;
+    align-self: start;
+    min-width: 32px;
+    min-height: 25px;
+    z-index: auto;
+    border-radius: 7px;
+  }
+
+  .sales-orders-page .order-row-number span {
+    display: none;
+  }
+
+  .sales-orders-page .order-row-number strong {
+    display: inline-grid !important;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid #dbe4ef;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #334155 !important;
+    font-size: .7rem !important;
+  }
+
+  .sales-orders-page .order-primary,
+  .sales-orders-page .order-customer-summary {
+    grid-column: 2;
+    padding-left: 0;
+  }
+
+  .sales-orders-page .order-shipment-summary,
+  .sales-orders-page .order-container-summary,
+  .sales-orders-page .order-billing-summary,
+  .sales-orders-page .order-document-summary {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(92px, 34%) minmax(0, 1fr);
+    min-height: 0;
+    gap: 7px;
+    padding: 7px 0 0;
+    border: 0 !important;
+    border-top: 1px solid #edf2f7;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .sales-orders-page .order-summary > div > span,
+  .sales-orders-page .order-primary span {
+    font-size: .54rem;
+    line-height: 1.15;
+  }
+
+  .sales-orders-page .order-summary > div > strong,
+  .sales-orders-page .order-primary strong {
+    font-size: .7rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .sales-orders-page .order-primary strong,
+  .sales-orders-page .order-customer-summary strong {
+    font-size: .78rem;
+  }
+
+  .sales-orders-page .order-container-summary small {
+    grid-column: 2;
+    font-size: .55rem;
+    line-height: 1.2;
+  }
+
+  .sales-orders-page .order-summary-actions {
+    grid-column: 1 / -1;
+    display: grid !important;
+    grid-template-columns: 1fr;
+  }
+
+  .sales-orders-page .order-summary-actions .secondary-button {
+    width: 100%;
+    min-height: 36px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: .68rem;
+  }
+
+  .sales-order-modal {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    height: min(94vh, calc(100dvh - 8px));
+    max-height: calc(100dvh - 8px);
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .sales-order-modal > header {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .sales-order-modal > header h2 {
+    font-size: .92rem;
+    line-height: 1.2;
+  }
+
+  .sales-order-modal > header p,
+  .sales-order-modal > header span {
+    font-size: .62rem;
+    line-height: 1.25;
+  }
+
+  .sales-order-modal > form {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sales-order-form-content {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 9px 12px calc(118px + env(safe-area-inset-bottom));
+  }
+
+  .sales-order-form-content .form-section {
+    margin: 0 0 9px;
+    padding: 10px;
+    border-radius: 9px;
+  }
+
+  .sales-order-form-content .form-section h3 {
+    font-size: .78rem;
+    line-height: 1.2;
+  }
+
+  .section-helper-text,
+  .line-item-toolbar p,
+  .form-section-heading p {
+    font-size: .62rem;
+    line-height: 1.3;
+  }
+
+  .sales-order-form-content .order-form-grid,
+  .sales-order-form-content .line-item-row,
+  .sales-order-form-content .reference-document-card {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .sales-order-form-content .order-form-grid label,
+  .line-item-note-field,
+  .reference-document-card label {
+    font-size: .6rem;
+    line-height: 1.2;
+  }
+
+  .sales-order-form-content input,
+  .sales-order-form-content select,
+  .sales-order-form-content textarea {
+    min-height: 38px;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: .72rem;
+  }
+
+  .sales-order-form-content textarea {
+    min-height: 68px;
+  }
+
+  .line-item-toolbar,
+  .form-section-heading {
+    align-items: stretch;
+    gap: 8px;
+    flex-direction: column;
+  }
+
+  .line-item-toolbar .secondary-button,
+  .form-section-heading .secondary-button {
+    width: 100%;
+    min-height: 36px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: .68rem;
+  }
+
+  .line-item-card,
+  .reference-document-card {
+    border-radius: 8px;
+    padding: 8px;
+  }
+
+  .line-item-table-head {
+    display: none;
+  }
+
+  .line-item-no {
+    width: 32px;
+    height: 26px;
+  }
+
+  .line-item-delete,
+  .reference-document-card > button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .document-file-button,
+  .document-notes {
+    grid-column: auto;
+  }
+
+  .sales-order-modal > form > footer,
+  .sales-order-modal > footer {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin: 0;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+  }
+
+  .sales-order-modal > form > footer button,
+  .sales-order-modal > footer button {
+    width: 100%;
+    min-height: 40px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: .7rem;
+  }
+
+  .sales-order-detail-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 9px 12px;
+  }
+
+  .sales-order-detail-body .order-meta,
+  .sales-order-detail-body .order-detail-sections,
+  .sales-order-detail-body .commercial-grid,
+  .sales-order-detail-body .order-container-progress-panel,
+  .sales-order-detail-body .container-grid {
+    gap: 7px;
+  }
+
+  .sales-order-detail-body .order-meta > div,
+  .sales-order-detail-body .order-detail-sections > div,
+  .line-item-detail,
+  .sales-reference-summary,
+  .order-invoice-card,
+  .container-detail {
+    border-radius: 8px;
+    padding: 8px;
+  }
+
+  .sales-order-review-modal {
+    display: flex;
+    height: min(94vh, calc(100dvh - 8px));
+    max-height: calc(100dvh - 8px);
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .sales-order-review-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .sales-order-review-modal > footer {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+  }
+}
+
+@media (max-width: 760px) {
+  .finance-workflow-page {
+    overflow-x: hidden;
+    padding: 8px;
+  }
+
+  .finance-workflow-panel {
+    overflow: hidden;
+    border-radius: 10px;
+  }
+
+  .finance-workflow-panel > div:first-child {
+    padding: 9px 10px;
+  }
+
+  .finance-workflow-panel h2 {
+    font-size: .9rem;
+    line-height: 1.2;
+  }
+
+  .finance-workflow-panel [role="tablist"] {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 4px;
+    scrollbar-width: thin;
+  }
+
+  .finance-workflow-panel [role="tablist"] > button {
+    flex: 0 0 auto;
+    height: 32px;
+    min-width: max-content;
+    padding-inline: 8px;
+    font-size: .62rem;
+  }
+
+  .finance-order-verification > div:first-child,
+  .finance-rpuj-workflow > div:first-child,
+  .finance-invoice-table-wrap + .master-pagination,
+  .finance-workflow-panel .master-pagination {
+    padding: 8px 10px;
+  }
+
+  .finance-workflow-page .table-wrap,
+  .finance-rpuj-workflow .table-wrap,
+  .finance-invoice-table-wrap {
+    overflow: visible !important;
+    padding: 8px 10px 10px;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: auto !important;
+    border-collapse: separate !important;
+    background: transparent !important;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) colgroup,
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) thead,
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) tr[aria-hidden="true"] {
+    display: none !important;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) tbody {
+    display: grid !important;
+    gap: 8px;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) tbody tr {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    overflow: hidden;
+    border: 1px solid #dbe4ef;
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: 0 5px 14px rgba(15, 23, 42, .05);
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) .finance-group-row {
+    border-color: #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+    box-shadow: none;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) .finance-group-row td {
+    display: block !important;
+    padding: 8px 10px !important;
+    border: 0;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) td {
+    display: grid !important;
+    grid-template-columns: minmax(92px, 34%) minmax(0, 1fr);
+    align-items: start;
+    width: auto !important;
+    max-width: 100% !important;
+    min-height: 32px;
+    gap: 8px;
+    padding: 7px 9px !important;
+    border-bottom: 1px solid #edf2f7;
+    color: #172033;
+    font-size: .66rem !important;
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: normal !important;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) td:last-child {
+    border-bottom: 0;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) td::before {
+    content: attr(data-label);
+    grid-column: 1;
+    grid-row: 1 / -1;
+    color: #667085;
+    font-size: .52rem;
+    font-weight: 950;
+    line-height: 1.15;
+    text-transform: uppercase;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) .finance-group-row td::before {
+    display: none;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) td > *,
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) td span,
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) td strong {
+    grid-column: 2;
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal !important;
+  }
+
+  .finance-workflow-page :is(.finance-order-table, .finance-rpuj-table, .finance-invoice-table) .finance-group-row td > * {
+    grid-column: auto;
+  }
+
+  .finance-rpuj-action-grid,
+  .finance-invoice-action-row {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    min-width: 0 !important;
+    gap: 6px !important;
+  }
+
+  .finance-rpuj-action-grid > button:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .finance-rpuj-action-grid .col-span-2 {
+    grid-column: 1 / -1 !important;
+  }
+
+  .finance-table-action-button,
+  .finance-rpuj-action-grid button,
+  .finance-rpuj-action-grid a,
+  .finance-rpuj-action-grid span {
+    width: 100%;
+    min-height: 32px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: .6rem;
+  }
+
+  .finance-invoice-so,
+  .finance-invoice-date,
+  .finance-invoice-total,
+  .finance-invoice-number,
+  .finance-invoice-aging,
+  .finance-invoice-actions,
+  .finance-invoice-customer,
+  .finance-invoice-status {
+    overflow: visible !important;
+  }
+
+  .finance-invoice-customer span + span,
+  .finance-invoice-aging small {
+    display: none !important;
+  }
+
+  .finance-invoice-number input {
+    min-height: 34px;
+    border-radius: 8px;
+    font-size: .66rem;
+  }
+
+  .finance-workflow-panel .master-pagination {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    font-size: .62rem;
+  }
+
+  .finance-workflow-panel .master-pagination > div,
+  .finance-workflow-panel .master-pagination-controls {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .finance-rpuj-detail-modal,
+  .finance-invoice-detail-modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: none;
+    height: min(94vh, calc(100dvh - 8px));
+    max-height: calc(100dvh - 8px);
+    overflow: hidden;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .finance-rpuj-detail-header,
+  .finance-invoice-detail-header {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .finance-rpuj-detail-header button,
+  .finance-invoice-detail-header button {
+    min-width: 0;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: .68rem;
+    font-weight: 850;
+  }
+
+  .finance-rpuj-detail-header h2,
+  .finance-invoice-detail-header h2 {
+    font-size: .92rem;
+    line-height: 1.2;
+  }
+
+  .finance-rpuj-detail-body,
+  .finance-invoice-detail-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .finance-rpuj-detail-grid,
+  .finance-rpuj-route-grid,
+  .finance-invoice-detail-layout,
+  .finance-invoice-detail-grid,
+  .finance-invoice-document-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .finance-rpuj-detail-card,
+  .finance-invoice-detail-card {
+    border-radius: 9px;
+    padding: 9px;
+  }
+
+  .finance-rpuj-detail-field,
+  .finance-invoice-detail-field {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}

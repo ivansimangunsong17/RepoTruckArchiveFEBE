@@ -158,8 +158,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="finance-dashboard-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation" onMouseDown={onClose}>
+      <section className="finance-dashboard-detail-modal max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Perjalanan Finance</p>
@@ -265,9 +265,9 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
                     <tbody>
                       {docs.map((document) => (
                         <tr className="border-t border-slate-100" key={document.id}>
-                          <td className="px-3 py-2 font-semibold text-slate-900">{document.label}</td>
-                          <td className="px-3 py-2 text-slate-700">{document.number || '-'}</td>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 font-semibold text-slate-900" data-label="Dokumen">{document.label}</td>
+                          <td className="px-3 py-2 text-slate-700" data-label="Nomor">{document.number || '-'}</td>
+                          <td className="px-3 py-2" data-label="File">
                             <DocumentLink file={document.file} className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50" />
                           </td>
                         </tr>
@@ -280,6 +280,78 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
           ) : null}
         </div>
       </section>
+    </div>
+  );
+}
+
+function FinanceTripMobileCards({ rows, onDetail }) {
+  return (
+    <div className="finance-trip-mobile-list" aria-label="Daftar perjalanan selesai">
+      {rows.map((row) => (
+        <article className="finance-trip-mobile-card" key={row.id}>
+          <header>
+            <div>
+              <span>Selesai</span>
+              <strong>{formatDate(row.completedAt)}</strong>
+              <small>{formatDateTime(row.completedAt)}</small>
+            </div>
+            <button type="button" onClick={() => onDetail(row.id)}>
+              <Eye size={15} /> Detail
+            </button>
+          </header>
+
+          <div className="finance-trip-mobile-main">
+            <span>SO / Dokumen</span>
+            <strong>{row.soNumber || '-'}</strong>
+            <small>DO: {row.doNumber || '-'} | SPK: {row.spkNumber || '-'}</small>
+          </div>
+
+          <div className="finance-trip-mobile-grid">
+            <div>
+              <span>Customer</span>
+              <strong>{row.customer || '-'}</strong>
+              <small>{row.serviceName || '-'}</small>
+            </div>
+            <div>
+              <span>Rute</span>
+              <strong>{row.origin || '-'} ke {row.destination || '-'}</strong>
+              <small>{row.containerSize || '-'} - {row.quantity || 1} ritase</small>
+            </div>
+            <div>
+              <span>Unit</span>
+              <strong>{row.truck || '-'}</strong>
+              <small>{row.driver || '-'} | Jalan: {formatDate(row.tripDate)}</small>
+            </div>
+          </div>
+
+          <div className="finance-trip-mobile-money">
+            <div>
+              <span>Penagihan</span>
+              <strong>{moneyValue(row.totalRevenue)}</strong>
+              {Number(row.reimbursementAmount || 0) > 0 ? (
+                <small>Reimb. {formatCurrency(row.reimbursementAmount || 0)}</small>
+              ) : null}
+            </div>
+            <div>
+              <span>Uang jalan</span>
+              <strong>{moneyValue(row.journeyMoney)}</strong>
+            </div>
+            <div>
+              <span>Tambahan</span>
+              <strong>{formatCurrency(row.additionalCost || 0)}</strong>
+            </div>
+            <div>
+              <span>Margin</span>
+              <strong>{moneyValue(row.estimatedMargin)}</strong>
+            </div>
+          </div>
+
+          <div className="finance-trip-mobile-status">
+            <StatusPill value={row.documentStatus} />
+            <StatusPill value={row.invoiceStatus} />
+          </div>
+        </article>
+      ))}
     </div>
   );
 }
@@ -424,7 +496,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-4 text-slate-900">
+    <div className="finance-dashboard-page min-h-screen bg-slate-50 px-4 py-4 text-slate-900">
       <header className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -672,7 +744,9 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
         ) : null}
 
         {hasRows ? (
-          <div className="table-wrap">
+          <>
+          <FinanceTripMobileCards rows={rows} onDetail={setDetailId} />
+          <div className="table-wrap finance-desktop-table-wrap">
             <table className="data-table master-table finance-master-table min-w-[1120px]">
               <thead>
                 <tr>
@@ -691,29 +765,29 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
               <tbody>
                 {rows.map((row) => (
                   <tr className="border-t border-slate-100 align-top hover:bg-slate-50" key={row.id}>
-                    <td className="finance-wrap-cell px-3 py-2">
+                    <td className="finance-wrap-cell px-3 py-2" data-label="Selesai">
                       <strong className="block text-sm text-slate-900">{formatDate(row.completedAt)}</strong>
                       <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{formatDateTime(row.completedAt)}</span>
                     </td>
-                    <td className="finance-wrap-cell px-3 py-2">
+                    <td className="finance-wrap-cell px-3 py-2" data-label="SO / Dokumen">
                       <strong className="block text-sm text-slate-950">{row.soNumber || '-'}</strong>
                       <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">DO: {row.doNumber || '-'}</span>
                       <span className="block text-[10px] font-semibold text-slate-500">SPK: {row.spkNumber || '-'}</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" data-label="Customer">
                       <strong className="block max-w-[210px] text-sm text-slate-900">{row.customer || '-'}</strong>
                       <span className="mt-0.5 block max-w-[210px] text-[10px] font-semibold text-slate-500">{row.serviceName || '-'}</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" data-label="Rute">
                       <strong className="block max-w-[220px] text-sm text-slate-900">{row.origin || '-'} ke {row.destination || '-'}</strong>
                       <span className="mt-0.5 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{row.containerSize || '-'} - {row.quantity || 1} ritase</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" data-label="Unit">
                       <strong className="block text-sm text-slate-900">{row.truck || '-'}</strong>
                       <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{row.driver || '-'}</span>
                       <span className="block text-[10px] font-semibold text-slate-500">Jalan: {formatDate(row.tripDate)}</span>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" data-label="Nilai">
                       <div className="grid min-w-[210px] grid-cols-2 gap-2">
                         <div className="rounded-md bg-emerald-50 px-2 py-1.5">
                           <span className="block text-[10px] font-bold uppercase text-emerald-700">Penagihan</span>
@@ -736,13 +810,13 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" data-label="Status">
                       <div className="flex min-w-[150px] flex-col items-start gap-1.5">
                         <StatusPill value={row.documentStatus} />
                         <StatusPill value={row.invoiceStatus} />
                       </div>
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" data-label="Aksi">
                       <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button" onClick={() => setDetailId(row.id)}>
                         <Eye size={15} /> Detail
                       </button>
@@ -752,6 +826,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
               </tbody>
             </table>
           </div>
+          </>
         ) : null}
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">

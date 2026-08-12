@@ -61,7 +61,7 @@ async function openReview(user, editing = false) {
 }
 
 async function confirmReview(user, editing = false) {
-  await user.click(screen.getByRole('button', { name: editing ? 'Simpan Perubahan' : 'Simpan Sales Order' }));
+  await user.click(screen.getByRole('button', { name: editing ? 'Simpan Update' : 'Simpan Sales Order' }));
 }
 
 describe('SalesOrderForm', () => {
@@ -278,7 +278,6 @@ describe('SalesOrderForm', () => {
   });
 
   it('mengisi PIC, kontak, dan alamat dari Master Customer', async () => {
-    const user = userEvent.setup();
     render(
       <SalesOrderForm
         customers={customers}

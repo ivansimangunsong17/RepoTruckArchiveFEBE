@@ -22,9 +22,12 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Jasa Handling',
+  'Stevedoring and Port Service',
   'Jasa Lainnya',
 ];
+const SERVICE_ALIASES = {
+  'Jasa Handling': 'Stevedoring and Port Service',
+};
 
 const SALES_INVOICE_DELIVERY_STATUSES = [
   'belum_dikirim',
@@ -43,8 +46,14 @@ function isOtherService(serviceName) {
   return serviceName === 'Jasa Lainnya';
 }
 
+function normalizeServiceName(value) {
+  const serviceName = String(value || '').trim();
+  const canonical = SERVICE_ALIASES[serviceName] || serviceName;
+  return SERVICE_OPTIONS.includes(canonical) ? canonical : '';
+}
+
 function normalizeLineItem(item = {}) {
-  const serviceName = SERVICE_OPTIONS.includes(item.serviceName) ? item.serviceName : 'Jasa Angkut D20';
+  const serviceName = normalizeServiceName(item.serviceName) || 'Jasa Angkut D20';
   const qty = Math.max(1, Number(item.qty || 0));
   const price = Math.max(0, Number(item.price || 0));
   return {
@@ -64,7 +73,7 @@ function normalizeLineItems(payload) {
   }
 
   const legacyItems = [];
-  const serviceName = SERVICE_OPTIONS.includes(payload.serviceName) ? payload.serviceName : '';
+  const serviceName = normalizeServiceName(payload.serviceName);
   const price = Number(payload.price || 0);
   const d20Qty = Math.max(0, Number(payload.container20Qty || 0));
   const d40Qty = Math.max(0, Number(payload.container40Qty || 0));
@@ -102,7 +111,7 @@ function normalizeLineItems(payload) {
     }
   } else if (price || payload.quantity) {
     legacyItems.push(normalizeLineItem({
-      serviceName: payload.serviceName && SERVICE_OPTIONS.includes(payload.serviceName) ? payload.serviceName : 'Bon Muat/Bongkar',
+      serviceName: normalizeServiceName(payload.serviceName) || 'Bon Muat/Bongkar',
       containerType: payload.cargoType || payload.container || '',
       qty: Math.max(1, Number(payload.quantity || 1)),
       price,

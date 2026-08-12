@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Archive,
   Ban,
+  CalendarDays,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -52,6 +53,20 @@ const REPO_CONTAINER_CONDITIONS = [
 
 function getStatusOrder(status) {
   return STATUS_ORDER[status] ?? Number.MAX_SAFE_INTEGER;
+}
+
+function getDateFilterKey(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  const dateOnly = raw.match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+  if (dateOnly) return dateOnly;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, '0'),
+    String(parsed.getDate()).padStart(2, '0'),
+  ].join('-');
 }
 
 function getJobStatusLabel(status) {
@@ -325,6 +340,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [rpujStage, setRpujStage] = useState('');
+  const [tripDateFilter, setTripDateFilter] = useState('');
   const [mobileRpujFilterOpen, setMobileRpujFilterOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [listVersion, setListVersion] = useState(0);
@@ -363,6 +379,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const repoEirValid = Boolean(repoForm.repoEirDocument || repoTarget?.repoEirDocument);
   const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid && repoConditionValid && repoEirNumberValid && repoEirValid);
   const effectiveStatus = repoStorageOnly ? 'repo_stored' : status;
+  const effectiveTripDateFilter = documentFollowUp || repoStorageOnly ? '' : tripDateFilter;
 
   useEffect(() => {
     if (!detail) return undefined;
@@ -417,10 +434,11 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     const matchesRpujStage = !rpujStage || (job.status !== 'cancelled' && getRpujStage(job) === rpujStage);
     const matchesRepoStorage = !repoStorageOnly || isRepoStoredJob(job);
     const matchesStatus = !effectiveStatus || (effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
+    const matchesTripDate = !effectiveTripDateFilter || getDateFilterKey(job.tripDate) === effectiveTripDateFilter;
     const matchesDocumentFollowUp = !documentFollowUp
       || (job.status === 'completed' && documentState(job).completed < documentState(job).total);
-    return matchesQuery && matchesStatus && matchesRpujStage && matchesRepoStorage && matchesDocumentFollowUp;
-  })), [demoJobs, documentFollowUp, effectiveStatus, query, repoStorageOnly, rpujStage]);
+    return matchesQuery && matchesStatus && matchesRpujStage && matchesRepoStorage && matchesTripDate && matchesDocumentFollowUp;
+  })), [demoJobs, documentFollowUp, effectiveStatus, effectiveTripDateFilter, query, repoStorageOnly, rpujStage]);
 
   const visibleJobs = archive.isDatabaseMode ? sortOperationalJobs(databaseJobs) : filteredDemoJobs;
   const allGroupedJobs = useMemo(() => groupJobsBySo(visibleJobs), [visibleJobs]);
@@ -453,7 +471,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
 
   useEffect(() => {
     setPage(1);
-  }, [query, rpujStage, status]);
+  }, [query, rpujStage, status, effectiveTripDateFilter]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -472,6 +490,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           status: documentFollowUp ? 'completed' : effectiveStatus,
           rpujStage: documentFollowUp || repoStorageOnly ? '' : rpujStage,
           documentStatus: documentFollowUp ? 'incomplete' : '',
+          tripDate: effectiveTripDateFilter,
         });
         if (!active) return;
         setDatabaseJobs(result.rows);
@@ -494,7 +513,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive.isDatabaseMode, documentFollowUp, effectiveStatus, listVersion, query, repoStorageOnly, rpujStage]);
+  }, [archive.isDatabaseMode, documentFollowUp, effectiveStatus, effectiveTripDateFilter, listVersion, query, repoStorageOnly, rpujStage]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -837,12 +856,23 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               );
             })}
           </div>
+          <label className={`operational-date-filter ${effectiveTripDateFilter ? 'active' : ''}`.trim()}>
+            <CalendarDays size={15} />
+            <span>Tanggal Jalan</span>
+            <input
+              aria-label="Filter tanggal jalan"
+              type="date"
+              value={tripDateFilter}
+              onChange={(event) => setTripDateFilter(event.target.value)}
+            />
+          </label>
           <small>Menampilkan {totalGroups} SO dari {totalItems} container job</small>
-          {query.trim() || effectiveStatus || rpujStage ? (
+          {query.trim() || effectiveStatus || rpujStage || effectiveTripDateFilter ? (
             <button className="filter-reset-link" type="button" onClick={() => {
               setQuery('');
               setStatus('');
               setRpujStage('');
+              setTripDateFilter('');
               setMobileRpujFilterOpen(false);
             }}>Reset</button>
           ) : null}

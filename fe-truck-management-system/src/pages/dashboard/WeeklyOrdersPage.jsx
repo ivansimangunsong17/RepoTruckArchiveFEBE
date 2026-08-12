@@ -234,9 +234,9 @@ function WeeklyOrdersPage() {
             <tbody>
               {!loading && !error && days.map((item, index) => (
                 <tr className={item.orderCount ? 'has-order' : 'empty'} key={item.dateKey}>
-                  <td><strong>{index + 1}.</strong></td>
-                  <td><strong>{formatShortDate(item.dateKey)}</strong></td>
-                  <td>
+                  <td data-label="No."><strong>{index + 1}.</strong></td>
+                  <td data-label="Tanggal Jalan"><strong>{formatShortDate(item.dateKey)}</strong></td>
+                  <td data-label="Customer">
                     <span className="weekly-customer-front" title={item.fullCustomerSummary || item.customerSummary}>
                       {item.customerBreakdown?.length ? (
                         item.customerBreakdown.map((customer) => (
@@ -247,21 +247,21 @@ function WeeklyOrdersPage() {
                       )}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="20FT">
                     <span className="weekly-size-stack">
                       {item.customerBreakdown?.length ? item.customerBreakdown.map((customer) => (
                         <span key={customer.customer}>{customer.twentyFt}</span>
                       )) : <span>0</span>}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="40FT">
                     <span className="weekly-size-stack">
                       {item.customerBreakdown?.length ? item.customerBreakdown.map((customer) => (
                         <span key={customer.customer}>{customer.fortyFt}</span>
                       )) : <span>0</span>}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Catatan">
                     {shortageText(item) !== 'Cukup' ? (
                       <span className="weekly-target-stack table-note">
                         <span className="weekly-shortage-note">{shortageText(item)}</span>
@@ -274,7 +274,7 @@ function WeeklyOrdersPage() {
                       </span>
                     )}
                   </td>
-                  <td>
+                  <td data-label="Detail">
                     <button
                       className="ops-detail-button weekly-detail-button"
                       type="button"

@@ -1,0 +1,1273 @@
+/* Mobile contract for Operational role screens. */
+
+.today-live-mobile-list {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .today-truck-live-page {
+    display: grid;
+    gap: 10px;
+    margin-top: 0 !important;
+  }
+
+  .today-live-page-header {
+    gap: 8px;
+  }
+
+  .today-live-page-header h1 {
+    font-size: 1.08rem !important;
+    line-height: 1.15 !important;
+  }
+
+  .today-live-page-header p {
+    font-size: .68rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .today-live-actions {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    width: 100%;
+  }
+
+  .today-live-actions button,
+  .today-live-date {
+    justify-content: center;
+    width: 100% !important;
+    min-height: 36px;
+    box-shadow: none !important;
+  }
+
+  .today-live-panel {
+    border-radius: 10px;
+    box-shadow: none !important;
+  }
+
+  .today-live-availability {
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .today-live-availability > div:first-child span {
+    font-size: .82rem !important;
+  }
+
+  .today-live-availability-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px;
+  }
+
+  .today-live-availability-card {
+    align-items: flex-start !important;
+    flex-direction: column;
+    min-height: 50px;
+    gap: 5px;
+    padding: 8px 9px !important;
+  }
+
+  .today-live-availability-card > div {
+    gap: 6px;
+  }
+
+  .today-live-availability-card > div > span {
+    padding-inline: 6px;
+    font-size: .48rem;
+  }
+
+  .today-live-availability-card > div > strong {
+    font-size: .88rem;
+  }
+
+  .today-live-availability-card > span {
+    font-size: .72rem;
+    white-space: normal !important;
+  }
+
+  .today-live-table-wrap {
+    display: none;
+  }
+
+  .today-live-mobile-list {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+
+  .today-live-mobile-card {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #dbe4ef;
+    border-left: 3px solid #cbd5e1;
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: 0 3px 10px rgba(15, 23, 42, .04);
+  }
+
+  .today-live-mobile-card.is-assigned {
+    border-left-color: #059669;
+  }
+
+  .today-live-mobile-card.is-maintenance {
+    border-left-color: #d97706;
+    background: #fffbeb;
+  }
+
+  .today-live-mobile-head {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .today-live-mobile-index {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid #dbeafe;
+    border-radius: 7px;
+    color: #1d4ed8;
+    background: #eff6ff;
+    font-size: .66rem;
+    font-weight: 950;
+  }
+
+  .today-live-mobile-title {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .today-live-mobile-title strong {
+    overflow: hidden;
+    color: #0f172a;
+    font-size: .82rem;
+    font-weight: 950;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .today-live-mobile-title small {
+    overflow: hidden;
+    color: #64748b;
+    font-size: .58rem;
+    font-weight: 850;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .today-live-mobile-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border: 1px solid #d0d5dd;
+    border-radius: 999px;
+    font-size: .55rem;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .today-live-mobile-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px 10px;
+    padding-top: 7px;
+    border-top: 1px solid #edf2f7;
+  }
+
+  .today-live-mobile-grid div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    padding: 3px 0;
+  }
+
+  .today-live-mobile-grid span {
+    color: #667085;
+    font-size: .54rem;
+    font-weight: 950;
+    text-transform: uppercase;
+  }
+
+  .today-live-mobile-grid strong {
+    overflow: hidden;
+    color: #101828;
+    font-size: .68rem;
+    font-weight: 850;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .today-live-mobile-detail {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid #d0d5dd;
+    border-radius: 7px;
+    color: #303744;
+    background: #fff;
+    font-size: .64rem;
+    font-weight: 900;
+  }
+
+  .today-live-mobile-detail:hover {
+    border-color: #efb8bd;
+    color: #9f141a;
+    background: #fff7f8;
+  }
+
+  .operations-page .page-header {
+    margin-bottom: 10px;
+  }
+
+  .operations-page .page-header p:not(.eyebrow) {
+    display: none;
+  }
+
+  .operations-page .quick-stats.operational-stats {
+    display: flex;
+    gap: 6px;
+    margin: 0 -12px 8px;
+    padding: 0 12px 2px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+  }
+
+  .operations-page .quick-stats.operational-stats > div {
+    flex: 0 0 92px;
+    min-width: 0;
+    min-height: 50px !important;
+    padding: 8px 9px !important;
+    border-radius: 8px;
+    box-shadow: none !important;
+    scroll-snap-align: start;
+  }
+
+  .operations-page .quick-stats.operational-stats span {
+    font-size: .54rem;
+    line-height: 1.1;
+  }
+
+  .operations-page .quick-stats.operational-stats strong {
+    margin: 2px 0 0;
+    font-size: .98rem;
+    line-height: 1.05;
+  }
+
+  .operations-page .quick-stats.operational-stats small {
+    display: none;
+  }
+
+  .operations-page .operational-workspace {
+    border-color: #dbe4ef;
+    border-radius: 10px;
+    box-shadow: none;
+  }
+
+  .operations-page .operational-filter-strip {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .operations-page .operational-filter-strip .search-field {
+    min-height: 38px;
+  }
+
+  .operations-page .job-status-tabs {
+    display: flex !important;
+    flex-wrap: nowrap;
+    gap: 6px !important;
+    width: 100%;
+    padding: 0 0 2px !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow-x: auto;
+  }
+
+  .operations-page .job-status-tabs button {
+    display: inline-flex !important;
+    flex: 0 0 auto;
+    justify-content: center;
+    gap: 6px;
+    min-height: 32px !important;
+    padding: 0 9px !important;
+    border: 1px solid #dbe3ee !important;
+    border-radius: 999px !important;
+    background: #fff;
+    font-size: .56rem !important;
+    white-space: nowrap !important;
+  }
+
+  .operations-page .job-status-tabs button span {
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    font-size: .48rem;
+  }
+
+  .operations-page .operational-filter-substrip {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 8px 10px 10px;
+    overflow: visible;
+  }
+
+  .operations-page .rpuj-mobile-toggle,
+  .operations-page .operational-date-filter,
+  .operations-page .filter-reset-link {
+    min-height: 34px;
+    border-radius: 8px;
+  }
+
+  .operations-page .operational-date-filter {
+    grid-column: auto;
+  }
+
+  .operations-page .operational-date-filter input {
+    min-width: 126px;
+  }
+
+  .operations-page .operational-filter-substrip small {
+    font-size: .58rem;
+    text-align: left;
+  }
+
+  .operations-page .job-rpuj-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .operations-page .job-rpuj-tabs button {
+    min-height: 32px;
+    border-radius: 8px;
+    font-size: .56rem;
+  }
+
+  .operations-page .operational-so-list {
+    gap: 8px;
+    padding: 8px;
+    background: #f8fafc;
+  }
+
+  .operations-page .operational-so-group {
+    border-color: #dbe4ef;
+    border-radius: 9px;
+    box-shadow: none;
+  }
+
+  .operations-page .operational-so-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    min-height: 0;
+    padding: 9px 10px;
+    border-bottom: 1px solid #edf2f7;
+    background: #fff;
+  }
+
+  .operations-page .operational-so-header::before {
+    display: none;
+  }
+
+  .operations-page .operational-so-number {
+    justify-self: start;
+    min-width: 0;
+    min-height: 22px;
+    padding: 0 8px;
+    border-color: #fecdd3;
+    color: #9f141a;
+    background: #fff1f2;
+    box-shadow: none;
+    font-size: .52rem;
+  }
+
+  .operations-page .operational-so-title {
+    gap: 1px;
+  }
+
+  .operations-page .operational-so-title span {
+    font-size: .5rem;
+  }
+
+  .operations-page .operational-so-title strong {
+    font-size: .74rem;
+    line-height: 1.2;
+  }
+
+  .operations-page .operational-so-meta {
+    display: grid;
+    gap: 3px;
+  }
+
+  .operations-page .operational-so-header small {
+    display: block;
+    font-size: .58rem;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .operations-page .operational-so-meta b {
+    display: inline;
+    margin-right: 4px;
+    font-size: .5rem;
+  }
+
+  .operations-page .operational-so-header em {
+    display: none;
+  }
+
+  .operations-page .operational-so-progress {
+    display: flex !important;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .operations-page .operational-so-progress span {
+    display: inline-flex;
+    min-height: 22px;
+    align-items: center;
+    gap: 5px;
+    padding: 0 7px;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    color: #475569;
+    background: #f8fafc;
+    font-size: .52rem;
+    font-weight: 900;
+  }
+
+  .operations-page .operational-so-progress b {
+    color: #0f172a;
+    font-size: .62rem;
+  }
+
+  .operations-page .operational-container-list {
+    gap: 7px;
+    padding: 8px;
+    background: #f8fafc;
+  }
+
+  .operations-page .operational-container-row,
+  .operations-page .operational-container-row.is-repo-stored {
+    display: grid;
+    grid-template-columns: 1fr !important;
+    gap: 6px !important;
+    min-height: 0;
+    padding: 9px 10px !important;
+    border: 1px solid #dbe4ef !important;
+    border-left: 3px solid #cbd5e1 !important;
+    border-radius: 9px;
+    background: #fff;
+    box-shadow: none !important;
+  }
+
+  .operations-page .operational-container-row.is-repo-stored {
+    border-color: #bfdbfe !important;
+    border-left-color: #2563eb !important;
+    background: #f8fbff;
+  }
+
+  .operations-page .container-row-main {
+    gap: 2px;
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  .operations-page .container-sequence {
+    display: none !important;
+  }
+
+  .operations-page .container-row-main strong {
+    font-size: .78rem;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .operations-page .container-row-main small {
+    font-size: .58rem;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-status,
+  .operations-page .container-rpuj-status,
+  .operations-page .container-row-assignment,
+  .operations-page .container-row-docs {
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  .operations-page .container-row-status::before,
+  .operations-page .container-row-assignment::before,
+  .operations-page .container-row-docs::before {
+    display: none !important;
+  }
+
+  .operations-page .container-row-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .operations-page .container-row-status .status-badge {
+    width: fit-content;
+    min-height: 22px;
+    padding: 3px 8px;
+    font-size: .56rem;
+  }
+
+  .operations-page .container-action-hint {
+    min-height: 20px;
+    padding: 0 7px;
+    font-size: .54rem;
+    line-height: 1.2;
+    white-space: normal;
+  }
+
+  .operations-page .container-rpuj-status {
+    display: grid;
+    grid-template-columns: 8px auto minmax(0, 1fr);
+    align-items: center;
+    gap: 3px 6px;
+  }
+
+  .operations-page .container-rpuj-status::before {
+    grid-row: 1;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+  }
+
+  .operations-page .container-rpuj-status span {
+    color: #64748b;
+    font-size: .52rem;
+    text-transform: uppercase;
+  }
+
+  .operations-page .container-rpuj-status strong {
+    font-size: .62rem;
+    line-height: 1.2;
+    white-space: normal;
+  }
+
+  .operations-page .container-rpuj-status small {
+    grid-column: 2 / -1;
+    font-size: .54rem;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-assignment {
+    display: grid;
+    gap: 3px;
+    padding-top: 5px !important;
+    border-top: 1px solid #edf2f7 !important;
+  }
+
+  .operations-page .container-row-assignment span {
+    align-items: flex-start;
+    font-size: .6rem;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary {
+    grid-column: auto !important;
+    gap: 4px;
+    padding: 7px !important;
+    border: 1px solid #bfdbfe !important;
+    border-radius: 8px !important;
+    background: #eff6ff !important;
+  }
+
+  .operations-page .container-row-assignment.is-repo-summary span {
+    grid-template-columns: 16px 46px minmax(0, 1fr);
+  }
+
+  .operations-page .container-row-docs {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding-top: 5px !important;
+  }
+
+  .operations-page .container-row-docs > span {
+    display: block !important;
+    font-size: .52rem;
+  }
+
+  .operations-page .container-row-docs div {
+    height: 5px;
+  }
+
+  .operations-page .container-row-docs strong {
+    font-size: .6rem;
+  }
+
+  .operations-page .container-row-docs small {
+    font-size: .54rem;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .operations-page .container-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin-top: 2px !important;
+  }
+
+  .operations-page .container-row-actions .operational-primary-action {
+    order: 0 !important;
+    grid-column: auto !important;
+  }
+
+  .operations-page .container-row-actions .secondary-button,
+  .operations-page .container-row-actions .primary-button,
+  .operations-page .container-row-actions .operational-primary-action {
+    min-height: 34px !important;
+    padding: 0 8px !important;
+    border-radius: 7px !important;
+    box-shadow: none !important;
+    font-size: .58rem !important;
+  }
+
+  .operations-page .container-row-actions .secondary-button:only-child,
+  .operations-page .container-row-actions .primary-button:only-child,
+  .operations-page .container-row-actions .operational-primary-action:only-child {
+    grid-column: 1 / -1 !important;
+  }
+
+  .operations-page .master-pagination {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .operations-page .master-pagination > span {
+    font-size: .58rem;
+    line-height: 1.3;
+  }
+}
+
+@media (max-width: 430px) {
+  .today-live-mobile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-page .container-row-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Phase 2: mobile modal workflow for Operational. */
+@media (max-width: 640px) {
+  .modal-backdrop:has(.operational-modal) {
+    align-items: end !important;
+    padding: 0 !important;
+    background: rgba(15, 23, 42, .72) !important;
+  }
+
+  .operational-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: min(96dvh, calc(100dvh - 8px)) !important;
+    max-height: min(96dvh, calc(100dvh - 8px)) !important;
+    border-radius: 14px 14px 0 0 !important;
+    box-shadow: 0 -14px 40px rgba(15, 23, 42, .24) !important;
+  }
+
+  .operational-modal > header {
+    flex: none;
+    align-items: center !important;
+    min-height: 58px;
+    padding: 10px 12px !important;
+  }
+
+  .operational-modal > header > div {
+    min-width: 0;
+  }
+
+  .operational-modal > header h2 {
+    overflow: hidden;
+    max-width: calc(100vw - 76px);
+    margin: 1px 0 0 !important;
+    font-size: .88rem !important;
+    line-height: 1.15 !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .operational-modal > header span {
+    display: -webkit-box !important;
+    max-width: calc(100vw - 76px) !important;
+    color: #64748b !important;
+    font-size: .56rem !important;
+    line-height: 1.25 !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+
+  .operational-modal > header button {
+    width: 36px !important;
+    height: 36px !important;
+    border: 1px solid #dbe3ee !important;
+    border-radius: 9px !important;
+    background: #fff !important;
+  }
+
+  .operational-update-form {
+    display: flex !important;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    max-height: none !important;
+    overflow: hidden !important;
+    background: #f8fafc !important;
+  }
+
+  .operational-update-form .operational-form-error,
+  .operational-update-form .operational-form-repo-pickup {
+    flex: none;
+    margin: 8px 10px 0 !important;
+    padding: 8px 10px !important;
+    border-radius: 8px !important;
+    font-size: .62rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .operational-update-form .operational-mobile-job-summary {
+    flex: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin: 8px 10px 0 !important;
+    padding: 8px !important;
+    border-radius: 9px !important;
+  }
+
+  .operational-update-form .operational-mobile-job-summary div {
+    gap: 2px !important;
+    min-height: 34px;
+  }
+
+  .operational-update-form .operational-mobile-job-summary span {
+    font-size: .5rem !important;
+  }
+
+  .operational-update-form .operational-mobile-job-summary strong {
+    font-size: .64rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .operational-update-form .operational-phase-tabs {
+    position: static !important;
+    flex: none;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    overflow: visible !important;
+    padding: 8px 10px !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    background: #f8fafc !important;
+  }
+
+  .operational-update-form .operational-phase-tabs button {
+    display: grid !important;
+    grid-template-columns: 19px minmax(0, 1fr);
+    align-items: center;
+    gap: 5px !important;
+    min-height: 40px !important;
+    padding: 5px 6px !important;
+    border-radius: 8px !important;
+    font-size: .58rem !important;
+    line-height: 1.12 !important;
+  }
+
+  .operational-update-form .operational-phase-tabs span {
+    width: 19px !important;
+    height: 19px !important;
+    font-size: .52rem !important;
+  }
+
+  .operational-update-form .operational-phase-tabs strong {
+    overflow: visible !important;
+    font-size: .56rem !important;
+    line-height: 1.12 !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+  }
+
+  .operational-form-content {
+    display: grid;
+    flex: 1 1 auto;
+    align-content: start;
+    min-height: 0;
+    gap: 8px;
+    overflow-y: auto;
+    padding: 8px 10px 10px;
+    overscroll-behavior: contain;
+    scroll-padding-bottom: 12px;
+  }
+
+  .operational-form-content > .form-section,
+  .operational-form-content > .operational-closing-phase > .form-section {
+    margin: 0 !important;
+    padding: 10px !important;
+    border: 1px solid #dbe4ef;
+    border-radius: 9px !important;
+    background: #fff;
+  }
+
+  .operational-form-content .form-section h3 {
+    margin-bottom: 8px !important;
+    font-size: .72rem !important;
+    line-height: 1.2;
+  }
+
+  .operational-form-content .form-section-heading {
+    align-items: center !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .operational-form-content .form-section-heading p {
+    display: none;
+  }
+
+  .operational-form-content .order-form-grid,
+  .operational-form-content .operational-cost-fields,
+  .operational-form-content .operational-rpuj-footer,
+  .operational-form-content .operational-rpuj-spk-grid,
+  .operational-form-content .operational-timeline-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .operational-form-content .order-form-grid label,
+  .operational-form-content .operational-inline-label,
+  .operational-form-content .operational-status-field,
+  .operational-form-content .operational-date-field {
+    gap: 5px !important;
+    color: #334155 !important;
+    font-size: .62rem !important;
+    font-weight: 850 !important;
+    line-height: 1.25;
+  }
+
+  .operational-form-content .order-form-grid input,
+  .operational-form-content .order-form-grid select,
+  .operational-form-content .operational-inline-label input,
+  .operational-form-content .operational-document-input,
+  .operational-form-content .operational-status-field select,
+  .operational-form-content .operational-date-field input {
+    min-height: 40px !important;
+    padding: 7px 9px !important;
+    border-radius: 8px !important;
+    font-size: .72rem !important;
+    line-height: 1.25;
+  }
+
+  .operational-form-content .operational-document-card {
+    gap: 7px !important;
+    padding: 10px !important;
+    border-radius: 9px !important;
+  }
+
+  .operational-form-content .operational-document-card > span,
+  .operational-form-content .operational-rpuj-card-head span {
+    font-size: .66rem !important;
+    line-height: 1.25 !important;
+  }
+
+  .operational-form-content .operational-rpuj-card-head small,
+  .operational-form-content .operational-eir-note,
+  .operational-form-content .operational-document-helper,
+  .operational-form-content .operational-rpuj-actions small,
+  .operational-form-content .operational-spk-note {
+    font-size: .56rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .operational-form-content .operational-cost-summary {
+    gap: 8px !important;
+    padding: 10px !important;
+    border-radius: 8px !important;
+  }
+
+  .operational-form-content .mb-4 {
+    margin-bottom: 8px !important;
+  }
+
+  .operational-form-content .uj-recommendation-card {
+    padding: 9px !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+  }
+
+  .operational-form-content .uj-recommendation-layout {
+    display: grid !important;
+    grid-template-columns: minmax(0, .85fr) minmax(120px, 1fr);
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  .operational-form-content .uj-recommendation-info {
+    display: grid;
+    align-content: center;
+    gap: 3px;
+  }
+
+  .operational-form-content .uj-recommendation-info > span:first-child {
+    font-size: .5rem !important;
+    line-height: 1.15 !important;
+  }
+
+  .operational-form-content .uj-recommendation-info > strong {
+    margin: 0 !important;
+    font-size: .68rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .operational-form-content .uj-recommendation-info > span:last-child {
+    width: fit-content;
+    margin: 0 !important;
+    padding: 2px 6px !important;
+    font-size: .5rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .operational-form-content .uj-recommendation-amount-card {
+    display: grid;
+    align-content: center;
+    padding: 8px !important;
+    border-radius: 8px !important;
+  }
+
+  .operational-form-content .uj-recommendation-amount-row {
+    gap: 8px !important;
+  }
+
+  .operational-form-content .uj-recommendation-amount-row span {
+    font-size: .5rem !important;
+    line-height: 1.15 !important;
+  }
+
+  .operational-form-content .uj-recommendation-amount-row div strong {
+    font-size: .68rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .operational-form-content .uj-recommendation-amount-row > strong {
+    font-size: .86rem !important;
+    line-height: 1.15 !important;
+    text-align: right;
+  }
+
+  .operational-form-content .uj-recommendation-card-warning {
+    font-size: .62rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .operational-form-content .operational-cost-summary-head {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+    gap: 5px !important;
+  }
+
+  .operational-form-content .operational-cost-summary-head strong {
+    font-size: .86rem !important;
+  }
+
+  .operational-form-content .operational-cost-pills {
+    gap: 5px !important;
+  }
+
+  .operational-form-content .operational-rpuj-actions,
+  .operational-form-content .operational-spk-actions {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 7px !important;
+  }
+
+  .operational-form-content .operational-rpuj-submit,
+  .operational-form-content .operational-spk-button,
+  .operational-form-content .operational-upload-button {
+    width: 100%;
+    min-height: 36px !important;
+    border-radius: 8px !important;
+    font-size: .62rem !important;
+  }
+
+  .operational-form-content .operational-closing-phase {
+    display: grid !important;
+    gap: 8px;
+  }
+
+  .operational-form-content .operational-timeline-section {
+    order: -1;
+  }
+
+  .operational-form-content .operational-closing-checklist {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .operational-form-content .operational-closing-checklist > div {
+    min-height: 34px !important;
+    gap: 5px !important;
+    padding: 7px !important;
+    border-radius: 8px !important;
+  }
+
+  .operational-form-content .operational-closing-checklist span {
+    width: 18px !important;
+    height: 18px !important;
+    font-size: .5rem !important;
+  }
+
+  .operational-form-content .operational-closing-checklist strong {
+    font-size: .56rem !important;
+    line-height: 1.18 !important;
+    white-space: normal !important;
+  }
+
+  .operational-form-content .operational-document-upload-row {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+
+  .operational-form-content .operational-document-hidden-input {
+    position: absolute !important;
+    width: 1px !important;
+    min-width: 0 !important;
+    height: 1px !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    border: 0 !important;
+    clip: rect(0 0 0 0) !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+  }
+
+  .operational-form-content .operational-file-name {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .operational-form-content .operational-file-name.is-empty,
+  .operational-form-content .operational-file-name.has-file {
+    display: block;
+    width: 100%;
+    padding: 6px 8px !important;
+    border-radius: 8px !important;
+  }
+
+  .operational-form-content .other-document-section {
+    margin-top: 10px !important;
+    padding-top: 10px !important;
+  }
+
+  .operational-form-content .other-document-row {
+    grid-template-columns: minmax(0, 1fr) 38px !important;
+    gap: 7px !important;
+    padding: 8px !important;
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    background: #fff;
+  }
+
+  .operational-form-content .other-document-row > input {
+    grid-column: 1 / -1;
+    min-height: 40px;
+  }
+
+  .operational-form-content .other-document-row .document-upload {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .operational-form-content .other-document-row > button {
+    grid-column: 2;
+    grid-row: 2;
+    width: 38px;
+    height: 42px;
+  }
+
+  .operational-form-footer {
+    position: static !important;
+    z-index: 3;
+    display: grid !important;
+    flex: none;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    margin: 0 !important;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
+    border-top: 1px solid #dbe4ef !important;
+    background: #fff !important;
+    box-shadow: 0 -10px 22px rgba(15, 23, 42, .12) !important;
+  }
+
+  .operational-form-footer .primary-button {
+    order: -1;
+  }
+
+  .operational-form-footer button {
+    width: 100% !important;
+    min-height: 42px !important;
+    border-radius: 8px !important;
+    font-size: .64rem !important;
+  }
+
+  .container-job-detail-modal,
+  .container-repo-modal,
+  .container-cancel-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: min(96dvh, calc(100dvh - 8px)) !important;
+    max-height: min(96dvh, calc(100dvh - 8px)) !important;
+    border-radius: 14px 14px 0 0 !important;
+    box-shadow: 0 -14px 40px rgba(15, 23, 42, .24) !important;
+  }
+
+  .container-job-detail-modal > header,
+  .container-repo-modal > header,
+  .container-cancel-modal > header {
+    flex: none;
+    min-height: 58px;
+    padding: 10px 12px !important;
+  }
+
+  .container-job-detail-modal > header {
+    align-items: center !important;
+  }
+
+  .container-job-detail-modal > header > div,
+  .container-repo-modal > header > div,
+  .container-cancel-modal > header > div {
+    min-width: 0;
+  }
+
+  .container-job-detail-modal h2,
+  .container-repo-modal h2,
+  .container-cancel-modal h2 {
+    max-width: calc(100vw - 76px);
+    font-size: .9rem !important;
+    line-height: 1.18 !important;
+  }
+
+  .container-job-detail-modal header p,
+  .container-repo-modal p,
+  .container-cancel-modal p {
+    display: -webkit-box !important;
+    max-width: calc(100vw - 76px);
+    font-size: .58rem !important;
+    line-height: 1.3 !important;
+    white-space: normal !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+
+  .container-job-mobile-summary {
+    flex: none;
+    gap: 6px !important;
+    padding: 8px 10px !important;
+  }
+
+  .container-job-mobile-summary > div {
+    min-height: 38px !important;
+    padding: 7px !important;
+    border-radius: 8px !important;
+  }
+
+  .container-job-mobile-summary span {
+    font-size: .5rem !important;
+  }
+
+  .container-job-mobile-summary strong {
+    font-size: .62rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .container-job-detail-body {
+    flex: 1 1 auto;
+    max-height: none !important;
+    gap: 8px !important;
+    padding: 8px 10px 10px !important;
+  }
+
+  .container-job-detail-body section {
+    padding: 10px !important;
+    border-radius: 9px !important;
+  }
+
+  .container-job-detail-body h3 {
+    margin-bottom: 7px !important;
+    font-size: .68rem !important;
+  }
+
+  .container-job-detail-body section > div:not(.job-timeline-detail):not(.detail-documents) > span {
+    padding: 8px !important;
+    border-radius: 8px !important;
+  }
+
+  .container-job-detail-modal > footer {
+    position: static !important;
+    display: grid !important;
+    flex: none;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .container-job-detail-modal > footer .operational-primary-action,
+  .container-job-detail-modal > footer .repo-action-button {
+    order: -3 !important;
+  }
+
+  .container-job-detail-modal > footer .danger-button {
+    order: -2 !important;
+  }
+
+  .container-job-detail-modal > footer .secondary-button:first-child {
+    order: 10 !important;
+  }
+
+  .container-job-detail-modal > footer button {
+    width: 100% !important;
+    min-height: 40px !important;
+    border-radius: 8px !important;
+    font-size: .64rem !important;
+  }
+}
+
+@media (max-width: 430px) {
+  .operational-update-form .operational-phase-tabs button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .operational-update-form .operational-phase-tabs strong {
+    min-height: 1.25em;
+  }
+}

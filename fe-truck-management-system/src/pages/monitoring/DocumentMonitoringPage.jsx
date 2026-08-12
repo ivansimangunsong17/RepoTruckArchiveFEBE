@@ -227,8 +227,8 @@ function DocumentMonitoringPage() {
           </select>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-[980px] w-full border-collapse text-left text-sm">
+        <div className="document-monitoring-table-wrap table-wrap overflow-x-auto">
+          <table className="document-monitoring-table responsive-data-table min-w-[980px] w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-[11px] uppercase text-slate-500">
                 <th className="w-14 px-3 py-3 font-black">No</th>
@@ -242,31 +242,31 @@ function DocumentMonitoringPage() {
             </thead>
             <tbody>
               {archive.loading ? (
-                <tr>
+                <tr className="responsive-empty-row">
                   <td className="px-3 py-8 text-center text-sm font-semibold text-slate-500" colSpan={7}>Memuat data monitoring...</td>
                 </tr>
               ) : filteredRows.length ? filteredRows.map((row, index) => (
                 <tr key={row.id} className={`border-b border-slate-200 ${STATUS_META[row.status]?.rowClass || ''}`}>
-                  <td className="px-3 py-3 text-center font-black text-slate-700">{index + 1}</td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3 text-center font-black text-slate-700" data-label="No">{index + 1}</td>
+                  <td className="px-3 py-3" data-label="Data">
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700">
                       <FileCheck2 size={13} />
                       {row.category}
                     </span>
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3" data-label="Nama / Identitas">
                     <strong className="block text-sm font-black text-slate-950">{row.name}</strong>
                     {row.raw?.plateNumber && row.raw?.unitCode ? (
                       <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{row.raw.unitCode}</span>
                     ) : null}
                   </td>
-                  <td className="px-3 py-3"><DocumentProgress row={row} /></td>
-                  <td className="px-3 py-3"><MissingList row={row} /></td>
-                  <td className="px-3 py-3"><DateList row={row} /></td>
-                  <td className="px-3 py-3"><StatusBadge status={row.status} /></td>
+                  <td className="px-3 py-3" data-label="Kelengkapan"><DocumentProgress row={row} /></td>
+                  <td className="px-3 py-3" data-label="Yang Belum Lengkap"><MissingList row={row} /></td>
+                  <td className="px-3 py-3" data-label="Waktu OFF"><DateList row={row} /></td>
+                  <td className="px-3 py-3" data-label="Status"><StatusBadge status={row.status} /></td>
                 </tr>
               )) : (
-                <tr>
+                <tr className="responsive-empty-row">
                   <td className="px-3 py-8 text-center text-sm font-semibold text-slate-500" colSpan={7}>
                     Tidak ada data yang cocok dengan filter.
                   </td>

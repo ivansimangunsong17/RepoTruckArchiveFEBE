@@ -1,0 +1,818 @@
+.master-mobile-list {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .page:has(.master-table-panel) {
+    gap: 10px;
+  }
+
+  .page:has(.master-table-panel) .page-header {
+    gap: 8px;
+  }
+
+  .page:has(.master-table-panel) .page-header h1 {
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+
+  .page:has(.master-table-panel) .page-header p {
+    font-size: .68rem;
+    line-height: 1.35;
+  }
+
+  .page:has(.master-table-panel) .page-action-group {
+    width: 100%;
+  }
+
+  .page:has(.master-table-panel) .page-action-group .primary-button,
+  .page:has(.master-table-panel) .page-action-group .dummy-chip {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .master-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    overflow: visible;
+    padding-bottom: 2px;
+  }
+
+  .page:has(.master-table-panel) .master-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .page:has(.master-table-panel) .master-stats > div {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    min-height: 52px;
+    gap: 1px 8px;
+    padding: 7px 9px;
+    border-radius: 8px;
+  }
+
+  .page:has(.master-table-panel) .master-stats span {
+    grid-column: 2;
+    font-size: .52rem;
+    line-height: 1.1;
+  }
+
+  .page:has(.master-table-panel) .master-stats strong {
+    grid-row: 1 / span 2;
+    margin: 0;
+    font-size: 1.02rem;
+    line-height: 1;
+  }
+
+  .page:has(.master-table-panel) .master-stats small {
+    grid-column: 2;
+    margin: 0;
+    font-size: .5rem;
+    line-height: 1.15;
+  }
+
+  .master-layout {
+    display: block;
+  }
+
+  .master-table-panel {
+    overflow: hidden;
+    border-radius: 10px;
+  }
+
+  .master-table-panel .master-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 10px;
+  }
+
+  .master-table-panel .master-toolbar .step-heading {
+    min-width: 0;
+  }
+
+  .master-table-panel .master-toolbar .step-heading span,
+  .master-table-panel .master-toolbar .step-heading p {
+    display: none;
+  }
+
+  .master-table-panel .master-toolbar h2 {
+    margin: 0;
+    font-size: .84rem;
+    line-height: 1.2;
+  }
+
+  .master-table-panel .search-field {
+    min-height: 38px;
+    margin: 0;
+    border-radius: 8px;
+  }
+
+  .master-table-panel .search-field input {
+    font-size: .72rem;
+  }
+
+  .master-table-panel .master-filter-select {
+    width: 100%;
+    max-width: none;
+    min-height: 34px;
+    border-radius: 8px;
+    font-size: .62rem;
+  }
+
+  .master-table-panel .table-wrap:has(.master-table) {
+    display: none !important;
+  }
+
+  .master-mobile-list {
+    display: grid;
+    gap: 8px;
+    padding: 0 10px 12px;
+  }
+
+  .master-mobile-card {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    border: 1px solid #dbe4ef;
+    border-radius: 9px;
+    background: #fff;
+    padding: 9px 10px;
+    box-shadow: 0 5px 14px rgba(15, 23, 42, .05);
+  }
+
+  .master-mobile-card-top {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .master-mobile-index {
+    display: inline-flex;
+    min-width: 32px;
+    min-height: 25px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #bfdbfe;
+    border-radius: 7px;
+    color: #1d4ed8;
+    background: #eff6ff;
+    font-size: .66rem;
+    font-weight: 950;
+    line-height: 1;
+  }
+
+  .master-mobile-identity {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .master-mobile-eyebrow,
+  .master-mobile-field dt {
+    color: #667085;
+    font-size: .52rem;
+    font-weight: 950;
+    letter-spacing: 0;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .master-mobile-primary-value,
+  .master-mobile-primary-value > *,
+  .master-mobile-primary-value .master-plain-cell,
+  .master-mobile-primary-value .customer-table-value,
+  .master-mobile-primary-value .driver-name-cell,
+  .master-mobile-primary-value .cell-main,
+  .master-mobile-primary-value strong,
+  .master-mobile-primary-value span {
+    min-width: 0;
+    max-width: 100%;
+    color: #101828;
+    font-size: .82rem;
+    font-weight: 950;
+    line-height: 1.2;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-align: left !important;
+    text-overflow: clip;
+    white-space: normal !important;
+  }
+
+  .master-mobile-subtitle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 8px;
+    min-width: 0;
+    color: #64748b;
+    font-size: .62rem;
+    font-weight: 750;
+    line-height: 1.25;
+  }
+
+  .master-mobile-subtitle > span,
+  .master-mobile-subtitle > span > *,
+  .master-mobile-subtitle strong,
+  .master-mobile-subtitle .master-plain-cell,
+  .master-mobile-subtitle .customer-table-value,
+  .master-mobile-subtitle .driver-number-cell,
+  .master-mobile-subtitle .driver-plate-cell {
+    min-width: 0;
+    max-width: 100%;
+    color: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-align: left !important;
+    text-overflow: clip;
+    white-space: normal !important;
+  }
+
+  .master-mobile-status {
+    min-width: 0;
+    max-width: 104px;
+    justify-self: end;
+  }
+
+  .master-mobile-status > *,
+  .master-mobile-status .master-status-dot,
+  .master-mobile-status .status-badge,
+  .master-mobile-status .driver-status-pill {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 4px 7px;
+    border-radius: 999px;
+    font-size: .56rem;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .master-mobile-field-list {
+    display: grid;
+    margin: 0;
+    border-top: 1px solid #edf2f7;
+  }
+
+  .master-mobile-field {
+    display: grid;
+    grid-template-columns: minmax(76px, 33%) minmax(0, 1fr);
+    align-items: start;
+    min-height: 28px;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .master-mobile-field:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .master-mobile-field dd {
+    min-width: 0;
+    margin: 0;
+    color: #172033;
+    font-size: .66rem;
+    font-weight: 850;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+
+  .master-mobile-field dd > *,
+  .master-mobile-field dd .master-plain-cell,
+  .master-mobile-field dd .customer-table-value,
+  .master-mobile-field dd .driver-payment-cell,
+  .master-mobile-field dd .driver-payment-cell strong,
+  .master-mobile-field dd .driver-payment-cell span,
+  .master-mobile-field dd .driver-doc-cell,
+  .master-mobile-field dd .driver-number-cell,
+  .master-mobile-field dd .driver-plate-cell,
+  .master-mobile-field dd .master-expiry-date-cell,
+  .master-mobile-field dd .master-status-dot,
+  .master-mobile-field dd .status-badge,
+  .master-mobile-field dd .customer-document-button {
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-align: left !important;
+    text-overflow: clip;
+    white-space: normal !important;
+  }
+
+  .master-mobile-field dd .master-expiry-date-cell {
+    display: grid;
+    justify-items: start;
+    gap: 2px;
+  }
+
+  .master-mobile-field dd .master-expiry-date-cell strong {
+    font-size: .64rem;
+    line-height: 1.15;
+  }
+
+  .master-mobile-field dd .master-expiry-date-cell em {
+    margin-top: 0;
+    font-size: .48rem;
+  }
+
+  .master-mobile-field dd .customer-document-button {
+    width: 30px;
+    height: 30px;
+    justify-content: center;
+    text-align: center !important;
+  }
+
+  .master-mobile-card-actions {
+    padding-top: 7px;
+    border-top: 1px solid #edf2f7;
+  }
+
+  .master-mobile-action-group {
+    justify-content: flex-start;
+    gap: 7px;
+  }
+
+  .master-mobile-action-group button {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .master-mobile-state {
+    display: grid;
+    min-height: 80px;
+    place-items: center;
+    border: 1px dashed #cbd5e1;
+    border-radius: 9px;
+    color: #64748b;
+    background: #f8fafc;
+    font-size: .72rem;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  .master-pagination {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px;
+    font-size: .62rem;
+  }
+
+  .master-pagination > div {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .master-pagination button {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+@media (max-width: 640px) {
+  .master-modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .master-modal,
+  .master-detail-modal {
+    width: 100%;
+    max-width: none;
+    height: min(94vh, calc(100dvh - 8px));
+    max-height: calc(100dvh - 8px);
+    border-radius: 14px 14px 0 0;
+    overflow: hidden;
+  }
+
+  .master-modal .master-form {
+    display: flex;
+    height: 100%;
+    max-height: none;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .master-form-heading {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .master-form-heading .step-heading {
+    min-width: 0;
+  }
+
+  .master-form-heading .step-heading p {
+    display: none;
+  }
+
+  .master-form-heading .step-heading h2 {
+    font-size: .9rem;
+    line-height: 1.2;
+  }
+
+  .master-form-heading .step-heading span:not(.step-number) {
+    font-size: .54rem;
+  }
+
+  .master-form-sections {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 12px 10px;
+  }
+
+  .master-fieldset {
+    margin: 0 0 9px;
+    padding: 10px;
+    border-radius: 9px;
+  }
+
+  .master-fieldset legend {
+    padding: 0 4px;
+    font-size: .58rem;
+  }
+
+  .master-form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px;
+  }
+
+  .master-form-grid .master-field,
+  .master-form-grid .master-field.span-quarter,
+  .master-form-grid .master-field.span-third,
+  .master-form-grid .master-field.span-two-thirds,
+  .master-form-grid .master-field.vehicle-document-number,
+  .master-form-grid .master-field.vehicle-document-date,
+  .master-form-grid .master-field.vehicle-document-upload,
+  .master-form-grid .master-field.vehicle-document-photo,
+  .master-form-grid .master-field.vehicle-document-tax {
+    grid-column: auto !important;
+  }
+
+  .master-field > span {
+    font-size: .58rem;
+    line-height: 1.15;
+  }
+
+  .master-field > small {
+    font-size: .55rem;
+    line-height: 1.25;
+  }
+
+  .master-form-grid input,
+  .master-form-grid select,
+  .master-form-grid textarea {
+    min-height: 38px;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: .72rem;
+  }
+
+  .master-form-grid textarea {
+    min-height: 72px;
+  }
+
+  .master-form-error {
+    margin-bottom: 8px;
+    font-size: .66rem;
+  }
+
+  .document-upload-dropzone {
+    min-height: 52px;
+    padding: 8px;
+    border-radius: 9px;
+  }
+
+  .document-upload-dropzone span strong {
+    font-size: .68rem;
+  }
+
+  .document-upload-dropzone span small {
+    font-size: .56rem;
+  }
+
+  .selected-document {
+    grid-template-columns: 32px minmax(0, 1fr) 30px;
+    gap: 8px;
+    padding: 7px;
+  }
+
+  .selected-document span {
+    min-width: 0;
+  }
+
+  .selected-document strong,
+  .selected-document small {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .master-form-actions {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+  }
+
+  .master-form-actions button {
+    width: 100%;
+    min-height: 40px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: .7rem;
+  }
+
+  .master-detail-modal {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .master-detail-modal > header {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .master-detail-modal > header h2 {
+    font-size: .92rem;
+    line-height: 1.2;
+  }
+
+  .master-detail-modal > header span {
+    font-size: .56rem;
+  }
+
+  .master-detail-grid {
+    flex: 1 1 auto;
+    grid-template-columns: 1fr;
+    gap: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px 14px;
+    background: #fff;
+  }
+
+  .master-detail-grid > div,
+  .master-detail-grid > div.span-full {
+    display: grid;
+    grid-template-columns: minmax(104px, 36%) minmax(0, 1fr);
+    grid-column: auto;
+    align-items: start;
+    min-height: 0 !important;
+    min-width: 0;
+    gap: 8px;
+    padding: 8px 0;
+    border: 0;
+    border-bottom: 1px solid #edf2f7;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .master-detail-grid > div.span-full {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 10px 0;
+  }
+
+  .master-detail-grid span {
+    font-size: .55rem;
+    line-height: 1.2;
+  }
+
+  .master-detail-grid strong,
+  .master-detail-grid .master-plain-cell,
+  .master-detail-grid .master-detail-document-empty {
+    font-size: .68rem;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .master-detail-document-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .master-detail-grid .master-document-note-layout,
+  .master-detail-grid .truck-document-summary-table,
+  .master-detail-grid .driver-document-detail-table,
+  .master-detail-grid .chassis-document-detail-table {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .truck-document-summary-table,
+  .driver-document-detail-table,
+  .chassis-document-detail-table {
+    display: grid;
+    gap: 7px;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .truck-document-summary-head,
+  .driver-document-detail-head {
+    display: none;
+  }
+
+  .truck-document-summary-row,
+  .truck-document-summary-table.has-notes .truck-document-summary-row,
+  .driver-document-detail-row,
+  .driver-document-detail-table.has-notes .driver-document-detail-row,
+  .chassis-document-detail-table .driver-document-detail-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+    min-height: 0;
+    gap: 7px;
+    padding: 9px;
+    border: 1px solid #dbe4ef;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+
+  .truck-document-summary-row > strong,
+  .driver-document-detail-row > strong {
+    color: #991b1b;
+    font-size: .68rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .truck-document-summary-info {
+    gap: 4px;
+  }
+
+  .truck-document-summary-info > span,
+  .truck-document-summary-info .master-expiry-detail > strong {
+    font-size: .64rem;
+    line-height: 1.2;
+  }
+
+  .truck-document-summary-info > span small,
+  .truck-document-summary-info .master-expiry-detail > small {
+    font-size: .52rem;
+  }
+
+  .truck-document-summary-row .master-detail-document-actions,
+  .driver-document-detail-row .master-detail-document-actions,
+  .chassis-document-detail-table .master-detail-document-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .truck-document-summary-row .master-detail-document-actions .document-link,
+  .driver-document-detail-row .master-detail-document-actions .document-link,
+  .chassis-document-detail-table .master-detail-document-actions .document-link {
+    width: auto;
+    min-width: 86px;
+    max-width: 100%;
+    min-height: 32px;
+    justify-content: center;
+    padding: 6px 9px;
+    font-size: .6rem;
+  }
+
+  .vehicle-documents-panel {
+    min-width: 0 !important;
+    padding: 10px !important;
+    border-radius: 8px !important;
+  }
+
+  .vehicle-documents-panel h3 {
+    font-size: .78rem !important;
+    line-height: 1.2 !important;
+  }
+
+  .vehicle-documents-panel p {
+    margin-top: 2px !important;
+    font-size: .62rem !important;
+    line-height: 1.25 !important;
+  }
+
+  .vehicle-documents-table-wrap {
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .vehicle-documents-table {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: separate !important;
+    background: transparent !important;
+  }
+
+  .vehicle-documents-table thead {
+    display: none !important;
+  }
+
+  .vehicle-documents-table tbody {
+    display: grid !important;
+    gap: 7px;
+  }
+
+  .vehicle-documents-table tr {
+    display: grid !important;
+    overflow: hidden;
+    border: 1px solid #dbe4ef !important;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .vehicle-documents-table td {
+    display: grid !important;
+    grid-template-columns: minmax(92px, 36%) minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    min-width: 0;
+    min-height: 30px;
+    padding: 7px 8px !important;
+    border-bottom: 1px solid #edf2f7;
+    color: #172033;
+    font-size: .64rem !important;
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: normal !important;
+  }
+
+  .vehicle-documents-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .vehicle-documents-table td::before {
+    content: attr(data-label);
+    color: #667085;
+    font-size: .52rem;
+    font-weight: 950;
+    line-height: 1.15;
+    text-transform: uppercase;
+  }
+
+  .vehicle-documents-table td > *,
+  .vehicle-documents-table td .document-link {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal !important;
+  }
+
+  .vehicle-documents-table .responsive-empty-row {
+    border-style: dashed !important;
+    background: #f8fafc;
+  }
+
+  .vehicle-documents-table .responsive-empty-row td {
+    display: block !important;
+    min-height: 54px;
+    text-align: center;
+  }
+
+  .vehicle-documents-table .responsive-empty-row td::before {
+    display: none;
+  }
+
+  .master-detail-modal > footer {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+  }
+
+  .master-detail-modal > footer button {
+    width: 100%;
+    min-height: 40px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: .7rem;
+  }
+}

@@ -119,7 +119,7 @@ describe('SalesOrdersPage billing status flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
     expect(await screen.findByText('Pembayaran: Tempo 14 hari')).toBeInTheDocument();
     expect(screen.getByText('Waktu Input Sistem')).toBeInTheDocument();
-    expect(screen.getByText('Tanggal SO: 19 Jul 2026')).toBeInTheDocument();
+    expect(screen.getByText('Tanggal SO: 19 Juli 2026')).toBeInTheDocument();
     expect(screen.getByText('Lama Pelunasan')).toBeInTheDocument();
     expect(screen.getByText(/Belum dikirim customer/i)).toBeInTheDocument();
     expect(screen.getByText('Riwayat Dokumen')).toBeInTheDocument();

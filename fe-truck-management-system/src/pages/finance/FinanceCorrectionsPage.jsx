@@ -62,8 +62,8 @@ function ReviewModal({ decision, row, note, error, busy, onNoteChange, onClose, 
   const isReject = decision === 'reject';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="finance-correction-review-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
+      <section className="finance-correction-review-modal w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Approval Koreksi Finance</p>
@@ -174,7 +174,7 @@ function FinanceCorrectionsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
+    <main className="finance-corrections-page min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
@@ -215,17 +215,17 @@ function FinanceCorrectionsPage() {
               <tbody>
                 {rows.map((row) => (
                   <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
-                    <td className="px-3 py-2 text-xs font-semibold text-slate-600">{row.requestedAt}</td>
-                    <td className="px-3 py-2 text-xs font-black text-slate-900">{typeLabel(row.correctionType)}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 text-xs font-semibold text-slate-600" data-label="Tanggal">{row.requestedAt}</td>
+                    <td className="px-3 py-2 text-xs font-black text-slate-900" data-label="Jenis">{typeLabel(row.correctionType)}</td>
+                    <td className="px-3 py-2" data-label="SO / Customer">
                       <strong className="block text-xs text-slate-950">{row.soNumber}</strong>
                       <span className="mt-0.5 block text-[11px] font-medium text-slate-500">{row.customer} - {row.destination}</span>
                     </td>
-                    <td className="px-3 py-2 text-xs font-semibold text-slate-700">{row.currentValue}</td>
-                    <td className="px-3 py-2 text-xs font-black text-slate-950">{row.requestedValue}</td>
-                    <td className="max-w-[280px] px-3 py-2 text-[11px] font-semibold leading-relaxed text-slate-600">{row.reason}</td>
-                    <td className="px-3 py-2"><StatusPill value={row.status} /></td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 text-xs font-semibold text-slate-700" data-label="Nilai Lama">{row.currentValue}</td>
+                    <td className="px-3 py-2 text-xs font-black text-slate-950" data-label="Nilai Baru">{row.requestedValue}</td>
+                    <td className="max-w-[280px] px-3 py-2 text-[11px] font-semibold leading-relaxed text-slate-600" data-label="Alasan Finance">{row.reason}</td>
+                    <td className="px-3 py-2" data-label="Status"><StatusPill value={row.status} /></td>
+                    <td className="px-3 py-2" data-label="Aksi">
                       {row.status === 'pending' ? (
                         <div className="flex gap-1.5">
                           <button className="rounded-md bg-emerald-600 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-emerald-700" onClick={() => { setDecision({ type: 'approve', row }); setNote(''); setDecisionError(''); }} type="button">Approve</button>

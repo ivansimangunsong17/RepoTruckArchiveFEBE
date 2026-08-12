@@ -10,8 +10,8 @@ function UjRecommendationCard({ job, destinations = [] }) {
     const destinationLabel = recommendation.destinationName ? ` untuk ${recommendation.destinationName}` : '';
 
     return (
-      <div className="!block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <div className="flex items-start gap-2">
+      <div className="uj-recommendation-card uj-recommendation-card-warning !block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="uj-recommendation-warning-layout flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <strong className="block font-semibold">Tarif UJ{sizeLabel}{destinationLabel} belum diatur.</strong>
@@ -23,9 +23,9 @@ function UjRecommendationCard({ job, destinations = [] }) {
   }
 
   return (
-    <div className="!block rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-3 shadow-sm">
-      <div className="flex flex-col gap-3 md:flex-row md:items-stretch">
-        <div className="min-w-0 md:w-56">
+    <div className="uj-recommendation-card !block rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-3 shadow-sm">
+      <div className="uj-recommendation-layout flex flex-col gap-3 md:flex-row md:items-stretch">
+        <div className="uj-recommendation-info min-w-0 md:w-56">
           <span className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Acuan Uang Jalan</span>
           <strong className="mt-0.5 block truncate text-sm font-bold text-slate-950">Tujuan: {recommendation.destinationName || '-'}</strong>
           <span className="mt-1 inline-flex rounded-md border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
@@ -33,8 +33,8 @@ function UjRecommendationCard({ job, destinations = [] }) {
           </span>
         </div>
 
-        <div className="min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2">
-          <div className="flex h-full items-center justify-between gap-3">
+        <div className="uj-recommendation-amount-card min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2">
+          <div className="uj-recommendation-amount-row flex h-full items-center justify-between gap-3">
             <div>
               <span className="text-[11px] font-bold uppercase text-slate-500">UJ Container Ini</span>
               <strong className="block text-sm font-bold text-slate-950">{recommendation.currentSize || job.size || '-'}</strong>

@@ -55,7 +55,12 @@ function periodFromDate(value, fallback = '') {
   return normalizeOptionalText(datePeriod || fallback);
 }
 
-function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', includeRpujStage = true, excludeCancelledJobs = false } = {}) {
+function normalizeDateOnly(value) {
+  const clean = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : '';
+}
+
+function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', tripDate = '', includeRpujStage = true, excludeCancelledJobs = false } = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
     "so.finance_verification_status = 'verified'",
@@ -63,6 +68,7 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
   ];
   const params = [];
   const cleanKeyword = keyword.trim();
+  const cleanTripDate = normalizeDateOnly(tripDate);
 
   if (cleanKeyword) {
     params.push(`%${cleanKeyword}%`);
@@ -78,6 +84,11 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
   if (status) {
     params.push(status);
     clauses.push(`cj.status = $${params.length}`);
+  }
+
+  if (cleanTripDate) {
+    params.push(cleanTripDate);
+    clauses.push(`so.trip_date = $${params.length}::date`);
   }
 
   if (excludeCancelledJobs) {

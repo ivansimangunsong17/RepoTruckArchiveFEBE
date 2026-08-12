@@ -247,15 +247,15 @@ function TodayTruckDashboard() {
   }
 
   return (
-    <div className="page -mt-1 space-y-2">
-      <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="page today-truck-live-page -mt-1 space-y-2">
+      <header className="today-live-page-header flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="m-0 text-[22px] font-black leading-none text-slate-950">Order Berjalan Hari Ini</h1>
           </div>
           <p className="m-0 mt-1 text-[12px] font-semibold leading-none text-slate-500">Data truck yang berjalan dan belum selesai.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="today-live-actions flex flex-wrap items-center gap-2">
           <button
             className="inline-flex min-h-[34px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-[12px] font-black text-slate-900 shadow-sm hover:border-red-700 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"
@@ -264,7 +264,7 @@ function TodayTruckDashboard() {
           >
             <Download size={15} /> Download PDF
           </button>
-          <div className="inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] shadow-sm">
+          <div className="today-live-date inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] shadow-sm">
             <span className="font-extrabold text-slate-500">Tanggal</span>
             <strong className="font-black text-slate-950">{formatShortDate(currentDateKey)}</strong>
           </div>
@@ -272,17 +272,17 @@ function TodayTruckDashboard() {
       </header>
       {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat dashboard truck...</p></div> : null}
       {error ? <div className="archive-inline-state is-error"><h3>Order berjalan gagal dimuat</h3><p>{error}</p></div> : null}
-      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="grid items-center gap-2.5 border-b border-slate-200 bg-slate-50 px-4 py-2 lg:grid-cols-[260px_1fr]" aria-label="Ketersediaan Truck Hari Ini">
+      <section className="today-live-panel overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="today-live-availability grid items-center gap-2.5 border-b border-slate-200 bg-slate-50 px-4 py-2 lg:grid-cols-[260px_1fr]" aria-label="Ketersediaan Truck Hari Ini">
           <div className="flex items-center pl-0">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
               <span className="block text-[17px] font-black leading-none text-slate-950">Tersedia Saat Ini</span>
             </div>
           </div>
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="today-live-availability-cards grid gap-2 md:grid-cols-2">
             {availability.map((item) => (
               <article
-                className={`flex min-h-[38px] items-center justify-between gap-3 rounded-lg border px-3 py-1 shadow-[inset_3px_0_0_rgba(16,185,129,0.95)] ${availabilityTone(item) === 'shortage' ? 'shadow-[inset_3px_0_0_rgba(220,38,38,0.95)]' : ''} ${availabilityCardClass(item)}`}
+                className={`today-live-availability-card flex min-h-[38px] items-center justify-between gap-3 rounded-lg border px-3 py-1 shadow-[inset_3px_0_0_rgba(16,185,129,0.95)] ${availabilityTone(item) === 'shortage' ? 'shadow-[inset_3px_0_0_rgba(220,38,38,0.95)]' : ''} ${availabilityCardClass(item)}`}
                 key={item.size}
               >
                 <div className="flex min-w-0 items-center gap-2.5">
@@ -295,7 +295,7 @@ function TodayTruckDashboard() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="today-live-table-wrap overflow-x-auto">
           <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-[11px]">
             <colgroup>
               <col className="w-[5%]" />
@@ -361,14 +361,54 @@ function TodayTruckDashboard() {
               ))}
             </tbody>
           </table>
-          {!loading && !error && !rows.length ? (
-            <div className="role-empty-state">
-              <Truck size={28} />
-              <h3>Data truck belum tersedia</h3>
-              <p>Belum ada truck aktif dari backend API.</p>
-            </div>
-          ) : null}
         </div>
+        <div className="today-live-mobile-list" aria-label="Daftar truck mobile">
+          {!loading && !error && rows.map((row, index) => (
+            <article
+              className={`today-live-mobile-card ${row.job ? 'is-assigned' : 'is-unassigned'} ${isTruckMaintenance(row.truck) ? 'is-maintenance' : ''}`.trim()}
+              key={`mobile-${row.id}`}
+            >
+              <div className="today-live-mobile-head">
+                <span className="today-live-mobile-index">{index + 1}</span>
+                <div className="today-live-mobile-title">
+                  <strong>{row.truck.plateNumber || '-'}</strong>
+                  <small>{formatTruckNumber(row.truck.unitCode)} - {chassisSizeLabel(row.truck)}</small>
+                </div>
+                <span className={`today-live-mobile-status ${rowStatusClass(row)}`}>
+                  {rowStatusLabel(row)}
+                </span>
+              </div>
+              <div className="today-live-mobile-grid">
+                <div>
+                  <span>Sopir</span>
+                  <strong>{row.job?.driver || row.truck.driver || '-'}</strong>
+                </div>
+                <div>
+                  <span>Container</span>
+                  <strong>{row.job?.containerNumber || '-'}</strong>
+                </div>
+                <div>
+                  <span>Order</span>
+                  <strong>{formatShipment(row.job?.shipment)}</strong>
+                </div>
+                <div>
+                  <span>Tujuan</span>
+                  <strong>{destinationText(row.job)}</strong>
+                </div>
+              </div>
+              <button className="today-live-mobile-detail" type="button" onClick={() => setSelectedRow(row)}>
+                Detail
+              </button>
+            </article>
+          ))}
+        </div>
+        {!loading && !error && !rows.length ? (
+          <div className="role-empty-state">
+            <Truck size={28} />
+            <h3>Data truck belum tersedia</h3>
+            <p>Belum ada truck aktif dari backend API.</p>
+          </div>
+        ) : null}
       </section>
 
       {selectedRow ? (

@@ -47,7 +47,10 @@ function LoginPage() {
       </section>
       <section className="login-form-panel">
         <form className="login-form" onSubmit={handleSubmit}>
-          <div className="mobile-login-brand"><img src={armadaLogo} alt="Armada" /><strong>ARMADA</strong></div>
+          <div className="mobile-login-brand">
+            <span><img src={armadaLogo} alt="Armada" /></span>
+            <p><strong>ARMADA</strong><small>Transportation Management System</small></p>
+          </div>
           <span className="login-lock"><LockKeyhole size={23} /></span>
           <h2>Selamat datang kembali</h2>
           <p>Masuk untuk melanjutkan ke order berjalan.</p>

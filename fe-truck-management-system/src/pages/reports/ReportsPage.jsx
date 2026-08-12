@@ -365,6 +365,7 @@ function getUtilizationTruckKey(row = {}, activeTruckLookup = new Map()) {
   return keys.map((key) => activeTruckLookup.get(key)).find(Boolean) || '';
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], month, year, baseDate = new Date()) {
   const period = buildUtilizationPeriod(month, year, baseDate);
   const activeTrucks = (masterTrucks || [])
@@ -443,6 +444,7 @@ export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], mo
   };
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month, year, holidaysByDate = {}) {
   const days = buildMonthDays(month, year, holidaysByDate);
   const dayKeys = new Set(days.map((day) => day.key));
@@ -509,6 +511,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
   };
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function buildMonthlyDriverUtilizationPivot(masterDrivers = [], rows = [], month, year, holidaysByDate = {}) {
   const days = buildMonthDays(month, year, holidaysByDate);
   const dayKeys = new Set(days.map((day) => day.key));
@@ -564,6 +567,7 @@ export function buildMonthlyDriverUtilizationPivot(masterDrivers = [], rows = []
   };
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function buildDriverPerformanceRows(masterDrivers = [], performanceRows = []) {
   const drivers = new Map();
 
@@ -615,6 +619,7 @@ function repoAgeDays(value, baseDate = new Date()) {
   return Math.max(0, Math.floor((base - start) / 86400000));
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function buildRepoMonitoringRows(rows = [], baseDate = new Date()) {
   return rows
     .filter((row) => row?.status === 'repo_stored')
@@ -690,8 +695,8 @@ function SummaryToggleCard({
 
 function DetailTable({ columns, rows, rowRenderer }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full text-left text-xs">
+    <div className="report-detail-table-wrap overflow-x-auto">
+      <table className="report-detail-table responsive-data-table min-w-full text-left text-xs">
         <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
           <tr>
             {columns.map((column) => (
@@ -868,8 +873,8 @@ function MasterReportSection({ section }) {
         <span className="rounded-md bg-white px-2.5 py-1 text-xs font-black text-slate-800 shadow-sm">{section.rows.length}</span>
       </div>
       {section.rows.length ? (
-        <div className="max-h-80 overflow-auto">
-          <table className="min-w-full text-left text-xs">
+        <div className="master-report-table-wrap max-h-80 overflow-auto">
+          <table className="master-report-table responsive-data-table min-w-full text-left text-xs">
             <thead className="sticky top-0 z-10 bg-white text-[11px] uppercase text-slate-500 shadow-sm">
               <tr>
                 <th className="w-12 px-3 py-2 font-bold">No</th>
@@ -881,9 +886,9 @@ function MasterReportSection({ section }) {
             <tbody className="divide-y divide-slate-100">
               {section.rows.map((row, index) => (
                 <tr key={row.id || `${section.key}-${index}`} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                  <td className="px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
                   {section.columns.map((column) => (
-                    <td key={column.label} className="px-3 py-2 font-semibold text-slate-800">
+                    <td key={column.label} className="px-3 py-2 font-semibold text-slate-800" data-label={column.label}>
                       {formatMasterValue(column.value(row))}
                     </td>
                   ))}
@@ -980,8 +985,8 @@ function UtilizationNoteModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[260] grid place-items-center bg-slate-950/35 px-3 py-5" role="presentation" onMouseDown={onClose}>
-      <form className="w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+    <div className="utilization-note-backdrop fixed inset-0 z-[260] grid place-items-center bg-slate-950/35 px-3 py-5" role="presentation" onMouseDown={onClose}>
+      <form className="utilization-note-modal w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
           <div className="min-w-0">
             <span className="text-[10px] font-black uppercase text-amber-700">Catatan Utilisasi</span>
@@ -1103,7 +1108,7 @@ export function MonthlyUtilizationModal({
 
   const modal = (
     <div className="fixed inset-0 z-[220] flex items-start justify-center overflow-hidden bg-slate-950/45 px-3 py-6" role="presentation" onMouseDown={onClose}>
-      <section className="flex max-h-[calc(100vh-3rem)] w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="monthly-utilization-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="monthly-utilization-modal flex max-h-[calc(100vh-3rem)] w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="monthly-utilization-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <span className="block text-[9px] font-black uppercase text-sky-700">Utilisasi Bulanan</span>
@@ -1296,7 +1301,7 @@ export function DriverMonthlyUtilizationModal({
 
   const modal = (
     <div className="fixed inset-0 z-[220] flex items-start justify-center overflow-hidden bg-slate-950/45 px-3 py-6" role="presentation" onMouseDown={onClose}>
-      <section className="flex max-h-[calc(100vh-3rem)] w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="driver-monthly-utilization-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="monthly-utilization-modal driver-monthly-utilization-modal flex max-h-[calc(100vh-3rem)] w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="driver-monthly-utilization-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <span className="block text-[9px] font-black uppercase text-amber-700">Utilisasi Bulanan Sopir</span>
@@ -1695,7 +1700,7 @@ function ReportsPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page reports-page">
       <PageHeader
         eyebrow="Laporan"
         title={reportHeader.title}
@@ -1819,15 +1824,15 @@ function ReportsPage() {
               rows={revenueTruckRows}
               rowRenderer={(truck, index) => (
                 <tr key={truck.plateNumber} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                  <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-950">{truck.plateNumber}</td>
-                  <td className="px-3 py-2 text-slate-600">{truck.sourceLabel}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-950" data-label="Plat">{truck.plateNumber}</td>
+                  <td className="px-3 py-2 text-slate-600" data-label="Sumber">{truck.sourceLabel}</td>
+                  <td className="px-3 py-2 text-right" data-label="Jumlah Trip">
                     <span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">
                       {truck.totalTrips}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right font-bold text-slate-950">{formatCurrency(truck.revenue)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(truck.revenue)}</td>
                 </tr>
               )}
             />
@@ -1881,17 +1886,17 @@ function ReportsPage() {
               rows={utilizationRowsWithTarget}
               rowRenderer={(truck, index) => (
                 <tr key={truck.plateNumber} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                  <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-950">{truck.plateNumber}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-700">{formatTruckUnitCode(truck.unitCode)}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-950" data-label="Plat">{truck.plateNumber}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-700" data-label="No Lambung">{formatTruckUnitCode(truck.unitCode)}</td>
+                  <td className="px-3 py-2 text-right" data-label="Jumlah Trip">
                     <span className="inline-flex min-w-8 justify-center rounded-md bg-sky-50 px-2 py-0.5 font-bold text-sky-700">
                       {truck.totalTrips}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-700">{truck.targetTruckDays}</td>
-                  <td className="px-3 py-2 text-right font-bold text-slate-950">{truck.utilizationPercent.toFixed(1)}%</td>
-                  <td className="px-3 py-2">{formatDate(truck.lastCompletedAt)}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-700" data-label="Hari Periode">{truck.targetTruckDays}</td>
+                  <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Utilisasi Truck">{truck.utilizationPercent.toFixed(1)}%</td>
+                  <td className="px-3 py-2" data-label="Terakhir Selesai">{formatDate(truck.lastCompletedAt)}</td>
                 </tr>
               )}
             />
@@ -1945,24 +1950,24 @@ function ReportsPage() {
               rows={repoMonitoringRows}
               rowRenderer={(row, index) => (
                 <tr key={row.id || `${row.soNumber}-${row.containerNumber}`} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                  <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
-                  <td className="px-3 py-2">
+                  <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                  <td className="px-3 py-2" data-label="SO / Container">
                     <strong className="block text-slate-950">{row.soNumber || '-'}</strong>
                     <span className="text-[11px] text-slate-500">{row.containerNumber || 'Container belum diisi'} - {row.size || '-'}</span>
                   </td>
-                  <td className="px-3 py-2 font-semibold text-slate-800">{row.customer || '-'}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-950">{row.repoLocation || '-'}</td>
-                  <td className="px-3 py-2">{row.repoContainerCondition === 'loaded' ? 'Isi' : row.repoContainerCondition === 'empty' ? 'Kosong' : '-'}</td>
-                  <td className="px-3 py-2">{formatDate(row.storedDate)}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2 font-semibold text-slate-800" data-label="Customer">{row.customer || '-'}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-950" data-label="Depo Penitipan">{row.repoLocation || '-'}</td>
+                  <td className="px-3 py-2" data-label="Kondisi">{row.repoContainerCondition === 'loaded' ? 'Isi' : row.repoContainerCondition === 'empty' ? 'Kosong' : '-'}</td>
+                  <td className="px-3 py-2" data-label="Tanggal Titip">{formatDate(row.storedDate)}</td>
+                  <td className="px-3 py-2 text-right" data-label="Usia">
                     <span className={`inline-flex min-w-14 justify-center rounded-md px-2 py-0.5 font-bold ${
                       row.ageDays >= 3 ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {row.ageDays} hari
                     </span>
                   </td>
-                  <td className="px-3 py-2">{row.repoCreatedByName || '-'}</td>
-                  <td className="max-w-xs px-3 py-2">
+                  <td className="px-3 py-2" data-label="Dicatat Oleh">{row.repoCreatedByName || '-'}</td>
+                  <td className="max-w-xs px-3 py-2" data-label="Alasan">
                     <span className="line-clamp-2">{row.repoReason || row.repoNotes || '-'}</span>
                   </td>
                 </tr>
@@ -2012,15 +2017,15 @@ function ReportsPage() {
               rows={driverRows}
               rowRenderer={(driver, index) => (
                 <tr key={driver.driver} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                  <td className="w-16 px-3 py-2 font-semibold text-slate-500">{index + 1}</td>
-                  <td className="px-3 py-2 font-semibold text-slate-950">{driver.driver}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                  <td className="px-3 py-2 font-semibold text-slate-950" data-label="Sopir">{driver.driver}</td>
+                  <td className="px-3 py-2 text-right" data-label="Jumlah Trip">
                     <span className="inline-flex min-w-8 justify-center rounded-md bg-amber-50 px-2 py-0.5 font-bold text-amber-700">
                       {driver.totalTrips}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right font-bold text-slate-950">{formatCurrency(driver.totalRevenue)}</td>
-                  <td className="px-3 py-2 text-right text-slate-600">{formatCurrency(driver.averageRevenuePerTrip)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Total Revenue">{formatCurrency(driver.totalRevenue)}</td>
+                  <td className="px-3 py-2 text-right text-slate-600" data-label="Rata-rata / Trip">{formatCurrency(driver.averageRevenuePerTrip)}</td>
                 </tr>
               )}
             />

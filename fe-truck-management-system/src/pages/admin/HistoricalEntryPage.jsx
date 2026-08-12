@@ -888,8 +888,8 @@ function HistoricalEntryPage() {
         {loading ? <div className="archive-inline-state"><p>Memuat data lama...</p></div> : null}
 
         {!loading && !error && rows.length ? (
-          <div className="historical-entry-table-wrap">
-            <table className="historical-entry-table">
+          <div className="historical-entry-table-wrap table-wrap">
+            <table className="historical-entry-table responsive-data-table">
               <thead>
                 <tr>
                   <th>No</th>
@@ -907,9 +907,9 @@ function HistoricalEntryPage() {
               <tbody>
                 {rows.map((order, index) => (
                   <tr key={order.id || `${order.customer}-${index}`}>
-                    <td>{(page - 1) * PAGE_SIZE + index + 1}</td>
-                    <td>{formatDate(order.tripDate)}</td>
-                    <td>
+                    <td data-label="No">{(page - 1) * PAGE_SIZE + index + 1}</td>
+                    <td data-label="Tanggal Jalan">{formatDate(order.tripDate)}</td>
+                    <td data-label="Nomor SO">
                       {order.soNumber ? (
                         <span className="historical-so-number">{order.soNumber}</span>
                       ) : (
@@ -923,18 +923,18 @@ function HistoricalEntryPage() {
                         </button>
                       )}
                     </td>
-                    <td>{order.customer || '-'}</td>
-                    <td>{order.destination || '-'}</td>
-                    <td>{getContainerSummary(order)}</td>
-                    <td><span className="historical-entry-status">{getOrderStatusLabel(order.status)}</span></td>
-                    <td>
+                    <td data-label="Customer">{order.customer || '-'}</td>
+                    <td data-label="Tujuan">{order.destination || '-'}</td>
+                    <td data-label="Container">{getContainerSummary(order)}</td>
+                    <td data-label="Status"><span className="historical-entry-status">{getOrderStatusLabel(order.status)}</span></td>
+                    <td data-label="Validasi">
                       <span className={`historical-validation-status ${order.validation.issueCount ? 'is-warning' : 'is-ok'}`}>
                         {order.validation.issueCount ? `${order.validation.issueCount} catatan` : 'Lengkap'}
                       </span>
                       <small className="historical-validation-note">{order.validation.firstIssue}</small>
                     </td>
-                    <td>{formatCurrency(order.totalAmount || 0)}</td>
-                    <td>
+                    <td data-label="Total">{formatCurrency(order.totalAmount || 0)}</td>
+                    <td data-label="Aksi">
                       <div className="historical-entry-actions">
                         <button className="secondary-button historical-entry-action" type="button" disabled={periodLocked} onClick={() => openHistoricalOrderForm(order)}>
                           <PencilLine size={15} /> Edit Data

@@ -3,6 +3,9 @@ node_modules/
 dist/
 coverage/
 uploads/
+fe-truck-management-system/playwright-artifacts/
+fe-truck-management-system/playwright-report/
+fe-truck-management-system/test-results/
 .env
 .env.production
 .env.local
