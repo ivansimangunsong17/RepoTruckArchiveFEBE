@@ -2060,6 +2060,8 @@
   .historical-job-list tr,
   .historical-job-list td {
     display: block;
+    min-width: 0;
+    width: 100%;
   }
 
   .historical-job-list thead {
@@ -2101,11 +2103,12 @@
     text-transform: uppercase;
   }
 
-  .historical-job-list td:nth-child(1)::before { content: "Container"; }
-  .historical-job-list td:nth-child(2)::before { content: "Truck"; }
-  .historical-job-list td:nth-child(3)::before { content: "Sopir"; }
-  .historical-job-list td:nth-child(4)::before { content: "Status"; }
-  .historical-job-list td:nth-child(5)::before { content: "Aksi"; }
+  .historical-job-list td:nth-child(1)::before { content: "No"; }
+  .historical-job-list td:nth-child(2)::before { content: "Container"; }
+  .historical-job-list td:nth-child(3)::before { content: "Truck"; }
+  .historical-job-list td:nth-child(4)::before { content: "Sopir"; }
+  .historical-job-list td:nth-child(5)::before { content: "Status"; }
+  .historical-job-list td:nth-child(6)::before { content: "Aksi"; }
 
   .historical-job-list td > * {
     justify-self: end;

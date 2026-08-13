@@ -58,8 +58,11 @@ function hasValue(value) {
 function getJobValidationIssues(job, index) {
   const label = getJobLabel(job, index);
   const status = job?.status || 'received';
-  if (status === 'cancelled') return [];
   const issues = [];
+  if (status === 'cancelled') {
+    if (!job?.cancelledAt) issues.push(`${label}: waktu batal belum diisi`);
+    return issues;
+  }
   if (!hasValue(job?.containerNumber)) issues.push(`${label}: nomor container belum diisi`);
   if (!hasValue(job?.driverId || job?.driver)) issues.push(`${label}: sopir belum diisi`);
   if (!hasValue(job?.vehicleId || job?.plateNumber)) issues.push(`${label}: truck belum diisi`);
@@ -168,6 +171,7 @@ function buildHistoricalValidationRows(orders = []) {
         formatCsvStatus(order.status),
         '',
         '',
+        '',
         validation.complete ? 'Lengkap' : 'Perlu Dilengkapi',
         validation.firstIssue,
         order.historicalNotes || '',
@@ -192,6 +196,7 @@ function buildHistoricalValidationRows(orders = []) {
         formatCsvStatus(job.status),
         formatCsvDateTime(job.runningAt),
         formatCsvDateTime(job.completedAt),
+        formatCsvDateTime(job.cancelledAt),
         issues.length ? 'Perlu Dilengkapi' : 'Lengkap',
         issues.join('; '),
         job.historicalNotes || order.historicalNotes || '',
@@ -227,6 +232,7 @@ function buildHistoricalValidationCsv({ period, rows, summary }) {
       'Status',
       'Mulai Jalan',
       'Selesai',
+      'Batal',
       'Status Validasi',
       'Catatan Validasi',
       'Catatan Data Lama',
@@ -663,6 +669,7 @@ function HistoricalEntryPage() {
       vehicleId: job.vehicleId || '',
       runningAt: toDateTimeLocalValue(job.runningAt),
       completedAt: toDateTimeLocalValue(job.completedAt),
+      cancelledAt: toDateTimeLocalValue(job.cancelledAt),
       cancelReason: job.cancelReason || '',
       historicalNotes: job.historicalNotes || selectedOrder?.historicalNotes || notes || '',
     });
@@ -687,6 +694,7 @@ function HistoricalEntryPage() {
     const requiresAssignment = ['running', 'completed'].includes(status);
     const runningAt = toIsoDateTime(jobForm.runningAt);
     const completedAt = toIsoDateTime(jobForm.completedAt);
+    const cancelledAt = toIsoDateTime(jobForm.cancelledAt);
 
     if (requiresAssignment && !String(jobForm.containerNumber || '').trim()) {
       notify({ type: 'error', title: 'Nomor container belum diisi', message: 'Isi nomor container sebelum status dibuat berjalan atau selesai.' });
@@ -704,8 +712,16 @@ function HistoricalEntryPage() {
       notify({ type: 'error', title: 'Waktu selesai belum diisi', message: 'Isi waktu selesai untuk container yang sudah selesai.' });
       return;
     }
+    if (status === 'cancelled' && !cancelledAt) {
+      notify({ type: 'error', title: 'Waktu batal belum diisi', message: 'Isi tanggal dan jam batal untuk container yang dibatalkan.' });
+      return;
+    }
     if (runningAt && completedAt && new Date(completedAt) < new Date(runningAt)) {
       notify({ type: 'error', title: 'Waktu tidak valid', message: 'Waktu selesai tidak boleh lebih awal dari waktu mulai.' });
+      return;
+    }
+    if (runningAt && cancelledAt && new Date(cancelledAt) < new Date(runningAt)) {
+      notify({ type: 'error', title: 'Waktu tidak valid', message: 'Waktu batal tidak boleh lebih awal dari waktu mulai.' });
       return;
     }
 
@@ -724,7 +740,7 @@ function HistoricalEntryPage() {
       chassis: getTruckDetail(truck) || editingJob.chassis || '',
       runningAt: requiresAssignment ? runningAt : null,
       completedAt: status === 'completed' ? completedAt : null,
-      cancelledAt: status === 'cancelled' ? new Date().toISOString() : editingJob.cancelledAt || null,
+      cancelledAt: status === 'cancelled' ? cancelledAt : editingJob.cancelledAt || null,
       cancelReason: status === 'cancelled' ? jobForm.cancelReason || 'Pembatalan data lama' : editingJob.cancelReason || '',
       entrySource: 'historical',
       historicalPeriod: targetPeriod,
@@ -1084,7 +1100,19 @@ function HistoricalEntryPage() {
                     <div className="historical-job-form-grid">
                       <label>
                         Status
-                        <select value={jobForm.status} onChange={(event) => setJobForm((current) => ({ ...current, status: event.target.value }))}>
+                        <select
+                          value={jobForm.status}
+                          onChange={(event) => {
+                            const nextStatus = event.target.value;
+                            setJobForm((current) => ({
+                              ...current,
+                              status: nextStatus,
+                              cancelledAt: nextStatus === 'cancelled' && !current.cancelledAt
+                                ? current.completedAt || current.runningAt || ''
+                                : current.cancelledAt,
+                            }));
+                          }}
+                        >
                           {JOB_STATUS_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </select>
                       </label>
@@ -1121,6 +1149,12 @@ function HistoricalEntryPage() {
                         Selesai
                         <DateTimeWibInput value={jobForm.completedAt} onChange={(value) => setJobForm((current) => ({ ...current, completedAt: value }))} dateLabel="Tanggal selesai" timeLabel="Jam selesai WIB" />
                       </label>
+                      {jobForm.status === 'cancelled' ? (
+                        <label>
+                          Tanggal Batal
+                          <DateTimeWibInput value={jobForm.cancelledAt} onChange={(value) => setJobForm((current) => ({ ...current, cancelledAt: value }))} dateLabel="Tanggal batal" timeLabel="Jam batal WIB" />
+                        </label>
+                      ) : null}
                     </div>
                     {jobForm.status === 'cancelled' ? (
                       <label>
@@ -1135,6 +1169,7 @@ function HistoricalEntryPage() {
                     <div className="historical-job-timeline">
                       <span>Mulai: <strong>{formatDateTime(editingJob.runningAt)}</strong></span>
                       <span>Selesai: <strong>{formatDateTime(editingJob.completedAt)}</strong></span>
+                      <span>Batal: <strong>{formatDateTime(editingJob.cancelledAt)}</strong></span>
                     </div>
                     <footer>
                       <button className="secondary-button" type="button" disabled={jobSaving} onClick={() => { setEditingJob(null); setJobForm(null); }}>Batal</button>

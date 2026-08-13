@@ -363,6 +363,21 @@ function formatDisplayDate(value) {
   }).format(date);
 }
 
+function getMonthDateRange(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return { dateFrom: '', dateTo: '' };
+
+  const [, yearText, monthText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const lastDay = new Date(year, month, 0).getDate();
+
+  return {
+    dateFrom: `${yearText}-${monthText}-01`,
+    dateTo: `${yearText}-${monthText}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
 function isCancelledFinanceOrder(row = {}) {
   const verificationStatus = String(row.verificationStatus || '').toLowerCase();
   const operationalStatus = String(row.operationalStatus || '').toLowerCase();
@@ -1700,7 +1715,21 @@ function InvoiceDetailModal({
   );
 }
 
-function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onOpenSoModal, savingSoId }) {
+function OrderVerificationTable({
+  rows,
+  query,
+  onQueryChange,
+  onSelectOrder,
+  onOpenSoModal,
+  savingSoId,
+  orderFilterMonth,
+  orderDateFrom,
+  orderDateTo,
+  onOrderFilterMonthChange,
+  onOrderDateFromChange,
+  onOrderDateToChange,
+  onResetOrderDateFilter,
+}) {
   const orderTabs = [
     { id: 'need-so', label: 'Belum Ada Nomor SO', icon: Clock3, match: (row) => !isCancelledFinanceOrder(row) && !isVerifiedFinanceOrder(row) },
     { id: 'running', label: 'SO Berjalan', icon: CheckCircle2, match: isVerifiedFinanceOrder },
@@ -1719,9 +1748,51 @@ function OrderVerificationTable({ rows, query, onQueryChange, onSelectOrder, onO
 
   return (
     <div className="finance-order-verification space-y-0">
-      <div className="border-b border-slate-200 bg-slate-50 px-2 py-1">
-        <div className="max-w-sm">
+      <div className="border-b border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[180px] max-w-full flex-1">
           <SearchBar query={query} onChange={onQueryChange} />
+          </div>
+          <div className="flex max-w-full flex-wrap items-end gap-2">
+            <label className="grid min-w-[150px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+              Bulan order dibuat
+              <input
+                aria-label="Bulan order dibuat"
+                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                onChange={(event) => onOrderFilterMonthChange(event.target.value)}
+                type="month"
+                value={orderFilterMonth}
+              />
+            </label>
+            <label className="grid min-w-[150px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+              Dari tanggal
+              <input
+                aria-label="Tanggal awal order dibuat"
+                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                onChange={(event) => onOrderDateFromChange(event.target.value)}
+                type="date"
+                value={orderDateFrom}
+              />
+            </label>
+            <label className="grid min-w-[150px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+              Sampai tanggal
+              <input
+                aria-label="Tanggal akhir order dibuat"
+                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                onChange={(event) => onOrderDateToChange(event.target.value)}
+                type="date"
+                value={orderDateTo}
+              />
+            </label>
+            <button
+              className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!orderFilterMonth && !orderDateFrom && !orderDateTo}
+              onClick={onResetOrderDateFilter}
+              type="button"
+            >
+              Reset
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2402,6 +2473,13 @@ function FinanceTable({
   periodYear,
   onPeriodMonthChange,
   onPeriodYearChange,
+  orderFilterMonth,
+  orderDateFrom,
+  orderDateTo,
+  onOrderFilterMonthChange,
+  onOrderDateFromChange,
+  onOrderDateToChange,
+  onResetOrderDateFilter,
   query,
   onQueryChange,
   onReset,
@@ -2485,7 +2563,20 @@ function FinanceTable({
       ) : null}
 
       {activeTab.id === 'order-verification' ? (
-        <OrderVerificationTable rows={orderRows} query={query} onQueryChange={onQueryChange} savingSoId={savingSoId} {...handlers} />
+        <OrderVerificationTable
+          onOrderDateFromChange={onOrderDateFromChange}
+          onOrderDateToChange={onOrderDateToChange}
+          onOrderFilterMonthChange={onOrderFilterMonthChange}
+          onQueryChange={onQueryChange}
+          onResetOrderDateFilter={onResetOrderDateFilter}
+          orderDateFrom={orderDateFrom}
+          orderDateTo={orderDateTo}
+          orderFilterMonth={orderFilterMonth}
+          query={query}
+          rows={orderRows}
+          savingSoId={savingSoId}
+          {...handlers}
+        />
       ) : null}
       {activeTab.id === 'rpuj-approval' ? (
         <RpujApprovalTable
@@ -2529,6 +2620,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
   const [activeInvoiceTab, setActiveInvoiceTab] = useState('need-number');
   const [activeInvoiceDocumentFilter, setActiveInvoiceDocumentFilter] = useState('all');
+  const [orderFilterMonth, setOrderFilterMonth] = useState('');
+  const [orderDateFrom, setOrderDateFrom] = useState('');
+  const [orderDateTo, setOrderDateTo] = useState('');
   const [query, setQuery] = useState('');
   const [orderRows, setOrderRows] = useState(initialOrderRows);
   const [rpujRows, setRpujRows] = useState(initialRpujRows);
@@ -2592,7 +2686,12 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setOrderLoading(true);
     setOrderError('');
     try {
-      const result = await fetchFinanceOrderVerifications({ page: 1, pageSize: 100 });
+      const result = await fetchFinanceOrderVerifications({
+        page: 1,
+        pageSize: 100,
+        ...(orderDateFrom ? { dateFrom: orderDateFrom } : {}),
+        ...(orderDateTo ? { dateTo: orderDateTo } : {}),
+      });
       setOrderRows((result.rows || []).map(normalizeFinanceOrderRow));
     } catch (error) {
       setOrderError(error.message || 'Data verifikasi order gagal dimuat.');
@@ -2600,11 +2699,34 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     } finally {
       setOrderLoading(false);
     }
-  }, [activeTab.id]);
+  }, [activeTab.id, orderDateFrom, orderDateTo]);
 
   useEffect(() => {
     loadOrderVerifications();
   }, [loadOrderVerifications]);
+
+  const handleOrderFilterMonthChange = useCallback((value) => {
+    const range = getMonthDateRange(value);
+    setOrderFilterMonth(value);
+    setOrderDateFrom(range.dateFrom);
+    setOrderDateTo(range.dateTo);
+  }, []);
+
+  const handleOrderDateFromChange = useCallback((value) => {
+    setOrderFilterMonth('');
+    setOrderDateFrom(value);
+  }, []);
+
+  const handleOrderDateToChange = useCallback((value) => {
+    setOrderFilterMonth('');
+    setOrderDateTo(value);
+  }, []);
+
+  const handleResetOrderDateFilter = useCallback(() => {
+    setOrderFilterMonth('');
+    setOrderDateFrom('');
+    setOrderDateTo('');
+  }, []);
 
   const loadRpujRequests = useCallback(async () => {
     if (activeTab.id !== 'rpuj-approval') return;
@@ -3068,16 +3190,23 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
           setActiveInvoiceDocumentFilter('all');
         }}
         onActiveRpujTabChange={setActiveRpujTab}
+        onOrderDateFromChange={handleOrderDateFromChange}
+        onOrderDateToChange={handleOrderDateToChange}
+        onOrderFilterMonthChange={handleOrderFilterMonthChange}
         onPeriodMonthChange={setPeriodMonth}
         onPeriodYearChange={setPeriodYear}
         onReset={resetSimulation}
+        onResetOrderDateFilter={handleResetOrderDateFilter}
         onQueryChange={setQuery}
+        orderDateFrom={orderDateFrom}
+        orderDateTo={orderDateTo}
         orderError={orderError}
+        orderFilterMonth={orderFilterMonth}
         orderLoading={orderLoading}
+        orderRows={orderRows}
         rpujBusyId={rpujBusyId}
         rpujError={rpujError}
         rpujLoading={rpujLoading}
-        orderRows={orderRows}
         periodMonth={periodMonth}
         periodYear={periodYear}
         query={query}

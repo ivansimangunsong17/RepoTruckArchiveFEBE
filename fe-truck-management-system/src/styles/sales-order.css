@@ -385,14 +385,15 @@
 }
 
 .historical-realization-modal {
-  width: min(1180px, 100%);
+  width: min(1180px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
 }
 
 .historical-realization-body {
   display: grid;
-  grid-template-columns: minmax(520px, 1.2fr) minmax(360px, .8fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(340px, .85fr);
   gap: 14px;
-  overflow: auto;
+  overflow: hidden;
   min-height: 0;
   max-height: calc(100vh - 138px);
   padding: 14px;
@@ -402,9 +403,14 @@
 .historical-job-list,
 .historical-job-form {
   min-width: 0;
+  max-width: 100%;
   border: 1px solid #dbe4ef;
   border-radius: 8px;
   background: #fff;
+}
+
+.historical-job-list {
+  overflow: auto;
 }
 
 .historical-realization-context {
@@ -429,6 +435,7 @@
 
 .historical-job-list table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
 }
 
@@ -511,6 +518,7 @@
   display: grid;
   align-content: start;
   gap: 10px;
+  overflow-y: auto;
   padding: 14px;
 }
 
@@ -580,7 +588,7 @@
 
 .historical-job-timeline {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -668,6 +676,12 @@
 
   .historical-realization-body {
     grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .historical-job-list,
+  .historical-job-form {
+    overflow: visible;
   }
 }
 

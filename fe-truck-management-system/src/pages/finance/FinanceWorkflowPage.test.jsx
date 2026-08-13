@@ -1,5 +1,5 @@
 import userEvent from '@testing-library/user-event';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FinanceWorkflowPage from './FinanceWorkflowPage';
 import {
@@ -195,6 +195,33 @@ beforeEach(() => {
 });
 
 describe('FinanceWorkflowPage validation modals', () => {
+  it('mengirim filter bulan dan tanggal order dibuat untuk verifikasi order', async () => {
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    await waitFor(() => {
+      expect(fetchFinanceOrderVerifications).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 100 }));
+    });
+
+    fireEvent.change(screen.getByLabelText('Bulan order dibuat'), { target: { value: '2026-07' } });
+
+    await waitFor(() => {
+      expect(fetchFinanceOrderVerifications).toHaveBeenLastCalledWith(expect.objectContaining({
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-31',
+      }));
+    });
+
+    fireEvent.change(screen.getByLabelText('Tanggal awal order dibuat'), { target: { value: '2026-07-10' } });
+
+    await waitFor(() => {
+      expect(fetchFinanceOrderVerifications).toHaveBeenLastCalledWith(expect.objectContaining({
+        dateFrom: '2026-07-10',
+        dateTo: '2026-07-31',
+      }));
+    });
+    expect(screen.getByLabelText('Bulan order dibuat')).toHaveValue('');
+  });
+
   it('memuat pencatatan sesuai bulan dan tahun yang dipilih', async () => {
     const user = userEvent.setup();
     const currentPeriod = getCurrentFinancePeriod();
