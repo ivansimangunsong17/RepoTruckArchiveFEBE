@@ -83,7 +83,7 @@ describe('buildMonthlyUtilizationPivot', () => {
         {
           plateNumber: 'B 9102 BEL',
           driver: 'Asep',
-          completedAt: '2026-07-01T17:00:00.000Z',
+          completedAt: '2026-07-01T10:00:00.000Z',
           destination: 'Jakarta',
         },
         {
@@ -130,6 +130,27 @@ describe('buildMonthlyUtilizationPivot', () => {
     expect(pivot.totalsByDay['2026-07-01']).toBe(2);
     expect(pivot.totalsByDay['2026-07-02']).toBe(1);
     expect(pivot.grandTotal).toBe(3);
+  });
+
+  it('menempatkan timestamp UTC ke tanggal selesai WIB pada pivot utilisasi', () => {
+    const pivot = buildMonthlyUtilizationPivot(
+      [{ id: 'truck-1', plateNumber: 'B 9102 BEL', unitCode: 'TRK-102', capacity: '40FT' }],
+      [
+        {
+          vehicleId: 'truck-1',
+          plateNumber: 'B 9102 BEL',
+          completedAt: '2026-08-02T17:00:00.000Z',
+          destination: 'Jakarta',
+          status: 'completed',
+        },
+      ],
+      8,
+      2026,
+    );
+
+    expect(pivot.rows[0].cells['2026-08-02'].count).toBe(0);
+    expect(pivot.rows[0].cells['2026-08-03'].count).toBe(1);
+    expect(pivot.totalsByDay['2026-08-03']).toBe(1);
   });
 });
 
@@ -229,6 +250,28 @@ describe('buildTruckDayUtilizationSummary', () => {
     expect(summary.rows[0].activeTruckDays).toBe(2);
     expect(summary.rows[0].utilizationPercent).toBe(150);
     expect(summary.rows.find((truck) => truck.id === 'truck-9').activeTruckDays).toBe(1);
+  });
+
+  it('menghitung active truck day memakai tanggal selesai WIB dari timestamp UTC', () => {
+    const summary = buildTruckDayUtilizationSummary(
+      [{ id: 'truck-1', plateNumber: 'B 9101 BEL', unitCode: 'TRK-001', status: 'Aktif' }],
+      [
+        {
+          vehicleId: 'truck-1',
+          plateNumber: 'B 9101 BEL',
+          completedAt: '2026-08-02T17:00:00.000Z',
+          status: 'completed',
+        },
+      ],
+      8,
+      2026,
+      new Date('2026-08-04T08:00:00.000Z'),
+    );
+
+    expect(summary.period.days).toBe(3);
+    expect(summary.realizedTruckDays).toBe(1);
+    expect(summary.rows[0].totalTrips).toBe(1);
+    expect(summary.rows[0].activeTruckDays).toBe(1);
   });
 
   it('menghasilkan 0 persen saat hari ini tanggal 1', () => {

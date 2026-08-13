@@ -43,6 +43,10 @@ function appendEntrySourceFilters(clauses, params, options = {}, alias = 'cj') {
   }
 }
 
+function timestampToJakartaDateSql(expression) {
+  return `(${expression} at time zone 'Asia/Jakarta')::date`;
+}
+
 export function calculateCompletedJobRevenue(row = {}) {
   const lineItems = row.line_items ?? row.lineItems;
   const financialItems = splitFinancialLineItems(lineItems);
@@ -409,7 +413,7 @@ export async function getMonthlyRevenueReport(options = {}) {
           to_jsonb(so)->'line_items' as line_items,
           cj.container_number,
           cj.container_size,
-          cj.completed_at::date as completed_date,
+          ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
           coalesce(cj.entry_source, 'realtime') as entry_source,
           cj.historical_period,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
@@ -474,11 +478,11 @@ export async function getOperationReport(options = {}) {
   const status = String(options.status || '');
   const isFinishedHistory = status === 'finished';
   const dateColumn = isFinishedHistory
-    ? 'coalesce(cj.completed_at, cj.cancelled_at, so.trip_date)::date'
+    ? `coalesce(${timestampToJakartaDateSql('cj.completed_at')}, ${timestampToJakartaDateSql('cj.cancelled_at')}, so.trip_date)`
     : status === 'completed'
-    ? 'coalesce(cj.completed_at, so.trip_date)::date'
+    ? `coalesce(${timestampToJakartaDateSql('cj.completed_at')}, so.trip_date)`
     : status === 'repo_stored'
-      ? 'coalesce(cj.repo_stored_at, so.trip_date)::date'
+      ? `coalesce(${timestampToJakartaDateSql('cj.repo_stored_at')}, so.trip_date)`
       : 'so.trip_date';
   const dateFilter = buildDateWhere(dateColumn, options);
   const clauses = [...dateFilter.clauses];
@@ -647,7 +651,7 @@ export async function getDriverPerformanceReport(options = {}) {
         completed_jobs as (
           select cj.id,
                  nullif(cj.assignment_snapshot->>'driver', '') as driver,
-                 coalesce(cj.completed_at, so.trip_date)::date as completed_date,
+                 coalesce(${timestampToJakartaDateSql('cj.completed_at')}, so.trip_date) as completed_date,
                  so.price,
                  so.total_amount,
                  to_jsonb(so)->'line_items' as line_items,
@@ -669,7 +673,7 @@ export async function getDriverPerformanceReport(options = {}) {
       params,
     ),
     query(`
-      select distinct to_char(coalesce(cj.completed_at, so.trip_date)::date, 'YYYY-MM') as value
+      select distinct to_char(coalesce(${timestampToJakartaDateSql('cj.completed_at')}, so.trip_date), 'YYYY-MM') as value
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       where cj.status = 'completed'

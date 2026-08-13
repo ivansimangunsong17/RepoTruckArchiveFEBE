@@ -327,16 +327,22 @@ function toDateKey(value) {
   }
 
   const raw = String(value).trim();
-  const isoDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (isoDate) return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) return `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}`;
+
+  const localDateTime = raw.match(/^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/);
+  if (localDateTime) return `${localDateTime[1]}-${localDateTime[2]}-${localDateTime[3]}`;
 
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return '';
-  return [
-    parsed.getFullYear(),
-    String(parsed.getMonth() + 1).padStart(2, '0'),
-    String(parsed.getDate()).padStart(2, '0'),
-  ].join('-');
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+  const partMap = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${partMap.year}-${partMap.month}-${partMap.day}`;
 }
 
 function getUtilizationDateKey(row = {}) {
