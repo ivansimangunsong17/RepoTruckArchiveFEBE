@@ -44,7 +44,7 @@ function formatContainerSummary(row) {
 }
 
 function normalizeVerificationStatus(row) {
-  return row.finance_verification_status === 'verified' && row.so_number ? 'verified' : 'pending_so';
+  return row.finance_verification_status === 'verified' && row.accurate_so_number ? 'verified' : 'pending_so';
 }
 
 function paymentTermsExpression(alias = 'so') {
@@ -82,7 +82,7 @@ async function applyFinanceCorrectionValue(client, orderId, correctionType, requ
   await client.query(
     `
       update sales_orders
-      set so_number = $1,
+      set accurate_so_number = $1,
           finance_verification_status = 'verified',
           finance_verified_by_name = coalesce(finance_verified_by_name, $2),
           finance_verified_at = coalesce(finance_verified_at, now()),
@@ -121,7 +121,9 @@ function mapOrderVerificationRow(row) {
     notes: row.notes || row.job_description || '',
     status: isCancelled ? 'SO Batal' : verificationStatus === 'verified' ? 'No. SO Terisi' : 'Menunggu No. SO Accurate',
     verificationStatus: isCancelled ? 'cancelled' : verificationStatus,
-    soNumber: row.so_number || '',
+    soNumber: row.accurate_so_number || '',
+    internalSoNumber: row.so_number || '',
+    accurateSoNumber: row.accurate_so_number || '',
     cancelReason,
     cancelRequestStatus: row.cancel_request_status || 'none',
     cancelRequestNote: row.cancel_request_note || '',
@@ -286,7 +288,9 @@ function financeRowsCte() {
       select
         cj.id,
         cj.sales_order_id,
-        so.so_number,
+        coalesce(so.accurate_so_number, so.so_number) as so_number,
+        so.so_number as internal_so_number,
+        so.accurate_so_number,
         so.do_number,
         so.invoice_number,
         so.billing_status,
@@ -315,6 +319,10 @@ function financeRowsCte() {
         cj.travel_document_number,
         cj.rpuj_status,
         cj.rpuj_notes,
+        cj.has_driver_commission,
+        cj.driver_commission_amount,
+        cj.driver_commission_source_destination_id,
+        cj.driver_commission_note,
         cj.received_at,
         cj.running_at,
         cj.completed_at,
@@ -366,6 +374,10 @@ function financeRowsCte() {
         end as journey_money,
         coalesce(((regexp_match(coalesce(cj.rpuj_notes, ''), '"amount"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1])::numeric, 0) as additional_cost,
         case
+          when coalesce(cj.has_driver_commission, false) then coalesce(cj.driver_commission_amount, 0)
+          else 0
+        end as driver_commission_cost,
+        case
           when coalesce(
             nullif(tup.unit_price, 0),
             case
@@ -401,6 +413,10 @@ function financeRowsCte() {
               else nullif(dl.uj_20ft, 0)
             end
             - coalesce(((regexp_match(coalesce(cj.rpuj_notes, ''), '"amount"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1])::numeric, 0)
+            - case
+              when coalesce(cj.has_driver_commission, false) then coalesce(cj.driver_commission_amount, 0)
+              else 0
+            end
           else null
         end as estimated_margin,
         case
@@ -495,6 +511,7 @@ function buildFinanceFilters(options = {}) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`(
       so_number ilike $${params.length}
+      or accurate_so_number ilike $${params.length}
       or do_number ilike $${params.length}
       or spk_number ilike $${params.length}
       or container_number ilike $${params.length}
@@ -508,7 +525,7 @@ function buildFinanceFilters(options = {}) {
 }
 
 function buildOrderVerificationFilters(options = {}) {
-  const clauses = ["so.status <> 'completed'"];
+  const clauses = [];
   const params = [];
 
   if (options.dateFrom) {
@@ -524,17 +541,18 @@ function buildOrderVerificationFilters(options = {}) {
     clauses.push("so.status = 'cancelled'");
   } else if (options.status === 'pending_so') {
     clauses.push("so.status <> 'cancelled'");
-    clauses.push("(so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null)");
+    clauses.push("(so.finance_verification_status <> 'verified' or nullif(btrim(so.accurate_so_number), '') is null)");
   } else if (options.status === 'verified') {
     clauses.push("so.status <> 'cancelled'");
     clauses.push("so.finance_verification_status = 'verified'");
-    clauses.push("nullif(btrim(so.so_number), '') is not null");
+    clauses.push("nullif(btrim(so.accurate_so_number), '') is not null");
   }
 
   if (options.query) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`(
       so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
       or so.do_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or so.destination ilike $${params.length}
@@ -546,7 +564,7 @@ function buildOrderVerificationFilters(options = {}) {
   }
 
   return {
-    whereSql: `where ${clauses.join(' and ')}`,
+    whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '',
     params,
   };
 }
@@ -554,7 +572,6 @@ function buildOrderVerificationFilters(options = {}) {
 function buildRpujFilters(options = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
-    "so.finance_verification_status = 'verified'",
     "nullif(btrim(so.so_number), '') is not null",
     "cj.rpuj_status <> 'pending'",
   ];
@@ -582,6 +599,7 @@ function buildRpujFilters(options = {}) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`(
       so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or so.destination ilike $${params.length}
       or cj.container_number ilike $${params.length}
@@ -651,6 +669,7 @@ function buildInvoiceFilters(options = {}) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`(
       so_number ilike $${params.length}
+      or accurate_so_number ilike $${params.length}
       or invoice_number ilike $${params.length}
       or customer_name ilike $${params.length}
       or destination ilike $${params.length}
@@ -680,6 +699,10 @@ function rpujRowsSelect() {
       cj.rpuj_rejection_note,
       cj.rpuj_transfer_uploaded_by_name,
       cj.rpuj_transfer_uploaded_at,
+      cj.has_driver_commission,
+      cj.driver_commission_amount,
+      cj.driver_commission_source_destination_id,
+      cj.driver_commission_note,
       cj.spk_number,
       cj.status as job_status,
       cj.repo_location,
@@ -697,7 +720,9 @@ function rpujRowsSelect() {
           then nullif(concat_ws(' ', nullif(d.emoney_provider, ''), nullif(d.emoney_number, '')), '')
         else nullif(concat_ws(' ', nullif(d.bank_name, ''), nullif(d.bank_account_number, '')), '')
       end as driver_payment_account,
-      so.so_number,
+      coalesce(so.accurate_so_number, so.so_number) as so_number,
+      so.so_number as internal_so_number,
+      so.accurate_so_number,
       so.customer_name,
       so.shipment_type,
       so.origin,
@@ -736,6 +761,7 @@ function mapFinanceRow(row) {
   const reimbursementAmount = Number(row.reimbursement_amount || 0);
   const journeyMoney = row.journey_money == null ? null : Number(row.journey_money);
   const additionalCost = Number(row.additional_cost || 0);
+  const driverCommissionAmount = row.has_driver_commission ? Number(row.driver_commission_cost ?? row.driver_commission_amount ?? 0) : 0;
   const estimatedMargin = row.estimated_margin == null ? null : Number(row.estimated_margin);
 
   return {
@@ -743,6 +769,8 @@ function mapFinanceRow(row) {
     orderId: row.sales_order_id,
     completedDate: row.completed_at,
     soNumber: row.so_number,
+    internalSoNumber: row.internal_so_number || row.so_number,
+    accurateSoNumber: row.accurate_so_number || '',
     doNumber: row.do_number,
     spkNumber: row.spk_number,
     invoiceNumber: row.invoice_number,
@@ -771,6 +799,10 @@ function mapFinanceRow(row) {
     billingAmount: totalRevenue,
     journeyMoney,
     additionalCost,
+    hasDriverCommission: Boolean(row.has_driver_commission),
+    driverCommissionAmount,
+    driverCommissionSourceDestinationId: row.driver_commission_source_destination_id || '',
+    driverCommissionNote: row.driver_commission_note || '',
     estimatedMargin,
     documentStatus: row.document_status,
     invoiceStatus: row.invoice_status,
@@ -850,6 +882,10 @@ function mapRpujRequestRow(row) {
   const otherCost = parseOtherCost(row.rpuj_notes);
   const totalUj = row.journey_money == null ? 0 : Number(row.journey_money);
   const additionalCost = Number(otherCost.amount || 0);
+  const hasDriverCommission = Boolean(row.has_driver_commission);
+  const driverCommissionAmount = hasDriverCommission ? Number(row.driver_commission_amount || 0) : 0;
+  const driverCommissionNote = hasDriverCommission ? row.driver_commission_note || '' : '';
+  const notes = otherCost.notes || row.rpuj_rejection_note || '';
   const transferProof = row.transfer_proof_id
     ? {
         id: row.transfer_proof_id,
@@ -865,6 +901,8 @@ function mapRpujRequestRow(row) {
     id: row.id,
     orderId: row.sales_order_id,
     soNumber: row.so_number,
+    internalSoNumber: row.internal_so_number || row.so_number,
+    accurateSoNumber: row.accurate_so_number || '',
     jobNumber: row.container_number || `JOB-${String(row.id || '').slice(0, 8).toUpperCase()}`,
     containerNumber: row.container_number || '',
     containerSize: row.container_size || '',
@@ -882,9 +920,13 @@ function mapRpujRequestRow(row) {
     ujRecommendation: row.journey_money == null
       ? 'Rekomendasi UJ belum tersedia'
       : `1 x ${row.container_size || 'Container'} @ Rp ${Number(row.journey_money || 0).toLocaleString('id-ID')}`,
-    notes: otherCost.notes || row.rpuj_rejection_note || '',
+    notes,
     totalUj,
     additionalCost,
+    hasDriverCommission,
+    driverCommissionAmount,
+    driverCommissionSourceDestinationId: row.driver_commission_source_destination_id || '',
+    driverCommissionNote,
     totalRequest: totalUj + additionalCost,
     status: mapRpujStatusLabel(row),
     rpujStatus: row.rpuj_status,
@@ -1103,7 +1145,7 @@ function mapInvoiceOrderRow(row) {
 const invoiceDocumentLabels = {
   invoicePdf: 'Invoice',
   taxInvoicePdf: 'Faktur Pajak',
-  spkDocument: 'SPK / Lampiran Biaya',
+  spkDocument: 'SPK',
   eirDocument: 'EIR',
   loadingVoucherDocument: 'Bon Muat / Bon Bongkar',
   tilaGatepassDocumentFile: 'TILA / Delivery Card / Gatepass / SP2',
@@ -1261,7 +1303,8 @@ function invoiceOrdersCte() {
     invoice_orders as (
       select
         so.id,
-        so.so_number,
+        coalesce(so.accurate_so_number, so.so_number) as so_number,
+        so.accurate_so_number,
         so.invoice_number,
         coalesce(so.billing_status, 'belum_invoice') as billing_status,
         so.invoice_issued_at,
@@ -1345,6 +1388,8 @@ function invoiceOrdersCte() {
       join finance_rows fr on fr.sales_order_id = so.id
       left join order_job_statuses ojs on ojs.sales_order_id = so.id
       where so.status = 'completed'
+        and so.finance_verification_status = 'verified'
+        and nullif(btrim(so.accurate_so_number), '') is not null
       group by so.id
     )
   `;
@@ -1385,14 +1430,14 @@ export async function getFinanceDashboard(options = {}) {
             select count(*)::int
             from sales_orders so
             where so.status not in ('completed', 'cancelled')
-              and (so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null)
+              and (so.finance_verification_status <> 'verified' or nullif(btrim(so.accurate_so_number), '') is null)
           ) as pending_so,
           (
             select count(*)::int
             from sales_orders so
             where so.status not in ('completed', 'cancelled')
               and so.finance_verification_status = 'verified'
-              and nullif(btrim(so.so_number), '') is not null
+              and nullif(btrim(so.accurate_so_number), '') is not null
           ) as verified_orders,
           (
             select count(*)::int
@@ -1538,6 +1583,7 @@ export async function getOrderVerificationsPage(options = {}) {
         select
           so.id,
           so.so_number,
+          so.accurate_so_number,
           so.finance_verification_status,
           so.finance_verified_by_name,
           so.finance_verified_at,
@@ -1584,7 +1630,7 @@ export async function getOrderVerificationsPage(options = {}) {
         order by
           case
             when so.status = 'cancelled' then 3
-            when so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null then 2
+            when so.finance_verification_status = 'verified' and nullif(btrim(so.accurate_so_number), '') is not null then 2
             else 1
           end,
           so.trip_date asc,
@@ -1604,8 +1650,8 @@ export async function getOrderVerificationsPage(options = {}) {
     query(
       `
         select
-          count(*) filter (where so.status not in ('completed', 'cancelled') and (so.finance_verification_status <> 'verified' or nullif(btrim(so.so_number), '') is null))::int as pending_so,
-          count(*) filter (where so.status not in ('completed', 'cancelled') and so.finance_verification_status = 'verified' and nullif(btrim(so.so_number), '') is not null)::int as verified,
+          count(*) filter (where so.status <> 'cancelled' and (so.finance_verification_status <> 'verified' or nullif(btrim(so.accurate_so_number), '') is null))::int as pending_so,
+          count(*) filter (where so.status <> 'cancelled' and so.finance_verification_status = 'verified' and nullif(btrim(so.accurate_so_number), '') is not null)::int as verified,
           count(*) filter (where so.status = 'cancelled')::int as cancelled
         from sales_orders so
         ${summaryWhereSql}
@@ -1640,16 +1686,16 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
   return withTransaction(async (client) => {
     const existing = await client.query(
       `
-        select id, so_number, finance_verification_status
+        select id, so_number, accurate_so_number, finance_verification_status
         from sales_orders
         where id = $1
-          and status not in ('completed', 'cancelled')
+          and status <> 'cancelled'
       `,
       [id],
     );
 
     if (!existing.rows[0]) {
-      const error = new Error('Request order Finance tidak ditemukan atau sudah selesai.');
+      const error = new Error('Request order Finance tidak ditemukan atau sudah dibatalkan.');
       error.statusCode = 404;
       error.code = 'FINANCE_ORDER_VERIFICATION_NOT_FOUND';
       throw error;
@@ -1659,7 +1705,7 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
       `
         select id
         from sales_orders
-        where lower(so_number) = lower($1)
+        where lower(accurate_so_number) = lower($1)
           and id <> $2
         limit 1
       `,
@@ -1676,7 +1722,7 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
     await client.query(
       `
         update sales_orders
-        set so_number = $1,
+        set accurate_so_number = $1,
             finance_verification_status = 'verified',
             finance_verified_by_name = $2,
             finance_verified_at = now(),
@@ -1692,6 +1738,7 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
         select
           so.id,
           so.so_number,
+          so.accurate_so_number,
           so.finance_verification_status,
           so.finance_verified_by_name,
           so.finance_verified_at,
@@ -1753,6 +1800,7 @@ export async function createFinanceCorrectionRequest(salesOrderId, payload = {})
         select
           so.id,
           so.so_number,
+          so.accurate_so_number,
           so.invoice_number,
           so.status,
           so.billing_status,
@@ -1867,7 +1915,7 @@ export async function createFinanceCorrectionRequest(salesOrderId, payload = {})
 
     return mapFinanceCorrectionRequest({
       ...inserted.rows[0],
-      so_number: correctionType === 'so_number' && !requiresAdminApproval ? requestedValue : order.so_number,
+      so_number: correctionType === 'so_number' && !requiresAdminApproval ? requestedValue : order.accurate_so_number || order.so_number,
       invoice_number: correctionType === 'invoice_number' && !requiresAdminApproval ? requestedValue : order.invoice_number,
     });
   });
@@ -1878,7 +1926,7 @@ export async function getFinanceCorrectionRequestsBySalesOrder(salesOrderId) {
     `
       select
         fcr.*,
-        so.so_number,
+        coalesce(so.accurate_so_number, so.so_number) as so_number,
         so.invoice_number
       from finance_correction_requests fcr
       join sales_orders so on so.id = fcr.sales_order_id
@@ -1909,6 +1957,7 @@ function buildFinanceCorrectionFilters(options = {}) {
     params.push(`%${String(options.query || options.search).trim()}%`);
     clauses.push(`(
       so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
       or so.invoice_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or fcr.current_value ilike $${params.length}
@@ -1931,7 +1980,7 @@ export async function getFinanceCorrectionRequestsPage(options = {}) {
       `
         select
           fcr.*,
-          so.so_number,
+          coalesce(so.accurate_so_number, so.so_number) as so_number,
           so.invoice_number,
           so.customer_name,
           so.destination
@@ -1984,7 +2033,7 @@ async function getPendingCorrectionForReview(client, id) {
     `
       select
         fcr.*,
-        so.so_number,
+        coalesce(so.accurate_so_number, so.so_number) as so_number,
         so.invoice_number,
         so.customer_name,
         so.destination

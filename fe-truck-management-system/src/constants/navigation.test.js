@@ -3,14 +3,13 @@ import { USER_ROLES } from './roles';
 import { navigationGroups } from './navigation';
 
 describe('navigationGroups', () => {
-  it('tidak menampilkan menu finance untuk admin', () => {
+  it('menampilkan menu finance untuk admin dan finance', () => {
     const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
     const financeItems = monitoringGroup?.items.filter((item) => item.to.startsWith('/finance')) || [];
 
-    expect(financeItems).toHaveLength(3);
+    expect(financeItems).toHaveLength(4);
     financeItems.forEach((item) => {
-      expect(item.roles).toEqual([USER_ROLES.FINANCE]);
-      expect(item.roles).not.toContain(USER_ROLES.ADMIN);
+      expect(item.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.FINANCE]);
     });
   });
 
@@ -32,6 +31,19 @@ describe('navigationGroups', () => {
 
     expect(repoItem?.label).toBe('Container Titip');
     expect(repoItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
+  });
+
+  it('memisahkan menu komisi Operational dan Finance', () => {
+    const operationalGroup = navigationGroups.find((group) => group.label === 'Operational');
+    const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
+
+    const operationalCommission = operationalGroup?.items.find((item) => item.to === '/operations/driver-commissions');
+    const financeCommission = monitoringGroup?.items.find((item) => item.to === '/finance/driver-commissions');
+
+    expect(operationalCommission?.label).toBe('Report Komisi');
+    expect(operationalCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
+    expect(financeCommission?.label).toBe('Pembayaran Komisi');
+    expect(financeCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.FINANCE]);
   });
 
   it('menampilkan Dokumen Customer hanya untuk admin dan sales', () => {

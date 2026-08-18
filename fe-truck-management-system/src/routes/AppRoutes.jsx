@@ -4,6 +4,7 @@ import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom';
 import App from '../App';
 import { AppErrorBoundary, PageSkeleton } from '../components/common/PageStates';
 import { USER_ROLES } from '../constants/roles';
+import { useAuth } from '../contexts/AuthContext';
 import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
 
@@ -14,6 +15,7 @@ const OrderHistoryPage = lazy(() => import('../pages/dashboard/OrderHistoryPage'
 const SalesOrdersPage = lazy(() => import('../pages/sales-orders/SalesOrdersPage'));
 const HistoricalEntryPage = lazy(() => import('../pages/admin/HistoricalEntryPage'));
 const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
+const DriverCommissionOperationalPage = lazy(() => import('../pages/operations/DriverCommissionOperationalPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
 const ClientsPage = lazy(() => import('../pages/admin/ClientsPage'));
 const DepotsPage = lazy(() => import('../pages/admin/DepotsPage'));
@@ -33,6 +35,7 @@ const FinanceInvoiceNumberPage = lazy(() => import('../pages/finance/FinanceInvo
 const FinanceCompletedTripsPage = lazy(() => import('../pages/finance/FinanceCompletedTripsPage'));
 const FinanceBillingReadinessPage = lazy(() => import('../pages/finance/FinanceBillingReadinessPage'));
 const FinanceCorrectionsPage = lazy(() => import('../pages/finance/FinanceCorrectionsPage'));
+const DriverCommissionPage = lazy(() => import('../pages/finance/DriverCommissionPage'));
 
 function LazyPage({ children }) {
   const location = useLocation();
@@ -52,7 +55,14 @@ const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
 const adminRoles = [USER_ROLES.ADMIN];
 const viewerOnlyRoles = [USER_ROLES.OBSERVER];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
-const financeRoles = [USER_ROLES.FINANCE];
+const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
+const driverCommissionRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.FINANCE];
+
+function DriverCommissionRedirect() {
+  const { user } = useAuth();
+  const target = user?.role === USER_ROLES.FINANCE ? '/finance/driver-commissions' : '/operations/driver-commissions';
+  return <Navigate to={target} replace />;
+}
 
 function guardedPage(roles, element) {
   return {
@@ -82,6 +92,8 @@ export const router = createBrowserRouter([
         { path: 'operations', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage /></LazyPage>)] },
         { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },
+        { path: 'operations/driver-commissions', children: [guardedPage(operationalRoles, <LazyPage><DriverCommissionOperationalPage /></LazyPage>)] },
+        { path: 'driver-commissions', children: [guardedPage(driverCommissionRoles, <DriverCommissionRedirect />)] },
         { path: 'trucks', children: [guardedPage(adminRoles, <LazyPage><TrucksPage /></LazyPage>)] },
         { path: 'drivers', children: [guardedPage(adminRoles, <LazyPage><DriversPage /></LazyPage>)] },
         { path: 'clients', children: [guardedPage(adminRoles, <LazyPage><ClientsPage /></LazyPage>)] },
@@ -109,6 +121,7 @@ export const router = createBrowserRouter([
         { path: 'finance/corrections', children: [guardedPage(adminRoles, <LazyPage><FinanceCorrectionsPage /></LazyPage>)] },
         { path: 'finance/completed-trips', children: [guardedPage(financeRoles, <LazyPage><FinanceCompletedTripsPage /></LazyPage>)] },
         { path: 'finance/billing-readiness', children: [guardedPage(financeRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
+        { path: 'finance/driver-commissions', children: [guardedPage(financeRoles, <LazyPage><DriverCommissionPage /></LazyPage>)] },
         { path: 'truck-utilization', element: <Navigate to="/reports?tab=utilization" replace /> },
         { path: 'driver-performance', element: <Navigate to="/reports" replace /> },
         { path: 'unit-performance', element: <Navigate to="/reports?tab=utilization" replace /> },

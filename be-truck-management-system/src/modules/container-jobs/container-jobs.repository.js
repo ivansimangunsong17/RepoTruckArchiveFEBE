@@ -20,7 +20,9 @@ const joinedJobColumns = `
   cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
   cj.repo_picked_up_at, cj.repo_picked_up_by_name,
   cj.entry_source, cj.historical_period, cj.historical_notes,
-  so.so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
+  cj.has_driver_commission, cj.driver_commission_amount,
+  cj.driver_commission_source_destination_id, cj.driver_commission_note,
+  so.so_number, so.accurate_so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
   so.terminal, so.service_name, so.origin, so.destination, so.trip_date,
@@ -50,6 +52,10 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
+function normalizeBooleanFlag(value) {
+  return value === true || String(value || '').toLowerCase() === 'true' || value === '1';
+}
+
 function periodFromDate(value, fallback = '') {
   const datePeriod = String(value || '').trim().match(/^(\d{4}-\d{2})-/)?.[1] || '';
   return normalizeOptionalText(datePeriod || fallback);
@@ -60,10 +66,20 @@ function normalizeDateOnly(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(clean) ? clean : '';
 }
 
-function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', rpujStage = '', documentStatus = '', tripDate = '', includeRpujStage = true, excludeCancelledJobs = false } = {}) {
+function buildJobWhere({
+  query: keyword = '',
+  status = '',
+  requestStatus = '',
+  rpujStage = '',
+  documentStatus = '',
+  tripDate = '',
+  entrySource = '',
+  historicalPeriod = '',
+  includeRpujStage = true,
+  excludeCancelledJobs = false,
+} = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
-    "so.finance_verification_status = 'verified'",
     "nullif(btrim(so.so_number), '') is not null",
   ];
   const params = [];
@@ -74,6 +90,7 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
     params.push(`%${cleanKeyword}%`);
     clauses.push(`(
       so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
       or so.do_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or cj.container_number ilike $${params.length}
@@ -91,6 +108,16 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
     clauses.push(`so.trip_date = $${params.length}::date`);
   }
 
+  if (entrySource) {
+    params.push(normalizeEntrySource(entrySource));
+    clauses.push(`coalesce(cj.entry_source, 'realtime') = $${params.length}`);
+  }
+
+  if (historicalPeriod) {
+    params.push(String(historicalPeriod).trim());
+    clauses.push(`cj.historical_period = $${params.length}`);
+  }
+
   if (excludeCancelledJobs) {
     clauses.push("cj.status <> 'cancelled'");
   }
@@ -105,7 +132,9 @@ function buildJobWhere({ query: keyword = '', status = '', requestStatus = '', r
     if (rpujStage === 'queue') {
       clauses.push("coalesce(cj.rpuj_status, 'pending') in ('pending', 'rejected')");
     } else if (rpujStage === 'submitted') {
-      clauses.push("cj.rpuj_status in ('submitted', 'approved')");
+      clauses.push("cj.rpuj_status = 'submitted'");
+    } else if (rpujStage === 'approved') {
+      clauses.push("cj.rpuj_status = 'approved'");
     } else if (rpujStage === 'paid') {
       clauses.push("cj.rpuj_status = 'paid'");
     }
@@ -277,10 +306,10 @@ async function refreshOrderStatus(client, salesOrderId) {
 }
 
 function ensureSalesOrderVerifiedForOperational(row) {
-  if (row?.finance_verification_status === 'verified' && String(row?.so_number || '').trim()) return;
-  const error = new Error('Order belum memiliki Nomor SO Accurate dari Finance. Operational baru bisa memproses setelah SO terbit.');
+  if (String(row?.so_number || '').trim()) return;
+  const error = new Error('Order belum memiliki Nomor SO internal. Operational baru bisa memproses setelah nomor kerja dibuat sistem.');
   error.statusCode = 409;
-  error.code = 'SALES_ORDER_NOT_VERIFIED_BY_FINANCE';
+  error.code = 'SALES_ORDER_INTERNAL_SO_REQUIRED';
   throw error;
 }
 
@@ -312,6 +341,23 @@ function normalizeEntrySource(value) {
 function normalizeOptionalText(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
+}
+
+function normalizeNonNegativeAmount(value, label) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw validationError(`${label} tidak boleh negatif.`, 'VALIDATION_ERROR', 400);
+  }
+  return amount;
+}
+
+function normalizeOptionalUuid(value, label) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) {
+    throw validationError(`${label} tidak valid.`, 'VALIDATION_ERROR', 400);
+  }
+  return normalized;
 }
 
 function hasRepoStorageHistory(existing = {}) {
@@ -346,7 +392,7 @@ export function shouldValidateVehicleContainerSize(form = {}, existing = {}) {
 }
 
 function requireTripStartAllowed(nextStatus, rpujStatus, options = {}) {
-  if (options.allowHistoricalBackfill) return;
+  if (options.allowHistoricalBackfill || options.allowAdminCorrection) return;
   if (!['running', 'completed'].includes(nextStatus)) return;
   if (['approved', 'paid'].includes(rpujStatus)) return;
   throw validationError(
@@ -497,7 +543,8 @@ async function syncResourceAssignmentStatus(client, existing, nextAssignment = {
 
 async function requireCompletedJobReady(client, id, form, existing, options = {}) {
   const allowHistoricalBackfill = Boolean(options.allowHistoricalBackfill);
-  if (!allowHistoricalBackfill && !['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
+  const allowAdminCorrection = Boolean(options.allowAdminCorrection);
+  if (!allowHistoricalBackfill && !allowAdminCorrection && !['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. UJ harus disetujui/dikirim Finance terlebih dahulu.',
       'CONTAINER_JOB_COMPLETION_INCOMPLETE',
@@ -530,7 +577,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
       409,
     );
   }
-  if (allowHistoricalBackfill) return;
+  if (allowHistoricalBackfill || allowAdminCorrection) return;
 
   const attachmentResult = await client.query(
     `
@@ -570,17 +617,64 @@ export async function findContainerJobsPage(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildJobWhere(options);
   const rpujCountWhere = buildJobWhere({ ...options, includeRpujStage: false, excludeCancelledJobs: true });
+  const statusCountWhere = buildJobWhere({ ...options, status: '', includeRpujStage: false });
+  const groupByOrder = normalizeBooleanFlag(options.groupByOrder);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
-
-  const [rowsResult, countResult, statusResult, rpujStatusResult] = await Promise.all([
-    query(
+  const rowQuery = groupByOrder
+    ? `
+        with filtered_jobs as (
+          select ${joinedJobColumns},
+            case cj.status
+              when 'received' then 1
+              when 'running' then 2
+              when 'repo_stored' then 3
+              when 'completed' then 4
+              when 'cancelled' then 5
+              else 4
+            end as job_status_rank,
+            coalesce(cj.cancel_requested_at, cj.updated_at) as job_activity_at,
+            so.trip_date as order_trip_date,
+            cj.created_at as job_created_at
+          from container_jobs cj
+          join sales_orders so on so.id = cj.sales_order_id
+          ${whereSql}
+        ),
+        page_orders as (
+          select
+            sales_order_id,
+            min(job_status_rank) as status_rank,
+            max(job_activity_at) as latest_activity_at,
+            min(order_trip_date) as trip_date,
+            min(job_created_at) as first_job_created_at
+          from filtered_jobs
+          group by sales_order_id
+          order by
+            min(job_status_rank),
+            max(job_activity_at) desc,
+            min(order_trip_date) asc,
+            min(job_created_at) asc
+          limit $${limitIndex} offset $${offsetIndex}
+        )
+        select filtered_jobs.*
+        from filtered_jobs
+        join page_orders on page_orders.sales_order_id = filtered_jobs.sales_order_id
+        order by
+          page_orders.status_rank,
+          page_orders.latest_activity_at desc,
+          page_orders.trip_date asc,
+          page_orders.first_job_created_at asc,
+          filtered_jobs.job_status_rank,
+          filtered_jobs.job_activity_at desc,
+          filtered_jobs.order_trip_date asc,
+          filtered_jobs.job_created_at asc
       `
+    : `
         select ${joinedJobColumns}
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         ${whereSql}
-    order by
+        order by
           case cj.status
             when 'received' then 1
             when 'running' then 2
@@ -593,7 +687,11 @@ export async function findContainerJobsPage(options = {}) {
           so.trip_date asc,
           cj.created_at asc
         limit $${limitIndex} offset $${offsetIndex}
-      `,
+      `;
+
+  const [rowsResult, countResult, statusResult, rpujStatusResult] = await Promise.all([
+    query(
+      rowQuery,
       [...params, pageSize, offset],
     ),
     query(
@@ -610,18 +708,18 @@ export async function findContainerJobsPage(options = {}) {
         select cj.status, count(*)::int as total
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
-        where so.status <> 'cancelled'
-          and so.finance_verification_status = 'verified'
-          and nullif(btrim(so.so_number), '') is not null
+        ${statusCountWhere.whereSql}
         group by cj.status
       `,
+      statusCountWhere.params,
     ),
     query(
       `
         select
           case
             when cj.rpuj_status = 'paid' then 'paid'
-            when cj.rpuj_status in ('submitted', 'approved') then 'submitted'
+            when cj.rpuj_status = 'approved' then 'approved'
+            when cj.rpuj_status = 'submitted' then 'submitted'
             else 'queue'
           end as stage,
           count(*)::int as total
@@ -633,6 +731,17 @@ export async function findContainerJobsPage(options = {}) {
       rpujCountWhere.params,
     ),
   ]);
+  const groupCountResult = groupByOrder
+    ? await query(
+        `
+          select count(distinct cj.sales_order_id)::int as total
+          from container_jobs cj
+          join sales_orders so on so.id = cj.sales_order_id
+          ${whereSql}
+        `,
+        params,
+      )
+    : { rows: [{ total: 0 }] };
 
   const jobIds = rowsResult.rows.map((row) => row.id);
   const attachmentResult = jobIds.length
@@ -656,14 +765,18 @@ export async function findContainerJobsPage(options = {}) {
   statusResult.rows.forEach((row) => {
     counts[row.status] = row.total;
   });
-  const rpujCounts = { queue: 0, submitted: 0, paid: 0 };
+  const rpujCounts = { queue: 0, submitted: 0, approved: 0, paid: 0 };
   rpujStatusResult.rows.forEach((row) => {
     rpujCounts[row.stage] = row.total;
   });
+  const totalRows = countResult.rows[0]?.total || 0;
+  const totalGroups = groupByOrder ? groupCountResult.rows[0]?.total || 0 : 0;
 
   return {
     rows: rowsResult.rows.map((row) => mapContainerJob(row, groupedAttachments[row.id] || [])),
-    total: countResult.rows[0]?.total || 0,
+    total: groupByOrder ? totalGroups : totalRows,
+    totalRows,
+    totalGroups,
     counts,
     rpujCounts,
   };
@@ -707,6 +820,8 @@ export async function updateContainerJob(id, form) {
                cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
                cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                cj.entry_source, cj.historical_period, cj.historical_notes,
+               cj.has_driver_commission, cj.driver_commission_amount,
+               cj.driver_commission_source_destination_id, cj.driver_commission_note,
                so.so_number, so.trip_date, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -724,6 +839,7 @@ export async function updateContainerJob(id, form) {
 
     const currentJob = existing.rows[0];
     const allowHistoricalBackfill = isHistoricalBackfill(form, currentJob);
+    const allowAdminCorrection = normalizeBooleanFlag(form.adminCorrectionMode);
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
     assertDriverAssignable(driver, currentJob.driver_id);
@@ -732,7 +848,7 @@ export async function updateContainerJob(id, form) {
       assertVehicleMatchesContainer(vehicle, currentJob.container_size);
     }
     const nextStatus = form.status || currentJob.status || 'received';
-    if (nextStatus === 'cancelled' && currentJob.status === 'completed') {
+    if (nextStatus === 'cancelled' && currentJob.status === 'completed' && !allowAdminCorrection) {
       throw validationError(
         'Container Job yang sudah selesai tidak dapat dibatalkan.',
         'CONTAINER_JOB_COMPLETED_CANNOT_CANCEL',
@@ -749,7 +865,7 @@ export async function updateContainerJob(id, form) {
         'RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    requireTripStartAllowed(nextStatus, nextRpujStatus, { allowHistoricalBackfill });
+    requireTripStartAllowed(nextStatus, nextRpujStatus, { allowHistoricalBackfill, allowAdminCorrection });
     if (['running', 'completed'].includes(nextStatus)) {
       requireCompleteOperationalAssignment(
         form,
@@ -761,7 +877,7 @@ export async function updateContainerJob(id, form) {
     }
     await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus);
     if (nextStatus === 'completed') {
-      await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill });
+      await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill, allowAdminCorrection });
     }
     const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
       ? new Date().toISOString()
@@ -848,6 +964,33 @@ export async function updateContainerJob(id, form) {
     const nextTilaGatepassDocument = hasTilaInput
       ? form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null
       : existing.rows[0].tila_gatepass_document_number || existing.rows[0].unloading_voucher_number || existing.rows[0].weighing_document_number || null;
+    const nextHasDriverCommission = hasOwnInput(form, 'hasDriverCommission')
+      ? Boolean(form.hasDriverCommission)
+      : Boolean(existing.rows[0].has_driver_commission);
+    const nextDriverCommissionAmount = nextHasDriverCommission
+      ? normalizeNonNegativeAmount(
+        hasOwnInput(form, 'driverCommissionAmount') ? form.driverCommissionAmount : existing.rows[0].driver_commission_amount,
+        'Nominal komisi sopir',
+      )
+      : 0;
+    if (nextHasDriverCommission && nextDriverCommissionAmount <= 0) {
+      throw validationError('Nominal komisi sopir wajib lebih dari 0 jika komisi aktif.', 'VALIDATION_ERROR', 400);
+    }
+    const nextDriverCommissionSourceDestinationId = nextHasDriverCommission
+      ? normalizeOptionalUuid(
+        hasOwnInput(form, 'driverCommissionSourceDestinationId')
+          ? form.driverCommissionSourceDestinationId
+          : existing.rows[0].driver_commission_source_destination_id,
+        'Sumber komisi sopir',
+      )
+      : null;
+    const nextDriverCommissionNote = nextHasDriverCommission
+      ? normalizeOptionalText(
+        hasOwnInput(form, 'driverCommissionNote')
+          ? form.driverCommissionNote
+          : existing.rows[0].driver_commission_note,
+      )
+      : null;
 
     await client.query(
       `
@@ -890,9 +1033,13 @@ export async function updateContainerJob(id, form) {
             entry_source = $32,
             historical_period = $33,
             historical_notes = $34,
-            updated_by_name = $35,
+            has_driver_commission = $35,
+            driver_commission_amount = $36,
+            driver_commission_source_destination_id = $37::uuid,
+            driver_commission_note = $38,
+            updated_by_name = $39,
             updated_at = now()
-        where id = $36
+        where id = $40
       `,
       [
         nextContainerNumber,
@@ -929,6 +1076,10 @@ export async function updateContainerJob(id, form) {
         nextEntrySource,
         nextHistoricalPeriod,
         nextHistoricalNotes,
+        nextHasDriverCommission,
+        nextDriverCommissionAmount,
+        nextDriverCommissionSourceDestinationId,
+        nextDriverCommissionNote,
         form.updatedBy || 'Operational',
         id,
       ],

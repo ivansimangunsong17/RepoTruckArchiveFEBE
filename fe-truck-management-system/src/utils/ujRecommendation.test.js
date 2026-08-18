@@ -17,10 +17,11 @@ describe('ujRecommendation', () => {
   it('membaca nominal UJ dengan format rupiah bertitik', () => {
     const recommendation = calculateUjRecommendation(
       { destination: 'Cikarang', size: '20FT' },
-      [{ name: 'Cikarang', uj20ft: 'Rp 600.000', uj40ft: '750.000' }],
+      [{ name: 'Cikarang', uj20ft: 'Rp 600.000', uj40ft: '750.000', driverCommissionAmount: '50.000' }],
     );
 
     expect(recommendation.currentContainerUj).toBe(600000);
+    expect(recommendation.driverCommissionAmount).toBe(50000);
     expect(recommendation.hasConfiguredTariff).toBe(true);
   });
 

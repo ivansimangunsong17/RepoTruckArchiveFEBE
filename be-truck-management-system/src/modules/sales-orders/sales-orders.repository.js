@@ -6,6 +6,7 @@ const salesOrderColumnCandidates = [
   'id',
   'customer_id',
   'so_number',
+  'accurate_so_number',
   'finance_verification_status',
   'finance_verified_by_name',
   'finance_verified_at',
@@ -136,6 +137,35 @@ function parsePage(options = {}) {
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
+function getPeriodKey(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-/);
+  if (match) return `${match[1]}${match[2]}`;
+  const date = new Date(raw || Date.now());
+  if (Number.isNaN(date.getTime())) {
+    const now = new Date();
+    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function generateInternalSoNumber(client, dateValue) {
+  const periodKey = getPeriodKey(dateValue);
+  const prefix = `SO-ARM-${periodKey}-`;
+  const result = await client.query(
+    `
+      select so_number
+      from sales_orders
+      where so_number like $1
+      order by so_number desc
+      limit 1
+    `,
+    [`${prefix}%`],
+  );
+  const lastSequence = Number(String(result.rows[0]?.so_number || '').slice(prefix.length)) || 0;
+  return `${prefix}${String(lastSequence + 1).padStart(4, '0')}`;
+}
+
 function isTruthyFilter(value) {
   return value === true || value === 'true' || value === '1';
 }
@@ -157,7 +187,7 @@ function buildOrderWhere({
 
   if (cleanKeyword) {
     params.push(`%${cleanKeyword}%`);
-    clauses.push(`(so_number ilike $${params.length} or do_number ilike $${params.length} or invoice_number ilike $${params.length} or customer_name ilike $${params.length})`);
+    clauses.push(`(so_number ilike $${params.length} or accurate_so_number ilike $${params.length} or do_number ilike $${params.length} or invoice_number ilike $${params.length} or customer_name ilike $${params.length})`);
   }
 
   if (status === 'waiting_operational') {
@@ -459,6 +489,9 @@ export async function createSalesOrder(form) {
   return withTransaction(async (client) => {
     const customer = await findCustomer(client, form);
     const payload = toSalesOrderDb(form, customer);
+    if (!payload.so_number) {
+      payload.so_number = await generateInternalSoNumber(client, payload.so_date || payload.trip_date);
+    }
     const filteredPayload = await filterSalesOrderPayload(payload, client.query.bind(client));
     const entries = Object.entries(filteredPayload);
     const orderColumns = await getSalesOrderColumns(client.query.bind(client));

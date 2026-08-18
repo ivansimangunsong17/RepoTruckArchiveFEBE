@@ -129,6 +129,10 @@ const BACKEND_PERMISSION_ALIASES = {
   'finance.correction.approve': ['finance.correction.approve'],
 };
 
+function isAdminRole(role) {
+  return String(role || '').trim().toLowerCase() === USER_ROLES.ADMIN;
+}
+
 function hasBackendPermission(user, permission) {
   const permissions = Array.isArray(user?.permissions) ? user.permissions : [];
   if (!permissions.length) return false;
@@ -137,8 +141,11 @@ function hasBackendPermission(user, permission) {
 }
 
 export function hasPermission(subject, permission) {
+  if (!permission) return false;
   if (subject && typeof subject === 'object') {
+    if (isAdminRole(subject.role)) return true;
     return hasBackendPermission(subject, permission) || Boolean(ROLE_PERMISSIONS[subject.role]?.includes(permission));
   }
+  if (isAdminRole(subject)) return true;
   return Boolean(ROLE_PERMISSIONS[subject]?.includes(permission));
 }

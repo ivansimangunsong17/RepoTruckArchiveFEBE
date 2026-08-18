@@ -245,6 +245,7 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
                   <ReadOnlyField label="Reimbursement" value={formatCurrency(trip.reimbursementAmount || 0)} />
                   <ReadOnlyField label="Uang Jalan" value={moneyValue(trip.journeyMoney)} />
                   <ReadOnlyField label="Biaya Tambahan" value={formatCurrency(trip.additionalCost || 0)} />
+                  <ReadOnlyField label="Komisi Sopir" value={formatCurrency(trip.driverCommissionAmount || 0)} />
                   <ReadOnlyField label="Estimasi Margin" value={moneyValue(trip.estimatedMargin)} />
                   <ReadOnlyField label="Status Dokumen" value={statusLabel[trip.documentStatus]} />
                   <ReadOnlyField label="Status Invoice" value={statusLabel[trip.invoiceStatus]} />
@@ -339,6 +340,10 @@ function FinanceTripMobileCards({ rows, onDetail }) {
             <div>
               <span>Tambahan</span>
               <strong>{formatCurrency(row.additionalCost || 0)}</strong>
+            </div>
+            <div>
+              <span>Komisi</span>
+              <strong>{formatCurrency(row.driverCommissionAmount || 0)}</strong>
             </div>
             <div>
               <span>Margin</span>
@@ -803,6 +808,10 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                         <div className="rounded-md bg-slate-50 px-2 py-1.5">
                           <span className="block text-[10px] font-bold uppercase text-slate-500">Tambahan</span>
                           <strong className="text-[11px] text-slate-950">{formatCurrency(row.additionalCost || 0)}</strong>
+                        </div>
+                        <div className="rounded-md bg-amber-50 px-2 py-1.5">
+                          <span className="block text-[10px] font-bold uppercase text-amber-700">Komisi</span>
+                          <strong className="text-[11px] text-slate-950">{formatCurrency(row.driverCommissionAmount || 0)}</strong>
                         </div>
                         <div className="rounded-md bg-slate-900 px-2 py-1.5">
                           <span className="block text-[10px] font-bold uppercase text-slate-300">Margin</span>

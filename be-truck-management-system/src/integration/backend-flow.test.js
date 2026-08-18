@@ -437,7 +437,9 @@ if (!hasDatabase) {
         body: salesOrderPayload(),
       });
       assert.equal(createdOrder.status, 201);
-      assert.equal(createdOrder.body.data.soNumber, null);
+      assert.match(createdOrder.body.data.soNumber, /^SO-ARM-\d{6}-\d{4}$/);
+      assert.equal(createdOrder.body.data.internalSoNumber, createdOrder.body.data.soNumber);
+      assert.equal(createdOrder.body.data.accurateSoNumber, '');
       assert.equal(createdOrder.body.data.financeVerificationStatus, 'pending_so');
       assert.equal(createdOrder.body.data.billingStatus, 'belum_invoice');
       assert.equal(createdOrder.body.data.paymentType, 'tempo');
@@ -446,10 +448,11 @@ if (!hasDatabase) {
       assert.equal(createdOrder.body.data.containers.length, 1);
       created.orderId = createdOrder.body.data.id;
       created.jobId = createdOrder.body.data.containers[0].id;
+      created.internalSoNumber = createdOrder.body.data.soNumber;
 
-      const hiddenFromOperational = await api(`/api/container-jobs?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
-      assert.equal(hiddenFromOperational.status, 200);
-      assert.equal(hiddenFromOperational.body.data.rows.some((row) => row.id === created.jobId), false);
+      const visibleFromOperational = await api(`/api/container-jobs?query=${encodeURIComponent(created.internalSoNumber)}`, { token: adminToken });
+      assert.equal(visibleFromOperational.status, 200);
+      assert.equal(visibleFromOperational.body.data.rows.some((row) => row.id === created.jobId), true);
 
       const financeQueue = await api(`/api/finance/order-verifications?query=${encodeURIComponent(runId)}`, { token: financeToken });
       assert.equal(financeQueue.status, 200);
@@ -463,6 +466,8 @@ if (!hasDatabase) {
       });
       assert.equal(financeVerified.status, 200);
       assert.equal(financeVerified.body.data.soNumber, created.orderSoNumber);
+      assert.equal(financeVerified.body.data.internalSoNumber, created.internalSoNumber);
+      assert.equal(financeVerified.body.data.accurateSoNumber, created.orderSoNumber);
       assert.equal(financeVerified.body.data.verificationStatus, 'verified');
 
       const list = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });

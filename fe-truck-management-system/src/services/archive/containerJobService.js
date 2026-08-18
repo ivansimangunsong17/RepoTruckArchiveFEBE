@@ -1,7 +1,8 @@
 import { httpClient } from '../api/httpClient';
-import { uploadAttachmentFile } from '../files/fileService';
+import { deleteAttachmentFile, uploadAttachmentFile } from '../files/fileService';
 
 const documentFields = [
+  ['additionalCostDocument', 'additionalCostDocument'],
   ['spkDocument', 'spkDocument'],
   ['eirDocument', 'eirDocument'],
   ['repoEirDocument', 'repoEirDocument'],
@@ -19,6 +20,9 @@ export function fetchContainerJobsPage({
   rpujStage = '',
   documentStatus = '',
   tripDate = '',
+  groupByOrder = false,
+  entrySource = '',
+  historicalPeriod = '',
 } = {}) {
   const params = new URLSearchParams({
     page: String(page),
@@ -30,6 +34,9 @@ export function fetchContainerJobsPage({
   if (rpujStage) params.set('rpujStage', rpujStage);
   if (documentStatus) params.set('documentStatus', documentStatus);
   if (tripDate) params.set('tripDate', tripDate);
+  if (groupByOrder) params.set('groupByOrder', 'true');
+  if (entrySource) params.set('entrySource', entrySource);
+  if (historicalPeriod) params.set('historicalPeriod', historicalPeriod);
   return httpClient.get(`/container-jobs?${params.toString()}`);
 }
 
@@ -44,23 +51,17 @@ function getRawFile(file) {
   return null;
 }
 
+function getAttachmentPath(attachment) {
+  return attachment?.path || attachment?.id || '';
+}
+
 async function uploadField(jobId, form, category, source, documentName = '') {
   const rawFile = getRawFile(source);
   const existingPath = source?.path || '';
 
-  if (!rawFile) {
-    if (!existingPath) return null;
-    return uploadAttachmentFile({
-      path: existingPath,
-      entityType: 'container_job',
-      entityId: jobId,
-      category,
-      notes: documentName,
-      uploadedByName: form.updatedBy || 'Operational',
-    });
-  }
+  if (!rawFile) return null;
 
-  return uploadAttachmentFile({
+  const attachment = await uploadAttachmentFile({
     path: existingPath,
     entityType: 'container_job',
     entityId: jobId,
@@ -69,21 +70,44 @@ async function uploadField(jobId, form, category, source, documentName = '') {
     notes: documentName,
     uploadedByName: form.updatedBy || 'Operational',
   });
+  return {
+    attachment,
+    created: !existingPath && Boolean(getAttachmentPath(attachment)),
+  };
 }
 
 async function uploadJobDocuments(id, form) {
-  await Promise.all(documentFields.map(([field, category]) => (
+  const uploadedDocumentResults = await Promise.all(documentFields.map(([field, category]) => (
     uploadField(id, form, category, form[field])
   )));
 
-  await Promise.all((form.otherDocuments || [])
+  const uploadedOtherDocumentResults = await Promise.all((form.otherDocuments || [])
     .filter((document) => document && (document.name || document.file))
     .map((document) => uploadField(id, form, 'otherDocument', document.file, document.name || '')));
+
+  return [...uploadedDocumentResults, ...uploadedOtherDocumentResults].filter(Boolean);
+}
+
+async function rollbackCreatedUploads(uploadResults) {
+  await Promise.allSettled(uploadResults
+    .filter((result) => result.created)
+    .map((result) => deleteAttachmentFile(getAttachmentPath(result.attachment))));
 }
 
 export async function updateContainerJob(id, form) {
-  await uploadJobDocuments(id, form);
-  return httpClient.patch(`/container-jobs/${id}`, form);
+  if (form.status !== 'completed') {
+    const saved = await httpClient.patch(`/container-jobs/${id}`, form);
+    const uploadedDocuments = await uploadJobDocuments(id, form);
+    return uploadedDocuments.length ? fetchContainerJob(id) : saved;
+  }
+
+  const uploadedDocuments = await uploadJobDocuments(id, form);
+  try {
+    return await httpClient.patch(`/container-jobs/${id}`, form);
+  } catch (error) {
+    await rollbackCreatedUploads(uploadedDocuments);
+    throw error;
+  }
 }
 
 export function generateContainerJobSpk(id, form = {}) {

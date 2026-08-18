@@ -242,7 +242,9 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     id: row.id,
     customerId: row.customer_id,
     soNumber: row.so_number,
-    financeVerificationStatus: row.finance_verification_status || (row.so_number ? 'verified' : 'pending_so'),
+    internalSoNumber: row.so_number,
+    accurateSoNumber: row.accurate_so_number || '',
+    financeVerificationStatus: row.finance_verification_status || (row.accurate_so_number ? 'verified' : 'pending_so'),
     financeVerifiedBy: row.finance_verified_by_name || '',
     financeVerifiedAt: row.finance_verified_at,
     doNumber: row.do_number,
@@ -330,9 +332,14 @@ export function toSalesOrderDb(form, customer) {
     ? historicalPeriodFromDate(tripDate, form.historicalPeriod)
     : null;
 
+  const soNumber = String(form.soNumber || '').trim() || null;
+  const accurateSoNumber = String(form.accurateSoNumber || '').trim()
+    || (form.financeVerificationStatus === 'verified' && soNumber ? soNumber : null);
+
   return {
-    so_number: String(form.soNumber || '').trim() || null,
-    finance_verification_status: form.financeVerificationStatus || (String(form.soNumber || '').trim() ? 'verified' : 'pending_so'),
+    so_number: soNumber,
+    accurate_so_number: accurateSoNumber,
+    finance_verification_status: form.financeVerificationStatus || (accurateSoNumber ? 'verified' : 'pending_so'),
     finance_verified_by_name: form.financeVerifiedBy || null,
     finance_verified_at: form.financeVerifiedAt || null,
     do_number: form.doNumber || null,

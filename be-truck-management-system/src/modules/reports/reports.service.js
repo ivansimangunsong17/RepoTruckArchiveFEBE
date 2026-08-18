@@ -60,6 +60,7 @@ export function fetchDriverPerformanceReport(query) {
     month: query.month || '',
     weekFrom: query.weekFrom || query.week_from || '',
     weekTo: query.weekTo || query.week_to || '',
+    commissionStatus: query.commissionStatus || query.commission_status || '',
     entrySource: query.entrySource || '',
     historicalPeriod: query.historicalPeriod || '',
   });

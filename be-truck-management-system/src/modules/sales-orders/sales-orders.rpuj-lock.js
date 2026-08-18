@@ -15,7 +15,7 @@ export function isSalesOrderLockedByRpuj(order = {}) {
 }
 
 export function isSalesOrderLockedByFinanceNumber(order = {}) {
-  const soNumber = String(order.soNumber || order.so_number || '').trim();
+  const accurateSoNumber = String(order.accurateSoNumber || order.accurate_so_number || '').trim();
   const verificationStatus = String(order.financeVerificationStatus || order.finance_verification_status || '').trim().toLowerCase();
-  return Boolean(soNumber || verificationStatus === 'verified');
+  return Boolean(accurateSoNumber || verificationStatus === 'verified');
 }

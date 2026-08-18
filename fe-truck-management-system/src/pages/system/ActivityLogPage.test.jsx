@@ -14,10 +14,12 @@ const rows = Array.from({ length: 12 }, (_, index) => ({
   time: `2026-06-${String(23 - index).padStart(2, '0')}T09:00:00+07:00`,
   user: index === 10 ? 'Sarah Sales' : 'Budi Admin',
   role: index === 10 ? 'sales' : 'admin',
-  action: index === 9 ? 'CREATE_HISTORICAL_SALES_ORDER' : index === 10 ? 'CREATE_SALES_ORDER' : `Aktivitas ${index + 1}`,
+  action: index === 8 ? 'ADMIN_CORRECTION_CONTAINER_JOB' : index === 9 ? 'CREATE_HISTORICAL_SALES_ORDER' : index === 10 ? 'CREATE_SALES_ORDER' : `Aktivitas ${index + 1}`,
   target: `Data ${index + 1}`,
-  module: index === 9 ? 'historical_entry' : index === 10 ? 'sales_orders' : 'auth',
-  metadata: index === 9 ? { soNumber: 'SO-HIST-001', historicalPeriod: '2026-07' } : {},
+  module: index === 8 ? 'container_jobs' : index === 9 ? 'historical_entry' : index === 10 ? 'sales_orders' : 'auth',
+  metadata: index === 8
+    ? { soNumber: 'SO-ARM-001', containerNumber: 'MSCU1234567', adminCorrectionReason: 'Koreksi tanggal selesai' }
+    : index === 9 ? { soNumber: 'SO-HIST-001', historicalPeriod: '2026-07' } : {},
 }));
 
 describe('ActivityLogPage', () => {
@@ -102,5 +104,17 @@ describe('ActivityLogPage', () => {
 
     expect((await screen.findAllByText('Input SO Data Lama')).length).toBeGreaterThan(0);
     expect(screen.getByText('SO-HIST-001 - Periode Juli 2026')).toBeInTheDocument();
+  });
+
+  it('menampilkan alasan koreksi admin container job', async () => {
+    const user = userEvent.setup();
+    render(<ActivityLogPage />);
+    await screen.findByText('Aktivitas 1');
+
+    await user.selectOptions(screen.getByLabelText('Filter modul'), 'container_jobs');
+    await user.selectOptions(screen.getByLabelText('Filter aksi'), 'ADMIN_CORRECTION_CONTAINER_JOB');
+
+    expect((await screen.findAllByText('Koreksi Admin Container')).length).toBeGreaterThan(0);
+    expect(screen.getByText('SO-ARM-001 / MSCU1234567 - Alasan: Koreksi tanggal selesai')).toBeInTheDocument();
   });
 });

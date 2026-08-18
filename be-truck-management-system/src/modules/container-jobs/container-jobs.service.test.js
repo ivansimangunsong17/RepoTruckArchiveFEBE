@@ -3,7 +3,20 @@ import test from 'node:test';
 
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
-const { ensureRepoStoragePayload, hasCompletedTimelineChange, hasOperationalDocumentChange, isContainerNumberLockedForOperational, isInitialContainerNumberInput, isOtherCostLockedForRepoPickup, isRepoCancellationLockedForOperational } = await import('./container-jobs.service.js');
+const {
+  adminCorrectionReason,
+  canUseAdminCorrection,
+  ensureRepoStoragePayload,
+  hasCompletedTimelineChange,
+  hasDriverCommissionChange,
+  hasOperationalDocumentChange,
+  isAdminCorrectionMode,
+  isContainerNumberLockedForOperational,
+  isDriverCommissionLockedForOperational,
+  isInitialContainerNumberInput,
+  isOtherCostLockedForRepoPickup,
+  isRepoCancellationLockedForOperational,
+} = await import('./container-jobs.service.js');
 const { hasCompleteOperationalAssignment, hasRequiredRepoCompletionDocuments, shouldValidateVehicleContainerSize } = await import('./container-jobs.repository.js');
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
@@ -38,6 +51,35 @@ test('mengunci perubahan biaya lainnya saat ambil container titip', () => {
   ), false);
 });
 
+test('mengenali perubahan snapshot komisi sopir', () => {
+  assert.equal(hasDriverCommissionChange(
+    { hasDriverCommission: false, driverCommissionAmount: 0 },
+    { hasDriverCommission: true, driverCommissionAmount: 50000 },
+  ), true);
+  assert.equal(hasDriverCommissionChange(
+    { hasDriverCommission: true, driverCommissionAmount: 50000, driverCommissionNote: 'Komisi Bandung' },
+    { hasDriverCommission: true, driverCommissionAmount: 50000, driverCommissionNote: 'Komisi Bandung' },
+  ), false);
+});
+
+test('mengunci perubahan komisi sopir operational setelah RPUJ disetujui atau dibayar', () => {
+  assert.equal(isDriverCommissionLockedForOperational(
+    { role: 'operational' },
+    { rpujStatus: 'approved', status: 'running', hasDriverCommission: true, driverCommissionAmount: 50000 },
+    { hasDriverCommission: true, driverCommissionAmount: 75000 },
+  ), true);
+  assert.equal(isDriverCommissionLockedForOperational(
+    { role: 'admin' },
+    { rpujStatus: 'paid', status: 'running', hasDriverCommission: true, driverCommissionAmount: 50000 },
+    { hasDriverCommission: true, driverCommissionAmount: 75000 },
+  ), true);
+  assert.equal(isDriverCommissionLockedForOperational(
+    { role: 'admin' },
+    { rpujStatus: 'paid', status: 'running', hasDriverCommission: true, driverCommissionAmount: 50000 },
+    { hasDriverCommission: true, driverCommissionAmount: 75000, adminCorrectionMode: true, adminCorrectionReason: 'Salah input komisi' },
+  ), false);
+});
+
 test('mengunci pembatalan operational setelah container pernah dititipkan', () => {
   assert.equal(isRepoCancellationLockedForOperational(
     { role: 'operational' },
@@ -48,6 +90,29 @@ test('mengunci pembatalan operational setelah container pernah dititipkan', () =
     { role: 'admin' },
     { status: 'running', repoStoredAt: '2026-07-23T09:00:00.000Z' },
     { status: 'cancelled' },
+  ), true);
+  assert.equal(isRepoCancellationLockedForOperational(
+    { role: 'admin' },
+    { status: 'running', repoStoredAt: '2026-07-23T09:00:00.000Z' },
+    { status: 'cancelled', adminCorrectionMode: true, adminCorrectionReason: 'Pembatalan koreksi admin' },
+  ), false);
+});
+
+test('mode koreksi admin membutuhkan role admin dan alasan', () => {
+  assert.equal(isAdminCorrectionMode({ adminCorrectionMode: true }), true);
+  assert.equal(isAdminCorrectionMode({ adminCorrectionMode: 'true' }), true);
+  assert.equal(adminCorrectionReason({ adminCorrectionReason: ' Salah tanggal selesai ' }), 'Salah tanggal selesai');
+  assert.equal(canUseAdminCorrection(
+    { role: 'admin' },
+    { adminCorrectionMode: true, adminCorrectionReason: 'Salah tanggal selesai' },
+  ), true);
+  assert.equal(canUseAdminCorrection(
+    { role: 'operational' },
+    { adminCorrectionMode: true, adminCorrectionReason: 'Salah tanggal selesai' },
+  ), false);
+  assert.equal(canUseAdminCorrection(
+    { role: 'admin' },
+    { adminCorrectionMode: true, adminCorrectionReason: 'pendek' },
   ), false);
 });
 

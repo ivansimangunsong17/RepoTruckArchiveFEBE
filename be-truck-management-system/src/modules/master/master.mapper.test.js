@@ -83,3 +83,20 @@ test('truck mapper membaca dan menyimpan barcode solar', () => {
   assert.equal(databaseRow.solar_barcode_date, '2026-08-06');
   assert.deepEqual(databaseRow.solar_barcode_document, document);
 });
+
+test('destination mapper membaca dan menyimpan komisi sopir', () => {
+  const mapped = resourceConfig.destinations.toApi({
+    id: 'destination-1',
+    name: 'Cikarang',
+    driver_commission_amount: '50000',
+  });
+
+  assert.equal(mapped.driverCommissionAmount, 50000);
+
+  const databaseRow = resourceConfig.destinations.toDb({
+    name: 'Cikarang',
+    driverCommissionAmount: '75000',
+  });
+
+  assert.equal(databaseRow.driver_commission_amount, 75000);
+});

@@ -45,6 +45,7 @@ const orderRow = {
   destination: 'Cikarang',
   runningDate: '2026-07-20',
   verificationStatus: 'pending_so',
+  internalSoNumber: 'SO-ARM-202607-0001',
   soNumber: '',
 };
 
@@ -58,6 +59,7 @@ const cancelledOrderRow = {
   status: 'SO Batal',
   verificationStatus: 'cancelled',
   operationalStatus: 'cancelled',
+  internalSoNumber: 'SO-ARM-202607-0002',
   soNumber: 'SO-CANCEL-001',
   cancelReason: 'Customer membatalkan pengiriman setelah nomor SO terbit.',
   cancelledAt: '2026-07-19T08:30:00.000Z',
@@ -77,6 +79,10 @@ const rpujRow = {
   truck: 'B 1000 AA',
   totalUj: 600000,
   additionalCost: 100000,
+  hasDriverCommission: true,
+  driverCommissionAmount: 50000,
+  driverCommissionNote: 'Komisi Cikarang',
+  totalRequest: 700000,
   status: 'Menunggu Approval Finance',
   rpujStatus: 'submitted',
 };
@@ -222,6 +228,23 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByLabelText('Bulan order dibuat')).toHaveValue('');
   });
 
+  it('menampilkan jumlah tab verifikasi order dari summary backend', async () => {
+    fetchFinanceOrderVerifications.mockResolvedValue({
+      rows: [orderRow],
+      summary: {
+        pendingSo: 47,
+        verified: 318,
+        cancelled: 9,
+      },
+    });
+
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    expect(await screen.findByRole('tab', { name: /Belum Ada Nomor SO/i })).toHaveTextContent('47');
+    expect(screen.getByRole('tab', { name: /SO Terisi/i })).toHaveTextContent('318');
+    expect(screen.getByRole('tab', { name: /SO Batal/i })).toHaveTextContent('9');
+  });
+
   it('memuat pencatatan sesuai bulan dan tahun yang dipilih', async () => {
     const user = userEvent.setup();
     const currentPeriod = getCurrentFinancePeriod();
@@ -279,6 +302,35 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
     expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
     expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+  });
+
+  it('memakai total invoice dari backend untuk pagination lebih dari 100 data', async () => {
+    const user = userEvent.setup();
+    const invoiceRows = Array.from({ length: 20 }, (_, index) => ({
+      ...invoiceRow,
+      id: `invoice-${index + 1}`,
+      soNumber: `SO-TEST-${String(index + 1).padStart(3, '0')}`,
+      invoiceStatus: 'Butuh Nomor Invoice',
+      invoiceNumber: '',
+    }));
+    fetchFinanceInvoices.mockResolvedValue({
+      rows: invoiceRows,
+      total: 100,
+      totalPages: 5,
+      summary: { ...invoiceSummary, needNumber: 100, inProgress: 300, paid: 35 },
+    });
+
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    expect(await screen.findByText('Menampilkan 1-20 dari 100 data filter ini (435 semua data)')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Halaman berikutnya' }));
+
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
+        page: 2,
+        pageSize: 20,
+      }));
+    });
   });
 
   it('mengirim filter dokumen invoice ke backend finance', async () => {
@@ -486,8 +538,10 @@ describe('FinanceWorkflowPage validation modals', () => {
     approveFinanceRpuj.mockResolvedValue({ ...rpujRow, rpujStatus: 'approved', status: 'Disetujui Finance' });
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
+    expect(await screen.findByText(/Komisi mingguan Rp\s*50\.000/i)).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Approve' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Validasi Approval RPUJ');
+    expect(screen.getByRole('dialog')).toHaveTextContent(/Rp\s*700\.000/i);
     await user.click(screen.getByRole('button', { name: 'Ya, Approve RPUJ' }));
 
     expect(approveFinanceRpuj).toHaveBeenCalledWith('job-1');
@@ -505,6 +559,8 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(dialog).toHaveTextContent('Cikarang');
     expect(dialog).toHaveTextContent('Nomor Container');
     expect(dialog).toHaveTextContent('CONT-TEST-001');
+    expect(dialog).toHaveTextContent('Komisi Sopir');
+    expect(dialog).toHaveTextContent('Komisi Cikarang');
     expect(dialog).not.toHaveTextContent('No. Job');
   });
 

@@ -730,6 +730,90 @@ describe('OperationalForm', () => {
     expect(onSubmit.mock.calls[0][0].rpujNotes).toContain('Tol dan parkir');
   });
 
+  it('tidak mengubah status RPUJ di form ketika pengajuan gagal disimpan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockRejectedValue(new Error('Backend gagal'));
+
+    render(
+      <OperationalForm
+        container={container}
+        masterDestinations={[{ name: 'Bandung', uj20ft: 500000 }]}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    await user.type(screen.getByLabelText(/nominal biaya/i), '150000');
+    await user.click(screen.getByRole('button', { name: /ajukan uang jalan/i }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText('Backend gagal')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /ajukan uang jalan/i })).toBeEnabled();
+  });
+
+  it('mencegah submit ganda saat penyimpanan masih berjalan', async () => {
+    const user = userEvent.setup();
+    let resolveSubmit;
+    const onSubmit = vi.fn(() => new Promise((resolve) => {
+      resolveSubmit = resolve;
+    }));
+
+    render(
+      <OperationalForm
+        container={container}
+        masterDestinations={[{ name: 'Bandung', uj20ft: 500000 }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const saveButton = screen.getByRole('button', { name: /simpan container job/i });
+    await user.dblClick(saveButton);
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(saveButton).toBeDisabled();
+    expect(saveButton).toHaveTextContent(/menyimpan/i);
+
+    resolveSubmit();
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+  });
+
+  it('mengirim snapshot komisi sopir saat checkbox komisi aktif', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={container}
+        masterDestinations={[{ id: 'destination-1', name: 'Bandung', uj20ft: 500000, driverCommissionAmount: 50000 }]}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await openOperationalPhase(user, /uang jalan & spk/i);
+    await user.click(screen.getByLabelText(/ada komisi sopir/i));
+    await user.click(screen.getByRole('button', { name: /ajukan uang jalan/i }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      rpujStatus: 'submitted',
+      hasDriverCommission: true,
+      driverCommissionAmount: 50000,
+      driverCommissionSourceDestinationId: 'destination-1',
+      driverCommissionNote: 'Komisi Bandung',
+    });
+  });
+
   it('menahan generate SPK sampai Finance approve RPUJ', async () => {
     const user = userEvent.setup();
     const onGenerateSpk = vi.fn();
@@ -887,7 +971,7 @@ describe('OperationalForm', () => {
     expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Tono Wibowo');
   });
 
-  it('mengizinkan admin merevisi truck dan driver setelah pekerjaan selesai', async () => {
+  it('mengizinkan admin merevisi data terkunci setelah mode koreksi aktif', async () => {
     const user = userEvent.setup();
 
     render(
@@ -911,11 +995,48 @@ describe('OperationalForm', () => {
 
     await openOperationalPhase(user, /persiapan job/i);
 
+    expect(screen.getByLabelText('Truck')).toBeDisabled();
+    await user.click(screen.getByRole('checkbox', { name: /mode koreksi admin/i }));
+    await user.type(screen.getByLabelText(/alasan koreksi/i), 'Koreksi salah input truck');
+
     expect(screen.getByLabelText('Truck')).not.toBeDisabled();
     await openOperationalPhase(user, /dokumen & closing/i);
     expect(screen.getByLabelText(/waktu mulai/i)).not.toBeDisabled();
     expect(screen.getByLabelText(/waktu selesai/i)).not.toBeDisabled();
     expect(screen.queryByText(/Hubungi admin untuk revisi/i)).not.toBeInTheDocument();
+  });
+
+  it('mengirim mode dan alasan koreksi admin saat menyimpan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          rpujStatus: 'approved',
+          status: 'completed',
+          plateNumber: 'B 6102 WXA',
+          driver: 'Tono Wibowo',
+          runningAt: '2026-07-19T08:00:00.000Z',
+          completedAt: '2026-07-19T12:00:00.000Z',
+        }}
+        currentUser={{ role: 'admin' }}
+        initialPhase="closing"
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('checkbox', { name: /mode koreksi admin/i }));
+    await user.type(screen.getByLabelText(/alasan koreksi/i), 'Koreksi tanggal selesai');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      adminCorrectionMode: true,
+      adminCorrectionReason: 'Koreksi tanggal selesai',
+    }));
   });
 
   it('mengunci biaya lainnya setelah RPUJ disetujui Finance', async () => {

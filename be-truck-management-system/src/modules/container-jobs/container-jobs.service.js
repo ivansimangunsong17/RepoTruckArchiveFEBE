@@ -8,8 +8,14 @@ import {
 } from './container-jobs.repository.js';
 import { findSalesOrderById } from '../sales-orders/sales-orders.repository.js';
 import { hasContainerSentRpuj } from '../sales-orders/sales-orders.rpuj-lock.js';
-import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-entry.permissions.js';
+import { actorHasPermission } from '../../utils/permissions.js';
+import {
+  ensureCanManageHistoricalEntry,
+  HISTORICAL_ENTRY_PERMISSION,
+} from '../historical-entry/historical-entry.permissions.js';
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
+
+const ADMIN_CORRECTION_REASON_MIN_LENGTH = 8;
 
 function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
@@ -22,7 +28,8 @@ function canSalesAccessOrder(actor, order) {
   return String(order.createdBy || '').trim() === getActorName(actor);
 }
 
-export function listContainerJobs(query) {
+export function listContainerJobs(query, actor = null) {
+  const canManageHistoricalEntry = actorHasPermission(actor, HISTORICAL_ENTRY_PERMISSION);
   return findContainerJobsPage({
     page: query.page,
     pageSize: query.pageSize,
@@ -32,11 +39,54 @@ export function listContainerJobs(query) {
     rpujStage: query.rpujStage || '',
     documentStatus: query.documentStatus || '',
     tripDate: query.tripDate || '',
+    groupByOrder: query.groupByOrder || '',
+    entrySource: canManageHistoricalEntry ? query.entrySource || '' : 'realtime',
+    historicalPeriod: canManageHistoricalEntry ? query.historicalPeriod || '' : '',
   });
 }
 
 function normalizeRole(actor) {
   return String(actor?.role || '').trim().toLowerCase();
+}
+
+function isAdmin(actor) {
+  return normalizeRole(actor) === 'admin';
+}
+
+export function isAdminCorrectionMode(payload = {}) {
+  return payload?.adminCorrectionMode === true || String(payload?.adminCorrectionMode || '').toLowerCase() === 'true';
+}
+
+export function adminCorrectionReason(payload = {}) {
+  return normalizeText(payload?.adminCorrectionReason);
+}
+
+export function canUseAdminCorrection(actor, payload = {}) {
+  return Boolean(
+    isAdmin(actor)
+      && isAdminCorrectionMode(payload)
+      && adminCorrectionReason(payload).length >= ADMIN_CORRECTION_REASON_MIN_LENGTH
+  );
+}
+
+function ensureAdminCorrectionContract(actor, payload = {}) {
+  if (!isAdminCorrectionMode(payload)) return;
+  if (!isAdmin(actor)) {
+    const error = new Error('Mode koreksi admin hanya dapat digunakan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'ADMIN_CORRECTION_ADMIN_ONLY';
+    throw error;
+  }
+  if (adminCorrectionReason(payload).length < ADMIN_CORRECTION_REASON_MIN_LENGTH) {
+    const error = new Error(`Alasan koreksi admin wajib diisi minimal ${ADMIN_CORRECTION_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'ADMIN_CORRECTION_REASON_REQUIRED';
+    throw error;
+  }
+}
+
+function shouldEnforceOperationalLock(actor, payload = {}) {
+  return ['operational', 'admin'].includes(normalizeRole(actor)) && !canUseAdminCorrection(actor, payload);
 }
 
 function hasRpujNotesInput(payload = {}) {
@@ -46,6 +96,36 @@ function hasRpujNotesInput(payload = {}) {
 function hasRpujNotesChange(job, payload = {}) {
   if (!Object.prototype.hasOwnProperty.call(payload, 'rpujNotes')) return false;
   return normalizeText(payload.rpujNotes) !== normalizeText(job?.rpujNotes);
+}
+
+function hasDriverCommissionInput(payload = {}) {
+  return [
+    'hasDriverCommission',
+    'driverCommissionAmount',
+    'driverCommissionSourceDestinationId',
+    'driverCommissionNote',
+  ].some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+}
+
+export function hasDriverCommissionChange(job = {}, payload = {}) {
+  if (!hasDriverCommissionInput(payload)) return false;
+  const nextEnabled = Object.prototype.hasOwnProperty.call(payload, 'hasDriverCommission')
+    ? Boolean(payload.hasDriverCommission)
+    : Boolean(job.hasDriverCommission);
+  const currentEnabled = Boolean(job.hasDriverCommission);
+  const nextAmount = Number(nextEnabled ? payload.driverCommissionAmount ?? job.driverCommissionAmount ?? 0 : 0);
+  const currentAmount = Number(currentEnabled ? job.driverCommissionAmount || 0 : 0);
+  const nextSource = normalizeText(nextEnabled ? payload.driverCommissionSourceDestinationId ?? job.driverCommissionSourceDestinationId : '');
+  const currentSource = normalizeText(currentEnabled ? job.driverCommissionSourceDestinationId : '');
+  const nextNote = normalizeText(nextEnabled ? payload.driverCommissionNote ?? job.driverCommissionNote : '');
+  const currentNote = normalizeText(currentEnabled ? job.driverCommissionNote : '');
+
+  return Boolean(
+    nextEnabled !== currentEnabled
+      || nextAmount !== currentAmount
+      || nextSource !== currentSource
+      || nextNote !== currentNote
+  );
 }
 
 function normalizeText(value) {
@@ -125,6 +205,15 @@ export function isOtherCostLockedForRepoPickup(job, payload = {}) {
   return Boolean(job?.status === 'repo_stored' && isRepoPickupPayload(job, payload) && hasRpujNotesChange(job, payload));
 }
 
+export function isDriverCommissionLockedForOperational(actor, job, payload = {}) {
+  if (!shouldEnforceOperationalLock(actor, payload)) return false;
+  if (!hasDriverCommissionChange(job, payload)) return false;
+
+  const lockedStatuses = new Set(['completed', 'cancelled']);
+  const lockedRpujStatuses = new Set(['approved', 'paid']);
+  return lockedStatuses.has(job?.status) || lockedRpujStatuses.has(job?.rpujStatus);
+}
+
 export function hasOperationalDocumentChange(currentJob, payload = {}) {
   const documentFields = [
     ['eirNumber', 'eirNumber'],
@@ -160,7 +249,7 @@ export function hasCompletedTimelineChange(currentJob, payload = {}) {
 }
 
 function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
-  if (normalizeRole(actor) !== 'operational') return;
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (!payload.status || payload.status === job?.status) return;
 
   if (job?.status === 'completed' || job?.status === 'cancelled') {
@@ -201,7 +290,7 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
 }
 
 function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
-  if (normalizeRole(actor) !== 'operational') return;
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (!isContainerNumberLockedForOperational(job, payload)) return;
 
   const error = new Error('No. Container yang sudah terisi tidak bisa diubah setelah pekerjaan berjalan, selesai, dibatalkan, atau UJ ditransfer.');
@@ -211,7 +300,7 @@ function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
 }
 
 function ensureOperationalCanEditDocuments(actor, job, payload = {}) {
-  if (normalizeRole(actor) !== 'operational') return;
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (job?.status !== 'completed') return;
   if (!hasOperationalDocumentChange(job, payload)) return;
 
@@ -222,7 +311,7 @@ function ensureOperationalCanEditDocuments(actor, job, payload = {}) {
 }
 
 function ensureOperationalCanEditCompletedTimeline(actor, job, payload = {}) {
-  if (normalizeRole(actor) !== 'operational') return;
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (job?.status !== 'completed') return;
   if (!hasCompletedTimelineChange(job, payload)) return;
 
@@ -233,7 +322,7 @@ function ensureOperationalCanEditCompletedTimeline(actor, job, payload = {}) {
 }
 
 function ensureOperationalCanInputOtherCost(actor, job, payload) {
-  if (normalizeRole(actor) !== 'operational') return;
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (!hasRpujNotesInput(payload)) return;
 
   const lockedStatuses = new Set(['completed', 'cancelled']);
@@ -249,7 +338,17 @@ function ensureOperationalCanInputOtherCost(actor, job, payload) {
   }
 }
 
-function ensureRepoPickupOtherCostLocked(job, payload = {}) {
+function ensureOperationalCanInputDriverCommission(actor, job, payload) {
+  if (!isDriverCommissionLockedForOperational(actor, job, payload)) return;
+
+  const error = new Error('Komisi sopir tidak bisa diubah lagi karena job sudah selesai/dibatalkan atau UJ sudah disetujui/dibayar.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_DRIVER_COMMISSION_LOCKED';
+  throw error;
+}
+
+function ensureRepoPickupOtherCostLocked(actor, job, payload = {}) {
+  if (canUseAdminCorrection(actor, payload)) return;
   if (!isOtherCostLockedForRepoPickup(job, payload)) return;
 
   const error = new Error('Biaya lainnya tidak bisa diubah saat ambil container titip.');
@@ -265,7 +364,7 @@ function isCompletingMissingAssignment(job, payload = {}) {
 }
 
 function preserveLockedOtherCost(actor, job, payload) {
-  if (normalizeRole(actor) !== 'operational') return payload;
+  if (!shouldEnforceOperationalLock(actor, payload)) return payload;
 
   const lockedStatuses = new Set(['completed', 'cancelled']);
   const lockedRpujStatuses = new Set(['submitted', 'approved', 'paid']);
@@ -278,7 +377,7 @@ function preserveLockedOtherCost(actor, job, payload) {
 }
 
 function ensureOperationalCanEditAssignment(actor, job, payload) {
-  if (normalizeRole(actor) !== 'operational') return;
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (job?.status === 'repo_stored' && hasAssignmentChange(job, payload) && !isRepoPickupPayload(job, payload)) {
     const error = new Error('Driver dan truck untuk container titip tidak bisa diubah dari form update biasa.');
     error.statusCode = 409;
@@ -365,7 +464,7 @@ export function ensureRepoStoragePayload(job, payload = {}) {
 }
 
 export function isRepoCancellationLockedForOperational(actor, job, payload = {}) {
-  return Boolean(normalizeRole(actor) === 'operational' && payload.status === 'cancelled' && hasRepoStorageHistory(job));
+  return Boolean(shouldEnforceOperationalLock(actor, payload) && payload.status === 'cancelled' && hasRepoStorageHistory(job));
 }
 
 function ensureRepoHistoryCanCancel(actor, job, payload = {}) {
@@ -409,6 +508,7 @@ export async function saveContainerJob(id, payload, actor) {
   }
 
   const currentJob = await getContainerJob(id);
+  ensureAdminCorrectionContract(actor, normalizedPayload);
   ensureCanManageHistoricalEntry(actor, {
     payload: normalizedPayload,
     currentRecord: currentJob,
@@ -418,13 +518,14 @@ export async function saveContainerJob(id, payload, actor) {
     normalizedPayload.historicalPeriod || currentJob.historicalPeriod,
     'Container data lama',
   );
-  ensureRepoPickupOtherCostLocked(currentJob, normalizedPayload);
+  ensureRepoPickupOtherCostLocked(actor, currentJob, normalizedPayload);
   ensureRepoHistoryCanCancel(actor, currentJob, normalizedPayload);
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
   ensureRepoStoragePayload(currentJob, payloadForUpdate);
   ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
   ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
+  ensureOperationalCanInputDriverCommission(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditDocuments(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditCompletedTimeline(actor, currentJob, payloadForUpdate);

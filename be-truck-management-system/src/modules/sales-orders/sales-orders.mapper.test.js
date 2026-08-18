@@ -88,6 +88,37 @@ test('sales order mapper membaca dan menyimpan metadata input historis', () => {
   assert.equal(row.historical_notes, 'Input dari arsip Juli.');
 });
 
+test('sales order mapper memisahkan nomor internal dan nomor SO Accurate', () => {
+  const pending = mapSalesOrder({
+    id: 'order-auto-1',
+    so_number: 'SO-ARM-202608-0001',
+    accurate_so_number: null,
+    customer_name: 'PT Auto',
+    finance_verification_status: 'pending_so',
+    payment_type: 'cash',
+    quantity: 1,
+    price: 0,
+    total_amount: 0,
+  });
+
+  assert.equal(pending.soNumber, 'SO-ARM-202608-0001');
+  assert.equal(pending.internalSoNumber, 'SO-ARM-202608-0001');
+  assert.equal(pending.accurateSoNumber, '');
+  assert.equal(pending.financeVerificationStatus, 'pending_so');
+
+  const historical = toSalesOrderDb({
+    soNumber: '26/080/ARM/00054',
+    financeVerificationStatus: 'verified',
+    customer: 'PT Arsip',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+  });
+
+  assert.equal(historical.so_number, '26/080/ARM/00054');
+  assert.equal(historical.accurate_so_number, '26/080/ARM/00054');
+  assert.equal(historical.finance_verification_status, 'verified');
+});
+
 test('sales order historis memakai periode dari tanggal jalan', () => {
   const row = toSalesOrderDb({
     customer: 'PT Arsip',

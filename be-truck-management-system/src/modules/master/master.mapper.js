@@ -328,6 +328,7 @@ export const resourceConfig = {
       uj20ft: row.uj_20ft == null ? null : Number(row.uj_20ft),
       uj40ft: row.uj_40ft == null ? null : Number(row.uj_40ft),
       ujNotes: row.uj_notes || '',
+      driverCommissionAmount: Number(row.driver_commission_amount || 0),
     }),
     toDb: (row) => ({
       name: row.name,
@@ -338,6 +339,7 @@ export const resourceConfig = {
       uj_20ft: toNullableNumber(row.uj20ft ?? row.uj_20ft),
       uj_40ft: toNullableNumber(row.uj40ft ?? row.uj_40ft),
       uj_notes: row.ujNotes || row.uj_notes || null,
+      driver_commission_amount: toNullableNumber(row.driverCommissionAmount ?? row.driver_commission_amount) || 0,
     }),
   },
   stids: {

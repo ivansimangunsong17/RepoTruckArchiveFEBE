@@ -592,7 +592,7 @@ function SalesOrderForm({
         <header>
           <div>
             <p className="eyebrow">{editing ? 'Edit Sales' : 'Input Sales'}</p>
-            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber || 'Order Menunggu SO'}` : 'Sales Order Baru'}</h2>
+            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber || 'Order Tanpa Nomor Internal'}` : 'Sales Order Baru'}</h2>
             <span>Lengkapi customer, rincian order, dan dokumen referensi.</span>
           </div>
 
@@ -643,7 +643,7 @@ function SalesOrderForm({
             <p className="section-helper-text">
               {historicalMode
                 ? 'Nomor SO lama boleh langsung diisi Admin sesuai data arsip.'
-                : 'No. Invoice diisi setelah pekerjaan selesai dan invoice dibuat.'}
+                : 'Nomor SO internal dibuat otomatis saat order disimpan.'}
             </p>
 
             <div className="order-form-grid">
@@ -652,7 +652,7 @@ function SalesOrderForm({
                   No. Sales Order
                   <input
                     name="soNumber"
-                    value={historicalMode ? form.soNumber : form.soNumber || 'Menunggu Finance'}
+                    value={historicalMode ? form.soNumber : form.soNumber || 'Otomatis dibuat sistem'}
                     onChange={historicalMode ? updateField : undefined}
                     placeholder={historicalMode ? 'SO-ARM-000' : undefined}
                     readOnly={!historicalMode}
@@ -999,7 +999,7 @@ function SalesOrderForm({
               <div className="sales-order-review-body">
                 <div className="sales-order-review-grid">
                   <div><span>Customer</span><strong>{reviewPayload.customer || '-'}</strong></div>
-                  <div><span>No. SO</span><strong>{reviewPayload.soNumber || 'Menunggu Finance'}</strong></div>
+                  <div><span>No. SO</span><strong>{reviewPayload.soNumber || 'Otomatis setelah simpan'}</strong></div>
                   <div><span>Tanggal SO</span><strong>{formatDate(reviewPayload.soDate)}</strong></div>
                   <div><span>Tanggal Jalan</span><strong>{formatDate(reviewPayload.tripDate)}</strong></div>
                   <div><span>Depo</span><strong>{reviewPayload.origin || '-'}</strong></div>

@@ -687,6 +687,7 @@
 
 .orders-list { border-top: 1px solid var(--border); }
 .sales-order-group {
+  overflow: hidden;
   border-bottom: 1px solid var(--border);
   background: white;
 }
@@ -729,16 +730,17 @@
   font-weight: 850;
   text-align: right;
 }
-.order-card { border-bottom: 1px solid var(--border); }
+.order-card { overflow: hidden; border-bottom: 1px solid var(--border); }
 .sales-order-group .order-card:last-child { border-bottom: 0; }
 .order-summary {
   display: grid;
-  grid-template-columns: 42px minmax(140px, .95fr) minmax(180px, 1.22fr) minmax(112px, .66fr) minmax(100px, .54fr) minmax(126px, .68fr) minmax(136px, .72fr) 108px;
+  grid-template-columns: 38px minmax(104px, .92fr) minmax(140px, 1.16fr) minmax(86px, .6fr) minmax(112px, .72fr) minmax(96px, .62fr) minmax(96px, .64fr) minmax(86px, .46fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
+  max-width: 100%;
   min-height: 68px;
-  padding: 12px 18px;
+  padding: 12px 14px;
   border: 0;
   color: inherit;
   background: white;
@@ -781,7 +783,7 @@
 }
 .order-summary-actions {
   display: grid !important;
-  grid-template-columns: 104px;
+  grid-template-columns: minmax(0, 96px);
   align-items: center;
   justify-content: flex-end;
   gap: 0;
@@ -814,6 +816,7 @@
   color: #64748b;
   font-size: .6rem !important;
   font-weight: 900;
+  white-space: normal;
 }
 .order-document-summary strong.ready {
   border-color: #bae6fd;
@@ -1277,9 +1280,11 @@
   background: #fef2f2;
 }
 .order-summary-actions .secondary-button {
-  width: 104px;
+  width: 100%;
+  max-width: 96px;
   min-height: 34px;
-  padding: 0 12px;
+  min-width: 0;
+  padding: 0 10px;
   border-color: #d9e0ea;
   font-size: .7rem;
   white-space: nowrap;

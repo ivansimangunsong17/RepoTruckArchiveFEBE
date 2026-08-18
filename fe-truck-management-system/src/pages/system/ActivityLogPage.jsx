@@ -18,6 +18,7 @@ const actionOptions = [
   ['UPDATE_HISTORICAL_SALES_ORDER', 'Ubah SO Data Lama'],
   ['CREATE_CONTAINER_JOB', 'Buat Container Job'],
   ['UPDATE_CONTAINER_JOB', 'Ubah Container Job'],
+  ['ADMIN_CORRECTION_CONTAINER_JOB', 'Koreksi Admin Container'],
   ['CREATE_HISTORICAL_CONTAINER_JOB', 'Input Container Data Lama'],
   ['UPDATE_HISTORICAL_CONTAINER_JOB', 'Ubah Container Data Lama'],
   ['LOCK_HISTORICAL_PERIOD', 'Kunci Periode Data Lama'],
@@ -61,6 +62,16 @@ function formatPeriod(value) {
 
 function formatLogTarget(item) {
   const metadata = item.metadata || {};
+  if (item.action === 'ADMIN_CORRECTION_CONTAINER_JOB') {
+    const reference = [
+      metadata.soNumber,
+      metadata.containerNumber,
+    ].filter(Boolean).join(' / ');
+    return [
+      reference || item.target || 'Container Job',
+      metadata.adminCorrectionReason ? `Alasan: ${metadata.adminCorrectionReason}` : '',
+    ].filter(Boolean).join(' - ');
+  }
   if (item.module !== 'historical_entry') return item.target || item.module || '-';
   const period = formatPeriod(metadata.historicalPeriod);
   const reference = [

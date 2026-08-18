@@ -1,5 +1,5 @@
-import { ROLE_PERMISSIONS } from '../modules/users/users.mapper.js';
 import { readBearerToken, verifyAuthToken } from '../modules/auth/auth.utils.js';
+import { actorHasPermission } from '../utils/permissions.js';
 
 function readRequestToken(request) {
   const headerToken = readBearerToken(request.headers);
@@ -22,8 +22,7 @@ export function authorizeRoute(route, request) {
       : [];
   if (!permissions.length) return payload;
 
-  const rolePermissions = ROLE_PERMISSIONS[payload.role] || [];
-  const allowed = permissions.some((permission) => rolePermissions.includes(permission));
+  const allowed = permissions.some((permission) => actorHasPermission(payload, permission));
   if (!allowed) {
     const error = new Error('Role pengguna tidak memiliki akses ke endpoint ini.');
     error.statusCode = 403;

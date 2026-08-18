@@ -82,4 +82,20 @@ describe('RoleRoute', () => {
     expect(screen.queryByText('Kelola Master')).not.toBeInTheDocument();
     expect(screen.getByText(/akses dibatasi/i)).toBeInTheDocument();
   });
+
+  it('membuka modul role lain untuk admin sebagai super role', () => {
+    useAuth.mockReturnValue({ user: { role: 'admin' } });
+
+    render(
+      <MemoryRouter initialEntries={['/finance-only']}>
+        <Routes>
+          <Route element={<RoleRoute allowedRoles={['finance']} />}>
+            <Route path="/finance-only" element={<div>Finance Tools</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Finance Tools')).toBeInTheDocument();
+  });
 });

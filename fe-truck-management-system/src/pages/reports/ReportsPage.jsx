@@ -52,6 +52,21 @@ const DATA_SOURCE_OPTIONS = [
   { value: 'historical', label: 'Data Lama' },
 ];
 
+const DRIVER_COMMISSION_FILTER_OPTIONS = [
+  { value: 'all', label: 'Semua Komisi' },
+  { value: 'with_commission', label: 'Ada Komisi' },
+  { value: 'without_commission', label: 'Tanpa Komisi' },
+];
+
+const DRIVER_COMMISSION_PAYMENT_FILTER_OPTIONS = [
+  { value: 'all', label: 'Semua Status Bayar' },
+  { value: 'unsubmitted', label: 'Belum Diajukan' },
+  { value: 'submitted', label: 'Menunggu Finance' },
+  { value: 'approved', label: 'Approved Belum Paid' },
+  { value: 'paid', label: 'Sudah Dibayar' },
+  { value: 'unpaid', label: 'Belum Dibayar' },
+];
+
 function utilizationNoteKey(resourceId, date) {
   return `${String(resourceId || '').trim()}|${String(date || '').trim().slice(0, 10)}`;
 }
@@ -146,6 +161,48 @@ function getDriverName(row = {}) {
 
 function monthKey(month, year) {
   return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function dateKey(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildCommissionWeekOptions(month, year) {
+  const selectedMonth = Number(month);
+  const selectedYear = Number(year);
+  const monthStart = new Date(selectedYear, selectedMonth - 1, 1);
+  const monthEnd = new Date(selectedYear, selectedMonth, 0);
+  let weekStart = new Date(monthStart);
+  while (weekStart.getDay() !== 4) {
+    weekStart = addDays(weekStart, -1);
+  }
+
+  const formatter = new Intl.DateTimeFormat('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  const options = [{ value: 'all', label: 'Semua periode bulan ini' }];
+  while (weekStart <= monthEnd) {
+    const weekEnd = addDays(weekStart, 6);
+    const from = dateKey(weekStart);
+    const to = dateKey(weekEnd);
+    options.push({
+      value: `${from}|${to}`,
+      from,
+      to,
+      label: `${formatter.format(weekStart)} - ${formatter.format(weekEnd)}`,
+    });
+    weekStart = addDays(weekStart, 7);
+  }
+  return options;
 }
 
 function daysInMonth(month, year) {
@@ -584,7 +641,11 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
         driver: name,
         totalTrips: 0,
         totalRevenue: 0,
+        totalDriverCommission: 0,
+        paidDriverCommission: 0,
+        unpaidDriverCommission: 0,
         averageRevenuePerTrip: 0,
+        averageCommissionPerTrip: 0,
       });
     }
   });
@@ -596,14 +657,22 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
         driver: name,
         totalTrips: 0,
         totalRevenue: 0,
+        totalDriverCommission: 0,
+        paidDriverCommission: 0,
+        unpaidDriverCommission: 0,
         averageRevenuePerTrip: 0,
+        averageCommissionPerTrip: 0,
       });
     }
 
     const driver = drivers.get(name);
     driver.totalTrips = Number(row.monthlyTrips ?? row.totalTrips ?? 0);
     driver.totalRevenue = Number(row.totalRevenue || 0);
+    driver.totalDriverCommission = Number(row.totalDriverCommission || 0);
+    driver.paidDriverCommission = Number(row.paidDriverCommission || 0);
+    driver.unpaidDriverCommission = Number(row.unpaidDriverCommission || 0);
     driver.averageRevenuePerTrip = Number(row.averageRevenuePerTrip || (driver.totalTrips ? driver.totalRevenue / driver.totalTrips : 0));
+    driver.averageCommissionPerTrip = Number(row.averageCommissionPerTrip || (driver.totalTrips ? driver.totalDriverCommission / driver.totalTrips : 0));
   });
 
   return Array.from(drivers.values()).sort((left, right) => {
@@ -860,6 +929,7 @@ function buildMasterReportSections(masters = {}) {
         { label: 'Area', value: (row) => row.area },
         { label: 'UJ 20FT', value: (row) => row.uj20ft == null ? '-' : formatCurrency(row.uj20ft) },
         { label: 'UJ 40FT', value: (row) => row.uj40ft == null ? '-' : formatCurrency(row.uj40ft) },
+        { label: 'Komisi Sopir', value: (row) => Number(row.driverCommissionAmount || 0) > 0 ? formatCurrency(row.driverCommissionAmount) : '-' },
         { label: 'Status', value: (row) => row.status },
       ],
     },
@@ -1450,6 +1520,9 @@ function ReportsPage() {
   const [publicHolidays, setPublicHolidays] = useState([]);
   const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab')));
   const [dataSource, setDataSource] = useState('all');
+  const [driverCommissionFilter, setDriverCommissionFilter] = useState('all');
+  const [driverCommissionPaymentFilter, setDriverCommissionPaymentFilter] = useState('all');
+  const [driverCommissionPeriod, setDriverCommissionPeriod] = useState('all');
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
   const [driverUtilizationModalOpen, setDriverUtilizationModalOpen] = useState(false);
   const [utilizationNotes, setUtilizationNotes] = useState([]);
@@ -1461,6 +1534,8 @@ function ReportsPage() {
   }, []);
   const activeMonthLabel = MONTHS.find((item) => Number(item.value) === Number(month))?.label || '-';
   const activePeriodKey = monthKey(month, year);
+  const driverCommissionPeriodOptions = useMemo(() => buildCommissionWeekOptions(month, year), [month, year]);
+  const selectedDriverCommissionPeriod = driverCommissionPeriodOptions.find((option) => option.value === driverCommissionPeriod) || driverCommissionPeriodOptions[0];
   const canEditUtilizationNotes = user?.role === USER_ROLES.ADMIN || hasPermission(user, 'operations.update');
   const reportSourceParams = useMemo(() => {
     if (dataSource === 'historical') return { entrySource: 'historical', historicalPeriod: activePeriodKey };
@@ -1476,6 +1551,12 @@ function ReportsPage() {
     if (selectedReport !== 'utilization') setUtilizationModalOpen(false);
     if (selectedReport !== 'driver') setDriverUtilizationModalOpen(false);
   }, [selectedReport]);
+
+  useEffect(() => {
+    if (!driverCommissionPeriodOptions.some((option) => option.value === driverCommissionPeriod)) {
+      setDriverCommissionPeriod('all');
+    }
+  }, [driverCommissionPeriod, driverCommissionPeriodOptions]);
 
   useEffect(() => {
     let active = true;
@@ -1563,7 +1644,16 @@ function ReportsPage() {
     Promise.allSettled([
       fetchMonthlyRevenueReport({ month, year, ...reportSourceParams }),
       loadUtilizationRows(),
-      fetchDriverPerformanceReport({ month: activePeriodKey, ...reportSourceParams }),
+      fetchDriverPerformanceReport({
+        month: selectedDriverCommissionPeriod?.from ? 'all' : activePeriodKey,
+        ...(driverCommissionFilter !== 'all' ? { commissionStatus: driverCommissionFilter } : {}),
+        ...(driverCommissionPaymentFilter !== 'all' ? { commissionPaymentStatus: driverCommissionPaymentFilter } : {}),
+        ...(selectedDriverCommissionPeriod?.from ? {
+          weekFrom: selectedDriverCommissionPeriod.from,
+          weekTo: selectedDriverCommissionPeriod.to,
+        } : {}),
+        ...reportSourceParams,
+      }),
       fetchOperationReport({
         page: 1,
         pageSize: 100,
@@ -1620,7 +1710,7 @@ function ReportsPage() {
     return () => {
       active = false;
     };
-  }, [activePeriodKey, month, reportSourceParams, year]);
+  }, [activePeriodKey, driverCommissionFilter, driverCommissionPaymentFilter, month, reportSourceParams, selectedDriverCommissionPeriod, year]);
 
   const masterTruckRows = archive.masters?.trucks;
   const masterDriverRows = archive.masters?.drivers;
@@ -1652,9 +1742,24 @@ function ReportsPage() {
     () => buildMonthlyDriverUtilizationPivot(masterDriverRows || [], utilizationSourceRows, month, year, holidaysByDate),
     [holidaysByDate, masterDriverRows, month, utilizationSourceRows, year],
   );
-  const driverRows = useMemo(() => buildDriverPerformanceRows(masterDriverRows || [], driverPerformanceRows), [masterDriverRows, driverPerformanceRows]);
+  const driverRows = useMemo(() => {
+    const rows = buildDriverPerformanceRows(masterDriverRows || [], driverPerformanceRows);
+    if (driverCommissionFilter === 'with_commission') {
+      return rows.filter((driver) => Number(driver.totalDriverCommission || 0) > 0);
+    }
+    if (driverCommissionFilter === 'without_commission') {
+      return rows.filter((driver) => Number(driver.totalTrips || 0) > 0 && Number(driver.totalDriverCommission || 0) <= 0);
+    }
+    if (driverCommissionPaymentFilter !== 'all') {
+      return rows.filter((driver) => Number(driver.totalTrips || 0) > 0);
+    }
+    return rows;
+  }, [driverCommissionFilter, driverCommissionPaymentFilter, masterDriverRows, driverPerformanceRows]);
   const driverSummary = useMemo(() => ({
     totalTrips: driverRows.reduce((total, driver) => total + driver.totalTrips, 0),
+    totalDriverCommission: driverRows.reduce((total, driver) => total + Number(driver.totalDriverCommission || 0), 0),
+    paidDriverCommission: driverRows.reduce((total, driver) => total + Number(driver.paidDriverCommission || 0), 0),
+    unpaidDriverCommission: driverRows.reduce((total, driver) => total + Number(driver.unpaidDriverCommission || 0), 0),
     activeDrivers: driverRows.filter((driver) => driver.totalTrips > 0).length,
     totalDrivers: driverRows.length,
     averageTripsPerActiveDriver: driverRows.filter((driver) => driver.totalTrips > 0).length
@@ -1751,6 +1856,40 @@ function ReportsPage() {
             <strong className="text-sm text-slate-900">{activeMonthLabel} {year}</strong>
           </div>
         </div>
+        {selectedReport === 'driver' ? (
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+              Status Komisi
+              <select
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
+                value={driverCommissionFilter}
+                onChange={(event) => setDriverCommissionFilter(event.target.value)}
+              >
+                {DRIVER_COMMISSION_FILTER_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+              Status Pembayaran
+              <select
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
+                value={driverCommissionPaymentFilter}
+                onChange={(event) => setDriverCommissionPaymentFilter(event.target.value)}
+              >
+                {DRIVER_COMMISSION_PAYMENT_FILTER_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+              Periode Komisi Kamis-Rabu
+              <select
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
+                value={driverCommissionPeriod}
+                onChange={(event) => setDriverCommissionPeriod(event.target.value)}
+              >
+                {driverCommissionPeriodOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+          </div>
+        ) : null}
       </section>
       ) : (
       <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
@@ -1791,8 +1930,8 @@ function ReportsPage() {
           helper={`${driverSummary.activeDrivers} sopir menjalankan trip`}
           secondaryLabel="Rata-rata Trip/Sopir"
           secondaryValue={`${formatDecimal(driverSummary.averageTripsPerActiveDriver)} Trip`}
-          tertiaryLabel="Total Sopir"
-          tertiaryValue={`${driverSummary.totalDrivers} Sopir`}
+          tertiaryLabel="Komisi Sopir"
+          tertiaryValue={formatCurrency(driverSummary.totalDriverCommission)}
           tone="amber"
           expanded={selectedReport === 'driver'}
           onClick={() => selectReport('driver')}
@@ -1995,7 +2134,7 @@ function ReportsPage() {
           <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-sm font-bold text-slate-950">Performa Sopir</h2>
-              <p className="text-xs text-slate-500">Jumlah trip dan revenue perusahaan dari trip yang dibawa sopir.</p>
+              <p className="text-xs text-slate-500">Jumlah trip, revenue perusahaan, dan komisi yang tercatat untuk sopir.</p>
             </div>
             <button
               type="button"
@@ -2018,7 +2157,11 @@ function ReportsPage() {
                 { label: 'Sopir' },
                 { label: 'Jumlah Trip', align: 'right' },
                 { label: 'Total Revenue', align: 'right' },
+                { label: 'Total Komisi', align: 'right' },
+                { label: 'Komisi Paid', align: 'right' },
+                { label: 'Belum Paid', align: 'right' },
                 { label: 'Rata-rata / Trip', align: 'right' },
+                { label: 'Avg Komisi / Trip', align: 'right' },
               ]}
               rows={driverRows}
               rowRenderer={(driver, index) => (
@@ -2031,7 +2174,11 @@ function ReportsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Total Revenue">{formatCurrency(driver.totalRevenue)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-amber-700" data-label="Total Komisi">{formatCurrency(driver.totalDriverCommission)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-emerald-700" data-label="Komisi Paid">{formatCurrency(driver.paidDriverCommission)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-rose-700" data-label="Belum Paid">{formatCurrency(driver.unpaidDriverCommission)}</td>
                   <td className="px-3 py-2 text-right text-slate-600" data-label="Rata-rata / Trip">{formatCurrency(driver.averageRevenuePerTrip)}</td>
+                  <td className="px-3 py-2 text-right text-slate-600" data-label="Avg Komisi / Trip">{formatCurrency(driver.averageCommissionPerTrip)}</td>
                 </tr>
               )}
             />

@@ -24,8 +24,58 @@ function historicalMetadata(job = {}) {
   };
 }
 
+const adminCorrectionAuditFields = {
+  status: 'Status',
+  containerNumber: 'No. Container',
+  plateNumber: 'Truck',
+  driver: 'Sopir',
+  runningAt: 'Waktu Mulai',
+  completedAt: 'Waktu Selesai',
+  rpujStatus: 'Status RPUJ',
+  rpujNotes: 'Biaya Lainnya',
+  hasDriverCommission: 'Komisi Sopir',
+  driverCommissionAmount: 'Nominal Komisi',
+  eirNumber: 'No. EIR',
+  loadingVoucher: 'Bon Muat/Bongkar',
+  tilaGatepassDocument: 'TILA/Gatepass',
+  travelDocument: 'Surat Jalan',
+};
+
+export function isAdminCorrectionPayload(payload = {}) {
+  return payload.adminCorrectionMode === true || String(payload.adminCorrectionMode || '').toLowerCase() === 'true';
+}
+
+export function adminCorrectionMetadata(payload = {}, job = {}) {
+  if (!isAdminCorrectionPayload(payload)) return {};
+  return {
+    adminCorrection: true,
+    adminCorrectionReason: String(payload.adminCorrectionReason || '').trim(),
+    salesOrderId: job.orderId,
+    soNumber: job.soNumber,
+    containerNumber: job.containerNumber,
+  };
+}
+
+function normalizeAuditValue(value) {
+  if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+export function adminCorrectionChanges(before = {}, after = {}) {
+  return Object.entries(adminCorrectionAuditFields)
+    .filter(([field]) => normalizeAuditValue(before[field]) !== normalizeAuditValue(after[field]))
+    .map(([field, label]) => ({
+      field,
+      label,
+      before: before[field] ?? null,
+      after: after[field] ?? null,
+    }));
+}
+
 export async function listContainerJobsController(request, response) {
-  const result = await listContainerJobs(request.query);
+  const result = await listContainerJobs(request.query, request.user);
   sendSuccess(response, result);
 }
 
@@ -44,7 +94,23 @@ export async function updateContainerJobController(request, response) {
     entityId: saved.id,
     beforeData: before,
     afterData: saved,
+    metadata: adminCorrectionMetadata(request.body, saved),
   });
+  if (isAdminCorrectionPayload(request.body)) {
+    const changes = adminCorrectionChanges(before, saved);
+    await safeRecordActivityLog(request, {
+      action: 'ADMIN_CORRECTION_CONTAINER_JOB',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: saved.id,
+      beforeData: Object.fromEntries(changes.map((item) => [item.field, item.before])),
+      afterData: Object.fromEntries(changes.map((item) => [item.field, item.after])),
+      metadata: {
+        ...adminCorrectionMetadata(request.body, saved),
+        changedFields: changes.map((item) => item.label),
+      },
+    });
+  }
   if (isHistoricalRecord(before) || isHistoricalRecord(saved)) {
     await safeRecordActivityLog(request, {
       action: 'UPDATE_HISTORICAL_CONTAINER_JOB',
@@ -176,10 +242,17 @@ export async function updateContainerJobController(request, response) {
       entityType: 'container_job',
       entityId: saved.id,
       beforeData: { rpujStatus: before.rpujStatus },
-      afterData: { rpujStatus: saved.rpujStatus, rpujNotes: saved.rpujNotes },
+      afterData: {
+        rpujStatus: saved.rpujStatus,
+        rpujNotes: saved.rpujNotes,
+        hasDriverCommission: saved.hasDriverCommission,
+        driverCommissionAmount: saved.driverCommissionAmount,
+      },
       metadata: {
         salesOrderId: saved.orderId,
         soNumber: saved.soNumber,
+        hasDriverCommission: saved.hasDriverCommission,
+        driverCommissionAmount: saved.driverCommissionAmount,
       },
     });
   }

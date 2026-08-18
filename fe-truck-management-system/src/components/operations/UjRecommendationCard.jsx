@@ -34,12 +34,18 @@ function UjRecommendationCard({ job, destinations = [] }) {
         </div>
 
         <div className="uj-recommendation-amount-card min-w-0 flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2">
-          <div className="uj-recommendation-amount-row flex h-full items-center justify-between gap-3">
+          <div className="uj-recommendation-amount-row flex h-full flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-[11px] font-bold uppercase text-slate-500">UJ Container Ini</span>
               <strong className="block text-sm font-bold text-slate-950">{recommendation.currentSize || job.size || '-'}</strong>
             </div>
             <strong className="whitespace-nowrap text-xl font-black text-emerald-700">{formatCurrency(recommendation.currentContainerUj)}</strong>
+            <div className="w-full border-t border-emerald-100 pt-2">
+              <span className="text-[11px] font-bold uppercase text-slate-500">Komisi Sopir</span>
+              <strong className="ml-2 text-sm font-black text-slate-900">
+                {recommendation.driverCommissionAmount > 0 ? formatCurrency(recommendation.driverCommissionAmount) : '-'}
+              </strong>
+            </div>
           </div>
         </div>
       </div>

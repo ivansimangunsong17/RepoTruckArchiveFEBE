@@ -3,6 +3,7 @@ import { Download, FileText, History, Truck, X } from 'lucide-react';
 import { formatShortDate, normalizeSize, todayKey } from '../../data/operationalDashboard';
 import { fetchDashboardReport } from '../../services/reports/reportService';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
+import { formatDateTime } from '../../utils/formatDate';
 
 function formatShipment(value) {
   const shipmentMap = {
@@ -181,6 +182,28 @@ function rowStatusClass(row) {
   return 'border-slate-300 bg-slate-100 text-slate-500';
 }
 
+function getLastOperationalUpdate(jobs = []) {
+  const latest = jobs
+    .map((job) => job.updatedAt || job.runningAt || job.receivedAt || '')
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => right.getTime() - left.getTime())[0];
+  return latest ? latest.toISOString() : '';
+}
+
+function formatRunningDate(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return new Intl.DateTimeFormat('id-ID', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  }).format(parsed);
+}
+
 function TodayTruckDashboard() {
   const [selectedRow, setSelectedRow] = useState(null);
   const [dashboard, setDashboard] = useState({ trucks: [], activeJobs: [] });
@@ -220,11 +243,13 @@ function TodayTruckDashboard() {
   const truckRows = sourceTrucks.map(normalizeTruck);
   const rows = buildTruckRows(truckRows, sourceJobs);
   const availability = getAvailability(truckRows, sourceJobs);
+  const lastOperationalUpdate = getLastOperationalUpdate(sourceJobs);
+  const lastOperationalUpdateLabel = formatDateTime(lastOperationalUpdate);
 
   function handleDownloadReport() {
     downloadPdfReport({
       title: 'Order Berjalan Hari Ini',
-      subtitle: `Tanggal ${formatShortDate(currentDateKey)}`,
+      subtitle: `Last Update ${lastOperationalUpdateLabel}`,
       filename: `dashboard-truck-harian-${reportDateKey(currentDateKey)}.pdf`,
       meta: [
         { label: 'Total Truck', value: rows.length },
@@ -253,9 +278,9 @@ function TodayTruckDashboard() {
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="m-0 text-[22px] font-black leading-none text-slate-950">Order Berjalan Hari Ini</h1>
           </div>
-          <p className="m-0 mt-1 text-[12px] font-semibold leading-none text-slate-500">Data truck yang berjalan dan belum selesai.</p>
+          <p className="m-0 mt-1 text-[12px] font-semibold leading-none text-slate-500">{formatRunningDate(currentDateKey)}</p>
         </div>
-        <div className="today-live-actions flex flex-wrap items-center gap-2">
+        <div className="today-live-actions flex flex-col items-start gap-1.5 sm:items-end">
           <button
             className="inline-flex min-h-[34px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-[12px] font-black text-slate-900 shadow-sm hover:border-red-700 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"
@@ -264,10 +289,7 @@ function TodayTruckDashboard() {
           >
             <Download size={15} /> Download PDF
           </button>
-          <div className="today-live-date inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] shadow-sm">
-            <span className="font-extrabold text-slate-500">Tanggal</span>
-            <strong className="font-black text-slate-950">{formatShortDate(currentDateKey)}</strong>
-          </div>
+          <p className="m-0 text-[12px] font-semibold leading-none text-slate-500">Last Update: {lastOperationalUpdateLabel}</p>
         </div>
       </header>
       {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat dashboard truck...</p></div> : null}

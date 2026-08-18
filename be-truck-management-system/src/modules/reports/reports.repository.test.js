@@ -3,7 +3,11 @@ import test from 'node:test';
 
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
-const { calculateCompletedJobRevenue } = await import('./reports.repository.js');
+const {
+  calculateCompletedJobRevenue,
+  calculateDriverCommissionAmount,
+  splitDriverCommissionPaymentAmount,
+} = await import('./reports.repository.js');
 
 test('monthly revenue memakai harga per container agar cancelled job tidak menggandakan revenue', () => {
   assert.equal(calculateCompletedJobRevenue({
@@ -57,4 +61,29 @@ test('monthly revenue memilih jasa angkut sesuai ukuran container', () => {
       { serviceName: 'Jasa Angkut D40', qty: 1, price: 2500000 },
     ]),
   }), 2500000);
+});
+
+test('driver commission hanya dihitung ketika flag komisi aktif', () => {
+  assert.equal(calculateDriverCommissionAmount({
+    has_driver_commission: true,
+    driver_commission_amount: '50000',
+  }), 50000);
+  assert.equal(calculateDriverCommissionAmount({
+    has_driver_commission: false,
+    driver_commission_amount: '50000',
+  }), 0);
+});
+
+test('driver commission payment dipisah paid dan unpaid', () => {
+  assert.deepEqual(splitDriverCommissionPaymentAmount({
+    has_driver_commission: true,
+    driver_commission_amount: '50000',
+    commission_payment_status: 'paid',
+  }), { paid: 50000, unpaid: 0 });
+
+  assert.deepEqual(splitDriverCommissionPaymentAmount({
+    has_driver_commission: true,
+    driver_commission_amount: '75000',
+    commission_payment_status: 'pending',
+  }), { paid: 0, unpaid: 75000 });
 });

@@ -34,7 +34,7 @@ export function normalizeFinanceCorrectionType(value) {
 
 export function getFinanceCorrectionField(type) {
   const normalizedType = normalizeFinanceCorrectionType(type);
-  return normalizedType === financeCorrectionTypes.invoiceNumber ? 'invoice_number' : 'so_number';
+  return normalizedType === financeCorrectionTypes.invoiceNumber ? 'invoice_number' : 'accurate_so_number';
 }
 
 export function validateFinanceCorrectionInput(payload = {}) {

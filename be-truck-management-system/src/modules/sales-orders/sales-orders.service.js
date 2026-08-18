@@ -296,6 +296,7 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
     || Boolean(String(payload.historicalPeriod || '').trim());
   if (currentOrder) {
     const nextSoNumber = currentOrder.soNumber || payload.soNumber || '';
+    const nextAccurateSoNumber = currentOrder.accurateSoNumber || payload.accurateSoNumber || '';
     const shouldVerifyHistoricalSo = isHistoricalPayload
       && nextSoNumber
       && String(currentOrder.financeVerificationStatus || '').trim().toLowerCase() === 'pending_so';
@@ -307,9 +308,10 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
       updatedBy: actorName,
       updatedByUserId: actor?.sub || null,
       soNumber: nextSoNumber,
+      accurateSoNumber: shouldVerifyHistoricalSo ? nextSoNumber : nextAccurateSoNumber,
       financeVerificationStatus: shouldVerifyHistoricalSo
         ? 'verified'
-        : currentOrder.financeVerificationStatus || payload.financeVerificationStatus || (nextSoNumber ? 'verified' : 'pending_so'),
+        : currentOrder.financeVerificationStatus || payload.financeVerificationStatus || (nextAccurateSoNumber ? 'verified' : 'pending_so'),
       financeVerifiedBy: shouldVerifyHistoricalSo
         ? actorName
         : currentOrder.financeVerifiedBy || payload.financeVerifiedBy || null,
@@ -335,6 +337,7 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
   return {
     ...payload,
     soNumber: isHistoricalPayload ? payload.soNumber || '' : '',
+    accurateSoNumber: isHistoricalPayload && payload.soNumber ? payload.soNumber : '',
     financeVerificationStatus: isHistoricalPayload && payload.soNumber ? 'verified' : 'pending_so',
     financeVerifiedBy: isHistoricalPayload && payload.soNumber ? actorName : null,
     financeVerifiedAt: isHistoricalPayload && payload.soNumber ? new Date().toISOString() : null,

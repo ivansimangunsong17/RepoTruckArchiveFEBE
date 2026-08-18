@@ -142,6 +142,7 @@ export async function calculateDestinationUj(id, query = {}) {
   const qty40ft = parseQuantity(query.qty40 ?? query.qty40ft ?? query.qty40FT);
   const uj20ft = Number(destination.uj20ft || 0);
   const uj40ft = Number(destination.uj40ft || 0);
+  const driverCommissionAmount = Number(destination.driverCommissionAmount || 0);
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
 
@@ -150,6 +151,7 @@ export async function calculateDestinationUj(id, query = {}) {
     destinationName: destination.name,
     uj20ft,
     uj40ft,
+    driverCommissionAmount,
     qty20ft,
     qty40ft,
     totalUj20ft,

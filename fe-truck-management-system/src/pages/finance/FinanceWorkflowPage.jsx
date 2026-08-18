@@ -386,12 +386,14 @@ function isCancelledFinanceOrder(row = {}) {
 }
 
 function isVerifiedFinanceOrder(row = {}) {
-  return !isCancelledFinanceOrder(row) && (row.verificationStatus === 'verified' || Boolean(row.soNumber));
+  return !isCancelledFinanceOrder(row) && (row.verificationStatus === 'verified' || Boolean(row.accurateSoNumber || row.soNumber));
 }
 
 function normalizeFinanceOrderRow(row = {}) {
   const isCancelled = isCancelledFinanceOrder(row);
   const soNumber = row.soNumber || '';
+  const accurateSoNumber = row.accurateSoNumber || soNumber;
+  const internalSoNumber = row.internalSoNumber || row.systemSoNumber || '';
   return {
     id: row.id,
     orderDate: formatDisplayDate(row.orderDate),
@@ -410,10 +412,12 @@ function normalizeFinanceOrderRow(row = {}) {
     depo: row.depo || row.origin || '-',
     document: row.document || '-',
     notes: row.notes || '-',
-    status: isCancelled ? 'SO Batal' : row.status || (soNumber ? 'No. SO Terisi' : 'Menunggu No. SO Accurate'),
+    status: isCancelled ? 'SO Batal' : row.status || (accurateSoNumber ? 'No. SO Terisi' : 'Menunggu No. SO Accurate'),
     soNumber,
+    internalSoNumber,
+    accurateSoNumber,
     soNumberDraft: soNumber,
-    verificationStatus: isCancelled ? 'cancelled' : row.verificationStatus || (soNumber ? 'verified' : 'pending_so'),
+    verificationStatus: isCancelled ? 'cancelled' : row.verificationStatus || (accurateSoNumber ? 'verified' : 'pending_so'),
     operationalStatus: row.operationalStatus || '',
     cancelReason: row.cancelReason || row.cancelReviewNote || row.cancelRequestNote || '',
     cancelledAt: formatDisplayDate(row.cancelledAt),
@@ -433,6 +437,9 @@ function normalizeRpujStatus(row = {}) {
 function normalizeFinanceRpujRow(row = {}) {
   const rpujStatus = normalizeRpujStatus(row);
   const containerParts = String(row.container || '').split('/').map((value) => value.trim()).filter(Boolean);
+  const totalUj = Number(row.totalUj || 0);
+  const additionalCost = Number(row.additionalCost || 0);
+  const driverCommissionAmount = Number(row.driverCommissionAmount || 0);
   return {
     id: row.id,
     soNumber: row.soNumber || '-',
@@ -452,8 +459,13 @@ function normalizeFinanceRpujRow(row = {}) {
     spkNumber: row.spkNumber || '',
     ujRecommendation: row.ujRecommendation || '-',
     notes: row.notes || '-',
-    totalUj: Number(row.totalUj || 0),
-    additionalCost: Number(row.additionalCost || 0),
+    totalUj,
+    additionalCost,
+    hasDriverCommission: Boolean(row.hasDriverCommission || driverCommissionAmount > 0),
+    driverCommissionAmount,
+    driverCommissionSourceDestinationId: row.driverCommissionSourceDestinationId || '',
+    driverCommissionNote: row.driverCommissionNote || '',
+    totalRequest: Number(row.totalRequest ?? (totalUj + additionalCost)),
     status: row.status || 'Belum Diajukan',
     rpujStatus,
     requestedBy: row.requestedBy || '',
@@ -583,6 +595,11 @@ function formatCurrency(value) {
     currency: 'IDR',
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
+}
+
+function calculateRpujTotal(row = {}) {
+  const fallbackTotal = Number(row.totalUj || 0) + Number(row.additionalCost || 0);
+  return Number(row.totalRequest ?? fallbackTotal);
 }
 
 function statusClass(value) {
@@ -754,7 +771,7 @@ function SoNumberInputModal({ order, value, error, busy, onChange, onClose, onCo
 function RpujDecisionModal({ decision, row, note, error, busy, onNoteChange, onClose, onConfirm }) {
   if (!decision || !row) return null;
   const isReject = decision === 'reject';
-  const totalRequest = Number(row.totalUj || 0) + Number(row.additionalCost || 0);
+  const totalRequest = calculateRpujTotal(row);
 
   return (
     <FinanceActionModal
@@ -800,7 +817,7 @@ function RpujDecisionModal({ decision, row, note, error, busy, onNoteChange, onC
 
 function RpujTransferUploadModal({ row, file, error, busy, onFileChange, onClose, onConfirm }) {
   if (!row) return null;
-  const totalRequest = Number(row.totalUj || 0) + Number(row.additionalCost || 0);
+  const totalRequest = calculateRpujTotal(row);
   const fileSize = file ? `${(file.size / 1024).toLocaleString('id-ID', { maximumFractionDigits: 1 })} KB` : '';
 
   return (
@@ -1023,7 +1040,10 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
 
           <div className="mt-2 grid gap-2 xl:grid-cols-[1fr_240px]">
             <DetailField label="Catatan Order" value={order.notes} />
-            <DetailField label="Nomor SO Accurate" value={order.soNumber} />
+            <div className="grid gap-2">
+              <DetailField label="Nomor SO Internal" value={order.internalSoNumber || '-'} />
+              <DetailField label="Nomor SO Accurate" value={order.soNumber || '-'} />
+            </div>
           </div>
           {!isCancelled && order.soNumber ? (
             <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -1057,7 +1077,7 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
 function RpujDetailModal({ rpuj, onClose }) {
   if (!rpuj) return null;
 
-  const totalRequest = rpuj.totalUj + rpuj.additionalCost;
+  const totalRequest = calculateRpujTotal(rpuj);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
@@ -1157,10 +1177,12 @@ function RpujDetailModal({ rpuj, onClose }) {
             <div className="finance-rpuj-amount-grid">
               <AmountField className="finance-rpuj-amount-field" label="Total UJ" value={rpuj.totalUj} />
               <AmountField className="finance-rpuj-amount-field" label="Biaya Tambahan" value={rpuj.additionalCost} />
+              <AmountField className="finance-rpuj-amount-field" label="Komisi Sopir" value={rpuj.driverCommissionAmount} />
               <AmountField className="finance-rpuj-amount-field" highlight label="Total Pengajuan" value={totalRequest} />
             </div>
             <div className="finance-rpuj-note-grid">
               <DetailField className="finance-rpuj-detail-field" label="Rekomendasi UJ" value={rpuj.ujRecommendation} />
+              <DetailField className="finance-rpuj-detail-field" label="Catatan Komisi" value={rpuj.hasDriverCommission ? rpuj.driverCommissionNote || 'Komisi sopir aktif - dibayar mingguan' : 'Tidak ada komisi'} />
               <DetailField className="finance-rpuj-detail-field" label="Catatan Pengajuan" value={rpuj.notes} />
             </div>
             {rpuj.rejectionNote ? (
@@ -1718,6 +1740,7 @@ function InvoiceDetailModal({
 function OrderVerificationTable({
   rows,
   query,
+  summary,
   onQueryChange,
   onSelectOrder,
   onOpenSoModal,
@@ -1732,13 +1755,21 @@ function OrderVerificationTable({
 }) {
   const orderTabs = [
     { id: 'need-so', label: 'Belum Ada Nomor SO', icon: Clock3, match: (row) => !isCancelledFinanceOrder(row) && !isVerifiedFinanceOrder(row) },
-    { id: 'running', label: 'SO Berjalan', icon: CheckCircle2, match: isVerifiedFinanceOrder },
+    { id: 'running', label: 'SO Terisi', icon: CheckCircle2, match: isVerifiedFinanceOrder },
     { id: 'cancelled', label: 'SO Batal', icon: AlertTriangle, match: isCancelledFinanceOrder },
   ];
   const [activeOrderTab, setActiveOrderTab] = useState(orderTabs[0].id);
   const currentTab = orderTabs.find((tab) => tab.id === activeOrderTab) || orderTabs[0];
-  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.salesName} ${row.customer} ${row.destination} ${row.paymentTerms} ${row.status} ${row.cancelReason}`.toLowerCase().includes(query.toLowerCase()));
+  const normalizedQuery = query.trim().toLowerCase();
+  const hasSearchQuery = normalizedQuery.length > 0;
+  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.internalSoNumber} ${row.accurateSoNumber} ${row.salesName} ${row.customer} ${row.destination} ${row.paymentTerms} ${row.status} ${row.cancelReason}`.toLowerCase().includes(normalizedQuery));
   const filteredRows = searchedRows.filter((row) => currentTab.match(row));
+  const hasBackendSummary = !hasSearchQuery && Boolean(summary);
+  const tabCounts = {
+    'need-so': hasBackendSummary ? Number(summary?.pendingSo || 0) : searchedRows.filter((row) => orderTabs[0].match(row)).length,
+    running: hasBackendSummary ? Number(summary?.verified || 0) : searchedRows.filter((row) => orderTabs[1].match(row)).length,
+    cancelled: hasBackendSummary ? Number(summary?.cancelled || 0) : searchedRows.filter((row) => orderTabs[2].match(row)).length,
+  };
   const groupedRows = filteredRows.reduce((groups, row) => {
     const salesName = row.salesName || 'Tanpa Sales';
     if (!groups[salesName]) groups[salesName] = [];
@@ -1799,7 +1830,7 @@ function OrderVerificationTable({
       <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm" role="tablist" aria-label="Filter verifikasi nomor SO">
           {orderTabs.map((tab) => {
-            const count = searchedRows.filter((row) => tab.match(row)).length;
+            const count = tabCounts[tab.id] ?? searchedRows.filter((row) => tab.match(row)).length;
             const active = tab.id === activeOrderTab;
             const Icon = tab.icon;
             const tone = {
@@ -1844,10 +1875,10 @@ function OrderVerificationTable({
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table finance-order-table min-w-[1220px]">
+        <table className="data-table master-table finance-master-table finance-order-table min-w-[1320px]">
           <thead>
             <tr>
-              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Status SO', 'Alasan Batal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
+              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Status SO', 'Alasan Batal', 'Nomor SO Internal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -1856,7 +1887,7 @@ function OrderVerificationTable({
             {Object.entries(groupedRows).map(([salesName, salesRows]) => (
               <Fragment key={salesName}>
                 <tr className="finance-group-row">
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Sales</span>
@@ -1867,7 +1898,7 @@ function OrderVerificationTable({
                   </td>
                 </tr>
                 <tr aria-hidden="true">
-                  <td className="h-px bg-slate-200 p-0" colSpan={9} />
+                  <td className="h-px bg-slate-200 p-0" colSpan={10} />
                 </tr>
                 {salesRows.map((row) => (
                   <Fragment key={row.id}>
@@ -1892,6 +1923,10 @@ function OrderVerificationTable({
                           <span className="text-slate-300">-</span>
                         )}
                       </td>
+                      <td className="px-2 py-1" data-label="Nomor SO Internal">
+                        <span className="block text-[11px] font-black text-slate-900">{row.internalSoNumber || '-'}</span>
+                        <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Nomor kerja</span>
+                      </td>
                       <td className="px-2 py-1" data-label="Nomor SO Accurate">
                         {activeOrderTab === 'need-so' && !isCancelled ? (
                           <button
@@ -1910,7 +1945,7 @@ function OrderVerificationTable({
                         ) : (
                           <div>
                             <span className="block text-[11px] font-black text-slate-900">{row.soNumber}</span>
-                            <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Order sedang berjalan</span>
+                            <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Nomor SO sudah terisi</span>
                           </div>
                         )}
                       </td>
@@ -1921,7 +1956,7 @@ function OrderVerificationTable({
                       );
                     })()}
                     <tr aria-hidden="true">
-                      <td className="h-px bg-slate-200 p-0" colSpan={9} />
+                      <td className="h-px bg-slate-200 p-0" colSpan={10} />
                     </tr>
                   </Fragment>
                 ))}
@@ -1929,7 +1964,7 @@ function OrderVerificationTable({
             ))}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={9}>Tidak ada order pada klasifikasi ini.</td>
+                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={10}>Tidak ada order pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
@@ -2089,7 +2124,11 @@ function RpujApprovalTable({
                     {soRows.map((row) => {
                       const canUploadTransfer = row.rpujStatus === 'approved';
                       const busy = rpujBusyId === row.id;
-                      const rowTotal = row.totalUj + row.additionalCost;
+                      const rowTotal = calculateRpujTotal(row);
+                      const rowBreakdown = [
+                        `UJ ${formatCurrency(row.totalUj)}`,
+                        `Tambahan ${formatCurrency(row.additionalCost)}`,
+                      ].filter(Boolean).join(' + ');
 
                       return (
                         <Fragment key={row.id}>
@@ -2101,7 +2140,10 @@ function RpujApprovalTable({
                             </td>
                             <td className="finance-wrap-cell px-2 py-2" data-label="Pengajuan">
                               <strong className="block text-[12px] font-black text-slate-900">{formatCurrency(rowTotal)}</strong>
-                              <span className="mt-0.5 block text-[9px] font-medium leading-snug text-slate-500">UJ {formatCurrency(row.totalUj)} + Tambahan {formatCurrency(row.additionalCost)}</span>
+                              <span className="mt-0.5 block text-[9px] font-medium leading-snug text-slate-500">{rowBreakdown}</span>
+                              {Number(row.driverCommissionAmount || 0) > 0 ? (
+                                <span className="mt-0.5 block text-[9px] font-semibold leading-snug text-amber-700">Komisi mingguan {formatCurrency(row.driverCommissionAmount)}</span>
+                              ) : null}
                             </td>
                             <td className="finance-wrap-cell px-2 py-2" data-label="Status">
                               <StatusPill value={compactRpujStatus(row.status)} />
@@ -2178,11 +2220,15 @@ function RpujApprovalTable({
 function InvoiceTable({
   rows,
   summary,
+  total,
+  totalPages,
+  currentPage,
   query,
   activeInvoiceTab,
   activeInvoiceDocumentFilter,
   onActiveInvoiceTabChange,
   onActiveInvoiceDocumentFilterChange,
+  onInvoicePageChange,
   periodMonth,
   periodYear,
   onPeriodMonthChange,
@@ -2192,7 +2238,6 @@ function InvoiceTable({
   onSaveInvoice,
   onSelectInvoice,
 }) {
-  const [invoicePage, setInvoicePage] = useState(1);
   const invoiceTabs = [
     {
       id: 'need-number',
@@ -2242,27 +2287,18 @@ function InvoiceTable({
     if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
     return true;
   });
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / INVOICE_TABLE_PAGE_SIZE));
-  const currentPage = Math.min(invoicePage, totalPages);
-  const paginatedRows = filteredRows.slice(
-    (currentPage - 1) * INVOICE_TABLE_PAGE_SIZE,
-    currentPage * INVOICE_TABLE_PAGE_SIZE,
-  );
-  const showingFrom = filteredRows.length ? (currentPage - 1) * INVOICE_TABLE_PAGE_SIZE + 1 : 0;
-  const showingTo = filteredRows.length ? Math.min(currentPage * INVOICE_TABLE_PAGE_SIZE, filteredRows.length) : 0;
+  const safeTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
+  const safeTotalPages = Math.max(1, Number(totalPages || Math.ceil(safeTotal / INVOICE_TABLE_PAGE_SIZE) || 1));
+  const safeCurrentPage = Math.min(Math.max(1, Number(currentPage || 1)), safeTotalPages);
+  const paginatedRows = filteredRows;
+  const showingFrom = safeTotal ? (safeCurrentPage - 1) * INVOICE_TABLE_PAGE_SIZE + 1 : 0;
+  const showingTo = safeTotal ? Math.min(showingFrom + paginatedRows.length - 1, safeTotal) : 0;
   const tabCounts = {
     'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[0].match(row)).length),
     'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
     paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
   };
-
-  useEffect(() => {
-    setInvoicePage(1);
-  }, [activeInvoiceDocumentFilter, activeInvoiceTab, query, rows]);
-
-  useEffect(() => {
-    if (invoicePage > totalPages) setInvoicePage(totalPages);
-  }, [invoicePage, totalPages]);
+  const allInvoiceTotal = tabCounts['need-number'] + tabCounts['in-progress'] + tabCounts.paid;
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
@@ -2445,14 +2481,15 @@ function InvoiceTable({
       </div>
       <div className="master-pagination border-t border-slate-200 bg-slate-50">
         <span>
-          Menampilkan {showingFrom}-{showingTo} dari {filteredRows.length} data
+          Menampilkan {showingFrom}-{showingTo} dari {safeTotal} data filter ini
+          {allInvoiceTotal && allInvoiceTotal !== safeTotal ? ` (${allInvoiceTotal} semua data)` : ''}
         </span>
         <div className="master-pagination-controls">
-          <button type="button" disabled={currentPage === 1} onClick={() => setInvoicePage((value) => Math.max(1, value - 1))} aria-label="Halaman sebelumnya">
+          <button type="button" disabled={safeCurrentPage === 1} onClick={() => onInvoicePageChange(Math.max(1, safeCurrentPage - 1))} aria-label="Halaman sebelumnya">
             <ChevronLeft size={15} />
           </button>
-          <strong>Halaman {currentPage} dari {totalPages}</strong>
-          <button type="button" disabled={currentPage === totalPages} onClick={() => setInvoicePage((value) => Math.min(totalPages, value + 1))} aria-label="Halaman berikutnya">
+          <strong>Halaman {safeCurrentPage} dari {safeTotalPages}</strong>
+          <button type="button" disabled={safeCurrentPage === safeTotalPages} onClick={() => onInvoicePageChange(Math.min(safeTotalPages, safeCurrentPage + 1))} aria-label="Halaman berikutnya">
             <ChevronRight size={15} />
           </button>
         </div>
@@ -2486,7 +2523,11 @@ function FinanceTable({
   orderRows,
   rpujRows,
   invoiceRows,
+  orderSummary,
   invoiceSummary,
+  invoicePage,
+  invoiceTotal,
+  invoiceTotalPages,
   orderError,
   orderLoading,
   rpujError,
@@ -2495,6 +2536,7 @@ function FinanceTable({
   invoiceError,
   invoiceLoading,
   invoiceBusyId,
+  onInvoicePageChange,
   savingSoId,
   handlers,
 }) {
@@ -2575,6 +2617,7 @@ function FinanceTable({
           query={query}
           rows={orderRows}
           savingSoId={savingSoId}
+          summary={orderSummary}
           {...handlers}
         />
       ) : null}
@@ -2596,7 +2639,9 @@ function FinanceTable({
         <InvoiceTable
           activeInvoiceDocumentFilter={activeInvoiceDocumentFilter}
           activeInvoiceTab={activeInvoiceTab}
+          currentPage={invoicePage}
           invoiceBusyId={invoiceBusyId}
+          onInvoicePageChange={onInvoicePageChange}
           onActiveInvoiceDocumentFilterChange={onActiveInvoiceDocumentFilterChange}
           onActiveInvoiceTabChange={onActiveInvoiceTabChange}
           onPeriodMonthChange={onPeriodMonthChange}
@@ -2606,6 +2651,8 @@ function FinanceTable({
           query={query}
           rows={invoiceRows}
           summary={invoiceSummary}
+          total={invoiceTotal}
+          totalPages={invoiceTotalPages}
           {...handlers}
         />
       ) : null}
@@ -2623,10 +2670,14 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [orderFilterMonth, setOrderFilterMonth] = useState('');
   const [orderDateFrom, setOrderDateFrom] = useState('');
   const [orderDateTo, setOrderDateTo] = useState('');
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [invoiceTotal, setInvoiceTotal] = useState(0);
+  const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
   const [query, setQuery] = useState('');
   const [orderRows, setOrderRows] = useState(initialOrderRows);
   const [rpujRows, setRpujRows] = useState(initialRpujRows);
   const [invoiceRows, setInvoiceRows] = useState(initialInvoiceRows);
+  const [orderSummary, setOrderSummary] = useState(null);
   const [invoiceSummary, setInvoiceSummary] = useState(defaultInvoiceSummary);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState('');
@@ -2693,9 +2744,15 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         ...(orderDateTo ? { dateTo: orderDateTo } : {}),
       });
       setOrderRows((result.rows || []).map(normalizeFinanceOrderRow));
+      setOrderSummary(result.summary ? {
+        pendingSo: Number(result.summary.pendingSo || 0),
+        verified: Number(result.summary.verified || 0),
+        cancelled: Number(result.summary.cancelled || 0),
+      } : null);
     } catch (error) {
       setOrderError(error.message || 'Data verifikasi order gagal dimuat.');
       setOrderRows([]);
+      setOrderSummary(null);
     } finally {
       setOrderLoading(false);
     }
@@ -2728,6 +2785,32 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setOrderDateTo('');
   }, []);
 
+  const handleQueryChange = useCallback((value) => {
+    setQuery(value);
+    if (activeTab.id === 'invoice-number') setInvoicePage(1);
+  }, [activeTab.id]);
+
+  const handleActiveInvoiceTabChange = useCallback((nextTab) => {
+    setActiveInvoiceTab(nextTab);
+    setActiveInvoiceDocumentFilter('all');
+    setInvoicePage(1);
+  }, []);
+
+  const handleActiveInvoiceDocumentFilterChange = useCallback((nextFilter) => {
+    setActiveInvoiceDocumentFilter(nextFilter);
+    setInvoicePage(1);
+  }, []);
+
+  const handlePeriodMonthChange = useCallback((value) => {
+    setPeriodMonth(value);
+    setInvoicePage(1);
+  }, []);
+
+  const handlePeriodYearChange = useCallback((value) => {
+    setPeriodYear(value);
+    setInvoicePage(1);
+  }, []);
+
   const loadRpujRequests = useCallback(async () => {
     if (activeTab.id !== 'rpuj-approval') return;
     setRpujLoading(true);
@@ -2757,8 +2840,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setInvoiceError('');
     try {
       const result = await fetchFinanceInvoices({
-        page: 1,
-        pageSize: 100,
+        page: invoicePage,
+        pageSize: INVOICE_TABLE_PAGE_SIZE,
+        ...(query.trim() ? { query: query.trim() } : {}),
         invoiceDocumentFilter: activeInvoiceTab === 'paid' ? 'all' : activeInvoiceDocumentFilter,
         ...(activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid'
           ? { status: activeInvoiceTab, ...periodRange }
@@ -2767,6 +2851,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
           : {}),
       });
       setInvoiceRows((result.rows || []).map(normalizeFinanceInvoiceRow));
+      const nextInvoiceTotal = Number(result.total ?? result.rows?.length ?? 0);
+      const nextInvoiceTotalPages = Math.max(1, Number(result.totalPages || Math.ceil(nextInvoiceTotal / INVOICE_TABLE_PAGE_SIZE) || 1));
+      setInvoiceTotal(nextInvoiceTotal);
+      setInvoiceTotalPages(nextInvoiceTotalPages);
+      if (invoicePage > nextInvoiceTotalPages) setInvoicePage(nextInvoiceTotalPages);
       setInvoiceSummary({
         needNumber: Number(result.summary?.needNumber || 0),
         inProgress: Number(result.summary?.inProgress || 0),
@@ -2786,11 +2875,13 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     } catch (error) {
       setInvoiceError(error.message || 'Daftar invoice gagal dimuat.');
       setInvoiceRows([]);
+      setInvoiceTotal(0);
+      setInvoiceTotalPages(1);
       setInvoiceSummary(defaultInvoiceSummary);
     } finally {
       setInvoiceLoading(false);
     }
-  }, [activeInvoiceDocumentFilter, activeInvoiceTab, activeTab.id, periodRange]);
+  }, [activeInvoiceDocumentFilter, activeInvoiceTab, activeTab.id, invoicePage, periodRange, query]);
 
   useEffect(() => {
     loadInvoiceOrders();
@@ -3182,28 +3273,30 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoiceBusyId={invoiceBusyId}
         invoiceError={invoiceError}
         invoiceLoading={invoiceLoading}
+        invoicePage={invoicePage}
         invoiceRows={invoiceRows}
         invoiceSummary={invoiceSummary}
-        onActiveInvoiceDocumentFilterChange={setActiveInvoiceDocumentFilter}
-        onActiveInvoiceTabChange={(nextTab) => {
-          setActiveInvoiceTab(nextTab);
-          setActiveInvoiceDocumentFilter('all');
-        }}
+        invoiceTotal={invoiceTotal}
+        invoiceTotalPages={invoiceTotalPages}
+        onActiveInvoiceDocumentFilterChange={handleActiveInvoiceDocumentFilterChange}
+        onActiveInvoiceTabChange={handleActiveInvoiceTabChange}
         onActiveRpujTabChange={setActiveRpujTab}
+        onInvoicePageChange={setInvoicePage}
         onOrderDateFromChange={handleOrderDateFromChange}
         onOrderDateToChange={handleOrderDateToChange}
         onOrderFilterMonthChange={handleOrderFilterMonthChange}
-        onPeriodMonthChange={setPeriodMonth}
-        onPeriodYearChange={setPeriodYear}
+        onPeriodMonthChange={handlePeriodMonthChange}
+        onPeriodYearChange={handlePeriodYearChange}
         onReset={resetSimulation}
         onResetOrderDateFilter={handleResetOrderDateFilter}
-        onQueryChange={setQuery}
+        onQueryChange={handleQueryChange}
         orderDateFrom={orderDateFrom}
         orderDateTo={orderDateTo}
         orderError={orderError}
         orderFilterMonth={orderFilterMonth}
         orderLoading={orderLoading}
         orderRows={orderRows}
+        orderSummary={orderSummary}
         rpujBusyId={rpujBusyId}
         rpujError={rpujError}
         rpujLoading={rpujLoading}

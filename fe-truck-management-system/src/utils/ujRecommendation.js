@@ -79,6 +79,12 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
   const qty40ft = readNumber(job.qty40ft, job.qty40FT, job.qty40, job.orderQty40ft, fallbackQty40ft);
   const uj20ft = readNumber(destination?.uj20ft, destination?.uj20Ft, destination?.uj20, destination?.uj_20ft, destination?.uj_20_ft);
   const uj40ft = readNumber(destination?.uj40ft, destination?.uj40Ft, destination?.uj40, destination?.uj_40ft, destination?.uj_40_ft);
+  const driverCommissionAmount = readNumber(
+    destination?.driverCommissionAmount,
+    destination?.driver_commission_amount,
+    destination?.driverCommission,
+    destination?.commission,
+  );
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
   const currentContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
@@ -90,9 +96,11 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
 
   return {
     destination,
+    destinationId: destination?.id || '',
     destinationName: destination?.name || job.destination || '',
     currentSize: currentSize || '',
     currentContainerUj,
+    driverCommissionAmount,
     uj20ft,
     uj40ft,
     qty20ft,

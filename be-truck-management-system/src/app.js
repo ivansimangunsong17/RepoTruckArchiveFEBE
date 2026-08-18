@@ -8,6 +8,7 @@ import { attachmentRoutes } from './modules/attachments/attachments.routes.js';
 import { archiveRoutes } from './modules/archive/archive.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { containerJobRoutes } from './modules/container-jobs/container-jobs.routes.js';
+import { driverCommissionRoutes } from './modules/driver-commissions/driver-commissions.routes.js';
 import { financeRoutes } from './modules/finance/finance.routes.js';
 import { historicalEntryRoutes } from './modules/historical-entry/historical-entry.routes.js';
 import { masterRoutes } from './modules/master/master.routes.js';
@@ -52,6 +53,7 @@ const routes = [
   ...archiveRoutes,
   ...salesOrderRoutes,
   ...containerJobRoutes,
+  ...driverCommissionRoutes,
   ...financeRoutes,
   ...historicalEntryRoutes,
   ...masterRoutes,

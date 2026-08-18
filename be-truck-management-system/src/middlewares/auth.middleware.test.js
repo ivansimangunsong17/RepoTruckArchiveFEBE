@@ -59,3 +59,15 @@ test('authorizeRoute limits historical entry management to admin', () => {
     );
   });
 });
+
+test('authorizeRoute memberikan admin akses ke permission baru tanpa update matrix', () => {
+  const route = {
+    permission: 'future.permission.manage',
+  };
+
+  assert.equal(authorizeRoute(route, requestForRole('admin')).role, 'admin');
+  assert.throws(
+    () => authorizeRoute(route, requestForRole('finance')),
+    (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+  );
+});

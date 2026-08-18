@@ -69,6 +69,23 @@ export function calculateCompletedJobRevenue(row = {}) {
   return totalAmount / totalContainers;
 }
 
+export function calculateDriverCommissionAmount(row = {}) {
+  const hasCommission = Boolean(row.has_driver_commission ?? row.hasDriverCommission);
+  if (!hasCommission) return 0;
+
+  const amount = Number(row.driver_commission_amount ?? row.driverCommissionAmount ?? 0);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+export function splitDriverCommissionPaymentAmount(row = {}) {
+  const amount = calculateDriverCommissionAmount(row);
+  const paymentStatus = String(row.commission_payment_status ?? row.commissionPaymentStatus ?? '').trim();
+  return {
+    paid: paymentStatus === 'paid' ? amount : 0,
+    unpaid: amount > 0 && paymentStatus !== 'paid' ? amount : 0,
+  };
+}
+
 export async function getDashboardReport() {
   const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs] = await Promise.all([
     query(`
@@ -624,6 +641,8 @@ export async function getDriverPerformanceReport(options = {}) {
   const month = String(options.month || '').trim();
   const weekFrom = String(options.weekFrom || '').trim();
   const weekTo = String(options.weekTo || '').trim();
+  const commissionStatus = String(options.commissionStatus || '').trim();
+  const commissionPaymentStatus = String(options.commissionPaymentStatus || options.commission_payment_status || '').trim();
   const params = [];
   const monthFilter = month && month !== 'all' ? month : '';
 
@@ -639,6 +658,18 @@ export async function getDriverPerformanceReport(options = {}) {
   const sourceClauses = [];
   appendEntrySourceFilters(sourceClauses, params, options, 'cj');
   const sourceCondition = sourceClauses.length ? `and ${sourceClauses.join(' and ')}` : '';
+  const commissionCondition = commissionStatus === 'with_commission'
+    ? 'and coalesce(cj.has_driver_commission, false) and coalesce(cj.driver_commission_amount, 0) > 0'
+    : commissionStatus === 'without_commission'
+      ? 'and not (coalesce(cj.has_driver_commission, false) and coalesce(cj.driver_commission_amount, 0) > 0)'
+      : '';
+  const commissionPaymentCondition = {
+    unsubmitted: 'and coalesce(has_driver_commission, false) and coalesce(driver_commission_amount, 0) > 0 and commission_batch_status is null',
+    submitted: "and commission_batch_status = 'submitted'",
+    approved: "and commission_batch_status = 'approved' and coalesce(commission_payment_status, 'pending') <> 'paid'",
+    paid: "and commission_payment_status = 'paid'",
+    unpaid: "and coalesce(has_driver_commission, false) and coalesce(driver_commission_amount, 0) > 0 and coalesce(commission_payment_status, 'pending') <> 'paid'",
+  }[commissionPaymentStatus] || '';
 
   const [rows, months] = await Promise.all([
     query(
@@ -656,18 +687,27 @@ export async function getDriverPerformanceReport(options = {}) {
                  so.total_amount,
                  to_jsonb(so)->'line_items' as line_items,
                  cj.container_size,
+                 cj.has_driver_commission,
+                 cj.driver_commission_amount,
+                 dcb.status as commission_batch_status,
+                 dcp.status as commission_payment_status,
+                 dcp.paid_at as commission_paid_at,
                  greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
           from container_jobs cj
           join sales_orders so on so.id = cj.sales_order_id
           left join order_job_totals ojt on ojt.sales_order_id = so.id
+          left join driver_commission_items dci on dci.container_job_id = cj.id and dci.voided_at is null
+          left join driver_commission_batches dcb on dcb.id = dci.batch_id
+          left join driver_commission_payments dcp on dcp.id = dci.payment_id
           where cj.status = 'completed'
             and so.status <> 'cancelled'
             and nullif(cj.assignment_snapshot->>'driver', '') is not null
             ${sourceCondition}
+            ${commissionCondition}
         )
         select *
         from completed_jobs cj
-        where true ${monthCondition} ${weekFromCondition} ${weekToCondition}
+        where true ${monthCondition} ${weekFromCondition} ${weekToCondition} ${commissionPaymentCondition}
         order by completed_date desc, driver asc
       `,
       params,
@@ -692,21 +732,30 @@ export async function getDriverPerformanceReport(options = {}) {
         monthlyTrips: 0,
         totalTrips: 0,
         totalRevenue: 0,
+        totalDriverCommission: 0,
+        paidDriverCommission: 0,
+        unpaidDriverCommission: 0,
       });
     }
 
     const summary = drivers.get(driver);
     const revenue = calculateCompletedJobRevenue(row);
+    const driverCommission = calculateDriverCommissionAmount(row);
+    const paymentAmount = splitDriverCommissionPaymentAmount(row);
     summary.weeklyTrips += 1;
     summary.monthlyTrips += 1;
     summary.totalTrips += 1;
     summary.totalRevenue += revenue;
+    summary.totalDriverCommission += driverCommission;
+    summary.paidDriverCommission += paymentAmount.paid;
+    summary.unpaidDriverCommission += paymentAmount.unpaid;
   });
 
   const performanceRows = Array.from(drivers.values())
     .map((row) => ({
       ...row,
       averageRevenuePerTrip: row.totalTrips ? row.totalRevenue / row.totalTrips : 0,
+      averageCommissionPerTrip: row.totalTrips ? row.totalDriverCommission / row.totalTrips : 0,
     }))
     .sort((left, right) => {
       if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
@@ -717,6 +766,14 @@ export async function getDriverPerformanceReport(options = {}) {
   return {
     rows: performanceRows,
     total: performanceRows.length,
+    summary: {
+      totalTrips: performanceRows.reduce((total, row) => total + row.totalTrips, 0),
+      totalRevenue: performanceRows.reduce((total, row) => total + row.totalRevenue, 0),
+      totalDriverCommission: performanceRows.reduce((total, row) => total + row.totalDriverCommission, 0),
+      paidDriverCommission: performanceRows.reduce((total, row) => total + row.paidDriverCommission, 0),
+      unpaidDriverCommission: performanceRows.reduce((total, row) => total + row.unpaidDriverCommission, 0),
+      activeDrivers: performanceRows.filter((row) => row.totalTrips > 0).length,
+    },
     months: months.rows.map((row) => ({
       value: row.value,
       label: new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' })

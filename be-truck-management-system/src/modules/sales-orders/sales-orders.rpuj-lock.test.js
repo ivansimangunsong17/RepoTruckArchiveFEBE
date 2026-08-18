@@ -24,14 +24,22 @@ test('tidak mengunci SO selama seluruh RPUJ masih pending', () => {
   }), false);
 });
 
-test('mengunci SO untuk Sales setelah nomor SO Finance terisi', () => {
-  assert.equal(isSalesOrderLockedByFinanceNumber({ soNumber: 'SO-202607-001' }), true);
+test('mengunci SO untuk Sales setelah nomor SO Accurate terisi', () => {
+  assert.equal(isSalesOrderLockedByFinanceNumber({ accurateSoNumber: '26/080/ARM/00054' }), true);
 });
 
 test('mengunci SO untuk Sales setelah status Finance verified', () => {
   assert.equal(isSalesOrderLockedByFinanceNumber({ financeVerificationStatus: 'verified' }), true);
 });
 
-test('tidak mengunci SO Finance ketika masih menunggu nomor SO', () => {
-  assert.equal(isSalesOrderLockedByFinanceNumber({ soNumber: '', financeVerificationStatus: 'pending_so' }), false);
+test('tidak mengunci SO Finance ketika masih menunggu nomor SO Accurate', () => {
+  assert.equal(isSalesOrderLockedByFinanceNumber({ soNumber: '', accurateSoNumber: '', financeVerificationStatus: 'pending_so' }), false);
+});
+
+test('nomor internal tidak mengunci sales order seperti nomor SO Accurate', () => {
+  assert.equal(isSalesOrderLockedByFinanceNumber({
+    soNumber: 'SO-ARM-202608-0001',
+    accurateSoNumber: '',
+    financeVerificationStatus: 'pending_so',
+  }), false);
 });

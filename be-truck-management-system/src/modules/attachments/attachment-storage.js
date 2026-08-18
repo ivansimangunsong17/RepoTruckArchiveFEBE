@@ -54,6 +54,7 @@ const categoryFolders = {
 const containerJobCategoryFolders = {
   containerJob: [CONTAINER_DOCUMENTS_FOLDER, 'Dokumen Lainnya'],
   container_job: [CONTAINER_DOCUMENTS_FOLDER, 'Dokumen Lainnya'],
+  additionalCostDocument: [CONTAINER_DOCUMENTS_FOLDER, 'Biaya Lainnya'],
   spkDocument: [CONTAINER_DOCUMENTS_FOLDER, 'SPK'],
   eirDocument: [CONTAINER_DOCUMENTS_FOLDER, 'EIR'],
   repoEirDocument: [CONTAINER_DOCUMENTS_FOLDER, 'EIR Titip'],

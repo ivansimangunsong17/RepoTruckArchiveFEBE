@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildCommissionWeekOptions,
   buildDriverPerformanceRows,
   buildMonthlyDriverUtilizationPivot,
   buildMonthlyUtilizationPivot,
   buildRepoMonitoringRows,
   buildTruckDayUtilizationSummary,
 } from './ReportsPage';
+
+describe('buildCommissionWeekOptions', () => {
+  it('membuat periode komisi Kamis sampai Rabu yang beririsan dengan bulan', () => {
+    const options = buildCommissionWeekOptions(8, 2026);
+
+    expect(options[0]).toMatchObject({ value: 'all' });
+    expect(options[1]).toMatchObject({
+      from: '2026-07-30',
+      to: '2026-08-05',
+    });
+    expect(options[2]).toMatchObject({
+      from: '2026-08-06',
+      to: '2026-08-12',
+    });
+  });
+});
 
 describe('buildDriverPerformanceRows', () => {
   it('menggunakan monthlyTrips 0 tanpa jatuh ke totalTrips lama', () => {
@@ -19,7 +36,9 @@ describe('buildDriverPerformanceRows', () => {
         driver: 'Budi',
         totalTrips: 0,
         totalRevenue: 0,
+        totalDriverCommission: 0,
         averageRevenuePerTrip: 0,
+        averageCommissionPerTrip: 0,
       },
     ]);
   });
@@ -35,17 +54,19 @@ describe('buildDriverPerformanceRows', () => {
         driver: 'Budi',
         totalTrips: 4,
         totalRevenue: 0,
+        totalDriverCommission: 0,
         averageRevenuePerTrip: 0,
+        averageCommissionPerTrip: 0,
       },
     ]);
   });
 
-  it('menyertakan total revenue dan rata-rata revenue per trip', () => {
+  it('menyertakan total revenue, komisi, dan rata-rata per trip', () => {
     const rows = buildDriverPerformanceRows(
       [{ id: 'driver-1', name: 'Budi' }, { id: 'driver-2', name: 'Agus' }],
       [
-        { driver: 'Budi', monthlyTrips: 2, totalRevenue: 6000000, averageRevenuePerTrip: 3000000 },
-        { driver: 'Agus', monthlyTrips: 3, totalRevenue: 4500000, averageRevenuePerTrip: 1500000 },
+        { driver: 'Budi', monthlyTrips: 2, totalRevenue: 6000000, totalDriverCommission: 100000, averageRevenuePerTrip: 3000000, averageCommissionPerTrip: 50000 },
+        { driver: 'Agus', monthlyTrips: 3, totalRevenue: 4500000, totalDriverCommission: 120000, averageRevenuePerTrip: 1500000 },
       ],
     );
 
@@ -54,13 +75,17 @@ describe('buildDriverPerformanceRows', () => {
         driver: 'Budi',
         totalTrips: 2,
         totalRevenue: 6000000,
+        totalDriverCommission: 100000,
         averageRevenuePerTrip: 3000000,
+        averageCommissionPerTrip: 50000,
       },
       {
         driver: 'Agus',
         totalTrips: 3,
         totalRevenue: 4500000,
+        totalDriverCommission: 120000,
         averageRevenuePerTrip: 1500000,
+        averageCommissionPerTrip: 40000,
       },
     ]);
   });
