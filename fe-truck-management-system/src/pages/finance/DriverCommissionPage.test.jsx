@@ -112,6 +112,83 @@ const batchDetail = {
   ],
 };
 
+const olderPeriodReport = {
+  ...periodReport,
+  periodStart: '2026-08-06',
+  periodEnd: '2026-08-12',
+  activeBatch: {
+    id: 'batch-2',
+    status: 'approved',
+    periodStart: '2026-08-06',
+    periodEnd: '2026-08-12',
+    submittedAt: '2026-08-13T03:00:00.000Z',
+  },
+  summary: {
+    totalDrivers: 1,
+    totalItems: 1,
+    totalAmount: 75000,
+    paidAmount: 0,
+    unpaidAmount: 75000,
+  },
+  drivers: [
+    {
+      driverId: 'driver-2',
+      driverName: 'Jajam',
+      paymentMethod: 'bank',
+      bankName: 'Mandiri',
+      bankAccountNumber: '987654',
+      bankAccountHolder: 'Jajam',
+      batchId: 'batch-2',
+      batchStatus: 'approved',
+      paymentId: 'payment-2',
+      paymentStatus: 'pending',
+      totalItems: 1,
+      totalAmount: 75000,
+      items: [
+        {
+          id: 'item-2',
+          containerJobId: 'job-2',
+          soNumber: 'SO-002',
+          containerNumber: 'CONT-002',
+          containerSize: '40FT',
+          customerName: 'PT B',
+          destination: 'Karawang',
+          truckPlateNumber: 'B 2000 BB',
+          completedDate: '2026-08-06',
+          amount: 75000,
+        },
+      ],
+    },
+  ],
+};
+
+const olderBatchDetail = {
+  ...batchDetail,
+  id: 'batch-2',
+  status: 'approved',
+  periodStart: '2026-08-06',
+  periodEnd: '2026-08-12',
+  totalItems: 1,
+  totalAmount: 75000,
+  submittedAt: '2026-08-13T03:00:00.000Z',
+  payments: [
+    {
+      id: 'payment-2',
+      batchId: 'batch-2',
+      driverId: 'driver-2',
+      driverName: 'Jajam',
+      paymentMethod: 'bank',
+      bankName: 'Mandiri',
+      bankAccountNumber: '987654',
+      bankAccountHolder: 'Jajam',
+      totalItems: 1,
+      totalAmount: 75000,
+      status: 'pending',
+      items: [],
+    },
+  ],
+};
+
 describe('DriverCommissionPage finance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -127,6 +204,7 @@ describe('DriverCommissionPage finance', () => {
     render(<DriverCommissionPage />);
 
     expect((await screen.findAllByText('Rahmat')).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Pilih batch komisi')).toHaveValue('batch-1');
     expect(screen.getAllByText(/BCA 123456/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
@@ -134,6 +212,29 @@ describe('DriverCommissionPage finance', () => {
 
     expect(await screen.findByRole('dialog', { name: /Rahmat/i })).toBeInTheDocument();
     expect(screen.getByText('CONT-001')).toBeInTheDocument();
+  });
+
+  it('mengganti report saat batch dipilih dari dropdown', async () => {
+    const user = userEvent.setup();
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [batchDetail, olderBatchDetail] });
+    fetchDriverCommissionBatchDetail.mockImplementation((id) => Promise.resolve(id === 'batch-2' ? olderBatchDetail : batchDetail));
+    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => Promise.resolve(periodStart === '2026-08-06' ? olderPeriodReport : periodReport));
+
+    render(<DriverCommissionPage />);
+
+    const batchSelect = await screen.findByLabelText('Pilih batch komisi');
+    await waitFor(() => expect(batchSelect).toHaveValue('batch-1'));
+
+    await user.selectOptions(batchSelect, 'batch-2');
+
+    await waitFor(() => {
+      expect(fetchDriverCommissionBatchDetail).toHaveBeenLastCalledWith('batch-2');
+      expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
+        periodStart: '2026-08-06',
+        periodEnd: '2026-08-12',
+      });
+    });
+    expect(await screen.findByText('Jajam')).toBeInTheDocument();
   });
 
   it('mengapprove batch komisi aktif', async () => {

@@ -18,7 +18,6 @@ import {
   uploadFinanceInvoiceDocument,
   uploadFinanceRpujTransferProof,
 } from '../../services/finance/financeService';
-import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
 
 vi.mock('../../services/finance/financeService', () => ({
   approveFinanceRpuj: vi.fn(),
@@ -117,6 +116,8 @@ beforeEach(() => {
   fetchFinanceOrderVerifications.mockResolvedValue({ rows: [orderRow, cancelledOrderRow] });
   fetchFinanceRpujRequests.mockResolvedValue({
     rows: [rpujRow],
+    total: 1,
+    totalPages: 1,
     summary: { submitted: 1, approved: 0, paid: 0, rejected: 0 },
   });
   fetchFinanceInvoices.mockResolvedValue({ rows: [invoiceRow], summary: invoiceSummary });
@@ -220,7 +221,8 @@ describe('FinanceWorkflowPage validation modals', () => {
       }));
     });
 
-    fireEvent.change(screen.getByLabelText('Bulan order dibuat'), { target: { value: '2026-07' } });
+    fireEvent.change(screen.getByLabelText('Tahun order dibuat'), { target: { value: '2026' } });
+    fireEvent.change(screen.getByLabelText('Bulan order dibuat'), { target: { value: '07' } });
 
     await waitFor(() => {
       expect(fetchFinanceOrderVerifications).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -238,6 +240,23 @@ describe('FinanceWorkflowPage validation modals', () => {
       }));
     });
     expect(screen.getByLabelText('Bulan order dibuat')).toHaveValue('');
+  });
+
+  it('mengosongkan filter bulan order jika tahun yang dipilih ekstrem', async () => {
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    await screen.findByLabelText('Bulan order dibuat');
+    fireEvent.change(screen.getByLabelText('Tahun order dibuat'), { target: { value: '2026' } });
+    fireEvent.change(screen.getByLabelText('Bulan order dibuat'), { target: { value: '12' } });
+    fireEvent.change(screen.getByLabelText('Tahun order dibuat'), { target: { value: '275760' } });
+
+    expect(screen.getByLabelText('Bulan order dibuat')).toHaveValue('');
+    await waitFor(() => {
+      expect(fetchFinanceOrderVerifications).toHaveBeenLastCalledWith(expect.not.objectContaining({
+        dateFrom: expect.any(String),
+        dateTo: expect.any(String),
+      }));
+    });
   });
 
   it('memakai pagination 20 data untuk verifikasi order', async () => {
@@ -289,25 +308,50 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByRole('tab', { name: /SO Batal/i })).toHaveTextContent('9');
   });
 
-  it('memuat pencatatan sesuai bulan dan tahun yang dipilih', async () => {
+  it('menampilkan filter tanggal dan pagination RPUJ', async () => {
     const user = userEvent.setup();
-    const currentPeriod = getCurrentFinancePeriod();
-    const currentRange = getFinancePeriodRange(currentPeriod.month, currentPeriod.year);
-    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
-
-    expect(screen.queryByLabelText('Bulan pencatatan Finance')).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('tab', { name: /UJ Dikirim/i }));
-
-    await waitFor(() => {
-      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining(currentRange));
+    const rpujRows = Array.from({ length: 20 }, (_, index) => ({
+      ...rpujRow,
+      id: `approved-rpuj-${index + 1}`,
+      rpujStatus: 'approved',
+      status: 'Disetujui Finance',
+      containerNumber: `CONT-${String(index + 1).padStart(3, '0')}`,
+    }));
+    fetchFinanceRpujRequests.mockResolvedValue({
+      rows: rpujRows,
+      total: 47,
+      totalPages: 3,
+      summary: { submitted: 0, approved: 47, paid: 6, rejected: 0 },
     });
 
-    const nextMonth = currentPeriod.month === '2' ? '3' : '2';
-    await user.selectOptions(screen.getByLabelText('Bulan pencatatan Finance'), nextMonth);
-    const nextRange = getFinancePeriodRange(nextMonth, currentPeriod.year);
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
+    await user.click(await screen.findByRole('tab', { name: /Siap Transfer/i }));
+    expect(screen.getByLabelText('Bulan RPUJ')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tahun RPUJ')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tanggal awal RPUJ')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tanggal akhir RPUJ')).toBeInTheDocument();
+    expect(await screen.findByText('Menampilkan 1-20 dari 47 data')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Tahun RPUJ'), { target: { value: '2026' } });
+    fireEvent.change(screen.getByLabelText('Bulan RPUJ'), { target: { value: '08' } });
     await waitFor(() => {
-      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining(nextRange));
+      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining({
+        page: 1,
+        pageSize: 20,
+        status: 'approved',
+        dateFrom: '2026-08-01',
+        dateTo: '2026-08-31',
+      }));
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Halaman berikutnya' }));
+    await waitFor(() => {
+      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining({
+        page: 2,
+        pageSize: 20,
+        status: 'approved',
+      }));
     });
   });
 
@@ -339,6 +383,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
     expect(await screen.findByLabelText('Bulan update invoice')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tahun update invoice')).toBeInTheDocument();
     expect(screen.getByLabelText('Tanggal awal update invoice')).toBeInTheDocument();
     expect(screen.getByLabelText('Tanggal akhir update invoice')).toBeInTheDocument();
 

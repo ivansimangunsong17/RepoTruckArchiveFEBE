@@ -588,7 +588,9 @@ function buildRpujFilters(options = {}) {
   const params = [];
   const periodStatus = options.periodBasis || options.status;
   const periodDateExpression = periodStatus === 'paid'
-    ? 'coalesce(cj.rpuj_transfer_uploaded_at::date, cj.rpuj_reviewed_at::date, cj.rpuj_requested_at::date)'
+    ? 'coalesce(cj.rpuj_transfer_uploaded_at::date, cj.rpuj_reviewed_at::date, cj.rpuj_requested_at::date, cj.updated_at::date, cj.created_at::date)'
+    : ['approved', 'rejected'].includes(periodStatus)
+      ? 'coalesce(cj.rpuj_reviewed_at::date, cj.rpuj_requested_at::date, cj.updated_at::date, cj.created_at::date)'
     : 'coalesce(cj.rpuj_requested_at::date, cj.received_at::date, so.trip_date, cj.created_at::date)';
 
   if (options.dateFrom) {
@@ -621,6 +623,19 @@ function buildRpujFilters(options = {}) {
     whereSql: `where ${clauses.join(' and ')}`,
     params,
   };
+}
+
+function buildRpujSummaryDateCondition(expression, options = {}, params = []) {
+  const clauses = [];
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`${expression} >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`${expression} <= $${params.length}`);
+  }
+  return clauses.length ? ` and ${clauses.join(' and ')}` : '';
 }
 
 function buildInvoiceFilters(options = {}) {
@@ -711,6 +726,7 @@ function rpujRowsSelect() {
       cj.rpuj_rejection_note,
       cj.rpuj_transfer_uploaded_by_name,
       cj.rpuj_transfer_uploaded_at,
+      cj.updated_at,
       cj.has_driver_commission,
       cj.driver_commission_amount,
       cj.driver_commission_source_destination_id,
@@ -951,6 +967,7 @@ function mapRpujRequestRow(row) {
     transferProofFile: transferProof,
     transferUploadedBy: row.rpuj_transfer_uploaded_by_name || '',
     transferUploadedAt: row.rpuj_transfer_uploaded_at,
+    updatedAt: row.updated_at,
     jobStatus: row.job_status || '',
     repoLocation: row.repo_location || '',
     repoStoredAt: row.repo_stored_at,
@@ -2200,9 +2217,25 @@ export async function rejectFinanceCorrectionRequest(id, payload = {}) {
 export async function getRpujRequestsPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildRpujFilters(options);
-  const { whereSql: summaryWhereSql, params: summaryParams } = buildRpujFilters({
+  const { whereSql: summaryWhereSql, params: summaryBaseParams } = buildRpujFilters({
     query: options.query,
   });
+  const summaryParams = [...summaryBaseParams];
+  const requestedDateSql = buildRpujSummaryDateCondition(
+    'coalesce(cj.rpuj_requested_at::date, cj.received_at::date, so.trip_date, cj.created_at::date)',
+    options,
+    summaryParams,
+  );
+  const reviewedDateSql = buildRpujSummaryDateCondition(
+    'coalesce(cj.rpuj_reviewed_at::date, cj.rpuj_requested_at::date, cj.updated_at::date, cj.created_at::date)',
+    options,
+    summaryParams,
+  );
+  const paidDateSql = buildRpujSummaryDateCondition(
+    'coalesce(cj.rpuj_transfer_uploaded_at::date, cj.rpuj_reviewed_at::date, cj.rpuj_requested_at::date, cj.updated_at::date, cj.created_at::date)',
+    options,
+    summaryParams,
+  );
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
@@ -2212,16 +2245,15 @@ export async function getRpujRequestsPage(options = {}) {
         ${rpujRowsSelect()}
         ${whereSql}
         order by
-          case cj.rpuj_status
-            when 'submitted' then 1
-            when 'approved' then 2
-            when 'paid' then 3
-            when 'rejected' then 4
-            else 5
-          end,
-          cj.rpuj_requested_at desc nulls last,
-          so.trip_date asc,
-          cj.created_at asc
+          coalesce(
+            case when cj.rpuj_status = 'paid' then cj.rpuj_transfer_uploaded_at end,
+            case when cj.rpuj_status in ('approved', 'rejected') then cj.rpuj_reviewed_at end,
+            cj.rpuj_requested_at,
+            cj.updated_at,
+            cj.created_at
+          ) desc nulls last,
+          so.trip_date desc nulls last,
+          cj.created_at desc
         limit $${limitIndex} offset $${offsetIndex}
       `,
       [...params, pageSize, offset],
@@ -2238,10 +2270,10 @@ export async function getRpujRequestsPage(options = {}) {
     query(
       `
         select
-          count(*) filter (where cj.rpuj_status = 'submitted')::int as submitted,
-          count(*) filter (where cj.rpuj_status = 'approved')::int as approved,
-          count(*) filter (where cj.rpuj_status = 'paid')::int as paid,
-          count(*) filter (where cj.rpuj_status = 'rejected')::int as rejected
+          count(*) filter (where cj.rpuj_status = 'submitted' ${requestedDateSql})::int as submitted,
+          count(*) filter (where cj.rpuj_status = 'approved' ${reviewedDateSql})::int as approved,
+          count(*) filter (where cj.rpuj_status = 'paid' ${paidDateSql})::int as paid,
+          count(*) filter (where cj.rpuj_status = 'rejected' ${reviewedDateSql})::int as rejected
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         ${summaryWhereSql}

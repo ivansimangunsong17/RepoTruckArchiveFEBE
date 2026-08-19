@@ -268,32 +268,42 @@ function DriverCommissionPage() {
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const selectedPayment = resolveSelectedPayment(selectedBatch, selectedDriver);
 
-  const loadData = useCallback(async () => {
+  const applySelectedReport = useCallback((nextReport) => {
+    setReport(nextReport || emptyReport);
+    setSelectedDriverKey((current) => {
+      const nextDrivers = nextReport?.drivers || [];
+      if (nextDrivers.some((driver) => (driver.driverKey || driver.driverId || driver.driverName) === current)) return current;
+      const firstDriver = nextDrivers[0];
+      return firstDriver ? firstDriver.driverKey || firstDriver.driverId || firstDriver.driverName : '';
+    });
+  }, []);
+
+  const loadData = useCallback(async (preferredBatchId = '') => {
     setLoading(true);
     try {
-      const [reportResult, batchResult] = await Promise.all([
-        fetchDriverCommissionPeriodReport({ periodStart, periodEnd }),
-        fetchDriverCommissionBatches({ periodStart, periodEnd, pageSize: 50 }),
-      ]);
-      const nextReport = reportResult || emptyReport;
+      const batchResult = await fetchDriverCommissionBatches({ pageSize: 50 });
       const nextBatches = batchResult?.rows || [];
-      setReport(nextReport);
       setBatches(nextBatches);
-      setSelectedDriverKey((current) => {
-        const nextDrivers = nextReport.drivers || [];
-        if (nextDrivers.some((driver) => (driver.driverKey || driver.driverId || driver.driverName) === current)) return current;
-        const firstDriver = nextDrivers[0];
-        return firstDriver ? firstDriver.driverKey || firstDriver.driverId || firstDriver.driverName : '';
-      });
 
-      const batchId = selectedBatch?.id || nextReport.activeBatch?.id || nextBatches[0]?.id;
-      setSelectedBatch(batchId ? await fetchDriverCommissionBatchDetail(batchId).catch(() => null) : null);
+      const targetBatch = nextBatches.find((batch) => batch.id === preferredBatchId) || nextBatches[0] || null;
+      const nextPeriodStart = targetBatch?.periodStart || defaultPeriod.periodStart;
+      const nextPeriodEnd = targetBatch?.periodEnd || defaultPeriod.periodEnd;
+      setPeriodStart(nextPeriodStart);
+      setPeriodEnd(nextPeriodEnd);
+
+      const [reportResult, detailResult] = await Promise.all([
+        fetchDriverCommissionPeriodReport({ periodStart: nextPeriodStart, periodEnd: nextPeriodEnd }),
+        targetBatch?.id ? fetchDriverCommissionBatchDetail(targetBatch.id).catch(() => null) : Promise.resolve(null),
+      ]);
+
+      applySelectedReport(reportResult || emptyReport);
+      setSelectedBatch(detailResult || targetBatch || null);
     } catch (error) {
       notify({ type: 'error', title: 'Komisi gagal dimuat', message: error.message });
     } finally {
       setLoading(false);
     }
-  }, [notify, periodEnd, periodStart, selectedBatch?.id]);
+  }, [applySelectedReport, defaultPeriod.periodEnd, defaultPeriod.periodStart, notify]);
 
   useEffect(() => {
     loadData();
@@ -301,9 +311,19 @@ function DriverCommissionPage() {
 
   async function openBatch(batchId) {
     try {
-      setSelectedBatch(await fetchDriverCommissionBatchDetail(batchId));
+      setLoading(true);
+      const detail = await fetchDriverCommissionBatchDetail(batchId);
+      const nextPeriodStart = detail?.periodStart || defaultPeriod.periodStart;
+      const nextPeriodEnd = detail?.periodEnd || defaultPeriod.periodEnd;
+      const reportResult = await fetchDriverCommissionPeriodReport({ periodStart: nextPeriodStart, periodEnd: nextPeriodEnd });
+      setPeriodStart(nextPeriodStart);
+      setPeriodEnd(nextPeriodEnd);
+      setSelectedBatch(detail);
+      applySelectedReport(reportResult || emptyReport);
     } catch (error) {
       notify({ type: 'error', title: 'Detail gagal dimuat', message: error.message });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -322,7 +342,7 @@ function DriverCommissionPage() {
       const updated = await approveDriverCommissionBatch(batch.id);
       notify({ title: 'Komisi disetujui', message: 'Finance bisa mulai mencatat pembayaran per sopir.' });
       setSelectedBatch(updated);
-      await loadData();
+      await loadData(updated.id);
     } catch (error) {
       notify({ type: 'error', title: 'Approve gagal', message: error.message });
     } finally {
@@ -339,7 +359,7 @@ function DriverCommissionPage() {
       const updated = await rejectDriverCommissionBatch(batch.id, rejectionNote);
       notify({ title: 'Komisi ditolak', message: 'Item batch dibuka agar Operational bisa mengajukan ulang.' });
       setSelectedBatch(updated);
-      await loadData();
+      await loadData(updated.id);
     } catch (error) {
       notify({ type: 'error', title: 'Reject gagal', message: error.message });
     } finally {
@@ -357,7 +377,7 @@ function DriverCommissionPage() {
       const updated = await payDriverCommissionPayment(payment.id, { paymentNote });
       notify({ title: 'Pembayaran dicatat', message: `${payment.driverName} ditandai paid.` });
       setSelectedBatch(updated);
-      await loadData();
+      await loadData(updated.id);
     } catch (error) {
       notify({ type: 'error', title: 'Pembayaran gagal', message: error.message });
     } finally {
@@ -375,7 +395,7 @@ function DriverCommissionPage() {
       const updated = await uploadDriverCommissionTransferProof(payment.id, file, { paymentNote });
       notify({ title: 'Bukti transfer disimpan', message: `${payment.driverName} ditandai paid.` });
       setSelectedBatch(updated);
-      await loadData();
+      await loadData(updated.id);
     } catch (error) {
       notify({ type: 'error', title: 'Upload bukti gagal', message: error.message });
     } finally {
@@ -394,16 +414,27 @@ function DriverCommissionPage() {
               Cek pengajuan Operational per sopir, approve batch, lalu catat pembayaran mingguan.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-              Dari
-              <input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-900" type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} />
+          <div className="flex flex-col gap-2 sm:min-w-[420px] sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1 text-xs font-black uppercase tracking-wide text-slate-500">
+              Batch Komisi
+              <select
+                aria-label="Pilih batch komisi"
+                className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case text-slate-900 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                disabled={loading || !batches.length}
+                onChange={(event) => {
+                  if (event.target.value) openBatch(event.target.value);
+                }}
+                value={selectedBatch?.id || ''}
+              >
+                <option value="">{loading ? 'Memuat batch...' : 'Belum ada batch'}</option>
+                {batches.map((batch) => (
+                  <option key={batch.id} value={batch.id}>
+                    {formatDate(batch.periodStart)} - {formatDate(batch.periodEnd)} | {statusLabels[batch.status] || batch.status} | {batch.totalItems || 0} job | {formatCurrency(batch.totalAmount || 0)}
+                  </option>
+                ))}
+              </select>
             </label>
-            <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-              Sampai
-              <input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-900" type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} />
-            </label>
-            <button className="secondary-button mt-5 inline-flex items-center justify-center gap-2" type="button" onClick={loadData} disabled={loading}>
+            <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={() => loadData(selectedBatch?.id)} disabled={loading}>
               <RefreshCw size={16} /> Refresh
             </button>
           </div>
@@ -414,7 +445,7 @@ function DriverCommissionPage() {
         <MetricCard icon={CalendarDays} label="Periode" value={`${formatDate(periodStart)} - ${formatDate(periodEnd)}`} helper="Berdasarkan tanggal selesai job." />
         <MetricCard icon={UserRound} label="Sopir" value={`${summary.totalDrivers || 0} sopir`} helper={`${summary.totalItems || 0} job komisi`} />
         <MetricCard icon={CircleDollarSign} label="Total Komisi" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.paidAmount || 0)} sudah dibayar`} />
-        <MetricCard icon={BadgeCheck} label="Status Batch" value={statusLabels[report.status] || report.status || '-'} helper={report.activeBatch ? `Diajukan ${formatDateTime(report.activeBatch.submittedAt)}` : 'Belum ada pengajuan aktif.'} />
+        <MetricCard icon={BadgeCheck} label="Status Batch" value={statusLabels[selectedBatch?.status || report.status] || selectedBatch?.status || report.status || '-'} helper={selectedBatch ? `Diajukan ${formatDateTime(selectedBatch.submittedAt)}` : 'Belum ada pengajuan aktif.'} />
       </section>
 
       <section>
@@ -422,7 +453,7 @@ function DriverCommissionPage() {
           <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-base font-black text-slate-950">Report Per Sopir</h2>
-              <p className="text-xs leading-relaxed text-slate-500">Daftar komisi dari pengajuan Operational pada periode filter.</p>
+              <p className="text-xs leading-relaxed text-slate-500">Daftar komisi dari batch yang dipilih.</p>
             </div>
             {canFinance && selectedBatch?.status === 'submitted' ? (
               <div className="flex flex-wrap gap-2">
@@ -435,7 +466,7 @@ function DriverCommissionPage() {
               </div>
             ) : null}
           </div>
-          {!report.activeBatch ? (
+          {!selectedBatch ? (
             <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
               Belum ada batch aktif dari Operational untuk periode ini.
             </div>
@@ -493,11 +524,11 @@ function DriverCommissionPage() {
       <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-4">
           <h2 className="text-base font-black text-slate-950">Batch Komisi</h2>
-          <p className="text-xs text-slate-500">Riwayat pengajuan pada periode filter.</p>
+          <p className="text-xs text-slate-500">Riwayat pengajuan terbaru dari Operational.</p>
         </div>
         <div className="divide-y divide-slate-100">
           {batches.map((batch) => (
-            <button key={batch.id} className="flex w-full flex-col gap-2 p-4 text-left hover:bg-slate-50 sm:flex-row sm:items-start sm:justify-between" type="button" onClick={() => openBatch(batch.id)}>
+            <button key={batch.id} className={`flex w-full flex-col gap-2 p-4 text-left hover:bg-slate-50 sm:flex-row sm:items-start sm:justify-between ${selectedBatch?.id === batch.id ? 'bg-red-50/60' : ''}`} type="button" onClick={() => openBatch(batch.id)}>
               <div>
                 <strong className="block text-sm text-slate-950">{formatDate(batch.periodStart)} - {formatDate(batch.periodEnd)}</strong>
                 <small className="mt-1 block text-xs text-slate-500">{batch.totalItems} job | {formatCurrency(batch.totalAmount)}</small>

@@ -213,8 +213,8 @@ function DriverCommissionOperationalPage() {
   const { user } = useAuth();
   const { notify, confirmAction } = useFeedback();
   const defaultPeriod = useMemo(() => defaultCompletedCommissionPeriod(), []);
-  const [periodStart, setPeriodStart] = useState(defaultPeriod.periodStart);
-  const [periodEnd, setPeriodEnd] = useState(defaultPeriod.periodEnd);
+  const periodStart = defaultPeriod.periodStart;
+  const periodEnd = defaultPeriod.periodEnd;
   const [report, setReport] = useState(emptyReport);
   const [selectedDriverKey, setSelectedDriverKey] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
@@ -299,16 +299,13 @@ function DriverCommissionOperationalPage() {
               Cek komisi per sopir sebelum diajukan ke Finance untuk periode Kamis sampai Rabu.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-              Dari
-              <input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-900" type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} />
-            </label>
-            <label className="text-xs font-black uppercase tracking-wide text-slate-500">
-              Sampai
-              <input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-900" type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} />
-            </label>
-            <button className="secondary-button mt-5 inline-flex items-center justify-center gap-2" type="button" onClick={loadReport} disabled={loading}>
+          <div className="flex flex-col gap-2 sm:min-w-[340px] sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="block text-[11px] font-black uppercase tracking-wide text-slate-500">Batch berjalan</span>
+              <strong className="mt-1 block break-words text-sm text-slate-950">{formatDate(periodStart)} - {formatDate(periodEnd)}</strong>
+              <small className="mt-0.5 block text-xs text-slate-500">Otomatis Kamis sampai Rabu.</small>
+            </div>
+            <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={loadReport} disabled={loading}>
               <RefreshCw size={16} /> Refresh
             </button>
           </div>

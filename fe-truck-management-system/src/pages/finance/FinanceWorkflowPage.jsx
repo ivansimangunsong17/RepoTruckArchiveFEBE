@@ -14,7 +14,6 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import FinancePeriodFilter from '../../components/finance/FinancePeriodFilter';
 import DocumentLink from '../../components/common/DocumentLink';
 import {
   approveFinanceRpuj,
@@ -32,11 +31,28 @@ import {
   uploadFinanceInvoiceDocument,
   uploadFinanceRpujTransferProof,
 } from '../../services/finance/financeService';
-import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
 import { validateArchiveFile } from '../../utils/fileValidation';
 
 const ORDER_TABLE_PAGE_SIZE = 20;
+const RPUJ_TABLE_PAGE_SIZE = 20;
 const INVOICE_TABLE_PAGE_SIZE = 20;
+const MONTH_FILTER_MIN_YEAR = 2000;
+const MONTH_FILTER_MAX_YEAR = 2100;
+const DEFAULT_MONTH_FILTER_YEAR = String(new Date().getFullYear());
+const MONTH_FILTER_OPTIONS = [
+  ['01', 'Januari'],
+  ['02', 'Februari'],
+  ['03', 'Maret'],
+  ['04', 'April'],
+  ['05', 'Mei'],
+  ['06', 'Juni'],
+  ['07', 'Juli'],
+  ['08', 'Agustus'],
+  ['09', 'September'],
+  ['10', 'Oktober'],
+  ['11', 'November'],
+  ['12', 'Desember'],
+];
 
 const financeTabs = [
   {
@@ -365,7 +381,8 @@ function formatDisplayDate(value) {
 }
 
 function getMonthDateRange(value) {
-  const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
+  const normalizedValue = normalizeMonthFilterValue(value);
+  const match = normalizedValue.match(/^(\d{4})-(\d{2})$/);
   if (!match) return { dateFrom: '', dateTo: '' };
 
   const [, yearText, monthText] = match;
@@ -377,6 +394,104 @@ function getMonthDateRange(value) {
     dateFrom: `${yearText}-${monthText}-01`,
     dateTo: `${yearText}-${monthText}-${String(lastDay).padStart(2, '0')}`,
   };
+}
+
+function normalizeMonthFilterValue(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})$/);
+  if (!match) return '';
+
+  const [, yearText, monthText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (year < MONTH_FILTER_MIN_YEAR || year > MONTH_FILTER_MAX_YEAR || month < 1 || month > 12) return '';
+  return `${yearText}-${monthText}`;
+}
+
+function normalizeMonthFilterYear(value) {
+  const yearText = String(value || '').trim();
+  if (!/^\d{4}$/.test(yearText)) return '';
+
+  const year = Number(yearText);
+  if (year < MONTH_FILTER_MIN_YEAR || year > MONTH_FILTER_MAX_YEAR) return '';
+  return yearText;
+}
+
+function getMonthFilterParts(value) {
+  const normalizedValue = normalizeMonthFilterValue(value);
+  if (!normalizedValue) return { month: '', year: '' };
+
+  const [year, month] = normalizedValue.split('-');
+  return { month, year };
+}
+
+function MonthFilterControl({
+  className = '',
+  label,
+  monthAriaLabel,
+  onChange,
+  value,
+  yearAriaLabel,
+}) {
+  const { month, year } = getMonthFilterParts(value);
+  const [draftYear, setDraftYear] = useState(year || DEFAULT_MONTH_FILTER_YEAR);
+  const visibleYear = year || draftYear || DEFAULT_MONTH_FILTER_YEAR;
+
+  useEffect(() => {
+    if (year) setDraftYear(year);
+  }, [year]);
+
+  const handleMonthChange = (event) => {
+    const nextMonth = event.target.value;
+    if (!nextMonth) {
+      onChange('');
+      return;
+    }
+
+    const normalizedYear = normalizeMonthFilterYear(visibleYear) || DEFAULT_MONTH_FILTER_YEAR;
+    onChange(`${normalizedYear}-${nextMonth}`);
+  };
+
+  const handleYearChange = (event) => {
+    const nextYear = event.target.value;
+    const normalizedYear = normalizeMonthFilterYear(nextYear);
+    setDraftYear(normalizedYear || DEFAULT_MONTH_FILTER_YEAR);
+
+    if (!month) return;
+    if (!normalizedYear) {
+      onChange('');
+      return;
+    }
+
+    onChange(`${normalizedYear}-${month}`);
+  };
+
+  return (
+    <label className={`grid min-w-[230px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500 ${className}`}>
+      {label}
+      <div className="grid grid-cols-[minmax(128px,1fr)_82px] gap-1">
+        <select
+          aria-label={monthAriaLabel}
+          className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+          onChange={handleMonthChange}
+          value={month}
+        >
+          <option value="">Semua bulan</option>
+          {MONTH_FILTER_OPTIONS.map(([optionValue, optionLabel]) => (
+            <option key={optionValue} value={optionValue}>{optionLabel}</option>
+          ))}
+        </select>
+        <input
+          aria-label={yearAriaLabel}
+          className="h-9 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+          max={MONTH_FILTER_MAX_YEAR}
+          min={MONTH_FILTER_MIN_YEAR}
+          onChange={handleYearChange}
+          type="number"
+          value={visibleYear}
+        />
+      </div>
+    </label>
+  );
 }
 
 function isCancelledFinanceOrder(row = {}) {
@@ -1899,16 +2014,13 @@ function OrderVerificationTable({
           <SearchBar query={query} onChange={onQueryChange} />
           </div>
           <div className="flex max-w-full flex-wrap items-end gap-2">
-            <label className="grid min-w-[150px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
-              Bulan order dibuat
-              <input
-                aria-label="Bulan order dibuat"
-                className="h-9 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
-                onChange={(event) => onOrderFilterMonthChange(event.target.value)}
-                type="month"
-                value={orderFilterMonth}
-              />
-            </label>
+            <MonthFilterControl
+              label="Bulan dibuat"
+              monthAriaLabel="Bulan order dibuat"
+              onChange={onOrderFilterMonthChange}
+              value={orderFilterMonth}
+              yearAriaLabel="Tahun order dibuat"
+            />
             <label className="grid min-w-[150px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
               Dari tanggal
               <input
@@ -2105,11 +2217,18 @@ function RpujApprovalTable({
   query,
   activeRpujTab,
   summary = defaultRpujSummary,
+  total,
+  totalPages,
+  currentPage,
   onActiveRpujTabChange,
-  periodMonth,
-  periodYear,
-  onPeriodMonthChange,
-  onPeriodYearChange,
+  onPageChange,
+  rpujFilterMonth,
+  rpujDateFrom,
+  rpujDateTo,
+  onRpujFilterMonthChange,
+  onRpujDateFromChange,
+  onRpujDateToChange,
+  onResetRpujDateFilter,
   onApprove,
   onReject,
   onOpenUploadModal,
@@ -2123,6 +2242,10 @@ function RpujApprovalTable({
   const readyTransferRows = searchableRows.filter((row) => row.rpujStatus === 'approved');
   const paidRows = searchableRows.filter((row) => row.rpujStatus === 'paid');
   const tabSummary = normalizeRpujSummary(summary);
+  const safeTotal = Math.max(0, Number(total ?? 0));
+  const safeTotalPages = Math.max(1, Number(totalPages || Math.ceil(safeTotal / RPUJ_TABLE_PAGE_SIZE) || 1));
+  const safeCurrentPage = Math.min(Math.max(1, Number(currentPage || 1)), safeTotalPages);
+  const showingFrom = safeTotal ? (safeCurrentPage - 1) * RPUJ_TABLE_PAGE_SIZE + 1 : 0;
 
   const tabs = [
     { id: 'need-approval', label: 'Butuh Approval', icon: Clock3, count: tabSummary.submitted, tone: 'red' },
@@ -2135,6 +2258,11 @@ function RpujApprovalTable({
     : activeRpujTab === 'paid'
       ? paidRows
       : needsApprovalRows;
+  const showingTo = safeTotal ? Math.min(showingFrom + activeRows.length - 1, safeTotal) : 0;
+  const rowNumbers = activeRows.reduce((numbers, row, index) => {
+    numbers.set(row.id, showingFrom + index);
+    return numbers;
+  }, new Map());
   const groupedRows = activeRows.reduce((groups, row) => {
     if (!groups[row.soNumber]) groups[row.soNumber] = [];
     groups[row.soNumber].push(row);
@@ -2193,28 +2321,59 @@ function RpujApprovalTable({
             );
           })}
         </div>
-        {activeRpujTab === 'paid' ? (
-          <FinancePeriodFilter
-            month={periodMonth}
-            onMonthChange={onPeriodMonthChange}
-            onYearChange={onPeriodYearChange}
-            year={periodYear}
+        <div className="flex max-w-full flex-wrap items-end gap-2">
+          <MonthFilterControl
+            className="[&>div>*]:h-8"
+            label="Bulan RPUJ"
+            monthAriaLabel="Bulan RPUJ"
+            onChange={onRpujFilterMonthChange}
+            value={rpujFilterMonth}
+            yearAriaLabel="Tahun RPUJ"
           />
-        ) : null}
+          <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+            Dari
+            <input
+              aria-label="Tanggal awal RPUJ"
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              onChange={(event) => onRpujDateFromChange(event.target.value)}
+              type="date"
+              value={rpujDateFrom}
+            />
+          </label>
+          <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+            Sampai
+            <input
+              aria-label="Tanggal akhir RPUJ"
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              onChange={(event) => onRpujDateToChange(event.target.value)}
+              type="date"
+              value={rpujDateTo}
+            />
+          </label>
+          <button
+            className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!rpujFilterMonth && !rpujDateFrom && !rpujDateTo}
+            onClick={onResetRpujDateFilter}
+            type="button"
+          >
+            Reset
+          </button>
+        </div>
       </div>
 
       <div className="table-wrap">
           <table className="data-table master-table finance-master-table finance-rpuj-table min-w-[1180px] table-fixed">
             <colgroup>
-              <col className="w-[25%]" />
+              <col className="w-[5%]" />
+              <col className="w-[22%]" />
               <col className="w-[18%]" />
               <col className="w-[12%]" />
               <col className="w-[22%]" />
-              <col className="w-[23%]" />
+              <col className="w-[21%]" />
             </colgroup>
             <thead>
               <tr>
-                {['Job / Container', 'Pengajuan', 'Status', 'Driver / Rekening', 'Aksi'].map((column) => (
+                {['No', 'Job / Container', 'Pengajuan', 'Status', 'Driver / Rekening', 'Aksi'].map((column) => (
                   <th className={column === 'Aksi' ? 'finance-rpuj-actions-header' : ''} key={column}>{column}</th>
                 ))}
               </tr>
@@ -2230,7 +2389,7 @@ function RpujApprovalTable({
                 return (
                   <Fragment key={soNumber}>
                     <tr className="finance-group-row">
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                             <strong className="min-w-0 break-words text-xs font-black text-slate-950">{soNumber}</strong>
@@ -2247,7 +2406,7 @@ function RpujApprovalTable({
                       </td>
                     </tr>
                     <tr aria-hidden="true">
-                      <td className="h-px bg-slate-200 p-0" colSpan={5} />
+                      <td className="h-px bg-slate-200 p-0" colSpan={6} />
                     </tr>
                     {soRows.map((row) => {
                       const canUploadTransfer = row.rpujStatus === 'approved';
@@ -2261,6 +2420,9 @@ function RpujApprovalTable({
                       return (
                         <Fragment key={row.id}>
                           <tr className="align-middle hover:bg-slate-50">
+                            <td className="px-2 py-2 text-center text-[11px] font-black text-slate-800" data-label="No">
+                              {rowNumbers.get(row.id) || '-'}
+                            </td>
                             <td className="finance-wrap-cell px-2 py-2" data-label="Job / Container">
                               <strong className="block break-words text-[11px] font-semibold leading-snug text-slate-900">{row.jobNumber}</strong>
                               <span className="mt-0.5 block break-words text-[9px] font-medium leading-snug text-slate-500">{row.container}</span>
@@ -2325,7 +2487,7 @@ function RpujApprovalTable({
                             </td>
                           </tr>
                           <tr aria-hidden="true">
-                            <td className="h-px bg-slate-200 p-0" colSpan={5} />
+                            <td className="h-px bg-slate-200 p-0" colSpan={6} />
                           </tr>
                         </Fragment>
                       );
@@ -2335,12 +2497,24 @@ function RpujApprovalTable({
               })}
               {!Object.keys(groupedRows).length ? (
                 <tr>
-                  <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={5}>Tidak ada RPUJ pada klasifikasi ini.</td>
+                  <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={6}>Tidak ada RPUJ pada klasifikasi ini.</td>
                 </tr>
               ) : null}
             </tbody>
           </table>
         </div>
+      <div className="master-pagination border-t border-slate-200 bg-slate-50">
+        <span>Menampilkan {showingFrom}-{showingTo} dari {safeTotal} data</span>
+        <div className="master-pagination-controls">
+          <button type="button" disabled={safeCurrentPage === 1} onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))} aria-label="Halaman sebelumnya">
+            <ChevronLeft size={15} />
+          </button>
+          <strong>Halaman {safeCurrentPage} dari {safeTotalPages}</strong>
+          <button type="button" disabled={safeCurrentPage === safeTotalPages} onClick={() => onPageChange(Math.min(safeTotalPages, safeCurrentPage + 1))} aria-label="Halaman berikutnya">
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2486,16 +2660,14 @@ function InvoiceTable({
             </div>
           </div>
           <div className="flex max-w-full flex-wrap items-end gap-2">
-            <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
-              Bulan
-              <input
-                aria-label="Bulan update invoice"
-                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
-                onChange={(event) => onInvoiceFilterMonthChange(event.target.value)}
-                type="month"
-                value={invoiceFilterMonth}
-              />
-            </label>
+            <MonthFilterControl
+              className="[&>div>*]:h-8"
+              label="Bulan update"
+              monthAriaLabel="Bulan update invoice"
+              onChange={onInvoiceFilterMonthChange}
+              value={invoiceFilterMonth}
+              yearAriaLabel="Tahun update invoice"
+            />
             <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
               Dari
               <input
@@ -2672,13 +2844,12 @@ function FinanceTable({
   onActiveOrderTabChange,
   onActiveInvoiceTabChange,
   onActiveInvoiceDocumentFilterChange,
-  periodMonth,
-  periodYear,
-  onPeriodMonthChange,
-  onPeriodYearChange,
   orderFilterMonth,
   orderDateFrom,
   orderDateTo,
+  rpujFilterMonth,
+  rpujDateFrom,
+  rpujDateTo,
   invoiceFilterMonth,
   invoiceDateFrom,
   invoiceDateTo,
@@ -2686,6 +2857,10 @@ function FinanceTable({
   onOrderDateFromChange,
   onOrderDateToChange,
   onResetOrderDateFilter,
+  onRpujFilterMonthChange,
+  onRpujDateFromChange,
+  onRpujDateToChange,
+  onResetRpujDateFilter,
   onInvoiceFilterMonthChange,
   onInvoiceDateFromChange,
   onInvoiceDateToChange,
@@ -2701,6 +2876,9 @@ function FinanceTable({
   orderPage,
   orderTotal,
   orderTotalPages,
+  rpujPage,
+  rpujTotal,
+  rpujTotalPages,
   rpujSummary,
   invoiceSummary,
   invoicePage,
@@ -2716,6 +2894,7 @@ function FinanceTable({
   invoiceBusyId,
   onInvoicePageChange,
   onOrderPageChange,
+  onRpujPageChange,
   savingSoId,
   handlers,
 }) {
@@ -2809,15 +2988,22 @@ function FinanceTable({
       {activeTab.id === 'rpuj-approval' ? (
         <RpujApprovalTable
           activeRpujTab={activeRpujTab}
+          currentPage={rpujPage}
           onActiveRpujTabChange={onActiveRpujTabChange}
-          onPeriodMonthChange={onPeriodMonthChange}
-          onPeriodYearChange={onPeriodYearChange}
-          periodMonth={periodMonth}
-          periodYear={periodYear}
+          onPageChange={onRpujPageChange}
+          onResetRpujDateFilter={onResetRpujDateFilter}
+          onRpujDateFromChange={onRpujDateFromChange}
+          onRpujDateToChange={onRpujDateToChange}
+          onRpujFilterMonthChange={onRpujFilterMonthChange}
           query={query}
           rows={rpujRows}
+          rpujDateFrom={rpujDateFrom}
+          rpujDateTo={rpujDateTo}
+          rpujFilterMonth={rpujFilterMonth}
           rpujBusyId={rpujBusyId}
           summary={rpujSummary}
+          total={rpujTotal}
+          totalPages={rpujTotalPages}
           {...handlers}
         />
       ) : null}
@@ -2833,11 +3019,7 @@ function FinanceTable({
           onInvoiceDateFromChange={onInvoiceDateFromChange}
           onInvoiceDateToChange={onInvoiceDateToChange}
           onInvoiceFilterMonthChange={onInvoiceFilterMonthChange}
-          onPeriodMonthChange={onPeriodMonthChange}
-          onPeriodYearChange={onPeriodYearChange}
           onResetInvoiceDateFilter={onResetInvoiceDateFilter}
-          periodMonth={periodMonth}
-          periodYear={periodYear}
           invoiceDateFrom={invoiceDateFrom}
           invoiceDateTo={invoiceDateTo}
           invoiceFilterMonth={invoiceFilterMonth}
@@ -2854,9 +3036,6 @@ function FinanceTable({
 }
 
 function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
-  const currentPeriod = useMemo(() => getCurrentFinancePeriod(), []);
-  const [periodMonth, setPeriodMonth] = useState(currentPeriod.month);
-  const [periodYear, setPeriodYear] = useState(currentPeriod.year);
   const [activeOrderTab, setActiveOrderTab] = useState('need-so');
   const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
   const [activeInvoiceTab, setActiveInvoiceTab] = useState('need-number');
@@ -2864,12 +3043,18 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [orderFilterMonth, setOrderFilterMonth] = useState('');
   const [orderDateFrom, setOrderDateFrom] = useState('');
   const [orderDateTo, setOrderDateTo] = useState('');
+  const [rpujFilterMonth, setRpujFilterMonth] = useState('');
+  const [rpujDateFrom, setRpujDateFrom] = useState('');
+  const [rpujDateTo, setRpujDateTo] = useState('');
   const [invoiceFilterMonth, setInvoiceFilterMonth] = useState('');
   const [invoiceDateFrom, setInvoiceDateFrom] = useState('');
   const [invoiceDateTo, setInvoiceDateTo] = useState('');
   const [orderPage, setOrderPage] = useState(1);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderTotalPages, setOrderTotalPages] = useState(1);
+  const [rpujPage, setRpujPage] = useState(1);
+  const [rpujTotal, setRpujTotal] = useState(0);
+  const [rpujTotalPages, setRpujTotalPages] = useState(1);
   const [invoicePage, setInvoicePage] = useState(1);
   const [invoiceTotal, setInvoiceTotal] = useState(0);
   const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
@@ -2928,11 +3113,6 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const rpujDecisionRow = rpujRows.find((row) => row.id === rpujDecision?.id);
   const transferModalRow = rpujRows.find((row) => row.id === transferModalId);
   const invoiceConfirmRow = invoiceRows.find((row) => row.id === invoiceConfirmId);
-  const periodRange = useMemo(
-    () => getFinancePeriodRange(periodMonth, periodYear),
-    [periodMonth, periodYear],
-  );
-
   const loadOrderVerifications = useCallback(async () => {
     if (activeTab.id !== 'order-verification') return;
     setOrderLoading(true);
@@ -2973,8 +3153,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   }, [loadOrderVerifications]);
 
   const handleOrderFilterMonthChange = useCallback((value) => {
-    const range = getMonthDateRange(value);
-    setOrderFilterMonth(value);
+    const normalizedValue = normalizeMonthFilterValue(value);
+    const range = getMonthDateRange(normalizedValue);
+    setOrderFilterMonth(normalizedValue);
     setOrderDateFrom(range.dateFrom);
     setOrderDateTo(range.dateTo);
     setOrderPage(1);
@@ -3002,12 +3183,18 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const handleQueryChange = useCallback((value) => {
     setQuery(value);
     if (activeTab.id === 'order-verification') setOrderPage(1);
+    if (activeTab.id === 'rpuj-approval') setRpujPage(1);
     if (activeTab.id === 'invoice-number') setInvoicePage(1);
   }, [activeTab.id]);
 
   const handleActiveOrderTabChange = useCallback((nextTab) => {
     setActiveOrderTab(nextTab);
     setOrderPage(1);
+  }, []);
+
+  const handleActiveRpujTabChange = useCallback((nextTab) => {
+    setActiveRpujTab(nextTab);
+    setRpujPage(1);
   }, []);
 
   const handleActiveInvoiceTabChange = useCallback((nextTab) => {
@@ -3021,9 +3208,38 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setInvoicePage(1);
   }, []);
 
+  const handleRpujFilterMonthChange = useCallback((value) => {
+    const normalizedValue = normalizeMonthFilterValue(value);
+    const range = getMonthDateRange(normalizedValue);
+    setRpujFilterMonth(normalizedValue);
+    setRpujDateFrom(range.dateFrom);
+    setRpujDateTo(range.dateTo);
+    setRpujPage(1);
+  }, []);
+
+  const handleRpujDateFromChange = useCallback((value) => {
+    setRpujFilterMonth('');
+    setRpujDateFrom(value);
+    setRpujPage(1);
+  }, []);
+
+  const handleRpujDateToChange = useCallback((value) => {
+    setRpujFilterMonth('');
+    setRpujDateTo(value);
+    setRpujPage(1);
+  }, []);
+
+  const handleResetRpujDateFilter = useCallback(() => {
+    setRpujFilterMonth('');
+    setRpujDateFrom('');
+    setRpujDateTo('');
+    setRpujPage(1);
+  }, []);
+
   const handleInvoiceFilterMonthChange = useCallback((value) => {
-    const range = getMonthDateRange(value);
-    setInvoiceFilterMonth(value);
+    const normalizedValue = normalizeMonthFilterValue(value);
+    const range = getMonthDateRange(normalizedValue);
+    setInvoiceFilterMonth(normalizedValue);
     setInvoiceDateFrom(range.dateFrom);
     setInvoiceDateTo(range.dateTo);
     setInvoicePage(1);
@@ -3048,39 +3264,37 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setInvoicePage(1);
   }, []);
 
-  const handlePeriodMonthChange = useCallback((value) => {
-    setPeriodMonth(value);
-    setInvoicePage(1);
-  }, []);
-
-  const handlePeriodYearChange = useCallback((value) => {
-    setPeriodYear(value);
-    setInvoicePage(1);
-  }, []);
-
   const loadRpujRequests = useCallback(async () => {
     if (activeTab.id !== 'rpuj-approval') return;
     setRpujLoading(true);
     setRpujError('');
     try {
       const result = await fetchFinanceRpujRequests({
-        page: 1,
-        pageSize: 100,
+        page: rpujPage,
+        pageSize: RPUJ_TABLE_PAGE_SIZE,
         status: rpujStatusParam(activeRpujTab),
         ...(query.trim() ? { query: query.trim() } : {}),
-        ...(activeRpujTab === 'paid' ? periodRange : {}),
+        ...(rpujDateFrom ? { dateFrom: rpujDateFrom } : {}),
+        ...(rpujDateTo ? { dateTo: rpujDateTo } : {}),
       });
       const normalizedRows = (result.rows || []).map(normalizeFinanceRpujRow);
       setRpujRows(normalizedRows);
+      const nextRpujTotal = Number(result.total ?? result.rows?.length ?? 0);
+      const nextRpujTotalPages = Math.max(1, Number(result.totalPages || Math.ceil(nextRpujTotal / RPUJ_TABLE_PAGE_SIZE) || 1));
+      setRpujTotal(nextRpujTotal);
+      setRpujTotalPages(nextRpujTotalPages);
+      if (rpujPage > nextRpujTotalPages) setRpujPage(nextRpujTotalPages);
       setRpujSummary(result.summary ? normalizeRpujSummary(result.summary) : summarizeRpujRows(normalizedRows));
     } catch (error) {
       setRpujError(error.message || 'Data pengajuan RPUJ gagal dimuat.');
       setRpujRows([]);
+      setRpujTotal(0);
+      setRpujTotalPages(1);
       setRpujSummary(defaultRpujSummary);
     } finally {
       setRpujLoading(false);
     }
-  }, [activeRpujTab, activeTab.id, periodRange, query]);
+  }, [activeRpujTab, activeTab.id, query, rpujDateFrom, rpujDateTo, rpujPage]);
 
   useEffect(() => {
     loadRpujRequests();
@@ -3276,6 +3490,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       const normalized = normalizeFinanceRpujRow(saved);
       setRpujRows((rows) => rows.map((row) => (row.id === rpujDecision.id ? normalized : row)));
       setRpujSummary((summary) => applyRpujSummaryTransition(summary, previousStatus, normalized.rpujStatus));
+      if (previousStatus && previousStatus !== normalized.rpujStatus) {
+        setRpujTotal((total) => Math.max(0, Number(total || 0) - 1));
+      }
       setRpujDecision(null);
       setRpujDecisionNote('');
     } catch (error) {
@@ -3320,6 +3537,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       const normalized = normalizeFinanceRpujRow(saved);
       setRpujRows((rows) => rows.map((row) => (row.id === transferModalId ? normalized : row)));
       setRpujSummary((summary) => applyRpujSummaryTransition(summary, previousStatus, normalized.rpujStatus));
+      if (previousStatus && previousStatus !== normalized.rpujStatus) {
+        setRpujTotal((total) => Math.max(0, Number(total || 0) - 1));
+      }
       setTransferModalId('');
       setTransferFile(null);
     } catch (error) {
@@ -3545,20 +3765,20 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         onActiveInvoiceDocumentFilterChange={handleActiveInvoiceDocumentFilterChange}
         onActiveInvoiceTabChange={handleActiveInvoiceTabChange}
         onActiveOrderTabChange={handleActiveOrderTabChange}
-        onActiveRpujTabChange={setActiveRpujTab}
+        onActiveRpujTabChange={handleActiveRpujTabChange}
         onInvoiceDateFromChange={handleInvoiceDateFromChange}
         onInvoiceDateToChange={handleInvoiceDateToChange}
         onInvoiceFilterMonthChange={handleInvoiceFilterMonthChange}
         onInvoicePageChange={setInvoicePage}
         onOrderPageChange={setOrderPage}
+        onRpujPageChange={setRpujPage}
         onOrderDateFromChange={handleOrderDateFromChange}
         onOrderDateToChange={handleOrderDateToChange}
         onOrderFilterMonthChange={handleOrderFilterMonthChange}
-        onPeriodMonthChange={handlePeriodMonthChange}
-        onPeriodYearChange={handlePeriodYearChange}
         onReset={resetSimulation}
         onResetInvoiceDateFilter={handleResetInvoiceDateFilter}
         onResetOrderDateFilter={handleResetOrderDateFilter}
+        onResetRpujDateFilter={handleResetRpujDateFilter}
         onQueryChange={handleQueryChange}
         orderDateFrom={orderDateFrom}
         orderDateTo={orderDateTo}
@@ -3570,14 +3790,21 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         orderSummary={orderSummary}
         orderTotal={orderTotal}
         orderTotalPages={orderTotalPages}
+        rpujDateFrom={rpujDateFrom}
+        rpujDateTo={rpujDateTo}
         rpujBusyId={rpujBusyId}
         rpujError={rpujError}
+        rpujFilterMonth={rpujFilterMonth}
         rpujLoading={rpujLoading}
+        rpujPage={rpujPage}
         rpujSummary={rpujSummary}
-        periodMonth={periodMonth}
-        periodYear={periodYear}
+        rpujTotal={rpujTotal}
+        rpujTotalPages={rpujTotalPages}
         query={query}
         rpujRows={rpujRows}
+        onRpujDateFromChange={handleRpujDateFromChange}
+        onRpujDateToChange={handleRpujDateToChange}
+        onRpujFilterMonthChange={handleRpujFilterMonthChange}
         savingSoId={savingSoId}
       />
 

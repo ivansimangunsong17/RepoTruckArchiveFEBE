@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DriverCommissionOperationalPage from './DriverCommissionOperationalPage';
@@ -130,13 +130,13 @@ describe('DriverCommissionOperationalPage', () => {
     expect(await screen.findByText('CONT-002')).toBeInTheDocument();
   });
 
-  it('mengajukan batch komisi dengan periode yang dipilih', async () => {
+  it('mengajukan batch komisi dengan periode otomatis', async () => {
     const user = userEvent.setup();
     render(<DriverCommissionOperationalPage />);
 
     await screen.findAllByText('Rahmat');
-    fireEvent.change(screen.getByLabelText('Dari'), { target: { value: '2026-08-13' } });
-    fireEvent.change(screen.getByLabelText('Sampai'), { target: { value: '2026-08-19' } });
+    expect(screen.queryByLabelText('Dari')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sampai')).not.toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /ajukan ke finance/i })).toBeEnabled();
@@ -146,23 +146,20 @@ describe('DriverCommissionOperationalPage', () => {
 
     await waitFor(() => {
       expect(confirmAction).toHaveBeenCalled();
-      expect(submitDriverCommissionBatch).toHaveBeenCalledWith({
-        periodStart: '2026-08-13',
-        periodEnd: '2026-08-19',
-      });
+      expect(submitDriverCommissionBatch).toHaveBeenCalledWith(expect.objectContaining({
+        periodStart: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        periodEnd: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      }));
     });
   });
 
-  it('menonaktifkan submit jika periode bukan Kamis sampai Rabu', async () => {
+  it('tidak menampilkan pilihan tanggal manual', async () => {
     render(<DriverCommissionOperationalPage />);
 
     await screen.findAllByText('Rahmat');
-    fireEvent.change(screen.getByLabelText('Dari'), { target: { value: '2026-08-13' } });
-    fireEvent.change(screen.getByLabelText('Sampai'), { target: { value: '2026-08-18' } });
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /ajukan ke finance/i })).toBeDisabled();
-    });
-    expect(screen.getByText(/periode submit wajib kamis-rabu/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Dari')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sampai')).not.toBeInTheDocument();
+    expect(screen.getByText(/otomatis kamis sampai rabu/i)).toBeInTheDocument();
   });
 });
