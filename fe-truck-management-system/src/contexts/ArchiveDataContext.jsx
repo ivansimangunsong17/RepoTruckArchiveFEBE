@@ -24,6 +24,7 @@ const ArchiveDataContext = createContext(null);
 const LOCAL_ORDERS_KEY = 'tms-sales-orders-v3';
 const LOCAL_MASTER_KEYS = {
   customers: 'tms-master-clients-v2',
+  'end-users': 'tms-master-end-users-v1',
   trucks: 'tms-master-trucks-v2',
   drivers: 'tms-master-drivers-v2',
   users: 'tms-master-users-v2',
@@ -34,6 +35,7 @@ const LOCAL_MASTER_KEYS = {
 };
 const fallbackMasters = {
   customers: fallbackCustomers,
+  'end-users': [],
   trucks: fallbackTruckUnits,
   drivers: fallbackDrivers,
   users: fallbackUsers,
@@ -55,6 +57,7 @@ function readLocalOrders() {
 function emptyApiMasters() {
   return {
     customers: [],
+    'end-users': [],
     trucks: [],
     drivers: [],
     users: [],
@@ -85,6 +88,7 @@ function readLocalMaster(resource) {
 function readLocalMasters() {
   return {
     customers: readLocalMaster('customers'),
+    'end-users': readLocalMaster('end-users'),
     trucks: readLocalMaster('trucks'),
     drivers: readLocalMaster('drivers'),
     users: readLocalMaster('users'),
@@ -210,6 +214,7 @@ export function ArchiveDataProvider({ children }) {
       try {
         const [
           customersResult,
+          endUsersResult,
           trucksResult,
           driversResult,
           usersResult,
@@ -220,6 +225,7 @@ export function ArchiveDataProvider({ children }) {
           ordersResult,
         ] = await Promise.allSettled([
           masterDatabaseMode ? fetchMaster('customers') : Promise.resolve(readLocalMaster('customers')),
+          masterDatabaseMode ? fetchMaster('end-users') : Promise.resolve(readLocalMaster('end-users')),
           masterDatabaseMode ? fetchMaster('trucks') : Promise.resolve(readLocalMaster('trucks')),
           masterDatabaseMode ? fetchMaster('drivers') : Promise.resolve(readLocalMaster('drivers')),
           masterDatabaseMode ? (canReadUsers ? fetchMaster('users') : Promise.resolve([])) : Promise.resolve(readLocalMaster('users')),
@@ -239,6 +245,7 @@ export function ArchiveDataProvider({ children }) {
 
         setMasters({
           customers: readSettledValue(customersResult, [], 'Customer'),
+          'end-users': readSettledValue(endUsersResult, [], 'End User'),
           trucks: readSettledValue(trucksResult, [], 'Truck'),
           drivers: readSettledValue(driversResult, [], 'Driver'),
           users: readSettledValue(usersResult, [], 'User'),

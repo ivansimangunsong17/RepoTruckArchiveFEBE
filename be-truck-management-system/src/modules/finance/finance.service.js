@@ -50,6 +50,7 @@ export function fetchOrderVerifications(query = {}) {
     pageSize: query.pageSize,
     dateFrom: query.dateFrom || query.startDate || '',
     dateTo: query.dateTo || query.endDate || '',
+    dateBasis: query.dateBasis || '',
     query: query.query || query.search || '',
     status: query.status || '',
   });

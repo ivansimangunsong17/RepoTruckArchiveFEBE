@@ -25,6 +25,19 @@ describe('ujRecommendation', () => {
     expect(recommendation.hasConfiguredTariff).toBe(true);
   });
 
+  it('memilih komisi sopir berdasarkan ukuran container', () => {
+    const destinations = [{
+      name: 'Cikarang',
+      uj20ft: 600000,
+      uj40ft: 750000,
+      driverCommission20ftAmount: 50000,
+      driverCommission40ftAmount: 80000,
+    }];
+
+    expect(calculateUjRecommendation({ destination: 'Cikarang', size: '20FT' }, destinations).driverCommissionAmount).toBe(50000);
+    expect(calculateUjRecommendation({ destination: 'Cikarang', size: '40FT' }, destinations).driverCommissionAmount).toBe(80000);
+  });
+
   it('menganggap tarif belum lengkap jika ukuran container ini belum punya UJ', () => {
     const recommendation = calculateUjRecommendation(
       { destination: 'Cikarang', size: '40FT' },

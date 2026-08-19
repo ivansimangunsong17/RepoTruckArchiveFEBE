@@ -18,6 +18,7 @@ const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
 const DriverCommissionOperationalPage = lazy(() => import('../pages/operations/DriverCommissionOperationalPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
 const ClientsPage = lazy(() => import('../pages/admin/ClientsPage'));
+const EndUsersPage = lazy(() => import('../pages/admin/EndUsersPage'));
 const DepotsPage = lazy(() => import('../pages/admin/DepotsPage'));
 const DestinationsPage = lazy(() => import('../pages/admin/DestinationsPage'));
 const DriversPage = lazy(() => import('../pages/admin/DriversPage'));
@@ -97,6 +98,7 @@ export const router = createBrowserRouter([
         { path: 'trucks', children: [guardedPage(adminRoles, <LazyPage><TrucksPage /></LazyPage>)] },
         { path: 'drivers', children: [guardedPage(adminRoles, <LazyPage><DriversPage /></LazyPage>)] },
         { path: 'clients', children: [guardedPage(adminRoles, <LazyPage><ClientsPage /></LazyPage>)] },
+        { path: 'end-users', children: [guardedPage(adminRoles, <LazyPage><EndUsersPage /></LazyPage>)] },
         { path: 'kir-chassis', children: [guardedPage(adminRoles, <LazyPage><KirChassisPage /></LazyPage>)] },
         { path: 'depots', children: [guardedPage(adminRoles, <LazyPage><DepotsPage /></LazyPage>)] },
         { path: 'terminals', children: [guardedPage(adminRoles, <LazyPage><TerminalsPage /></LazyPage>)] },
@@ -104,6 +106,7 @@ export const router = createBrowserRouter([
         { path: 'viewer/trucks', children: [guardedPage(viewerOnlyRoles, <LazyPage><TrucksPage readOnly /></LazyPage>)] },
         { path: 'viewer/drivers', children: [guardedPage(viewerOnlyRoles, <LazyPage><DriversPage readOnly /></LazyPage>)] },
         { path: 'viewer/clients', children: [guardedPage(viewerOnlyRoles, <LazyPage><ClientsPage readOnly /></LazyPage>)] },
+        { path: 'viewer/end-users', children: [guardedPage(viewerOnlyRoles, <LazyPage><EndUsersPage readOnly /></LazyPage>)] },
         { path: 'viewer/kir-chassis', children: [guardedPage(viewerOnlyRoles, <LazyPage><KirChassisPage readOnly /></LazyPage>)] },
         { path: 'viewer/depots', children: [guardedPage(viewerOnlyRoles, <LazyPage><DepotsPage readOnly /></LazyPage>)] },
         { path: 'viewer/terminals', children: [guardedPage(viewerOnlyRoles, <LazyPage><TerminalsPage readOnly /></LazyPage>)] },

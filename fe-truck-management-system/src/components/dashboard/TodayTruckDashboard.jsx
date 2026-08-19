@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, FileText, History, Truck, X } from 'lucide-react';
+import { Archive, Download, FileText, History, Truck, X } from 'lucide-react';
 import { formatShortDate, normalizeSize, todayKey } from '../../data/operationalDashboard';
 import { fetchDashboardReport } from '../../services/reports/reportService';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
@@ -47,6 +47,17 @@ function isTruckMaintenance(truck) {
 
 function isActiveDashboardJob(job) {
   return ['received', 'running', 'Belum Jalan', 'Sedang Jalan'].includes(job?.status);
+}
+
+function isRepoStoredDashboardJob(job) {
+  return Boolean(job?.status === 'repo_stored' || (job?.repoStoredAt && !job?.repoPickedUpAt));
+}
+
+function repoConditionLabel(value) {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'loaded') return 'Isi';
+  if (normalized === 'empty') return 'Kosong';
+  return value || 'Kondisi belum diisi';
 }
 
 function formatTruckNumber(unitCode) {
@@ -239,11 +250,12 @@ function TodayTruckDashboard() {
   }, []);
 
   const sourceTrucks = dashboard.trucks;
+  const sourceRepoJobs = dashboard.activeJobs.filter(isRepoStoredDashboardJob);
   const sourceJobs = dashboard.activeJobs.filter(isActiveDashboardJob);
   const truckRows = sourceTrucks.map(normalizeTruck);
   const rows = buildTruckRows(truckRows, sourceJobs);
   const availability = getAvailability(truckRows, sourceJobs);
-  const lastOperationalUpdate = getLastOperationalUpdate(sourceJobs);
+  const lastOperationalUpdate = getLastOperationalUpdate(dashboard.activeJobs);
   const lastOperationalUpdateLabel = formatDateTime(lastOperationalUpdate);
 
   function handleDownloadReport() {
@@ -294,6 +306,40 @@ function TodayTruckDashboard() {
       </header>
       {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat dashboard truck...</p></div> : null}
       {error ? <div className="archive-inline-state is-error"><h3>Order berjalan gagal dimuat</h3><p>{error}</p></div> : null}
+      {!loading && !error && sourceRepoJobs.length ? (
+        <section
+          aria-label="Notifikasi container titip"
+          className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm"
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white text-amber-700 ring-1 ring-amber-200">
+              <Archive size={18} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="m-0 text-sm font-black leading-tight">{sourceRepoJobs.length} container sedang dititipkan</h2>
+              <p className="m-0 mt-1 text-xs font-semibold leading-snug text-amber-800">
+                Pantau container titip di repo. Truck dan sopirnya sudah bisa dipakai untuk pekerjaan lain.
+              </p>
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-wrap justify-start gap-1.5 sm:justify-end">
+            {sourceRepoJobs.slice(0, 4).map((job) => (
+              <span
+                className="max-w-full rounded-md border border-amber-200 bg-white px-2.5 py-1 text-[10px] font-bold text-amber-900 shadow-sm"
+                key={job.id}
+                title={`${job.containerNumber || '-'} - ${job.repoLocation || 'Lokasi belum diisi'}`}
+              >
+                {job.containerNumber || job.soNumber || '-'} - {job.repoLocation || 'Lokasi belum diisi'} - {repoConditionLabel(job.repoContainerCondition)}
+              </span>
+            ))}
+            {sourceRepoJobs.length > 4 ? (
+              <span className="rounded-md border border-amber-200 bg-amber-100 px-2.5 py-1 text-[10px] font-black text-amber-900">
+                +{sourceRepoJobs.length - 4} lainnya
+              </span>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       <section className="today-live-panel overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="today-live-availability grid items-center gap-2.5 border-b border-slate-200 bg-slate-50 px-4 py-2 lg:grid-cols-[260px_1fr]" aria-label="Ketersediaan Truck Hari Ini">
           <div className="flex items-center pl-0">

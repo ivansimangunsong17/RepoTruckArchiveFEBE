@@ -79,12 +79,33 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
   const qty40ft = readNumber(job.qty40ft, job.qty40FT, job.qty40, job.orderQty40ft, fallbackQty40ft);
   const uj20ft = readNumber(destination?.uj20ft, destination?.uj20Ft, destination?.uj20, destination?.uj_20ft, destination?.uj_20_ft);
   const uj40ft = readNumber(destination?.uj40ft, destination?.uj40Ft, destination?.uj40, destination?.uj_40ft, destination?.uj_40_ft);
-  const driverCommissionAmount = readNumber(
+  const fallbackDriverCommissionAmount = readNumber(
     destination?.driverCommissionAmount,
     destination?.driver_commission_amount,
     destination?.driverCommission,
     destination?.commission,
   );
+  const driverCommission20ftAmount = readNumber(
+    destination?.driverCommission20ftAmount,
+    destination?.driverCommission20FtAmount,
+    destination?.driverCommission20,
+    destination?.driver_commission_20ft_amount,
+    destination?.driver_commission_20_ft_amount,
+    fallbackDriverCommissionAmount,
+  );
+  const driverCommission40ftAmount = readNumber(
+    destination?.driverCommission40ftAmount,
+    destination?.driverCommission40FtAmount,
+    destination?.driverCommission40,
+    destination?.driver_commission_40ft_amount,
+    destination?.driver_commission_40_ft_amount,
+    fallbackDriverCommissionAmount,
+  );
+  const driverCommissionAmount = currentSize === '40FT'
+    ? driverCommission40ftAmount
+    : currentSize === '20FT'
+      ? driverCommission20ftAmount
+      : fallbackDriverCommissionAmount || driverCommission20ftAmount || driverCommission40ftAmount;
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
   const currentContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
@@ -101,6 +122,8 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
     currentSize: currentSize || '',
     currentContainerUj,
     driverCommissionAmount,
+    driverCommission20ftAmount,
+    driverCommission40ftAmount,
     uj20ft,
     uj40ft,
     qty20ft,

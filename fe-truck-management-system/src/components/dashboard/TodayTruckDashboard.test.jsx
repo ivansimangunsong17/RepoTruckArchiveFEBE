@@ -205,6 +205,9 @@ describe('TodayTruckDashboard', () => {
           truck: 'B 2300 RP',
           status: 'repo_stored',
           containerNumber: 'CONT-REPO',
+          repoLocation: 'Depo Marunda',
+          repoStoredAt: '2026-08-17T03:00:00.000Z',
+          repoContainerCondition: 'loaded',
         },
       ],
     });
@@ -215,6 +218,8 @@ describe('TodayTruckDashboard', () => {
       const availabilityRegion = screen.getByLabelText('Ketersediaan Truck Hari Ini');
       expect(within(availabilityRegion).getByText('20FT').closest('article')).toHaveTextContent('1 Unit');
     });
-    expect(screen.queryByText('CONT-REPO')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Notifikasi container titip')).toHaveTextContent('CONT-REPO');
+    expect(screen.getByLabelText('Notifikasi container titip')).toHaveTextContent('Depo Marunda');
+    expect(within(screen.getByRole('table')).queryByText('CONT-REPO')).not.toBeInTheDocument();
   });
 });

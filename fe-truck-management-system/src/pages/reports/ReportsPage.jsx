@@ -862,6 +862,18 @@ function buildMasterReportSections(masters = {}) {
       ],
     },
     {
+      key: 'end-users',
+      title: 'End User',
+      rows: masters['end-users'] || [],
+      columns: [
+        { label: 'End User', value: (row) => row.name },
+        { label: 'Kode', value: (row) => row.code },
+        { label: 'PIC', value: (row) => row.pic },
+        { label: 'Kontak', value: (row) => row.phone },
+        { label: 'Status', value: (row) => row.status },
+      ],
+    },
+    {
       key: 'trucks',
       title: 'Truck',
       rows: masters.trucks || [],
@@ -2134,7 +2146,7 @@ function ReportsPage() {
           <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-sm font-bold text-slate-950">Performa Sopir</h2>
-              <p className="text-xs text-slate-500">Jumlah trip, revenue perusahaan, dan komisi yang tercatat untuk sopir.</p>
+              <p className="text-xs text-slate-500">Jumlah trip dan revenue perusahaan yang tercatat untuk sopir.</p>
             </div>
             <button
               type="button"
@@ -2157,11 +2169,6 @@ function ReportsPage() {
                 { label: 'Sopir' },
                 { label: 'Jumlah Trip', align: 'right' },
                 { label: 'Total Revenue', align: 'right' },
-                { label: 'Total Komisi', align: 'right' },
-                { label: 'Komisi Paid', align: 'right' },
-                { label: 'Belum Paid', align: 'right' },
-                { label: 'Rata-rata / Trip', align: 'right' },
-                { label: 'Avg Komisi / Trip', align: 'right' },
               ]}
               rows={driverRows}
               rowRenderer={(driver, index) => (
@@ -2174,11 +2181,6 @@ function ReportsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Total Revenue">{formatCurrency(driver.totalRevenue)}</td>
-                  <td className="px-3 py-2 text-right font-bold text-amber-700" data-label="Total Komisi">{formatCurrency(driver.totalDriverCommission)}</td>
-                  <td className="px-3 py-2 text-right font-bold text-emerald-700" data-label="Komisi Paid">{formatCurrency(driver.paidDriverCommission)}</td>
-                  <td className="px-3 py-2 text-right font-bold text-rose-700" data-label="Belum Paid">{formatCurrency(driver.unpaidDriverCommission)}</td>
-                  <td className="px-3 py-2 text-right text-slate-600" data-label="Rata-rata / Trip">{formatCurrency(driver.averageRevenuePerTrip)}</td>
-                  <td className="px-3 py-2 text-right text-slate-600" data-label="Avg Komisi / Trip">{formatCurrency(driver.averageCommissionPerTrip)}</td>
                 </tr>
               )}
             />

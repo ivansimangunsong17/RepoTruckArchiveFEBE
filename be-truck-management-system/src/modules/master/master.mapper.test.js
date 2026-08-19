@@ -89,14 +89,63 @@ test('destination mapper membaca dan menyimpan komisi sopir', () => {
     id: 'destination-1',
     name: 'Cikarang',
     driver_commission_amount: '50000',
+    driver_commission_20ft_amount: '45000',
+    driver_commission_40ft_amount: '75000',
   });
 
   assert.equal(mapped.driverCommissionAmount, 50000);
+  assert.equal(mapped.driverCommission20ftAmount, 45000);
+  assert.equal(mapped.driverCommission40ftAmount, 75000);
 
   const databaseRow = resourceConfig.destinations.toDb({
     name: 'Cikarang',
-    driverCommissionAmount: '75000',
+    driverCommission20ftAmount: '50000',
+    driverCommission40ftAmount: '80000',
   });
 
-  assert.equal(databaseRow.driver_commission_amount, 75000);
+  assert.equal(databaseRow.driver_commission_amount, 0);
+  assert.equal(databaseRow.driver_commission_20ft_amount, 50000);
+  assert.equal(databaseRow.driver_commission_40ft_amount, 80000);
+});
+
+test('end user mapper membaca dan menyimpan data kontak', () => {
+  const mapped = resourceConfig['end-users'].toApi({
+    id: 'end-user-1',
+    name: 'PT Penerima Akhir',
+    code: 'EU-001',
+    address: 'Cikarang',
+    pic_name: 'Budi',
+    phone: '08123456789',
+    email: 'budi@example.com',
+    operational_status: 'Aktif',
+    notes: 'Prioritas',
+  });
+
+  assert.deepEqual(mapped, {
+    id: 'end-user-1',
+    name: 'PT Penerima Akhir',
+    code: 'EU-001',
+    address: 'Cikarang',
+    pic: 'Budi',
+    phone: '08123456789',
+    email: 'budi@example.com',
+    status: 'Aktif',
+    notes: 'Prioritas',
+  });
+
+  const databaseRow = resourceConfig['end-users'].toDb({
+    name: 'PT Penerima Akhir',
+    code: 'EU-001',
+    address: 'Cikarang',
+    pic: 'Budi',
+    phone: '08123456789',
+    email: 'budi@example.com',
+    status: 'Tidak Aktif',
+    notes: 'Hold',
+  });
+
+  assert.equal(databaseRow.name, 'PT Penerima Akhir');
+  assert.equal(databaseRow.code, 'EU-001');
+  assert.equal(databaseRow.pic_name, 'Budi');
+  assert.equal(databaseRow.operational_status, 'Tidak Aktif');
 });

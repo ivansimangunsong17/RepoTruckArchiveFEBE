@@ -135,13 +135,15 @@ export async function getDashboardReport() {
              cj.weighing_document_number, cj.tila_gatepass_document_number,
              cj.received_at, cj.running_at,
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
+             cj.repo_location, cj.repo_stored_at, cj.repo_reason,
+             cj.repo_notes, cj.repo_container_condition,
              so.id as sales_order_id, so.so_number, so.customer_name,
              so.shipment_type, so.origin, so.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       where so.status <> 'cancelled'
-        and cj.status in ('received', 'running')
+        and cj.status in ('received', 'running', 'repo_stored')
       order by so.trip_date asc, cj.created_at asc
       limit 200
     `),
@@ -223,6 +225,11 @@ export async function getDashboardReport() {
       receivedAt: row.received_at,
       runningAt: row.running_at,
       completedAt: row.completed_at,
+      repoLocation: row.repo_location || '',
+      repoStoredAt: row.repo_stored_at,
+      repoReason: row.repo_reason || '',
+      repoNotes: row.repo_notes || '',
+      repoContainerCondition: row.repo_container_condition || '',
       updatedAt: row.updated_at,
     })),
     upcomingJobs: upcomingJobs.rows.map((row) => ({

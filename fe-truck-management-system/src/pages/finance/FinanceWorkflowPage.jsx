@@ -35,6 +35,7 @@ import {
 import { getCurrentFinancePeriod, getFinancePeriodRange } from '../../utils/financePeriod';
 import { validateArchiveFile } from '../../utils/fileValidation';
 
+const ORDER_TABLE_PAGE_SIZE = 20;
 const INVOICE_TABLE_PAGE_SIZE = 20;
 
 const financeTabs = [
@@ -389,11 +390,26 @@ function isVerifiedFinanceOrder(row = {}) {
   return !isCancelledFinanceOrder(row) && (row.verificationStatus === 'verified' || Boolean(row.accurateSoNumber || row.soNumber));
 }
 
+function orderVerificationStatusParam(tabId) {
+  if (tabId === 'running') return 'verified';
+  if (tabId === 'cancelled') return 'cancelled';
+  return 'pending_so';
+}
+
 function normalizeFinanceOrderRow(row = {}) {
   const isCancelled = isCancelledFinanceOrder(row);
   const soNumber = row.soNumber || '';
   const accurateSoNumber = row.accurateSoNumber || soNumber;
   const internalSoNumber = row.internalSoNumber || row.systemSoNumber || '';
+  const lineItems = Array.isArray(row.lineItems)
+    ? row.lineItems.map((item) => ({
+      serviceName: item.serviceName || item.service_name || item.name || '-',
+      containerType: item.containerType || item.container_type || '',
+      qty: Number(item.qty || item.quantity || 0),
+      price: Number(item.price || 0),
+      total: Number(item.total || Number(item.qty || item.quantity || 0) * Number(item.price || 0)),
+    }))
+    : [];
   return {
     id: row.id,
     orderDate: formatDisplayDate(row.orderDate),
@@ -405,6 +421,9 @@ function normalizeFinanceOrderRow(row = {}) {
     destination: row.destination || '-',
     orderType: row.orderType || row.shipment || '-',
     paymentTerms: row.paymentTerms || '-',
+    price: Number(row.price || 0),
+    totalAmount: Number(row.totalAmount || row.total_amount || 0),
+    lineItems,
     runningDate: formatDisplayDate(row.runningDate),
     container: row.container || '-',
     vesselName: row.vesselName || '-',
@@ -588,6 +607,48 @@ const defaultInvoiceSummary = {
   completeInvoiceDocuments: 0,
   sentInvoiceDocuments: 0,
 };
+
+const defaultRpujSummary = {
+  submitted: 0,
+  approved: 0,
+  paid: 0,
+  rejected: 0,
+};
+
+function rpujStatusParam(tabId) {
+  if (tabId === 'ready-transfer') return 'approved';
+  if (tabId === 'paid') return 'paid';
+  return 'submitted';
+}
+
+function normalizeRpujSummary(summary = {}) {
+  return {
+    submitted: Number(summary.submitted || 0),
+    approved: Number(summary.approved || 0),
+    paid: Number(summary.paid || 0),
+    rejected: Number(summary.rejected || 0),
+  };
+}
+
+function summarizeRpujRows(rows = []) {
+  return rows.reduce((summary, row) => {
+    if (Object.prototype.hasOwnProperty.call(summary, row.rpujStatus)) {
+      summary[row.rpujStatus] += 1;
+    }
+    return summary;
+  }, { ...defaultRpujSummary });
+}
+
+function applyRpujSummaryTransition(summary, previousStatus, nextStatus) {
+  const nextSummary = normalizeRpujSummary(summary);
+  if (previousStatus && Object.prototype.hasOwnProperty.call(nextSummary, previousStatus)) {
+    nextSummary[previousStatus] = Math.max(0, nextSummary[previousStatus] - 1);
+  }
+  if (nextStatus && Object.prototype.hasOwnProperty.call(nextSummary, nextStatus)) {
+    nextSummary[nextStatus] += 1;
+  }
+  return nextSummary;
+}
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('id-ID', {
@@ -1006,6 +1067,8 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
   if (!order) return null;
 
   const isCancelled = isCancelledFinanceOrder(order);
+  const priceItems = Array.isArray(order.lineItems) ? order.lineItems.filter((item) => item.serviceName || item.price || item.total) : [];
+  const priceTotal = Number(order.totalAmount || priceItems.reduce((sum, item) => sum + Number(item.total || 0), 0) || order.price || 0);
 
   return (
     <div className="finance-order-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
@@ -1036,6 +1099,48 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
             <DetailField label="Depo" value={order.depo} />
             <DetailField label="Dokumen Awal" value={order.document} />
             <DetailField label="Status SO" value={order.status} />
+          </div>
+
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Detail Harga</p>
+                <h4 className="mt-1 text-lg font-black text-slate-950">{formatCurrency(priceTotal)}</h4>
+              </div>
+              <div className="grid min-w-[180px] gap-1 text-right">
+                <span className="text-[10px] font-black uppercase tracking-wide text-slate-500">Harga Dasar</span>
+                <strong className="text-sm font-black text-slate-900">{formatCurrency(order.price)}</strong>
+              </div>
+            </div>
+            {priceItems.length ? (
+              <div className="mt-3 overflow-hidden rounded-md border border-slate-200 bg-white">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-[10px] font-black uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2">Layanan</th>
+                      <th className="px-3 py-2 text-right">Qty</th>
+                      <th className="px-3 py-2 text-right">Harga</th>
+                      <th className="px-3 py-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priceItems.map((item, index) => (
+                      <tr className="border-t border-slate-100" key={`${item.serviceName}-${index}`}>
+                        <td className="px-3 py-2 font-semibold text-slate-900">
+                          <span className="block break-words">{item.serviceName || '-'}</span>
+                          {item.containerType ? <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{item.containerType}</span> : null}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-slate-700">{item.qty || '-'}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-slate-700">{formatCurrency(item.price)}</td>
+                        <td className="px-3 py-2 text-right font-black text-slate-950">{formatCurrency(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs font-semibold text-slate-500">Rincian harga belum tersedia.</p>
+            )}
           </div>
 
           <div className="mt-2 grid gap-2 xl:grid-cols-[1fr_240px]">
@@ -1741,7 +1846,13 @@ function OrderVerificationTable({
   rows,
   query,
   summary,
+  activeOrderTab,
+  currentPage,
+  total,
+  totalPages,
   onQueryChange,
+  onActiveOrderTabChange,
+  onPageChange,
   onSelectOrder,
   onOpenSoModal,
   savingSoId,
@@ -1758,13 +1869,16 @@ function OrderVerificationTable({
     { id: 'running', label: 'SO Terisi', icon: CheckCircle2, match: isVerifiedFinanceOrder },
     { id: 'cancelled', label: 'SO Batal', icon: AlertTriangle, match: isCancelledFinanceOrder },
   ];
-  const [activeOrderTab, setActiveOrderTab] = useState(orderTabs[0].id);
   const currentTab = orderTabs.find((tab) => tab.id === activeOrderTab) || orderTabs[0];
   const normalizedQuery = query.trim().toLowerCase();
-  const hasSearchQuery = normalizedQuery.length > 0;
   const searchedRows = rows.filter((row) => `${row.soNumber} ${row.internalSoNumber} ${row.accurateSoNumber} ${row.salesName} ${row.customer} ${row.destination} ${row.paymentTerms} ${row.status} ${row.cancelReason}`.toLowerCase().includes(normalizedQuery));
   const filteredRows = searchedRows.filter((row) => currentTab.match(row));
-  const hasBackendSummary = !hasSearchQuery && Boolean(summary);
+  const hasBackendSummary = Boolean(summary);
+  const safeTotal = Math.max(0, Number(total ?? filteredRows.length ?? 0));
+  const safeCurrentPage = Math.max(1, Number(currentPage || 1));
+  const safeTotalPages = Math.max(1, Number(totalPages || Math.ceil(safeTotal / ORDER_TABLE_PAGE_SIZE) || 1));
+  const showingFrom = safeTotal ? (safeCurrentPage - 1) * ORDER_TABLE_PAGE_SIZE + 1 : 0;
+  const showingTo = safeTotal ? Math.min(safeCurrentPage * ORDER_TABLE_PAGE_SIZE, safeTotal) : 0;
   const tabCounts = {
     'need-so': hasBackendSummary ? Number(summary?.pendingSo || 0) : searchedRows.filter((row) => orderTabs[0].match(row)).length,
     running: hasBackendSummary ? Number(summary?.verified || 0) : searchedRows.filter((row) => orderTabs[1].match(row)).length,
@@ -1859,7 +1973,7 @@ function OrderVerificationTable({
                 aria-selected={active}
                 className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-bold transition ${active ? `${tone.active} shadow-sm ring-1` : inactiveTone}`}
                 key={tab.id}
-                onClick={() => setActiveOrderTab(tab.id)}
+                onClick={() => onActiveOrderTabChange(tab.id)}
                 role="tab"
                 type="button"
               >
@@ -1878,7 +1992,7 @@ function OrderVerificationTable({
         <table className="data-table master-table finance-master-table finance-order-table min-w-[1320px]">
           <thead>
             <tr>
-              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Status SO', 'Alasan Batal', 'Nomor SO Internal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
+              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Customer', 'Alasan Batal', 'Nomor SO Internal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -1913,8 +2027,8 @@ function OrderVerificationTable({
                         <StatusPill value={row.paymentTerms} />
                       </td>
                       <td className="px-2 py-1 font-semibold text-slate-800" data-label="Tanggal Jalan">{row.runningDate}</td>
-                      <td className="px-2 py-1" data-label="Status SO">
-                        <StatusPill value={row.status} />
+                      <td className="max-w-[220px] px-2 py-1 font-semibold text-slate-800" data-label="Customer">
+                        <span className="block break-words leading-snug">{row.customer || '-'}</span>
                       </td>
                       <td className="max-w-[220px] px-2 py-1 text-[10px] font-semibold text-slate-600" data-label="Alasan Batal">
                         {isCancelled ? (
@@ -1970,6 +2084,18 @@ function OrderVerificationTable({
           </tbody>
         </table>
       </div>
+      <div className="master-pagination border-t border-slate-200 bg-slate-50">
+        <span>Menampilkan {showingFrom}-{showingTo} dari {safeTotal} data</span>
+        <div className="master-pagination-controls">
+          <button type="button" disabled={safeCurrentPage === 1} onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))} aria-label="Halaman sebelumnya">
+            <ChevronLeft size={15} />
+          </button>
+          <strong>Halaman {safeCurrentPage} dari {safeTotalPages}</strong>
+          <button type="button" disabled={safeCurrentPage === safeTotalPages} onClick={() => onPageChange(Math.min(safeTotalPages, safeCurrentPage + 1))} aria-label="Halaman berikutnya">
+            <ChevronRight size={15} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1978,6 +2104,7 @@ function RpujApprovalTable({
   rows,
   query,
   activeRpujTab,
+  summary = defaultRpujSummary,
   onActiveRpujTabChange,
   periodMonth,
   periodYear,
@@ -1995,11 +2122,12 @@ function RpujApprovalTable({
   const needsApprovalRows = searchableRows.filter((row) => row.rpujStatus === 'submitted');
   const readyTransferRows = searchableRows.filter((row) => row.rpujStatus === 'approved');
   const paidRows = searchableRows.filter((row) => row.rpujStatus === 'paid');
+  const tabSummary = normalizeRpujSummary(summary);
 
   const tabs = [
-    { id: 'need-approval', label: 'Butuh Approval', icon: Clock3, count: needsApprovalRows.length, tone: 'red' },
-    { id: 'ready-transfer', label: 'Siap Transfer', icon: Upload, count: readyTransferRows.length, tone: 'amber' },
-    { id: 'paid', label: 'UJ Dikirim', icon: CheckCircle2, count: paidRows.length, tone: 'emerald' },
+    { id: 'need-approval', label: 'Butuh Approval', icon: Clock3, count: tabSummary.submitted, tone: 'red' },
+    { id: 'ready-transfer', label: 'Siap Transfer', icon: Upload, count: tabSummary.approved, tone: 'amber' },
+    { id: 'paid', label: 'UJ Dikirim', icon: CheckCircle2, count: tabSummary.paid, tone: 'emerald' },
   ];
 
   const activeRows = activeRpujTab === 'ready-transfer'
@@ -2229,10 +2357,13 @@ function InvoiceTable({
   onActiveInvoiceTabChange,
   onActiveInvoiceDocumentFilterChange,
   onInvoicePageChange,
-  periodMonth,
-  periodYear,
-  onPeriodMonthChange,
-  onPeriodYearChange,
+  invoiceFilterMonth,
+  invoiceDateFrom,
+  invoiceDateTo,
+  onInvoiceFilterMonthChange,
+  onInvoiceDateFromChange,
+  onInvoiceDateToChange,
+  onResetInvoiceDateFilter,
   invoiceBusyId = '',
   onInvoiceChange,
   onSaveInvoice,
@@ -2354,14 +2485,46 @@ function InvoiceTable({
             })}
             </div>
           </div>
-          {activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid' ? (
-            <FinancePeriodFilter
-              month={periodMonth}
-              onMonthChange={onPeriodMonthChange}
-              onYearChange={onPeriodYearChange}
-              year={periodYear}
-            />
-          ) : null}
+          <div className="flex max-w-full flex-wrap items-end gap-2">
+            <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+              Bulan
+              <input
+                aria-label="Bulan update invoice"
+                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                onChange={(event) => onInvoiceFilterMonthChange(event.target.value)}
+                type="month"
+                value={invoiceFilterMonth}
+              />
+            </label>
+            <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+              Dari
+              <input
+                aria-label="Tanggal awal update invoice"
+                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                onChange={(event) => onInvoiceDateFromChange(event.target.value)}
+                type="date"
+                value={invoiceDateFrom}
+              />
+            </label>
+            <label className="grid min-w-[135px] max-w-full flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
+              Sampai
+              <input
+                aria-label="Tanggal akhir update invoice"
+                className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                onChange={(event) => onInvoiceDateToChange(event.target.value)}
+                type="date"
+                value={invoiceDateTo}
+              />
+            </label>
+            <button
+              className="h-8 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!invoiceFilterMonth && !invoiceDateFrom && !invoiceDateTo}
+              onClick={onResetInvoiceDateFilter}
+              type="button"
+            >
+              Reset
+            </button>
+          </div>
         </div>
         {canFilterDocuments ? (
         <div className="mt-2 flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -2390,26 +2553,27 @@ function InvoiceTable({
       <div className="finance-invoice-table-wrap">
         <table className="data-table master-table finance-master-table finance-invoice-table table-fixed">
           <colgroup>
+            <col className="w-[4%]" />
             <col className="w-[8%]" />
-            <col className="w-[14%]" />
+            <col className="w-[13%]" />
             <col className="w-[11%]" />
             <col className="w-[8%]" />
             <col className="w-[8%]" />
             <col className="w-[8%]" />
             <col className="w-[10%]" />
-            <col className="w-[14%]" />
+            <col className="w-[13%]" />
             <col className="w-[9%]" />
-            <col className="w-[10%]" />
+            <col className="w-[8%]" />
           </colgroup>
           <thead>
             <tr>
-              {['Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Penagihan', 'No. Invoice', 'Lama Pelunasan', 'Aksi'].map((column) => (
+              {['No', 'Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Penagihan', 'No. Invoice', 'Lama Pelunasan', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {paginatedRows.map((row) => {
+            {paginatedRows.map((row, index) => {
               const needsInvoiceNumber = row.invoiceStatus === 'Butuh Nomor Invoice';
               const needsInvoiceDocuments = Boolean(row.invoiceNumber && (!row.invoiceDocumentUploadedAt || !row.taxInvoiceDocumentUploadedAt));
               const documentActionLabel = needsInvoiceDocuments ? 'Upload Dokumen' : 'Detail Dokumen';
@@ -2417,6 +2581,7 @@ function InvoiceTable({
 
               return (
                 <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
+                  <td className="font-black text-slate-800" data-label="No">{showingFrom + index}</td>
                   <td className="finance-invoice-so font-semibold text-slate-700" data-label="Nomor SO">{row.soNumber}</td>
                   <td className="finance-invoice-customer" data-label="Customer">
                     <span className="block truncate font-semibold text-slate-900">{row.customer}</span>
@@ -2473,7 +2638,7 @@ function InvoiceTable({
             })}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={10}>Tidak ada data pada klasifikasi ini.</td>
+                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={11}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
@@ -2504,6 +2669,7 @@ function FinanceTable({
   activeInvoiceTab,
   activeInvoiceDocumentFilter,
   onActiveRpujTabChange,
+  onActiveOrderTabChange,
   onActiveInvoiceTabChange,
   onActiveInvoiceDocumentFilterChange,
   periodMonth,
@@ -2513,17 +2679,29 @@ function FinanceTable({
   orderFilterMonth,
   orderDateFrom,
   orderDateTo,
+  invoiceFilterMonth,
+  invoiceDateFrom,
+  invoiceDateTo,
   onOrderFilterMonthChange,
   onOrderDateFromChange,
   onOrderDateToChange,
   onResetOrderDateFilter,
+  onInvoiceFilterMonthChange,
+  onInvoiceDateFromChange,
+  onInvoiceDateToChange,
+  onResetInvoiceDateFilter,
   query,
   onQueryChange,
   onReset,
   orderRows,
   rpujRows,
   invoiceRows,
+  activeOrderTab,
   orderSummary,
+  orderPage,
+  orderTotal,
+  orderTotalPages,
+  rpujSummary,
   invoiceSummary,
   invoicePage,
   invoiceTotal,
@@ -2537,6 +2715,7 @@ function FinanceTable({
   invoiceLoading,
   invoiceBusyId,
   onInvoicePageChange,
+  onOrderPageChange,
   savingSoId,
   handlers,
 }) {
@@ -2609,8 +2788,12 @@ function FinanceTable({
           onOrderDateFromChange={onOrderDateFromChange}
           onOrderDateToChange={onOrderDateToChange}
           onOrderFilterMonthChange={onOrderFilterMonthChange}
+          onActiveOrderTabChange={onActiveOrderTabChange}
+          onPageChange={onOrderPageChange}
           onQueryChange={onQueryChange}
           onResetOrderDateFilter={onResetOrderDateFilter}
+          activeOrderTab={activeOrderTab}
+          currentPage={orderPage}
           orderDateFrom={orderDateFrom}
           orderDateTo={orderDateTo}
           orderFilterMonth={orderFilterMonth}
@@ -2618,6 +2801,8 @@ function FinanceTable({
           rows={orderRows}
           savingSoId={savingSoId}
           summary={orderSummary}
+          total={orderTotal}
+          totalPages={orderTotalPages}
           {...handlers}
         />
       ) : null}
@@ -2632,6 +2817,7 @@ function FinanceTable({
           query={query}
           rows={rpujRows}
           rpujBusyId={rpujBusyId}
+          summary={rpujSummary}
           {...handlers}
         />
       ) : null}
@@ -2644,10 +2830,17 @@ function FinanceTable({
           onInvoicePageChange={onInvoicePageChange}
           onActiveInvoiceDocumentFilterChange={onActiveInvoiceDocumentFilterChange}
           onActiveInvoiceTabChange={onActiveInvoiceTabChange}
+          onInvoiceDateFromChange={onInvoiceDateFromChange}
+          onInvoiceDateToChange={onInvoiceDateToChange}
+          onInvoiceFilterMonthChange={onInvoiceFilterMonthChange}
           onPeriodMonthChange={onPeriodMonthChange}
           onPeriodYearChange={onPeriodYearChange}
+          onResetInvoiceDateFilter={onResetInvoiceDateFilter}
           periodMonth={periodMonth}
           periodYear={periodYear}
+          invoiceDateFrom={invoiceDateFrom}
+          invoiceDateTo={invoiceDateTo}
+          invoiceFilterMonth={invoiceFilterMonth}
           query={query}
           rows={invoiceRows}
           summary={invoiceSummary}
@@ -2664,12 +2857,19 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const currentPeriod = useMemo(() => getCurrentFinancePeriod(), []);
   const [periodMonth, setPeriodMonth] = useState(currentPeriod.month);
   const [periodYear, setPeriodYear] = useState(currentPeriod.year);
+  const [activeOrderTab, setActiveOrderTab] = useState('need-so');
   const [activeRpujTab, setActiveRpujTab] = useState('need-approval');
   const [activeInvoiceTab, setActiveInvoiceTab] = useState('need-number');
   const [activeInvoiceDocumentFilter, setActiveInvoiceDocumentFilter] = useState('all');
   const [orderFilterMonth, setOrderFilterMonth] = useState('');
   const [orderDateFrom, setOrderDateFrom] = useState('');
   const [orderDateTo, setOrderDateTo] = useState('');
+  const [invoiceFilterMonth, setInvoiceFilterMonth] = useState('');
+  const [invoiceDateFrom, setInvoiceDateFrom] = useState('');
+  const [invoiceDateTo, setInvoiceDateTo] = useState('');
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderTotal, setOrderTotal] = useState(0);
+  const [orderTotalPages, setOrderTotalPages] = useState(1);
   const [invoicePage, setInvoicePage] = useState(1);
   const [invoiceTotal, setInvoiceTotal] = useState(0);
   const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
@@ -2678,6 +2878,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const [rpujRows, setRpujRows] = useState(initialRpujRows);
   const [invoiceRows, setInvoiceRows] = useState(initialInvoiceRows);
   const [orderSummary, setOrderSummary] = useState(null);
+  const [rpujSummary, setRpujSummary] = useState(defaultRpujSummary);
   const [invoiceSummary, setInvoiceSummary] = useState(defaultInvoiceSummary);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState('');
@@ -2738,12 +2939,19 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setOrderError('');
     try {
       const result = await fetchFinanceOrderVerifications({
-        page: 1,
-        pageSize: 100,
+        page: orderPage,
+        pageSize: ORDER_TABLE_PAGE_SIZE,
+        status: orderVerificationStatusParam(activeOrderTab),
+        ...(query.trim() ? { query: query.trim() } : {}),
         ...(orderDateFrom ? { dateFrom: orderDateFrom } : {}),
         ...(orderDateTo ? { dateTo: orderDateTo } : {}),
       });
       setOrderRows((result.rows || []).map(normalizeFinanceOrderRow));
+      const nextOrderTotal = Number(result.total ?? result.rows?.length ?? 0);
+      const nextOrderTotalPages = Math.max(1, Number(result.totalPages || Math.ceil(nextOrderTotal / ORDER_TABLE_PAGE_SIZE) || 1));
+      setOrderTotal(nextOrderTotal);
+      setOrderTotalPages(nextOrderTotalPages);
+      if (orderPage > nextOrderTotalPages) setOrderPage(nextOrderTotalPages);
       setOrderSummary(result.summary ? {
         pendingSo: Number(result.summary.pendingSo || 0),
         verified: Number(result.summary.verified || 0),
@@ -2752,11 +2960,13 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     } catch (error) {
       setOrderError(error.message || 'Data verifikasi order gagal dimuat.');
       setOrderRows([]);
+      setOrderTotal(0);
+      setOrderTotalPages(1);
       setOrderSummary(null);
     } finally {
       setOrderLoading(false);
     }
-  }, [activeTab.id, orderDateFrom, orderDateTo]);
+  }, [activeOrderTab, activeTab.id, orderDateFrom, orderDateTo, orderPage, query]);
 
   useEffect(() => {
     loadOrderVerifications();
@@ -2767,28 +2977,38 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setOrderFilterMonth(value);
     setOrderDateFrom(range.dateFrom);
     setOrderDateTo(range.dateTo);
+    setOrderPage(1);
   }, []);
 
   const handleOrderDateFromChange = useCallback((value) => {
     setOrderFilterMonth('');
     setOrderDateFrom(value);
+    setOrderPage(1);
   }, []);
 
   const handleOrderDateToChange = useCallback((value) => {
     setOrderFilterMonth('');
     setOrderDateTo(value);
+    setOrderPage(1);
   }, []);
 
   const handleResetOrderDateFilter = useCallback(() => {
     setOrderFilterMonth('');
     setOrderDateFrom('');
     setOrderDateTo('');
+    setOrderPage(1);
   }, []);
 
   const handleQueryChange = useCallback((value) => {
     setQuery(value);
+    if (activeTab.id === 'order-verification') setOrderPage(1);
     if (activeTab.id === 'invoice-number') setInvoicePage(1);
   }, [activeTab.id]);
+
+  const handleActiveOrderTabChange = useCallback((nextTab) => {
+    setActiveOrderTab(nextTab);
+    setOrderPage(1);
+  }, []);
 
   const handleActiveInvoiceTabChange = useCallback((nextTab) => {
     setActiveInvoiceTab(nextTab);
@@ -2798,6 +3018,33 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
 
   const handleActiveInvoiceDocumentFilterChange = useCallback((nextFilter) => {
     setActiveInvoiceDocumentFilter(nextFilter);
+    setInvoicePage(1);
+  }, []);
+
+  const handleInvoiceFilterMonthChange = useCallback((value) => {
+    const range = getMonthDateRange(value);
+    setInvoiceFilterMonth(value);
+    setInvoiceDateFrom(range.dateFrom);
+    setInvoiceDateTo(range.dateTo);
+    setInvoicePage(1);
+  }, []);
+
+  const handleInvoiceDateFromChange = useCallback((value) => {
+    setInvoiceFilterMonth('');
+    setInvoiceDateFrom(value);
+    setInvoicePage(1);
+  }, []);
+
+  const handleInvoiceDateToChange = useCallback((value) => {
+    setInvoiceFilterMonth('');
+    setInvoiceDateTo(value);
+    setInvoicePage(1);
+  }, []);
+
+  const handleResetInvoiceDateFilter = useCallback(() => {
+    setInvoiceFilterMonth('');
+    setInvoiceDateFrom('');
+    setInvoiceDateTo('');
     setInvoicePage(1);
   }, []);
 
@@ -2819,16 +3066,21 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       const result = await fetchFinanceRpujRequests({
         page: 1,
         pageSize: 100,
-        ...(activeRpujTab === 'paid' ? { status: 'paid', ...periodRange } : {}),
+        status: rpujStatusParam(activeRpujTab),
+        ...(query.trim() ? { query: query.trim() } : {}),
+        ...(activeRpujTab === 'paid' ? periodRange : {}),
       });
-      setRpujRows((result.rows || []).map(normalizeFinanceRpujRow));
+      const normalizedRows = (result.rows || []).map(normalizeFinanceRpujRow);
+      setRpujRows(normalizedRows);
+      setRpujSummary(result.summary ? normalizeRpujSummary(result.summary) : summarizeRpujRows(normalizedRows));
     } catch (error) {
       setRpujError(error.message || 'Data pengajuan RPUJ gagal dimuat.');
       setRpujRows([]);
+      setRpujSummary(defaultRpujSummary);
     } finally {
       setRpujLoading(false);
     }
-  }, [activeRpujTab, activeTab.id, periodRange]);
+  }, [activeRpujTab, activeTab.id, periodRange, query]);
 
   useEffect(() => {
     loadRpujRequests();
@@ -2843,12 +3095,15 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         page: invoicePage,
         pageSize: INVOICE_TABLE_PAGE_SIZE,
         ...(query.trim() ? { query: query.trim() } : {}),
+        dateBasis: 'updated',
+        ...(invoiceDateFrom ? { dateFrom: invoiceDateFrom } : {}),
+        ...(invoiceDateTo ? { dateTo: invoiceDateTo } : {}),
         invoiceDocumentFilter: activeInvoiceTab === 'paid' ? 'all' : activeInvoiceDocumentFilter,
         ...(activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid'
-          ? { status: activeInvoiceTab, ...periodRange }
+          ? { status: activeInvoiceTab }
           : activeInvoiceTab === 'need-number'
             ? { status: activeInvoiceTab }
-          : {}),
+            : {}),
       });
       setInvoiceRows((result.rows || []).map(normalizeFinanceInvoiceRow));
       const nextInvoiceTotal = Number(result.total ?? result.rows?.length ?? 0);
@@ -2881,7 +3136,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     } finally {
       setInvoiceLoading(false);
     }
-  }, [activeInvoiceDocumentFilter, activeInvoiceTab, activeTab.id, invoicePage, periodRange, query]);
+  }, [activeInvoiceDocumentFilter, activeInvoiceTab, activeTab.id, invoiceDateFrom, invoiceDateTo, invoicePage, query]);
 
   useEffect(() => {
     loadInvoiceOrders();
@@ -2954,8 +3209,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       return;
     }
     setRpujRows(initialRpujRows);
-      setInvoiceRows(initialInvoiceRows);
-      setInvoiceSummary(defaultInvoiceSummary);
+    setRpujSummary(defaultRpujSummary);
+    setInvoiceRows(initialInvoiceRows);
+    setInvoiceSummary(defaultInvoiceSummary);
     setSelectedOrderId('');
     setSelectedRpujId('');
     setSelectedInvoiceId('');
@@ -3013,11 +3269,13 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setRpujDecisionError('');
     setRpujError('');
     try {
+      const previousStatus = rpujDecisionRow?.rpujStatus || '';
       const saved = rpujDecision.type === 'reject'
         ? await rejectFinanceRpuj(rpujDecision.id, rejectionNote)
         : await approveFinanceRpuj(rpujDecision.id);
       const normalized = normalizeFinanceRpujRow(saved);
       setRpujRows((rows) => rows.map((row) => (row.id === rpujDecision.id ? normalized : row)));
+      setRpujSummary((summary) => applyRpujSummaryTransition(summary, previousStatus, normalized.rpujStatus));
       setRpujDecision(null);
       setRpujDecisionNote('');
     } catch (error) {
@@ -3057,9 +3315,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     setTransferModalError('');
     setRpujError('');
     try {
+      const previousStatus = transferModalRow?.rpujStatus || '';
       const saved = await uploadFinanceRpujTransferProof(transferModalId, transferFile);
       const normalized = normalizeFinanceRpujRow(saved);
       setRpujRows((rows) => rows.map((row) => (row.id === transferModalId ? normalized : row)));
+      setRpujSummary((summary) => applyRpujSummaryTransition(summary, previousStatus, normalized.rpujStatus));
       setTransferModalId('');
       setTransferFile(null);
     } catch (error) {
@@ -3267,11 +3527,15 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       <FinanceTable
         activeInvoiceDocumentFilter={activeInvoiceDocumentFilter}
         activeInvoiceTab={activeInvoiceTab}
+        activeOrderTab={activeOrderTab}
         activeRpujTab={activeRpujTab}
         activeTab={activeTab}
         handlers={handlers}
         invoiceBusyId={invoiceBusyId}
+        invoiceDateFrom={invoiceDateFrom}
+        invoiceDateTo={invoiceDateTo}
         invoiceError={invoiceError}
+        invoiceFilterMonth={invoiceFilterMonth}
         invoiceLoading={invoiceLoading}
         invoicePage={invoicePage}
         invoiceRows={invoiceRows}
@@ -3280,14 +3544,20 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoiceTotalPages={invoiceTotalPages}
         onActiveInvoiceDocumentFilterChange={handleActiveInvoiceDocumentFilterChange}
         onActiveInvoiceTabChange={handleActiveInvoiceTabChange}
+        onActiveOrderTabChange={handleActiveOrderTabChange}
         onActiveRpujTabChange={setActiveRpujTab}
+        onInvoiceDateFromChange={handleInvoiceDateFromChange}
+        onInvoiceDateToChange={handleInvoiceDateToChange}
+        onInvoiceFilterMonthChange={handleInvoiceFilterMonthChange}
         onInvoicePageChange={setInvoicePage}
+        onOrderPageChange={setOrderPage}
         onOrderDateFromChange={handleOrderDateFromChange}
         onOrderDateToChange={handleOrderDateToChange}
         onOrderFilterMonthChange={handleOrderFilterMonthChange}
         onPeriodMonthChange={handlePeriodMonthChange}
         onPeriodYearChange={handlePeriodYearChange}
         onReset={resetSimulation}
+        onResetInvoiceDateFilter={handleResetInvoiceDateFilter}
         onResetOrderDateFilter={handleResetOrderDateFilter}
         onQueryChange={handleQueryChange}
         orderDateFrom={orderDateFrom}
@@ -3295,11 +3565,15 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         orderError={orderError}
         orderFilterMonth={orderFilterMonth}
         orderLoading={orderLoading}
+        orderPage={orderPage}
         orderRows={orderRows}
         orderSummary={orderSummary}
+        orderTotal={orderTotal}
+        orderTotalPages={orderTotalPages}
         rpujBusyId={rpujBusyId}
         rpujError={rpujError}
         rpujLoading={rpujLoading}
+        rpujSummary={rpujSummary}
         periodMonth={periodMonth}
         periodYear={periodYear}
         query={query}

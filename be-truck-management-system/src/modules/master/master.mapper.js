@@ -51,6 +51,34 @@ export const resourceConfig = {
       other_document: row.otherDocument || null,
     }),
   },
+  'end-users': {
+    table: 'end_users',
+    searchable: ['name', 'code', 'address', 'pic_name', 'phone', 'email', 'operational_status', 'notes'],
+    filters: { status: 'operational_status' },
+    archivedColumn: 'archived_at',
+    orderColumn: 'created_at',
+    toApi: (row) => ({
+      id: row.id,
+      name: row.name,
+      code: row.code || '',
+      address: row.address || '',
+      pic: row.pic_name || '',
+      phone: row.phone || '',
+      email: row.email || '',
+      status: row.operational_status || 'Aktif',
+      notes: row.notes || '',
+    }),
+    toDb: (row) => ({
+      name: row.name,
+      code: row.code || null,
+      address: row.address || null,
+      pic_name: row.pic || null,
+      phone: row.phone || null,
+      email: row.email || null,
+      operational_status: row.status || 'Aktif',
+      notes: row.notes || null,
+    }),
+  },
   drivers: {
     table: 'drivers',
     searchable: ['name', 'nickname', 'nik', 'phone', 'birth_date', 'license_type', 'operational_status', 'bank_name', 'bank_account_number', 'emoney_provider', 'emoney_number', 'emoney_account_holder', 'blacklist_reason', 'blacklist_notes'],
@@ -329,6 +357,8 @@ export const resourceConfig = {
       uj40ft: row.uj_40ft == null ? null : Number(row.uj_40ft),
       ujNotes: row.uj_notes || '',
       driverCommissionAmount: Number(row.driver_commission_amount || 0),
+      driverCommission20ftAmount: Number(row.driver_commission_20ft_amount ?? row.driver_commission_amount ?? 0),
+      driverCommission40ftAmount: Number(row.driver_commission_40ft_amount ?? row.driver_commission_amount ?? 0),
     }),
     toDb: (row) => ({
       name: row.name,
@@ -340,6 +370,18 @@ export const resourceConfig = {
       uj_40ft: toNullableNumber(row.uj40ft ?? row.uj_40ft),
       uj_notes: row.ujNotes || row.uj_notes || null,
       driver_commission_amount: toNullableNumber(row.driverCommissionAmount ?? row.driver_commission_amount) || 0,
+      driver_commission_20ft_amount: toNullableNumber(
+        row.driverCommission20ftAmount
+          ?? row.driver_commission_20ft_amount
+          ?? row.driverCommissionAmount
+          ?? row.driver_commission_amount,
+      ) || 0,
+      driver_commission_40ft_amount: toNullableNumber(
+        row.driverCommission40ftAmount
+          ?? row.driver_commission_40ft_amount
+          ?? row.driverCommissionAmount
+          ?? row.driver_commission_amount,
+      ) || 0,
     }),
   },
   stids: {

@@ -121,6 +121,8 @@ export const navigationGroups = [
         children: [
           { to: '/clients', label: 'Data Customer', icon: Building2, roles: adminOnly },
           { to: '/viewer/clients', label: 'Data Customer', icon: Building2, roles: viewerOnly },
+          { to: '/end-users', label: 'Data End User', icon: Building2, roles: adminOnly },
+          { to: '/viewer/end-users', label: 'Data End User', icon: Building2, roles: viewerOnly },
           { to: '/drivers', label: 'Data Supir', icon: IdCard, roles: adminOnly },
           { to: '/viewer/drivers', label: 'Data Supir', icon: IdCard, roles: viewerOnly },
           { to: '/trucks', label: 'Data Truck', icon: Truck, roles: adminOnly },

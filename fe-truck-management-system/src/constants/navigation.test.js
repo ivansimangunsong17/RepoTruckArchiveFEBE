@@ -71,6 +71,7 @@ describe('navigationGroups', () => {
       '/weekly-orders',
       '/order-history',
       '/viewer/clients',
+      '/viewer/end-users',
       '/viewer/drivers',
       '/viewer/trucks',
       '/viewer/kir-chassis',

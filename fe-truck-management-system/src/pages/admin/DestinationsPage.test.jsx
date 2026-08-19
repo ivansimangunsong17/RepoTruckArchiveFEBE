@@ -54,7 +54,7 @@ describe('DestinationsPage', () => {
     removeMaster.mockResolvedValue(undefined);
     confirmAction.mockResolvedValue(true);
     fetchMasterPage.mockResolvedValue({
-      rows: [{ id: 'destination-1', name: 'Bekasi', status: 'Aktif', driverCommissionAmount: 25000 }],
+      rows: [{ id: 'destination-1', name: 'Bekasi', status: 'Aktif', driverCommission20ftAmount: 25000, driverCommission40ftAmount: 40000 }],
       total: 1,
     });
     fetchMasterViewerNote.mockResolvedValue([]);
@@ -66,7 +66,7 @@ describe('DestinationsPage', () => {
     useArchiveData.mockReturnValue({
       isDatabaseMode: true,
       masters: {
-        destinations: [{ id: 'destination-1', name: 'Bekasi', status: 'Aktif', driverCommissionAmount: 25000 }],
+        destinations: [{ id: 'destination-1', name: 'Bekasi', status: 'Aktif', driverCommission20ftAmount: 25000, driverCommission40ftAmount: 40000 }],
       },
       upsertMaster,
       removeMaster,
@@ -75,20 +75,22 @@ describe('DestinationsPage', () => {
     useFeedback.mockReturnValue({ notify, confirmAction });
   });
 
-  it('menyimpan jumlah komisi sopir dari master tujuan', async () => {
+  it('menyimpan komisi sopir 20FT dan 40FT dari master tujuan', async () => {
     const user = userEvent.setup();
     render(<DestinationsPage />);
 
     await user.click(screen.getByRole('button', { name: /Input Lokasi Tujuan Baru/i }));
     await user.type(screen.getByPlaceholderText('Contoh: Gudang Customer Bandung'), 'Cikarang');
     await user.type(screen.getByPlaceholderText('Contoh: 50000'), '50000');
+    await user.type(screen.getByPlaceholderText('Contoh: 75000'), '75000');
     await user.click(screen.getByRole('button', { name: 'Simpan Lokasi Tujuan' }));
 
     await waitFor(() => expect(upsertMaster).toHaveBeenCalledWith(
       'destinations',
       expect.objectContaining({
         name: 'Cikarang',
-        driverCommissionAmount: 50000,
+        driverCommission20ftAmount: 50000,
+        driverCommission40ftAmount: 75000,
       }),
       null,
     ));

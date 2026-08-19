@@ -99,6 +99,7 @@ function mapOrderVerificationRow(row) {
   const isCancelled = row.status === 'cancelled';
   const cancelReason = row.cancel_review_note || row.cancel_request_note || row.cancel_reason || '';
   const referenceDocuments = parseJsonArray(row.reference_documents);
+  const lineItems = parseJsonArray(row.line_items);
 
   return {
     id: row.id,
@@ -112,6 +113,15 @@ function mapOrderVerificationRow(row) {
     origin: row.origin,
     orderType: row.shipment_type,
     paymentTerms: row.payment_terms || '-',
+    price: row.price == null ? 0 : Number(row.price),
+    totalAmount: row.total_amount == null ? 0 : Number(row.total_amount),
+    lineItems: lineItems.map((item) => ({
+      serviceName: item.serviceName || item.service_name || item.name || '-',
+      containerType: item.containerType || item.container_type || '',
+      qty: Number(item.qty || item.quantity || 0),
+      price: Number(item.price || 0),
+      total: Number(item.total || Number(item.qty || item.quantity || 0) * Number(item.price || 0)),
+    })),
     runningDate: row.trip_date,
     container: formatContainerSummary(row),
     vesselName: row.vessel_name,
@@ -617,7 +627,9 @@ function buildInvoiceFilters(options = {}) {
   const clauses = [];
   const params = [];
   const periodStatus = options.periodBasis || options.status;
-  const periodDateExpression = periodStatus === 'paid'
+  const periodDateExpression = options.dateBasis === 'updated'
+    ? 'coalesce(updated_at::date, invoice_issued_at::date, completed_at::date)'
+    : periodStatus === 'paid'
     ? 'coalesce(updated_at::date, invoice_issued_at::date, completed_at::date)'
     : periodStatus === 'in-progress'
       ? 'coalesce(invoice_issued_at::date, completed_at::date)'
@@ -1573,6 +1585,7 @@ export async function getOrderVerificationsPage(options = {}) {
   const { whereSql: summaryWhereSql, params: summaryParams } = buildOrderVerificationFilters({
     dateFrom: options.dateFrom,
     dateTo: options.dateTo,
+    query: options.query,
   });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -1599,6 +1612,8 @@ export async function getOrderVerificationsPage(options = {}) {
           so.vessel_name,
           so.job_description,
           so.container_summary,
+          so.price,
+          so.total_amount,
           to_jsonb(so)->'line_items' as line_items,
           so.terminal,
           ${paymentTermsExpression('so')} as payment_terms,
@@ -1628,13 +1643,9 @@ export async function getOrderVerificationsPage(options = {}) {
         ${whereSql}
         group by so.id
         order by
-          case
-            when so.status = 'cancelled' then 3
-            when so.finance_verification_status = 'verified' and nullif(btrim(so.accurate_so_number), '') is not null then 2
-            else 1
-          end,
-          so.trip_date asc,
-          so.created_at desc
+          coalesce(so.so_date, so.created_at::date) desc nulls last,
+          so.created_at desc,
+          so.id desc
         limit $${limitIndex} offset $${offsetIndex}
       `,
       [...params, pageSize, offset],
@@ -1754,6 +1765,8 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
           so.vessel_name,
           so.job_description,
           so.container_summary,
+          so.price,
+          so.total_amount,
           to_jsonb(so)->'line_items' as line_items,
           so.terminal,
           ${paymentTermsExpression('so')} as payment_terms,
@@ -2188,9 +2201,7 @@ export async function getRpujRequestsPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildRpujFilters(options);
   const { whereSql: summaryWhereSql, params: summaryParams } = buildRpujFilters({
-    dateFrom: options.dateFrom,
-    dateTo: options.dateTo,
-    periodBasis: options.status,
+    query: options.query,
   });
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -2373,6 +2384,7 @@ export async function getInvoiceOrdersPage(options = {}) {
   const { whereSql: summaryWhereSql, params: summaryParams } = buildInvoiceFilters({
     dateFrom: options.dateFrom,
     dateTo: options.dateTo,
+    dateBasis: options.dateBasis,
     periodBasis: options.status,
   });
   const limitIndex = params.length + 1;
@@ -2386,13 +2398,10 @@ export async function getInvoiceOrdersPage(options = {}) {
         from invoice_orders
         ${whereSql}
         order by
-          case
-            when nullif(btrim(invoice_number), '') is null then 1
-            when billing_status <> 'lunas' then 2
-            else 3
-          end,
+          updated_at desc nulls last,
+          invoice_issued_at desc nulls last,
           completed_at desc nulls last,
-          so_number asc
+          so_number desc
         limit $${limitIndex} offset $${offsetIndex}
       `,
       [...params, pageSize, offset],

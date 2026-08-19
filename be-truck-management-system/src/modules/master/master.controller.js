@@ -19,6 +19,8 @@ function destinationUjChanged(before, after) {
   if (!before || !after) return false;
   return Number(before.uj20ft || 0) !== Number(after.uj20ft || 0)
     || Number(before.uj40ft || 0) !== Number(after.uj40ft || 0)
+    || Number(before.driverCommission20ftAmount || 0) !== Number(after.driverCommission20ftAmount || 0)
+    || Number(before.driverCommission40ftAmount || 0) !== Number(after.driverCommission40ftAmount || 0)
     || String(before.ujNotes || '') !== String(after.ujNotes || '');
 }
 
