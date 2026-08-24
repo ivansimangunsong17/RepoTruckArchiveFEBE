@@ -24,6 +24,10 @@ export function updateFinanceOrderSoNumber(id, soNumber) {
   return httpClient.patch(`/finance/order-verifications/${encodeURIComponent(id)}/so-number`, { soNumber });
 }
 
+export function addFinanceOrderLineItem(id, payload = {}) {
+  return httpClient.post(`/finance/order-verifications/${encodeURIComponent(id)}/line-items`, payload);
+}
+
 export function fetchFinanceOrderCorrections(id) {
   return httpClient.get(`/finance/order-verifications/${encodeURIComponent(id)}/corrections`);
 }

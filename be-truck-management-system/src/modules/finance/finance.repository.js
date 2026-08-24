@@ -121,6 +121,7 @@ function mapOrderVerificationRow(row) {
       qty: Number(item.qty || item.quantity || 0),
       price: Number(item.price || 0),
       total: Number(item.total || Number(item.qty || item.quantity || 0) * Number(item.price || 0)),
+      notes: item.notes || '',
     })),
     runningDate: row.trip_date,
     container: formatContainerSummary(row),
@@ -1761,6 +1762,110 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
         where id = $3
       `,
       [soNumber, payload.actorName || 'Finance', id],
+    );
+
+    const updated = await client.query(
+      `
+        select
+          so.id,
+          so.so_number,
+          so.accurate_so_number,
+          so.finance_verification_status,
+          so.finance_verified_by_name,
+          so.finance_verified_at,
+          so.do_number,
+          so.so_date,
+          so.trip_date,
+          so.customer_name,
+          so.customer_pic,
+          so.customer_phone,
+          so.customer_address,
+          so.shipment_type,
+          so.job_type,
+          so.vessel_name,
+          so.job_description,
+          so.container_summary,
+          so.price,
+          so.total_amount,
+          to_jsonb(so)->'line_items' as line_items,
+          so.terminal,
+          ${paymentTermsExpression('so')} as payment_terms,
+          so.origin,
+          so.destination,
+          so.quantity,
+          so.status,
+          so.sales_name,
+          so.created_by_name,
+          so.cancelled_at,
+          so.cancel_request_status,
+          so.cancel_request_note,
+          so.cancel_requested_by_name,
+          so.cancel_requested_by_role,
+          so.cancel_requested_at,
+          so.cancel_reviewed_by_name,
+          so.cancel_reviewed_at,
+          so.cancel_review_note,
+          so.created_at,
+          so.updated_at,
+          so.notes,
+          to_jsonb(so)->'reference_documents' as reference_documents,
+          coalesce(count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '20FT'), 0)::int as qty_20ft,
+          coalesce(count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '40FT'), 0)::int as qty_40ft
+        from sales_orders so
+        left join container_jobs cj on cj.sales_order_id = so.id and cj.status <> 'cancelled'
+        where so.id = $1
+        group by so.id
+      `,
+      [id],
+    );
+
+    return mapOrderVerificationRow(updated.rows[0]);
+  });
+}
+
+export async function addOrderVerificationLineItem(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select id, status, line_items
+        from sales_orders
+        where id = $1
+      `,
+      [id],
+    );
+
+    const order = existing.rows[0];
+    if (!order) {
+      const error = new Error('Request order Finance tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'FINANCE_ORDER_VERIFICATION_NOT_FOUND';
+      throw error;
+    }
+    if (order.status === 'cancelled') {
+      const error = new Error('Sales Order yang sudah dibatalkan tidak bisa ditambah rincian.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_CANCELLED_LOCKED';
+      throw error;
+    }
+
+    const currentLineItems = parseJsonArray(order.line_items);
+    const nextLineItems = [...currentLineItems, payload.lineItem];
+    const quantity = nextLineItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
+    const price = nextLineItems.length === 1 ? Number(nextLineItems[0].price || 0) : 0;
+    const totalAmount = nextLineItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
+
+    await client.query(
+      `
+        update sales_orders
+        set line_items = $1::jsonb,
+            price = $2,
+            quantity = $3,
+            total_amount = $4,
+            updated_by_name = $5,
+            updated_at = now()
+        where id = $6
+      `,
+      [JSON.stringify(nextLineItems), price, quantity, totalAmount, payload.actorName || 'Finance', id],
     );
 
     const updated = await client.query(

@@ -18,11 +18,17 @@ import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-e
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
 import { getCustomerOutstandingSummary } from '../finance/finance.repository.js';
 
-const SERVICE_OPTIONS = [
+export const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
+  'Handling',
+  'Jasa Lainnya',
+];
+export const REVENUE_SERVICE_OPTIONS = [
+  'Jasa Angkut D20',
+  'Jasa Angkut D40',
   'Handling',
   'Jasa Lainnya',
 ];
@@ -42,11 +48,11 @@ const SALES_INVOICE_DELIVERY_STATUSES = [
   'revisi_dispute',
 ];
 
-function isContainerService(serviceName) {
+export function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
 }
 
-function isOtherService(serviceName) {
+export function isOtherService(serviceName) {
   return serviceName === 'Jasa Lainnya';
 }
 
@@ -56,7 +62,7 @@ function normalizeServiceName(value) {
   return SERVICE_OPTIONS.includes(canonical) ? canonical : '';
 }
 
-function normalizeLineItem(item = {}) {
+export function normalizeLineItem(item = {}) {
   const serviceName = normalizeServiceName(item.serviceName) || 'Jasa Angkut D20';
   const qty = Math.max(1, Number(item.qty || 0));
   const price = Math.max(0, Number(item.price || 0));

@@ -30,6 +30,7 @@ import {
   rejectRpuj,
   requestFinanceCorrection,
   saveInvoiceNumber,
+  saveOrderVerificationLineItem,
   saveOrderVerificationSoNumber,
   uploadInvoiceDocument,
   uploadOperationalFundTransferProof,
@@ -65,6 +66,19 @@ export async function updateOrderVerificationSoNumberController(request, respons
     metadata: { soNumber: result.soNumber },
   });
   sendSuccess(response, result, 'Nomor SO Accurate berhasil disimpan.');
+}
+
+export async function addOrderVerificationLineItemController(request, response) {
+  const result = await saveOrderVerificationLineItem(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_ADD_ORDER_LINE_ITEM',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: { serviceName: request.body?.serviceName },
+  });
+  sendSuccess(response, result, 'Rincian revenue berhasil ditambahkan.');
 }
 
 export async function rpujRequestsController(request, response) {

@@ -36,6 +36,7 @@ const expenseCategories = new Set([
   'reimbursement',
   'lainnya',
 ]);
+const expenseGroups = new Set(['operational', 'reimbursement']);
 const expensePaymentStatuses = new Set([
   'belum_dibayar',
   'pending_pembayaran',
@@ -536,6 +537,17 @@ function normalizeExpenseCategory(value) {
   return category;
 }
 
+function normalizeExpenseGroup(value) {
+  const group = String(value || '').trim();
+  if (!expenseGroups.has(group)) {
+    const error = new Error('Jenis biaya (operational/reimbursement) wajib dipilih.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_GROUP_INVALID';
+    throw error;
+  }
+  return group;
+}
+
 function normalizeExpensePaymentStatus(value) {
   const status = String(value || 'belum_dibayar').trim();
   if (!expensePaymentStatuses.has(status)) {
@@ -569,6 +581,7 @@ export function createContainerJobExpense(id, payload = {}, actor) {
 
   return createContainerJobExpenseRecord(id, {
     category: normalizeExpenseCategory(payload.category),
+    expenseGroup: normalizeExpenseGroup(payload.expenseGroup),
     amount: normalizeExpenseAmount(payload.amount),
     description: normalizeExpenseText(payload.description, 'Keterangan biaya'),
     recipientType: normalizeExpenseText(payload.recipientType || 'driver', 'Tipe penerima', 80) || 'driver',

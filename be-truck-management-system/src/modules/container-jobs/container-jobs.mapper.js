@@ -29,6 +29,7 @@ export function mapContainerJobExpense(row = {}) {
     containerJobId: row.container_job_id || row.containerJobId || '',
     driverId: row.driver_id || row.driverId || '',
     category: row.category || '',
+    expenseGroup: row.expense_group || row.expenseGroup || null,
     amount: Number(row.amount || 0),
     description: row.description || '',
     recipientType: row.recipient_type || row.recipientType || '',

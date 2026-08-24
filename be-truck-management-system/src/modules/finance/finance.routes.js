@@ -29,6 +29,7 @@ import {
   rpujRequestsController,
   updateInvoiceNumberController,
   updateOrderVerificationSoNumberController,
+  addOrderVerificationLineItemController,
   uploadInvoiceDocumentController,
   uploadOperationalFundTransferProofController,
   uploadRpujTransferProofController,
@@ -52,6 +53,12 @@ export const financeRoutes = [
     path: '/api/finance/order-verifications/:id/so-number',
     permission: 'finance.order_verification.update',
     handler: updateOrderVerificationSoNumberController,
+  },
+  {
+    method: 'POST',
+    path: '/api/finance/order-verifications/:id/line-items',
+    permission: 'finance.order_verification.update',
+    handler: addOrderVerificationLineItemController,
   },
   {
     method: 'GET',

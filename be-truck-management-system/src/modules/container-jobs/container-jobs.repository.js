@@ -52,6 +52,7 @@ const expenseColumns = `
   expense.container_job_id,
   expense.driver_id,
   expense.category,
+  expense.expense_group,
   expense.amount,
   expense.description,
   expense.recipient_type,
@@ -610,6 +611,7 @@ async function syncAutoJourneyMoneyExpense(client, {
         container_job_id,
         driver_id,
         category,
+        expense_group,
         amount,
         description,
         recipient_type,
@@ -625,12 +627,13 @@ async function syncAutoJourneyMoneyExpense(client, {
         created_by_name,
         updated_by_name
       )
-      values ($1, $2, $3, 'uj_awal', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'sudah_dicek', $8, now(), 'auto_uj_order', $9, $8, $8)
+      values ($1, $2, $3, 'uj_awal', 'operational', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'sudah_dicek', $8, now(), 'auto_uj_order', $9, $8, $8)
       on conflict (source, source_ref_id)
         where source = 'auto_uj_order' and source_ref_id is not null
       do update set
         sales_order_id = excluded.sales_order_id,
         driver_id = excluded.driver_id,
+        expense_group = 'operational',
         amount = excluded.amount,
         description = excluded.description,
         recipient_name = excluded.recipient_name,
@@ -1304,6 +1307,7 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
           container_job_id,
           driver_id,
           category,
+          expense_group,
           amount,
           description,
           recipient_type,
@@ -1318,7 +1322,7 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
           created_by_name,
           updated_by_name
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz, $11, $12, 'manual', $13, $14, $15, $15)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamptz, $12, $13, 'manual', $14, $15, $16, $16)
         on conflict (idempotency_key) where idempotency_key is not null do nothing
         returning id
       `,
@@ -1327,6 +1331,7 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
         job.id,
         payload.driverId || job.driver_id || null,
         payload.category,
+        payload.expenseGroup || null,
         payload.amount,
         payload.description || null,
         payload.recipientType || 'driver',

@@ -17,6 +17,7 @@ import OperationalFundCloseBatchModal from './dropping-account/OperationalFundCl
 import OperationalFundDecisionModal from './dropping-account/OperationalFundDecisionModal';
 import OperationalFundDepositValidationModal from './dropping-account/OperationalFundDepositValidationModal';
 import OperationalFundRequestModal from './dropping-account/OperationalFundRequestModal';
+import AddLineItemModal from './order-verification/AddLineItemModal';
 import OrderDetailModal from './order-verification/OrderDetailModal';
 import OrderVerificationTable from './order-verification/OrderVerificationTable';
 import SoNumberInputModal from './order-verification/SoNumberInputModal';
@@ -544,6 +545,10 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     soModalValue,
     soModalError,
     soModalOrder,
+    lineItemModalOrder,
+    lineItemForm,
+    lineItemError,
+    lineItemSaving,
     setOrderPage,
     handleActiveOrderTabChange,
     handleOrderFilterMonthChange,
@@ -553,6 +558,10 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     closeSoModal,
     handleSoModalValueChange,
     saveSoNumberFromModal,
+    onOpenLineItemModal,
+    closeLineItemModal,
+    handleLineItemFieldChange,
+    saveLineItemFromModal,
   } = orderVerification;
 
   const {
@@ -774,9 +783,19 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         corrections={correctionHistory}
         correctionsError={correctionHistoryError}
         correctionsLoading={correctionHistoryLoading}
+        onAddLineItem={onOpenLineItemModal}
         onClose={orderVerification.closeOrderDetail}
         onOpenCorrection={openCorrectionModal}
         order={selectedOrder}
+      />
+      <AddLineItemModal
+        busy={lineItemSaving}
+        error={lineItemError}
+        form={lineItemForm}
+        onClose={closeLineItemModal}
+        onConfirm={saveLineItemFromModal}
+        onFieldChange={handleLineItemFieldChange}
+        order={lineItemModalOrder}
       />
       <InvoiceDetailModal
         corrections={correctionHistory}

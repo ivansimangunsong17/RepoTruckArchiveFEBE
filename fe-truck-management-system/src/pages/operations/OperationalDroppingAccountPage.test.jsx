@@ -249,6 +249,7 @@ describe('OperationalDroppingAccountPage', () => {
     await user.type(screen.getByLabelText(/penerima/i), 'Petugas Depo');
     await user.selectOptions(screen.getByLabelText(/^keterangan$/i), 'custom');
     await user.type(screen.getByLabelText(/keterangan manual/i), 'Parkir depo');
+    await user.selectOptions(screen.getByLabelText(/jenis biaya/i), 'operational');
     const proofFile = new File(['proof'], 'parkir.pdf', { type: 'application/pdf' });
     await user.upload(screen.getByLabelText(/pilih bukti/i), proofFile);
     await user.click(screen.getByRole('button', { name: /validasi biaya/i }));
@@ -262,6 +263,7 @@ describe('OperationalDroppingAccountPage', () => {
     await waitFor(() => {
       expect(createContainerJobExpense).toHaveBeenCalledWith('job-1', expect.objectContaining({
         category: 'lainnya',
+        expenseGroup: 'operational',
         amount: 50000,
         description: 'Parkir depo',
         recipientName: 'Petugas Depo',

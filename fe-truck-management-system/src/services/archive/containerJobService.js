@@ -87,6 +87,7 @@ export async function createContainerJobExpense(id, payload = {}) {
 
   return httpClient.post(`/container-jobs/${id}/expenses`, {
     category: payload.category,
+    expenseGroup: payload.expenseGroup,
     amount: payload.amount,
     description: payload.description,
     recipientType: payload.recipientType,

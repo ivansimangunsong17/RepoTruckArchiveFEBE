@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
+  isContainerService,
+  isOtherService,
+  normalizeLineItem,
+  REVENUE_SERVICE_OPTIONS,
+} from '../sales-orders/sales-orders.service.js';
+import {
   approveFinanceCorrectionRequest,
   approveRpujRequest,
+  addOrderVerificationLineItem,
   createFinanceCorrectionRequest,
   closeOperationalFundBatchRecord,
   depositOperationalFundRecord,
@@ -74,6 +81,35 @@ export function fetchOrderVerifications(query = {}) {
 export function saveOrderVerificationSoNumber(id, payload = {}, actor) {
   return updateOrderVerificationSoNumber(id, {
     soNumber: payload.soNumber,
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function saveOrderVerificationLineItem(id, payload = {}, actor) {
+  const serviceName = REVENUE_SERVICE_OPTIONS.includes(payload.serviceName) ? payload.serviceName : '';
+  if (!serviceName) {
+    const error = new Error('Layanan wajib salah satu dari Jasa Angkut D20, Jasa Angkut D40, Handling, atau Jasa Lainnya.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const lineItem = normalizeLineItem({ ...payload, serviceName });
+  if (isContainerService(lineItem.serviceName) && lineItem.price <= 0) {
+    const error = new Error('Harga container D20/D40 wajib diisi lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  if (isOtherService(lineItem.serviceName) && !String(lineItem.notes || '').trim()) {
+    const error = new Error('Isi catatan untuk rincian Jasa Lainnya.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  return addOrderVerificationLineItem(id, {
+    lineItem,
     actorName: actor?.name || actor?.email || 'Finance',
   });
 }

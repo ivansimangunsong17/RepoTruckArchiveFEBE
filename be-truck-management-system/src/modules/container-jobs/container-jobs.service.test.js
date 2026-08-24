@@ -314,17 +314,21 @@ test('menolak titip container jika hanya EIR akhir yang tersedia', () => {
   ), /EIR Titip/);
 });
 
-test('create expense menolak kategori, nominal, dan bukti pembayaran yang tidak valid', () => {
+test('create expense menolak kategori, nominal, jenis biaya, dan bukti pembayaran yang tidak valid', () => {
   assert.throws(
-    () => createContainerJobExpense('job-1', { category: 'solar', amount: 100000 }, { name: 'Operational Test' }),
+    () => createContainerJobExpense('job-1', { category: 'solar', amount: 100000, expenseGroup: 'operational' }, { name: 'Operational Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_CATEGORY_INVALID' && error.statusCode === 400,
   );
   assert.throws(
-    () => createContainerJobExpense('job-1', { category: 'tol', amount: 0 }, { name: 'Operational Test' }),
+    () => createContainerJobExpense('job-1', { category: 'tol', amount: 100000 }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_GROUP_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => createContainerJobExpense('job-1', { category: 'tol', amount: 0, expenseGroup: 'operational' }, { name: 'Operational Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_AMOUNT_INVALID' && error.statusCode === 400,
   );
   assert.throws(
-    () => createContainerJobExpense('job-1', { category: 'tol', amount: 100000, paymentStatus: 'sudah_dibayar' }, { name: 'Operational Test' }),
+    () => createContainerJobExpense('job-1', { category: 'tol', amount: 100000, expenseGroup: 'operational', paymentStatus: 'sudah_dibayar' }, { name: 'Operational Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED' && error.statusCode === 400,
   );
 });

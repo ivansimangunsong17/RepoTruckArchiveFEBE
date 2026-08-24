@@ -486,6 +486,21 @@ if (!hasDatabase) {
       assert.equal(financeVerified.body.data.accurateSoNumber, created.orderSoNumber);
       assert.equal(financeVerified.body.data.verificationStatus, 'verified');
 
+      const rejectedReimbursementLineItem = await api(`/api/finance/order-verifications/${created.orderId}/line-items`, {
+        method: 'POST',
+        token: financeToken,
+        body: { serviceName: 'Bon Muat/Bongkar', qty: 1, price: 50000 },
+      });
+      assert.equal(rejectedReimbursementLineItem.status, 400);
+
+      const addedRevenueLineItem = await api(`/api/finance/order-verifications/${created.orderId}/line-items`, {
+        method: 'POST',
+        token: financeToken,
+        body: { serviceName: 'Handling', qty: 2, price: 150000 },
+      });
+      assert.equal(addedRevenueLineItem.status, 200);
+      assert.equal(addedRevenueLineItem.body.data.lineItems.some((item) => item.serviceName === 'Handling' && item.qty === 2 && item.total === 300000), true);
+
       const list = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
       assert.equal(list.status, 200);
       assert.ok(list.body.data.rows.some((row) => row.id === created.orderId));
@@ -1182,6 +1197,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 5000000,
           description: `Overspend test ${runId}`,
           recipientType: 'vendor',
@@ -1204,6 +1220,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 40000,
           description: `Within budget test ${runId}`,
           recipientType: 'vendor',
@@ -1266,6 +1283,7 @@ if (!hasDatabase) {
       const idempotencyKey = `idem-test-${runId}`;
       const expensePayload = {
         category: 'tol',
+        expenseGroup: 'operational',
         amount: 50000,
         description: `Idempotent test ${runId}`,
         recipientType: 'vendor',
@@ -1349,6 +1367,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 50000,
           description: `Idempotency mismatch original ${runId}`,
           recipientType: 'vendor',
@@ -1368,6 +1387,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 90000,
           description: `Idempotency mismatch edited ${runId}`,
           recipientType: 'vendor',
@@ -1434,6 +1454,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 800000,
           description: `Audit trail test ${runId}`,
           recipientType: 'vendor',
@@ -1536,6 +1557,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 50000,
           description: `Closed check test ${runId}`,
           recipientType: 'vendor',
@@ -1624,6 +1646,7 @@ if (!hasDatabase) {
         token: adminToken,
         body: {
           category: 'tol',
+          expenseGroup: 'operational',
           amount: 50000,
           description: `Reconcile lock test ${runId}`,
           recipientType: 'vendor',

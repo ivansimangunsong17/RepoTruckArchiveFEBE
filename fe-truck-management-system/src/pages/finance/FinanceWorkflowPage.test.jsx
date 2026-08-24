@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FinanceWorkflowPage from './FinanceWorkflowPage';
 import { downloadCsv } from '../../utils/csvExport';
 import {
+  addFinanceOrderLineItem,
   approveOperationalFundRequest,
   closeOperationalFundBatch,
   createOperationalFundRequest,
@@ -36,6 +37,7 @@ vi.mock('../../hooks/useAuth', () => ({
 }));
 
 vi.mock('../../services/finance/financeService', () => ({
+  addFinanceOrderLineItem: vi.fn(),
   approveOperationalFundRequest: vi.fn(),
   closeOperationalFundBatch: vi.fn(),
   createOperationalFundRequest: vi.fn(),
@@ -911,6 +913,43 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(dialog).toHaveTextContent(/Rp\s*5\.200\.000/i);
     expect(dialog).toHaveTextContent('Jasa Angkut 20FT');
     expect(dialog).toHaveTextContent(/Rp\s*2\.600\.000/i);
+  });
+
+  it('menambah rincian revenue dari modal detail order finance, dibatasi hanya layanan revenue', async () => {
+    const user = userEvent.setup();
+    addFinanceOrderLineItem.mockResolvedValue({
+      ...orderRow,
+      totalAmount: 5500000,
+      lineItems: [
+        ...orderRow.lineItems,
+        { serviceName: 'Handling', qty: 1, price: 300000, total: 300000 },
+      ],
+    });
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    await user.click(await screen.findByRole('button', { name: /Tambah Rincian Revenue/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /Tambah Rincian Revenue/i });
+    const serviceSelect = within(dialog).getByLabelText('Layanan');
+    const options = within(serviceSelect).getAllByRole('option').map((option) => option.value);
+    expect(options).toEqual(['Jasa Angkut D20', 'Jasa Angkut D40', 'Handling', 'Jasa Lainnya']);
+
+    await user.selectOptions(serviceSelect, 'Handling');
+    await user.clear(within(dialog).getByLabelText('Qty'));
+    await user.type(within(dialog).getByLabelText('Qty'), '1');
+    await user.type(within(dialog).getByLabelText(/Harga per Unit/i), '300000');
+    await user.click(within(dialog).getByRole('button', { name: 'Tambah Rincian' }));
+
+    await waitFor(() => {
+      expect(addFinanceOrderLineItem).toHaveBeenCalledWith('order-1', expect.objectContaining({
+        serviceName: 'Handling',
+        qty: 1,
+        price: 300000,
+      }));
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Tambah Rincian Revenue/i })).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog')).toHaveTextContent('Handling');
   });
 
   it('menampilkan status dan alasan SO batal di finance', async () => {

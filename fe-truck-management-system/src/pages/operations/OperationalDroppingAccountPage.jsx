@@ -60,7 +60,24 @@ const fundCategoryLabels = {
 };
 
 
-const EXPENSE_DESCRIPTION_PRESETS = ['Uang MEL', 'Bon Muat/Bon Bongkar', 'Gatepass/TILA', 'Tambal Ban'];
+const EXPENSE_DESCRIPTION_GROUPS = [
+  {
+    id: 'operational',
+    label: 'Biaya Operational',
+    presets: ['Uang MEL (Uang Petugas)', 'Tambal Ban'],
+  },
+  {
+    id: 'reimbursement',
+    label: 'Biaya Reimbursement',
+    presets: ['Bon Muat/Bon Bongkar', 'Gatepass/TILA', 'Reimbursement Uang MEL (Uang Petugas)', 'Biaya Extend'],
+  },
+];
+const EXPENSE_DESCRIPTION_PRESETS = EXPENSE_DESCRIPTION_GROUPS.flatMap((group) => group.presets);
+const EXPENSE_GROUP_BY_PRESET = EXPENSE_DESCRIPTION_GROUPS.reduce((acc, group) => {
+  for (const preset of group.presets) acc[preset] = group.id;
+  return acc;
+}, {});
+const EXPENSE_GROUP_LABELS = { operational: 'Biaya Operational', reimbursement: 'Biaya Reimbursement' };
 const CUSTOM_DESCRIPTION_VALUE = 'custom';
 
 const expenseCategoryOptions = [
@@ -308,6 +325,7 @@ function OperationalDroppingAccountPage() {
   const [descriptionManualMode, setDescriptionManualMode] = useState(false);
   const [addExpenseForm, setAddExpenseForm] = useState({
     category: 'lainnya',
+    expenseGroup: '',
     amount: '',
     description: '',
     recipientType: 'vendor',
@@ -500,10 +518,11 @@ function OperationalDroppingAccountPage() {
     const selected = event.target.value;
     if (selected === CUSTOM_DESCRIPTION_VALUE) {
       setDescriptionManualMode(true);
+      setAddExpenseForm((current) => ({ ...current, expenseGroup: '' }));
       return;
     }
     setDescriptionManualMode(false);
-    setAddExpenseForm((current) => ({ ...current, description: selected }));
+    setAddExpenseForm((current) => ({ ...current, description: selected, expenseGroup: EXPENSE_GROUP_BY_PRESET[selected] || '' }));
     setFileError('');
   }
 
@@ -585,6 +604,10 @@ function OperationalDroppingAccountPage() {
     }
     if (!String(addExpenseForm.description || '').trim()) {
       setFileError('Keterangan biaya wajib diisi agar pencatatan jelas.');
+      return null;
+    }
+    if (!['operational', 'reimbursement'].includes(addExpenseForm.expenseGroup)) {
+      setFileError('Jenis biaya (Operational/Reimbursement) wajib dipilih.');
       return null;
     }
     if (!String(addExpenseForm.recipientName || '').trim()) {
@@ -1048,25 +1071,43 @@ function OperationalDroppingAccountPage() {
                         value={descriptionSelectValue}
                       >
                         <option disabled value="">Pilih keterangan...</option>
-                        {EXPENSE_DESCRIPTION_PRESETS.map((preset) => (
-                          <option key={preset} value={preset}>{preset}</option>
+                        {EXPENSE_DESCRIPTION_GROUPS.map((group) => (
+                          <optgroup key={group.id} label={group.label}>
+                            {group.presets.map((preset) => (
+                              <option key={preset} value={preset}>{preset}</option>
+                            ))}
+                          </optgroup>
                         ))}
                         <option value={CUSTOM_DESCRIPTION_VALUE}>Lainnya (Input Manual)</option>
                       </select>
                     </label>
                     {showManualDescription ? (
-                      <label className="master-field span-full">
-                        <span className="sr-only">Keterangan manual</span>
-                        <input
-                          aria-label="Keterangan manual"
-                          placeholder="Contoh: Parkir depo / tol Cikampek / bongkar"
-                          value={addExpenseForm.description}
-                          onChange={(event) => {
-                            setAddExpenseForm((current) => ({ ...current, description: event.target.value }));
-                            setFileError('');
-                          }}
-                        />
-                      </label>
+                      <>
+                        <label className="master-field span-full">
+                          <span className="sr-only">Keterangan manual</span>
+                          <input
+                            aria-label="Keterangan manual"
+                            placeholder="Contoh: Parkir depo / tol Cikampek / bongkar"
+                            value={addExpenseForm.description}
+                            onChange={(event) => {
+                              setAddExpenseForm((current) => ({ ...current, description: event.target.value }));
+                              setFileError('');
+                            }}
+                          />
+                        </label>
+                        <label className="master-field span-full">
+                          <span>Jenis Biaya <em>*</em></span>
+                          <select
+                            aria-label="Jenis biaya"
+                            onChange={(event) => setAddExpenseForm((current) => ({ ...current, expenseGroup: event.target.value }))}
+                            value={addExpenseForm.expenseGroup}
+                          >
+                            <option disabled value="">Pilih jenis biaya...</option>
+                            <option value="operational">{EXPENSE_GROUP_LABELS.operational}</option>
+                            <option value="reimbursement">{EXPENSE_GROUP_LABELS.reimbursement}</option>
+                          </select>
+                        </label>
+                      </>
                     ) : null}
                     <label className="master-field">
                       <span className="flex items-center justify-between gap-2">
@@ -1144,6 +1185,10 @@ function OperationalDroppingAccountPage() {
                       <span>Ritasi</span>
                       <strong className="text-sm font-black normal-case text-slate-950">{selectedAddExpenseJob?.soNumber || '-'}</strong>
                       <span className="text-xs font-semibold normal-case text-slate-500">{selectedAddExpenseJob?.containerNumber || '-'} - {selectedAddExpenseJob?.destination || '-'}</span>
+                    </div>
+                    <div className="master-field">
+                      <span>Jenis Biaya</span>
+                      <strong className="text-sm font-black normal-case text-slate-950">{EXPENSE_GROUP_LABELS[addExpenseForm.expenseGroup] || '-'}</strong>
                     </div>
                     <div className="master-field">
                       <span>Nominal Keluar</span>
