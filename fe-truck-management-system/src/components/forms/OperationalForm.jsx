@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Plus, Send, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import DateTimeWibInput from '../common/DateTimeWibInput';
@@ -7,13 +7,11 @@ import UjRecommendationCard from '../operations/UjRecommendationCard';
 import { calculateUjRecommendation } from '../../utils/ujRecommendation';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
-import { parseOtherCost, serializeOtherCost } from '../../utils/otherCost';
 import { formatDate } from '../../utils/formatDate';
 import { isApiDataSource } from '../../services/config/dataSource';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
 
 const documentFields = [
-  ['additionalCostDocument', 'Lampiran Biaya Lainnya'],
   ['eirDocument', 'Lampiran EIR'],
   ['loadingVoucherDocument', 'No. Bon Muat / Bon Bongkar'],
   ['tilaGatepassDocumentFile', 'No. TILA / Delivery Card / Gatepass / SP2'],
@@ -28,7 +26,7 @@ const operationalDocumentFields = [
 
 const operationalPhaseOptions = [
   { id: 'preparation', label: 'Persiapan Job', description: 'Assignment truck dan nomor container' },
-  { id: 'rpuj', label: 'Uang Jalan & SPK', description: 'Pengajuan RPUJ, biaya lainnya, dan SPK' },
+  { id: 'rpuj', label: 'Biaya Perjalanan & SPK', description: 'Komisi sopir dan penerbitan SPK' },
   { id: 'closing', label: 'Dokumen & Closing', description: 'Dokumen operasional dan status perjalanan' },
 ];
 
@@ -375,7 +373,7 @@ function createSpkPdfBlob(documentData, logoImage = null) {
   y = drawSection('1. INFORMASI SPK / ORDER', documentData.orderRows, y);
   y = drawSection('2. INFORMASI ARMADA & DRIVER', documentData.driverRows, y);
   y = drawSection('3. INFORMASI OPERASIONAL', documentData.operationalRows, y);
-  y = drawSection('4. INFORMASI RPUJ / SPK', documentData.rpujRows, y);
+  y = drawSection('4. INFORMASI BIAYA PERJALANAN / SPK', documentData.rpujRows, y);
   drawText('Catatan:', leftX, y, { bold: true, size: 6.4, color: '0.62 0.06 0.08' });
   documentData.notes.forEach((note, index) => drawText(`${index + 1}. ${note}`, leftX, y - 10 - (index * 9), { size: 5.7 }));
   commands.push('0.82 0.82 0.82 RG 430 44 131 50 re S');
@@ -398,9 +396,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     .map((truck) => normalizeTruck(truck, localTruckRows));
   const drivers = Array.isArray(masterDrivers) ? masterDrivers : localDriverRows;
   const findDriverByName = (name) => drivers.find((driver) => normalizeName(driver.name) === normalizeName(name));
+  const getDriverDisplayName = (name) => (name ? findDriverByName(name)?.nickname || name : name);
   const isTruckDefaultDriverBlacklisted = (truck) => isDriverBlacklisted(findDriverByName(getTruckDefaultDriver(truck, localTruckRows)));
   const containerSize = normalizeSize(container.size || container.containerSize);
-  const initialOtherCost = parseOtherCost(container.rpujNotes);
   const initialDriver = findDriverByName(container.driver);
   const initialDriverPayment = {
     ...getDriverPaymentInfo(initialDriver),
@@ -420,8 +418,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     containerNumber: container.containerNumber || '',
     rpujStatus: container.rpujStatus || 'pending',
     rpujNotes: container.rpujNotes || '',
-    otherCostAmount: initialOtherCost.amount ? String(initialOtherCost.amount) : '',
-    otherCostNotes: initialOtherCost.notes || '',
     hasDriverCommission: existingHasDriverCommission,
     driverCommissionAmount: String(existingHasDriverCommission ? existingDriverCommissionAmount || defaultDriverCommissionAmount : 0),
     driverCommissionSourceDestinationId: container.driverCommissionSourceDestinationId || ujRecommendation.destinationId || '',
@@ -430,7 +426,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     spkGeneratedAt: container.spkGeneratedAt || container.spk_generated_at || '',
     spkFilePath: container.spkFilePath || container.spk_file_path || '',
     spkDocument: container.spkDocument || null,
-    additionalCostDocument: container.additionalCostDocument || null,
     eirNumber: container.eirNumber || '',
     eirDocument: container.eirDocument || null,
     loadingVoucher: container.loadingVoucher || '',
@@ -456,12 +451,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const [isSaving, setIsSaving] = useState(false);
   const submitInFlightRef = useRef(false);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
-  const otherCostAmountValue = Number(form.otherCostAmount || 0);
   const driverCommissionAmountValue = form.hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
-  const totalJourneyCost = ujAmount + otherCostAmountValue;
   const rpujStatus = form.rpujStatus || 'pending';
   const isRepoPickupMode = Boolean(container.repoPickupMode);
-  const requiresFinanceApprovalForSpk = Boolean(onGenerateSpk);
+  const requiresFinanceApprovalForSpk = false;
   const hasCompleteAssignment = Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
   const financeApprovedForSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
   const canGenerateSpk = !isRepoPickupMode && financeApprovedForSpk && hasCompleteAssignment;
@@ -469,12 +462,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const spkRequirementMessage = !form.spkNumber && !hasCompleteAssignment
     ? 'SPK bisa dibuat setelah truck dan driver lengkap.'
     : requiresFinanceApprovalForSpk && !form.spkNumber && !financeApprovedForSpk
-      ? 'SPK bisa dibuat setelah Finance approve RPUJ.'
+      ? 'SPK bisa dibuat setelah biaya perjalanan tercatat.'
       : '';
   const canAccessAdminCorrection = String(currentUser?.role || '').toLowerCase() === 'admin';
   const canReviseLockedFields = canAccessAdminCorrection && Boolean(form.adminCorrectionMode);
-  const canSubmitRpujRequest = !isRepoPickupMode && !['submitted', 'approved', 'paid'].includes(rpujStatus);
-  const canEditOtherCost = !isRepoPickupMode && (canReviseLockedFields || !['approved', 'paid'].includes(rpujStatus));
+  const canEditDriverCommission = !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
   const canFillMissingAssignment = !hasCompleteAssignment && form.status !== 'completed';
   const canEditAssignment = canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed');
   const hasSavedContainerNumber = Boolean(String(container.containerNumber || '').trim());
@@ -489,21 +481,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const canEditDocumentFile = (field) => !isCompletedDocumentFollowUp || !container[field];
   const canEditOtherDocuments = !isCompletedDocumentFollowUp;
   const canEditTimeline = canReviseLockedFields || container.status !== 'completed';
-  const rpujActionLabel = rpujStatus === 'submitted'
-    ? 'Sudah Diajukan'
-    : rpujStatus === 'approved'
-      ? 'Disetujui Finance'
-      : rpujStatus === 'paid'
-        ? 'Sudah Dibayar'
-        : 'Ajukan Uang Jalan';
-  const canStartTrip = ['approved', 'paid'].includes(rpujStatus) || canReviseLockedFields;
+  const canStartTrip = hasCompleteAssignment || canReviseLockedFields;
   const availableStatusOptions = statusOptions.filter((option) => {
     if (canReviseLockedFields) return true;
     if (container.status === 'completed') return option.value === 'completed';
     if (container.status === 'running') return option.value !== 'received';
     return true;
   });
-  const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.';
+  const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah truck dan driver lengkap.';
   const hasEirDocument = Boolean(form.eirDocument);
   const hasRepoHistory = Boolean(container.repoLocation || container.repoStoredAt || container.repoEirNumber || container.repoPickedUpAt || container.repoEirDocument);
   const hasRepoEirReceipt = Boolean(String(container.repoEirNumber || '').trim() && container.repoEirDocument);
@@ -515,7 +500,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const primaryActionLabel = activePhase === 'preparation'
     ? 'Simpan Assignment'
     : activePhase === 'rpuj'
-      ? 'Simpan Uang Jalan & SPK'
+      ? 'Simpan Biaya & SPK'
       : isReadyToStart
         ? 'Mulai Jalan'
         : form.status === 'running'
@@ -527,7 +512,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     { label: 'Nomor container ada', ready: Boolean(String(form.containerNumber || '').trim()) },
     { label: 'Truck dan driver ada', ready: hasCompleteAssignment },
     { label: 'Waktu mulai dan selesai ada', ready: Boolean(form.runningAt && form.completedAt) },
-    { label: 'UJ sudah disetujui/dikirim', ready: canStartTrip },
+    { label: 'Biaya perjalanan tercatat', ready: canStartTrip },
     { label: 'SPK ada', ready: hasSpkDocument },
     ...(hasRepoHistory ? [{ label: 'EIR Titip tersedia', ready: hasRepoEirReceipt }] : []),
     { label: 'Lampiran EIR sudah diupload', ready: hasEirDocument },
@@ -696,9 +681,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     const truckCode = formatTruckUnitCode(selectedTruck?.unitCode || container.unitCode || container.truckCode);
     const plateNumber = form.plateNumber || container.plateNumber || '';
     const truckPlate = truckCode && plateNumber ? `${truckCode} - ${plateNumber}` : truckCode || plateNumber || '-';
-    const otherCostLabel = otherCostAmountValue > 0 ? formatCurrency(otherCostAmountValue) : '-';
     const driverCommissionLabel = driverCommissionAmountValue > 0 ? `${formatCurrency(driverCommissionAmountValue)} (dibayar mingguan)` : '-';
-    const totalRpujLabel = totalJourneyCost > 0 ? formatCurrency(totalJourneyCost) : '-';
+    const totalRpujLabel = ujAmount > 0 ? formatCurrency(ujAmount) : '-';
     const shipment = container.shipment || container.jobType || container.orderType;
     const terminal = spkValue(container.terminal);
     const depo = spkValue(container.origin);
@@ -738,11 +722,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
         { label: 'Depo', value: depo },
       ],
       rpujRows: [
-        { label: 'Total RPUJ', value: totalRpujLabel, highlight: true },
+        { label: 'Total Biaya Perjalanan', value: totalRpujLabel, highlight: true },
         { label: 'Uang Jalan', value: ujAmount > 0 ? formatCurrency(ujAmount) : '-' },
-        { label: 'Biaya Lainnya', value: otherCostLabel },
         { label: 'Komisi Sopir', value: driverCommissionLabel },
-        { label: 'Catatan Biaya Lainnya', value: spkValue(form.otherCostNotes), maxLength: 64 },
       ],
       notes: [
         'SPK ini adalah perintah kerja resmi dan diselesaikan dengan penuh tanggung jawab.',
@@ -901,7 +883,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
             ${renderSection('1', 'Informasi SPK / Order', documentData.orderRows)}
             ${renderSection('2', 'Informasi Armada & Driver', documentData.driverRows)}
             ${renderSection('3', 'Informasi Operasional', documentData.operationalRows)}
-            ${renderSection('4', 'Informasi RPUJ / SPK', documentData.rpujRows)}
+            ${renderSection('4', 'Informasi Biaya Perjalanan / SPK', documentData.rpujRows)}
             <div class="notes">
               <div>
                 <strong>Catatan:</strong>
@@ -947,13 +929,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     updateFile(fileField, file);
   }
 
-  function buildSubmitForm({ forceRpujStatus, includeRpujNotes = activePhase === 'rpuj' && !isRepoPickupMode } = {}) {
-    const otherCostAmount = Number(form.otherCostAmount || 0);
+  function buildSubmitForm({ forceRpujStatus } = {}) {
     const hasDriverCommission = Boolean(form.hasDriverCommission);
     const driverCommissionAmount = hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
-    if (otherCostAmount < 0) {
-      return { error: 'Nominal biaya lainnya tidak boleh negatif.' };
-    }
     if (driverCommissionAmount < 0) {
       return { error: 'Nominal komisi sopir tidak boleh negatif.' };
     }
@@ -961,12 +939,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       return { error: 'Nominal komisi sopir belum tersedia. Lengkapi Master Lokasi Tujuan atau matikan checkbox komisi.' };
     }
     const currentRpujStatus = form.rpujStatus || 'pending';
-    const hasRpujRequest = ujAmount > 0 || otherCostAmount > 0 || Boolean(form.otherCostNotes.trim());
+    const hasRpujRequest = ujAmount > 0;
     const nextRpujStatus = ['approved', 'paid'].includes(currentRpujStatus)
       ? currentRpujStatus
-      : forceRpujStatus || (hasRpujRequest
-        ? 'submitted'
-        : 'pending');
+      : hasRpujRequest
+        ? forceRpujStatus || 'pending'
+        : 'pending';
     const submitForm = {
       ...form,
       rpujStatus: nextRpujStatus,
@@ -977,6 +955,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       runningAt: dateTimeInputToIso(form.runningAt),
       completedAt: dateTimeInputToIso(form.completedAt),
     };
+    delete submitForm.rpujNotes;
     if (canReviseLockedFields) {
       const correctionReason = String(form.adminCorrectionReason || '').trim();
       if (correctionReason.length < 8) {
@@ -988,47 +967,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       delete submitForm.adminCorrectionMode;
       delete submitForm.adminCorrectionReason;
     }
-    if (includeRpujNotes) {
-      submitForm.rpujNotes = serializeOtherCost({
-        amount: otherCostAmount,
-        notes: form.otherCostNotes,
-      });
-    } else {
-      delete submitForm.rpujNotes;
-    }
-    return { submitForm, hasRpujRequest, otherCostAmount, driverCommissionAmount };
-  }
-
-  async function handleSubmitRpujRequest() {
-    if (!canSubmitRpujRequest || submitInFlightRef.current) return;
-    if (!hasCompleteAssignment) {
-      showSubmitNotification('RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.');
-      return;
-    }
-    const { submitForm, hasRpujRequest, error: submitError } = buildSubmitForm({ forceRpujStatus: 'submitted' });
-    if (submitError) {
-      showSubmitNotification(submitError);
-      return;
-    }
-    if (!hasRpujRequest) {
-      showSubmitNotification('Nominal uang jalan belum tersedia. Lengkapi tarif UJ atau biaya lainnya terlebih dahulu.');
-      return;
-    }
-    setError('');
-    try {
-      await submitOnce(submitForm);
-    } catch {
-      return;
-    }
-    setForm((current) => ({
-      ...current,
-      rpujStatus: 'submitted',
-      rpujNotes: submitForm.rpujNotes,
-      hasDriverCommission: submitForm.hasDriverCommission,
-      driverCommissionAmount: String(submitForm.driverCommissionAmount || 0),
-      driverCommissionSourceDestinationId: submitForm.driverCommissionSourceDestinationId,
-      driverCommissionNote: submitForm.driverCommissionNote,
-    }));
+    return { submitForm, hasRpujRequest, driverCommissionAmount };
   }
 
   async function submitOnce(submitForm) {
@@ -1051,13 +990,15 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   async function handleSubmit(event) {
     event.preventDefault();
     if (submitInFlightRef.current) return;
-    const { submitForm, error: submitError } = buildSubmitForm();
+    const { submitForm, error: submitError } = buildSubmitForm({
+      forceRpujStatus: activePhase === 'rpuj' ? 'submitted' : undefined,
+    });
     if (submitError) {
       showSubmitNotification(submitError);
       return;
     }
     if (isRepoPickupMode && !hasCompleteAssignment) {
-      showSubmitNotification('Ambil container titip wajib assign ulang truck dan sopir terlebih dahulu.');
+      showSubmitNotification('Ambil container titip wajib melengkapi truck dan sopir perjalanan lanjutan terlebih dahulu.');
       return;
     }
     if (isRepoPickupMode) {
@@ -1137,7 +1078,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           {error ? <div className="alert error operational-form-error">{error}</div> : null}
           {isRepoPickupMode ? (
             <div className="alert operational-form-repo-pickup">
-              Container sedang diambil dari depo penitipan. Pilih truck dan sopir baru untuk melanjutkan perjalanan ke tujuan akhir.
+              Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.
             </div>
           ) : null}
           {canAccessAdminCorrection ? (
@@ -1210,7 +1151,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           <div className="form-section">
             <h3>Assignment</h3>
             <div className="order-form-grid">
-              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'} - {truck.defaultDriver || 'Driver belum diset'}</option>)}</select></label>
+              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'} - {getDriverDisplayName(truck.defaultDriver) || 'Driver belum diset'}</option>)}</select></label>
               <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
               <label>Driver Otomatis<input name="driver" value={form.driver || 'Pilih truck terlebih dahulu'} readOnly /></label>
               <label>Pembayaran UJ Driver<input value={form.driverBankAccount || 'Belum diisi di master driver'} readOnly /></label>
@@ -1220,7 +1161,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <p className="mt-2 text-[11px] font-medium text-amber-700">Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</p>
             ) : null}
             {!canEditContainerNumber ? (
-              <p className="mt-2 text-[11px] font-medium text-amber-700">{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memilih truck dan sopir baru.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</p>
+              <p className="mt-2 text-[11px] font-medium text-amber-700">{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</p>
             ) : !hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid') ? (
               <p className="mt-2 text-[11px] font-medium text-emerald-700">No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</p>
             ) : null}
@@ -1229,55 +1170,29 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
           {activePhase === 'rpuj' ? (
           <div className="form-section">
-            <h3>Biaya Lainnya & SPK</h3>
+            <h3>Komisi Sopir & SPK</h3>
             <div className="mb-4">
               <UjRecommendationCard job={container} destinations={masterDestinations} />
             </div>
             <div className="operational-rpuj-spk-grid">
               <div className="operational-document-card operational-rpuj-card">
                 <div className="operational-rpuj-card-head">
-                  <span>Biaya Lainnya</span>
-                  <small>Tambahkan biaya operasional di luar UJ utama.</small>
+                  <span>Komisi Sopir</span>
+                  <small>Komisi dihitung otomatis dari Master Lokasi Tujuan.</small>
                 </div>
 
-                {!canEditOtherCost ? (
+                {!canEditDriverCommission ? (
                   <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    {isRepoPickupMode ? 'Biaya lainnya terkunci saat ambil container titip. Operational hanya memilih truck dan sopir baru.' : 'Biaya lainnya terkunci karena UJ sudah disetujui Finance. Admin dapat membuka revisi jika diperlukan.'}
+                    {isRepoPickupMode ? 'Komisi sopir terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'Komisi sopir terkunci setelah pekerjaan selesai. Admin dapat membuka revisi jika diperlukan.'}
                   </div>
                 ) : null}
 
-                <div className="operational-cost-fields">
-                  <label className="operational-inline-label">
-                    Nominal Biaya
-                    <input
-                      name="otherCostAmount"
-                      type="number"
-                      min="0"
-                      step="1000"
-                      value={form.otherCostAmount}
-                      onChange={updateField}
-                      disabled={!canEditOtherCost}
-                      placeholder="Contoh: 150000"
-                    />
-                  </label>
-                  <label className="operational-inline-label">
-                    Catatan Biaya
-                    <input
-                      name="otherCostNotes"
-                      value={form.otherCostNotes}
-                      onChange={updateField}
-                      disabled={!canEditOtherCost}
-                      placeholder="Contoh: tol, parkir, bongkar"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                   <label className="flex items-start gap-2 text-xs font-bold text-slate-800">
                     <input
                       checked={Boolean(form.hasDriverCommission)}
                       className="mt-0.5 h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-200"
-                      disabled={!canEditOtherCost}
+                      disabled={!canEditDriverCommission}
                       onChange={updateDriverCommission}
                       type="checkbox"
                     />
@@ -1304,10 +1219,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                 <div className="operational-cost-summary">
                   <div className="operational-cost-summary-head">
                     <div>
-                      <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Subtotal Perjalanan</span>
-                      <small className="block text-[11px] text-slate-400">UJ + biaya lainnya</small>
+                      <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Ringkasan Biaya</span>
+                      <small className="block text-[11px] text-slate-400">Acuan tarif UJ</small>
                     </div>
-                    <strong className="text-base font-semibold text-slate-900">{formatCurrency(totalJourneyCost)}</strong>
+                    <strong className="text-base font-semibold text-slate-900">{formatCurrency(ujAmount)}</strong>
                   </div>
                   <div className="operational-cost-pills">
                     <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
@@ -1315,57 +1230,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       <strong className="font-semibold text-slate-800">{formatCurrency(ujAmount)}</strong>
                     </span>
                     <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
-                      <span className="text-slate-400">Lainnya</span>
-                      <strong className="font-semibold text-slate-800">{formatCurrency(otherCostAmountValue)}</strong>
-                    </span>
-                    <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
                       <span className="text-slate-400">Komisi Mingguan</span>
                       <strong className="font-semibold text-slate-800">{formatCurrency(driverCommissionAmountValue)}</strong>
                     </span>
-                  </div>
-                </div>
-
-                <div className="operational-rpuj-footer">
-                  <div className="operational-rpuj-actions">
-                    <button
-                      type="button"
-                      className="primary-button operational-rpuj-submit"
-                      onClick={handleSubmitRpujRequest}
-                      disabled={isSaving || !canSubmitRpujRequest || !canEditOtherCost}
-                    >
-                      <Send size={14} />
-                      {isSaving ? 'Menyimpan...' : rpujActionLabel}
-                    </button>
-                    <small>
-                      {canEditOtherCost && canSubmitRpujRequest
-                        ? 'Kirim total UJ dan biaya lainnya ke Finance. Komisi sopir dicatat untuk pembayaran mingguan.'
-                        : !canEditOtherCost
-                          ? isRepoPickupMode
-                            ? 'Biaya lainnya tidak bisa diubah saat ambil container titip.'
-                            : 'Biaya lainnya tidak bisa diubah setelah UJ disetujui Finance.'
-                        : 'Pengajuan uang jalan sudah masuk ke alur Finance.'}
-                    </small>
-                  </div>
-                  <div className="operational-rpuj-upload">
-                    <AttachmentUploadField
-                      id="operational-additional-cost-document"
-                      label="Lampiran Biaya Lainnya"
-                      value={form.additionalCostDocument}
-                      title={form.additionalCostDocument?.name ? 'Ubah File' : 'Pilih File'}
-                      helper="PDF maks. 5 MB, JPG/PNG maks. 10 MB"
-                      accept={OPERATIONAL_FILE_ACCEPT}
-                      compact
-                      disabled={!canEditOtherCost}
-                      validationOptions={{
-                        label: 'Lampiran Biaya Lainnya',
-                      }}
-                      onSelect={(file, validationError) => {
-                        if (validationError) return setError(validationError);
-                        setError('');
-                        updateFile('additionalCostDocument', file);
-                      }}
-                      onClear={() => setForm((current) => ({ ...current, additionalCostDocument: null }))}
-                    />
                   </div>
                 </div>
               </div>
@@ -1386,7 +1253,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                       onClick={handleGenerateSpk}
                       disabled={!canGenerateSpk}
                     >
-                      {canGenerateSpk ? 'Generate SPK' : !hasCompleteAssignment ? 'Lengkapi Truck' : 'Menunggu Finance'}
+                      {canGenerateSpk ? 'Generate SPK' : !hasCompleteAssignment ? 'Lengkapi Truck' : 'Lengkapi Biaya'}
                     </button>
                   ) : (
                     <>
@@ -1602,7 +1469,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
                     </small>
                   ) : !canStartTrip ? (
                     <small className="text-[11px] font-semibold leading-snug text-amber-700">
-                      UJ harus disetujui Finance sebelum perjalanan berjalan.
+                      Catatan biaya perjalanan perlu dilengkapi sebelum perjalanan berjalan.
                     </small>
                   ) : null}
                 </label>

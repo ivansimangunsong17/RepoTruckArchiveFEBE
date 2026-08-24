@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { fallbackCustomers } from '../../data/masterData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
+import { fetchCustomerOutstandingSummary } from '../../services/archive/salesOrderService';
+import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 
 const REFERENCE_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
@@ -11,11 +13,12 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Stevedoring and Port Service',
+  'Handling',
   'Jasa Lainnya',
 ];
 const SERVICE_ALIASES = {
-  'Jasa Handling': 'Stevedoring and Port Service',
+  'Jasa Handling': 'Handling',
+  'Stevedoring and Port Service': 'Handling',
 };
 
 const CONTAINER_TYPE_OPTIONS = ['Dry', 'Reefer', 'Special'];
@@ -396,6 +399,33 @@ function SalesOrderForm({
     [customers, form.customer],
   );
 
+  const [customerOutstanding, setCustomerOutstanding] = useState(null);
+  const [customerOutstandingLoading, setCustomerOutstandingLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selectedCustomer?.name) {
+      setCustomerOutstanding(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setCustomerOutstandingLoading(true);
+    fetchCustomerOutstandingSummary(selectedCustomer.name)
+      .then((summary) => {
+        if (!cancelled) setCustomerOutstanding(summary);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerOutstanding(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCustomerOutstandingLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomer?.name]);
+
   const lineItems = form.lineItems;
   const totalQuantity = lineItems.reduce((total, item) => total + Number(item.qty || 0), 0);
   const totalAmount = lineItems.reduce((total, item) => total + calculateLineItemTotal(item), 0);
@@ -636,6 +666,19 @@ function SalesOrderForm({
                 <textarea value={form.customerAddress} readOnly rows="2" />
               </label>
             </div>
+
+            {customerOutstandingLoading ? (
+              <p className="section-helper-text">Memuat status piutang customer...</p>
+            ) : null}
+            {!customerOutstandingLoading && customerOutstanding && customerOutstanding.totalOutstandingAmount > 0 ? (
+              <div className={`alert ${customerOutstanding.overdueCount > 0 ? 'warning' : 'info'}`}>
+                Outstanding customer ini saat ini: <strong>{formatCurrency(customerOutstanding.totalOutstandingAmount)}</strong> dari {customerOutstanding.openInvoiceCount} invoice belum lunas.
+                {customerOutstanding.overdueCount > 0
+                  ? ` ${customerOutstanding.overdueCount} di antaranya sudah lewat jatuh tempo (maks ${customerOutstanding.worstDaysOverdue} hari).`
+                  : ' Semua masih dalam masa jatuh tempo.'}
+                {customerOutstanding.needsReview > 0 ? ' Sebagian data invoice masih perlu ditinjau Finance.' : ''}
+              </div>
+            ) : null}
           </div>
 
           <div className="form-section">

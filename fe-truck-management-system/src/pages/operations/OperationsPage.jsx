@@ -29,7 +29,14 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import UjRecommendationCard from '../../components/operations/UjRecommendationCard';
 import { parseOtherCost } from '../../utils/otherCost';
-import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk } from '../../services/archive/containerJobService';
+import {
+  cancelContainerJob,
+  correctContainerJobExpense,
+  createContainerJobExpense,
+  fetchContainerJob,
+  fetchContainerJobsPage,
+  generateContainerJobSpk,
+} from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
 const STATUS_ORDER = { received: 0, running: 1, repo_stored: 2, completed: 3, cancelled: 4 };
@@ -41,14 +48,41 @@ const CANCEL_SOURCE_OPTIONS = [
   { value: 'other', label: 'Lainnya' },
 ];
 const rpujStageOptions = [
-  { value: 'queue', label: 'Antri Pengajuan', description: 'Belum diajukan atau perlu diajukan ulang' },
-  { value: 'submitted', label: 'Sudah Diajukan', description: 'Menunggu approval Finance' },
-  { value: 'approved', label: 'Disetujui Finance', description: 'Sudah approve, menunggu transfer UJ' },
-  { value: 'paid', label: 'UJ Dikirim', description: 'Bukti transfer UJ sudah masuk' },
+  { value: 'queue', label: 'Belum Dicatat', description: 'Biaya perjalanan belum dicatat' },
+  { value: 'submitted', label: 'Biaya Tercatat', description: 'Pemakaian saldo sudah dicatat Operational' },
+  { value: 'approved', label: 'Dicek Finance', description: 'Catatan saldo sudah dicek Finance' },
+  { value: 'paid', label: 'Bukti Tercatat', description: 'Bukti pembayaran sudah tersedia' },
 ];
 const REPO_CONTAINER_CONDITIONS = [
   { value: 'empty', label: 'Kosong' },
   { value: 'loaded', label: 'Isi' },
+];
+const EXPENSE_CATEGORY_OPTIONS = [
+  { value: 'uj_awal', label: 'UJ Awal' },
+  { value: 'top_up_uj', label: 'Top Up UJ' },
+  { value: 'tol', label: 'Tol' },
+  { value: 'parkir', label: 'Parkir' },
+  { value: 'bongkar', label: 'Bongkar' },
+  { value: 'muat', label: 'Muat' },
+  { value: 'lolo', label: 'LOLO' },
+  { value: 'inap', label: 'Inap' },
+  { value: 'terminal_depo', label: 'Terminal / Depo' },
+  { value: 'tunggu', label: 'Tunggu' },
+  { value: 'reimbursement', label: 'Reimbursement' },
+  { value: 'lainnya', label: 'Lainnya' },
+];
+const EXPENSE_PAYMENT_STATUS_OPTIONS = [
+  { value: 'belum_dibayar', label: 'Belum Dibayar' },
+  { value: 'pending_pembayaran', label: 'Pending Pembayaran' },
+  { value: 'sudah_dibayar', label: 'Sudah Dibayar' },
+  { value: 'ditahan_sopir', label: 'Ditahan Sopir' },
+  { value: 'dipakai_job_berikutnya', label: 'Dipakai Job Berikutnya' },
+];
+const EXPENSE_FINANCE_STATUS_OPTIONS = [
+  { value: 'belum_dicek', label: 'Belum Dicek' },
+  { value: 'sudah_dicek', label: 'Sudah Dicek' },
+  { value: 'perlu_klarifikasi', label: 'Perlu Klarifikasi' },
+  { value: 'dikoreksi', label: 'Dikoreksi' },
 ];
 
 function getStatusOrder(status) {
@@ -67,6 +101,10 @@ function getDateFilterKey(value) {
     String(parsed.getMonth() + 1).padStart(2, '0'),
     String(parsed.getDate()).padStart(2, '0'),
   ].join('-');
+}
+
+function optionLabel(options, value) {
+  return options.find((option) => option.value === value)?.label || value || '-';
 }
 
 function getJobStatusLabel(status) {
@@ -192,15 +230,15 @@ function getRpujStage(job) {
 
 function rpujDetail(job) {
   if (job?.status === 'cancelled') return { tone: 'cancelled', label: 'Tidak Diproses', helper: 'Job sudah batal' };
-  if (job?.rpujStatus === 'paid') return { tone: 'paid', label: 'UJ Dikirim', helper: 'Bukti transfer masuk' };
-  if (job?.rpujStatus === 'approved') return { tone: 'approved', label: 'Disetujui Finance', helper: 'Siap transfer / SPK' };
-  if (job?.rpujStatus === 'submitted') return { tone: 'submitted', label: 'Menunggu Finance', helper: 'Pengajuan sudah masuk' };
+  if (job?.rpujStatus === 'paid') return { tone: 'paid', label: 'Bukti Tercatat', helper: 'Bukti pembayaran tersedia' };
+  if (job?.rpujStatus === 'approved') return { tone: 'approved', label: 'Dicek Finance', helper: 'Catatan sudah dicek' };
+  if (job?.rpujStatus === 'submitted') return { tone: 'submitted', label: 'Biaya Tercatat', helper: 'Pemakaian saldo tercatat' };
   if (job?.rpujStatus === 'rejected') return {
     tone: 'rejected',
-    label: 'Ditolak Finance',
-    helper: job.rpujRejectionNote || 'Ajukan ulang',
+    label: 'Perlu Koreksi',
+    helper: job.rpujRejectionNote || 'Perbaiki catatan biaya',
   };
-  return { tone: 'queue', label: 'Belum Diajukan', helper: 'Perlu ajukan UJ' };
+  return { tone: 'queue', label: 'Belum Dicatat', helper: 'Catat biaya perjalanan' };
 }
 
 function nextActionHint(job, documents, rpuj, { documentFollowUp = false, repoSummary = null } = {}) {
@@ -208,8 +246,8 @@ function nextActionHint(job, documents, rpuj, { documentFollowUp = false, repoSu
   if (repoSummary) return { label: 'Perlu ambil container', tone: 'repo' };
   if (documentFollowUp && documents.missing.length) return { label: 'Dokumen belum lengkap', tone: 'warning' };
   if (!String(job?.containerNumber || '').trim()) return { label: 'Isi nomor container', tone: 'warning' };
-  if (rpuj.tone === 'rejected') return { label: 'Ajukan ulang UJ', tone: 'danger' };
-  if (rpuj.tone === 'queue') return { label: 'Ajukan UJ', tone: 'warning' };
+  if (rpuj.tone === 'rejected') return { label: 'Koreksi biaya', tone: 'danger' };
+  if (rpuj.tone === 'queue') return { label: 'Catat biaya', tone: 'warning' };
   if (!String(job?.driver || '').trim() || !String(job?.plateNumber || '').trim()) return { label: 'Lengkapi assignment', tone: 'warning' };
   if (documents.missing.length && !['cancelled'].includes(job?.status)) return { label: 'Dokumen belum lengkap', tone: 'neutral' };
   if (job?.status === 'running') return { label: 'Pantau perjalanan', tone: 'info' };
@@ -325,6 +363,19 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [detailLoadingId, setDetailLoadingId] = useState('');
+  const [expenseForm, setExpenseForm] = useState({
+    category: 'tol',
+    amount: '',
+    description: '',
+    recipientType: 'vendor',
+    recipientName: '',
+    paymentStatus: 'belum_dibayar',
+    proofFile: null,
+  });
+  const [expenseSaving, setExpenseSaving] = useState(false);
+  const [expenseError, setExpenseError] = useState('');
+  const [expenseCorrectionId, setExpenseCorrectionId] = useState('');
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelForm, setCancelForm] = useState({ cancelSource: 'customer', cancelReason: '' });
   const [cancelSaving, setCancelSaving] = useState(false);
@@ -344,11 +395,12 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const detailOtherCost = otherCostValue(detail);
   const detailDocuments = detail ? documentState(detail) : { completed: 0, total: 0, missing: [] };
   const detailRpuj = detail ? rpujDetail(detail) : { label: '-', helper: '' };
+  const expenseCorrection = (detail?.expenses || []).find((expense) => expense.id === expenseCorrectionId);
   const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
   const repoMissing = getRepoStorageMissing(repoTarget);
   const depotOptions = useMemo(() => normalizeDepotOptions(archive.masters?.depots), [archive.masters?.depots]);
   const hasCurrentDepot = Boolean(repoForm.repoLocation && !depotOptions.includes(repoForm.repoLocation));
-  const activeRpujFilterLabel = rpujStageOptions.find((option) => option.value === rpujStage)?.label || 'Filter UJ';
+  const activeRpujFilterLabel = rpujStageOptions.find((option) => option.value === rpujStage)?.label || 'Filter Saldo';
   const repoLocationValid = repoForm.repoLocation.trim().length >= 3;
   const repoReasonValid = repoForm.repoReason.trim().length >= 8;
   const repoConditionValid = ['empty', 'loaded'].includes(repoForm.repoContainerCondition);
@@ -530,6 +582,54 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  function resetExpenseForm(job = detail) {
+    setExpenseCorrectionId('');
+    setExpenseForm({
+      category: 'tol',
+      amount: '',
+      description: '',
+      recipientType: 'vendor',
+      recipientName: job?.driver || '',
+      paymentStatus: 'belum_dibayar',
+      proofFile: null,
+    });
+    setExpenseError('');
+  }
+
+  function startExpenseCorrection(expense) {
+    setExpenseCorrectionId(expense.id);
+    setExpenseForm({
+      category: expense.category || 'tol',
+      amount: expense.amount ? String(expense.amount) : '',
+      description: expense.description || '',
+      recipientType: expense.recipientType || 'vendor',
+      recipientName: expense.recipientName || detail?.driver || '',
+      paymentStatus: expense.paymentStatus || 'belum_dibayar',
+      proofFile: null,
+    });
+    setExpenseError('');
+  }
+
+  async function openJobDetail(job) {
+    resetExpenseForm(job);
+    if (!archive.isDatabaseMode) {
+      setDetail(job);
+      return;
+    }
+
+    setDetailLoadingId(job.id);
+    try {
+      const freshJob = await fetchContainerJob(job.id);
+      setDetail(freshJob);
+      resetExpenseForm(freshJob);
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Detail gagal dimuat', message: requestError.message });
+      setDetail(job);
+    } finally {
+      setDetailLoadingId('');
+    }
+  }
+
   async function updateOperational(form) {
     if (isHistoricalJob(editing) && !canManageHistoricalEntry) {
       notify({
@@ -565,7 +665,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       notify({
         title: editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
         message: editing.repoPickupMode
-          ? `${containerNumber} berhasil diambil dari Repo dan lanjut Sedang Jalan dengan assignment baru.`
+          ? `${containerNumber} berhasil diambil dari Repo dan lanjut Sedang Jalan dengan assignment perjalanan.`
           : `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
     } catch (requestError) {
@@ -588,6 +688,50 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     setDetail((current) => (current?.id === saved.id ? { ...current, ...saved } : current));
     if (archive.isDatabaseMode) setListVersion((value) => value + 1);
     return saved;
+  }
+
+  async function submitContainerJobExpense(event) {
+    event.preventDefault();
+    if (!detail?.id || expenseSaving) return;
+    const amount = Number(expenseForm.amount || 0);
+    if (!amount || amount <= 0) {
+      setExpenseError('Nominal biaya wajib lebih dari 0.');
+      return;
+    }
+    if (expenseForm.paymentStatus === 'sudah_dibayar' && !expenseForm.proofFile && !expenseCorrection?.proofAttachment) {
+      setExpenseError('Upload bukti pembayaran untuk biaya yang sudah dibayar.');
+      return;
+    }
+
+    setExpenseSaving(true);
+    setExpenseError('');
+    try {
+      const payload = {
+        ...expenseForm,
+        amount,
+        updatedBy: user?.fullName || user?.name || 'Operational',
+        proofAttachmentId: expenseCorrection?.proofAttachmentId || expenseCorrection?.proofAttachment?.path || expenseCorrection?.proofAttachment?.id || null,
+      };
+      const savedExpense = expenseCorrectionId
+        ? await correctContainerJobExpense(detail.id, expenseCorrectionId, payload)
+        : await createContainerJobExpense(detail.id, payload);
+      setDetail((current) => {
+        if (current?.id !== detail.id) return current;
+        const currentExpenses = current.expenses || [];
+        return expenseCorrectionId
+          ? { ...current, expenses: currentExpenses.map((expense) => (expense.id === expenseCorrectionId ? savedExpense : expense)) }
+          : { ...current, expenses: [...currentExpenses, savedExpense] };
+      });
+      resetExpenseForm(detail);
+      notify({
+        title: expenseCorrectionId ? 'Koreksi biaya dikirim' : 'Biaya Container Job dicatat',
+        message: `${optionLabel(EXPENSE_CATEGORY_OPTIONS, savedExpense.category)} ${formatCurrency(savedExpense.amount)} berhasil disimpan.`,
+      });
+    } catch (requestError) {
+      setExpenseError(requestError.message || (expenseCorrectionId ? 'Koreksi biaya Container Job gagal dikirim.' : 'Biaya Container Job gagal dicatat.'));
+    } finally {
+      setExpenseSaving(false);
+    }
   }
 
   function openCancelOperational(job) {
@@ -834,8 +978,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
             {activeRpujFilterLabel}
             {rpujStage ? <strong>{activeRpujCounts[rpujStage] || 0}</strong> : null}
           </button>
-          <span>RPUJ</span>
-          <div className="job-rpuj-tabs" role="tablist" aria-label="Status Pengajuan Uang Jalan">
+          <span>Saldo</span>
+          <div className="job-rpuj-tabs" role="tablist" aria-label="Status pencatatan saldo perjalanan">
             {rpujStageOptions.map((option) => {
               const active = rpujStage === option.value;
               return (
@@ -937,7 +1081,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         {actionHint ? <em className={`container-action-hint ${actionHint.tone}`}>{actionHint.label}</em> : null}
                       </div>
                       <div className={`container-rpuj-status ${rpuj.tone}`}>
-                        <span>RPUJ</span>
+                        <span>Saldo</span>
                         <strong>{rpuj.label}</strong>
                         <small>{rpuj.helper}</small>
                       </div>
@@ -961,7 +1105,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         {documentFollowUp ? <small title={documents.missing.join(', ')}>Kurang: {documents.missing.join(', ')}</small> : null}
                       </div>
                       <div className="container-row-actions">
-                        <button className="secondary-button" type="button" onClick={() => setDetail(job)}><Eye size={14} /> Detail</button>
+                        <button className="secondary-button" type="button" disabled={detailLoadingId === job.id} onClick={() => openJobDetail(job)}><Eye size={14} /> {detailLoadingId === job.id ? 'Memuat' : 'Detail'}</button>
                         {canEdit && !historicalLocked && canStoreRepoJob(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(job)}><Archive size={14} /> Titipkan</button> : null}
                         {canEdit && !historicalLocked && isRepoStoredJob(job) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
                         {canEdit && !historicalLocked && !isRepoStoredJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
@@ -1018,8 +1162,84 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
             </div>
             <div className="container-job-detail-body">
               <section className="container-detail-assignment"><h3>Penugasan</h3><div><span>No. Container<strong>{detail.containerNumber || '-'}</strong></span><span>Driver<strong>{detail.driver || '-'}</strong></span><span>Truck<strong>{detail.plateNumber || '-'}</strong></span><span>Detail Truck<strong>{detail.chassis || '-'}</strong></span></div></section>
-              <section className="container-detail-billing"><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>Status RPUJ<strong>{detailRpuj.label}</strong><small>{detail.rpujRejectionNote || detailRpuj.helper}</small></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
-              <section className="container-detail-uj"><h3>Rekomendasi UJ</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
+              <section className="container-detail-billing"><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>Status Saldo<strong>{detailRpuj.label}</strong><small>{detail.rpujRejectionNote || detailRpuj.helper}</small></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
+              <section className="container-detail-billing">
+                <h3>Transaksi Biaya Lapangan</h3>
+                <div>
+                  {(detail.expenses || []).length ? (detail.expenses || []).map((expense) => (
+                    <span key={expense.id}>
+                      {optionLabel(EXPENSE_CATEGORY_OPTIONS, expense.category)}
+                      <strong>{formatCurrency(expense.amount)}</strong>
+                      <small>{optionLabel(EXPENSE_PAYMENT_STATUS_OPTIONS, expense.paymentStatus)} - {expense.description || expense.recipientName || '-'}</small>
+                      <small>Finance: {optionLabel(EXPENSE_FINANCE_STATUS_OPTIONS, expense.financeCheckStatus || 'belum_dicek')}</small>
+                      {expense.financeNote ? <small>Catatan: {expense.financeNote}</small> : null}
+                      {expense.proofAttachment ? <DocumentLink file={expense.proofAttachment} label="Bukti" /> : null}
+                      {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && expense.financeCheckStatus === 'perlu_klarifikasi' ? (
+                        <button className="secondary-button mt-2" type="button" onClick={() => startExpenseCorrection(expense)}>Koreksi</button>
+                      ) : null}
+                    </span>
+                  )) : <span>Belum ada transaksi biaya<strong>Rp 0</strong><small>Catat biaya setelah saldo operasional digunakan.</small></span>}
+                </div>
+                {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) ? (
+                  <form className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3" onSubmit={submitContainerJobExpense}>
+                    {expenseCorrectionId ? (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+                        Mode koreksi biaya aktif. Catatan Finance: {expenseCorrection?.financeNote || '-'}
+                      </div>
+                    ) : null}
+                    <div className="grid gap-2 md:grid-cols-3">
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Kategori
+                        <select className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" value={expenseForm.category} onChange={(event) => setExpenseForm((current) => ({ ...current, category: event.target.value }))}>
+                          {EXPENSE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Nominal
+                        <input className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" min="0" placeholder="125000" type="number" value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} />
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Status Bayar
+                        <select className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" value={expenseForm.paymentStatus} onChange={(event) => setExpenseForm((current) => ({ ...current, paymentStatus: event.target.value }))}>
+                          {EXPENSE_PAYMENT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Penerima
+                        <input className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" placeholder="Nama sopir/vendor" value={expenseForm.recipientName} onChange={(event) => setExpenseForm((current) => ({ ...current, recipientName: event.target.value }))} />
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold text-slate-600">
+                        Keterangan
+                        <input className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" placeholder="Contoh: Tol Cikampek" value={expenseForm.description} onChange={(event) => setExpenseForm((current) => ({ ...current, description: event.target.value }))} />
+                      </label>
+                    </div>
+                    <AttachmentUploadField
+                      helper="Wajib jika status sudah dibayar. PDF, JPG, PNG"
+                      id="expense-payment-proof"
+                      label="Bukti Pembayaran"
+                      onClear={() => setExpenseForm((current) => ({ ...current, proofFile: null }))}
+                      onSelect={(file, validationError) => {
+                        if (validationError) {
+                          setExpenseError(validationError);
+                          return;
+                        }
+                        setExpenseForm((current) => ({ ...current, proofFile: file }));
+                        setExpenseError('');
+                      }}
+                      title={expenseForm.proofFile?.name ? 'Ganti Bukti' : 'Upload Bukti'}
+                      value={expenseForm.proofFile}
+                    />
+                    {expenseError ? <p className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{expenseError}</p> : null}
+                    <div className="flex justify-end gap-2">
+                      {expenseCorrectionId ? <button className="secondary-button" disabled={expenseSaving} type="button" onClick={() => resetExpenseForm(detail)}>Batal Koreksi</button> : null}
+                      <button className="primary-button" disabled={expenseSaving} type="submit">{expenseSaving ? 'Menyimpan...' : expenseCorrectionId ? 'Kirim Koreksi' : 'Catat Biaya'}</button>
+                    </div>
+                  </form>
+                ) : null}
+              </section>
+              <section className="container-detail-uj"><h3>Acuan Biaya Perjalanan</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section className="container-detail-documents"><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
               <section className="container-detail-timeline"><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
               {isRepoStoredJob(detail) || detail.repoLocation || detail.repoStoredAt ? (

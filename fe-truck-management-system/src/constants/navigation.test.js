@@ -7,7 +7,7 @@ describe('navigationGroups', () => {
     const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
     const financeItems = monitoringGroup?.items.filter((item) => item.to.startsWith('/finance')) || [];
 
-    expect(financeItems).toHaveLength(4);
+    expect(financeItems).toHaveLength(5);
     financeItems.forEach((item) => {
       expect(item.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.FINANCE]);
     });
@@ -31,6 +31,14 @@ describe('navigationGroups', () => {
 
     expect(repoItem?.label).toBe('Container Titip');
     expect(repoItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
+  });
+
+  it('menambahkan rekening dropping untuk operational sebagai riwayat saldo', () => {
+    const operationalGroup = navigationGroups.find((group) => group.label === 'Operational');
+    const droppingItem = operationalGroup?.items.find((item) => item.to === '/operations/rekening-dropping');
+
+    expect(droppingItem?.label).toBe('Rekening Dropping');
+    expect(droppingItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
   });
 
   it('memisahkan menu komisi Operational dan Finance', () => {
@@ -60,6 +68,13 @@ describe('navigationGroups', () => {
 
     expect(historicalEntryItem?.label).toBe('Input Data Lama');
     expect(historicalEntryItem?.roles).toEqual([USER_ROLES.ADMIN]);
+  });
+
+  it('menambahkan menu laporan untuk finance', () => {
+    const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
+    const reportsItem = monitoringGroup?.items.find((item) => item.to === '/reports');
+
+    expect(reportsItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
   });
 
   it('menampilkan Viewer pada dashboard order read-only dan laporan', () => {

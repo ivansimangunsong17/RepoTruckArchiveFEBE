@@ -1455,7 +1455,7 @@
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: #17181cb3; backdrop-filter: blur(3px); }
 .order-modal { position: relative; display: flex; overflow: hidden; width: min(760px, 100%); max-height: calc(100vh - 48px); border: 1px solid #ffffff38; border-radius: 14px; background: white; box-shadow: 0 28px 80px #08090b59; flex-direction: column; }
-.sales-order-modal { width: min(960px, 100%); }
+.sales-order-modal { width: min(1180px, 100%); }
 .order-modal > header { z-index: 2; display: flex; flex: none; align-items: flex-start; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border); background: white; }
 .order-modal > header h2 { margin-bottom: 3px; font-size: 1.15rem; }
 .order-modal > header span { color: #7d899b; font-size: .7rem; }
@@ -1552,7 +1552,7 @@
 .sales-order-review-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #fecdd3; border-radius: 8px; background: #fff1f2; }
 .sales-order-review-total strong { color: #9f1239; font-size: 1rem; font-weight: 950; }
 .sales-order-review-modal footer { position: static; z-index: auto; bottom: auto; display: flex; flex: none; justify-content: flex-end; gap: 10px; padding: 14px 18px; border-top: 1px solid #e5eaf1; background: #fff; box-shadow: none; }
-.operational-modal { width: min(900px, 100%); }
+.operational-modal { width: min(1080px, 100%); }
 .operational-form-error { margin: 10px 12px 0; border: 1px solid #efc9cb; font-weight: 700; }
 .operational-phase-tabs {
   display: grid;

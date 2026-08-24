@@ -10,8 +10,9 @@ export const REVENUE_SERVICE_NAMES = Object.freeze({
   TRANSPORT_LEGACY: 'Jasa Angkut',
   LOADING_UNLOADING: 'Bon Muat/Bongkar',
   TILA_GATEPASS: 'Tila/Gatepass',
-  HANDLING: 'Stevedoring and Port Service',
+  HANDLING: 'Handling',
   HANDLING_LEGACY: 'Jasa Handling',
+  HANDLING_LEGACY_2: 'Stevedoring and Port Service',
   OTHER: 'Jasa Lainnya',
 });
 
@@ -48,6 +49,11 @@ const SERVICE_DEFINITIONS = Object.freeze([
   },
   {
     serviceName: REVENUE_SERVICE_NAMES.HANDLING_LEGACY,
+    category: FINANCIAL_LINE_ITEM_CATEGORY.REIMBURSEMENT,
+    containerSize: '',
+  },
+  {
+    serviceName: REVENUE_SERVICE_NAMES.HANDLING_LEGACY_2,
     category: FINANCIAL_LINE_ITEM_CATEGORY.REIMBURSEMENT,
     containerSize: '',
   },

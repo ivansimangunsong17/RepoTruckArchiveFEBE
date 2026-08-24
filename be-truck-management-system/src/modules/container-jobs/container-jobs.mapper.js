@@ -10,11 +10,52 @@ function mapAttachmentFile(attachment) {
     : null;
 }
 
+export function mapContainerJobExpense(row = {}) {
+  const proofAttachment = row.proofAttachment || row.proof_attachment || (
+    row.proof_attachment_id
+      ? {
+          id: row.proof_attachment_id,
+          fileName: row.proof_file_name,
+          fileSize: row.proof_file_size,
+          mimeType: row.proof_mime_type,
+          storagePath: row.proof_storage_path,
+        }
+      : null
+  );
+
+  return {
+    id: row.id,
+    salesOrderId: row.sales_order_id || row.salesOrderId || '',
+    containerJobId: row.container_job_id || row.containerJobId || '',
+    driverId: row.driver_id || row.driverId || '',
+    category: row.category || '',
+    amount: Number(row.amount || 0),
+    description: row.description || '',
+    recipientType: row.recipient_type || row.recipientType || '',
+    recipientName: row.recipient_name || row.recipientName || '',
+    paymentStatus: row.payment_status || row.paymentStatus || 'belum_dibayar',
+    paidAt: row.paid_at || row.paidAt || null,
+    paidByName: row.paid_by_name || row.paidByName || '',
+    proofAttachmentId: row.proof_attachment_id || row.proofAttachmentId || '',
+    proofAttachment: mapAttachmentFile(proofAttachment),
+    financeCheckStatus: row.finance_check_status || row.financeCheckStatus || 'belum_dicek',
+    financeCheckedByName: row.finance_checked_by_name || row.financeCheckedByName || '',
+    financeCheckedAt: row.finance_checked_at || row.financeCheckedAt || null,
+    financeNote: row.finance_note || row.financeNote || '',
+    source: row.source || 'manual',
+    sourceRefId: row.source_ref_id || row.sourceRefId || '',
+    createdByName: row.created_by_name || row.createdByName || '',
+    updatedByName: row.updated_by_name || row.updatedByName || '',
+    createdAt: row.created_at || row.createdAt || null,
+    updatedAt: row.updated_at || row.updatedAt || null,
+  };
+}
+
 function firstAttachment(...attachments) {
   return attachments.find(Boolean);
 }
 
-export function mapContainerJob(row, attachments = []) {
+export function mapContainerJob(row, attachments = [], expenses = []) {
   const assignment = row.assignment_snapshot || {};
   const attachmentMap = attachments.reduce((map, attachment) => {
     map[attachment.category] = attachment;
@@ -135,6 +176,7 @@ export function mapContainerJob(row, attachments = []) {
     travelDocumentFile: mapAttachmentFile(attachmentMap.travelDocumentFile),
     weighingDocumentFile: mapAttachmentFile(attachmentMap.weighingDocumentFile),
     otherDocuments,
+    expenses: expenses.map(mapContainerJobExpense),
     status: row.status,
     receivedAt: row.received_at,
     runningAt: row.running_at,

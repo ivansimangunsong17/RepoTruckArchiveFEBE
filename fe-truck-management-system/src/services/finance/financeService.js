@@ -36,6 +36,70 @@ export function fetchFinanceRpujRequests(params = {}) {
   return httpClient.get(`/finance/rpuj-requests${buildQuery(params)}`);
 }
 
+export function fetchOperationalFundRequests(params = {}) {
+  return httpClient.get(`/finance/operational-fund-requests${buildQuery(params)}`);
+}
+
+export function fetchOperationalFundBatches(params = {}) {
+  return httpClient.get(`/finance/operational-fund-batches${buildQuery(params)}`);
+}
+
+export function fetchOperationalFundTransactions(params = {}) {
+  return httpClient.get(`/finance/operational-fund-transactions${buildQuery(params)}`);
+}
+
+export function createOperationalFundRequest(payload = {}) {
+  return httpClient.post('/finance/operational-fund-requests', payload);
+}
+
+function getRawFile(file) {
+  if (!file) return null;
+  if (typeof File !== 'undefined' && file instanceof File) return file;
+  if (typeof File !== 'undefined' && file.rawFile instanceof File) return file.rawFile;
+  return null;
+}
+
+export async function depositOperationalFund(payload = {}) {
+  const proofFile = getRawFile(payload.proofFile);
+  if (!proofFile) {
+    return httpClient.post('/finance/operational-fund-deposits', payload);
+  }
+
+  const uploadFile = await compressImageFile(proofFile);
+  const validationError = validateFinalUploadFile(uploadFile);
+  if (validationError) throw new Error(validationError);
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
+  return httpClient.post('/finance/operational-fund-deposits', {
+    requestDate: payload.requestDate,
+    amount: payload.amount,
+    purpose: payload.purpose,
+    fileName: uploadFile.name,
+    mimeType: uploadFile.type,
+    fileSize: uploadFile.size,
+    fileBase64,
+  });
+}
+
+export function approveOperationalFundRequest(id) {
+  return httpClient.patch(`/finance/operational-fund-requests/${encodeURIComponent(id)}/approve`, {});
+}
+
+export function rejectOperationalFundRequest(id, rejectionNote = '') {
+  return httpClient.patch(`/finance/operational-fund-requests/${encodeURIComponent(id)}/reject`, { rejectionNote });
+}
+
+export function closeOperationalFundBatch(id, payload = {}) {
+  return httpClient.patch(`/finance/operational-fund-batches/${encodeURIComponent(id)}/close`, payload);
+}
+
+export function fetchFinanceContainerJobExpenses(params = {}) {
+  return httpClient.get(`/finance/container-job-expenses${buildQuery(params)}`);
+}
+
+export function reconcileFinanceContainerJobExpense(id, payload = {}) {
+  return httpClient.patch(`/finance/container-job-expenses/${encodeURIComponent(id)}/reconcile`, payload);
+}
+
 export function approveFinanceRpuj(id) {
   return httpClient.patch(`/finance/rpuj-requests/${encodeURIComponent(id)}/approve`, {});
 }
@@ -88,6 +152,19 @@ export async function uploadFinanceRpujTransferProof(id, file) {
   });
 }
 
+export async function uploadOperationalFundTransferProof(id, file) {
+  const uploadFile = await compressImageFile(file);
+  const validationError = validateFinalUploadFile(uploadFile);
+  if (validationError) throw new Error(validationError);
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
+  return httpClient.post(`/finance/operational-fund-requests/${encodeURIComponent(id)}/transfer-proof`, {
+    fileName: uploadFile.name,
+    mimeType: uploadFile.type,
+    fileSize: uploadFile.size,
+    fileBase64,
+  });
+}
+
 export function fetchFinanceInvoices(params = {}) {
   return httpClient.get(`/finance/invoices${buildQuery(params)}`);
 }
@@ -116,6 +193,32 @@ export async function uploadFinanceInvoiceDocument(id, documentType, file) {
     mimeType: file.type || 'application/pdf',
     fileSize: file.size,
     fileBase64,
+  });
+}
+
+export function fetchFinanceOutstanding(params = {}) {
+  return httpClient.get(`/finance/outstanding${buildQuery(params)}`);
+}
+
+export function fetchFinanceInvoicePayments(id) {
+  return httpClient.get(`/finance/invoices/${encodeURIComponent(id)}/payments`);
+}
+
+export async function recordFinanceInvoicePayment(id, payload = {}, proofFile) {
+  const validationError = validateArchiveFile(proofFile, { label: 'Bukti transfer' })
+    || validateFinalUploadFile(proofFile, { label: 'Bukti transfer' });
+  if (validationError) throw new Error(validationError);
+
+  const uploadFile = proofFile.type?.startsWith('image/') ? await compressImageFile(proofFile) : proofFile;
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
+  return httpClient.post(`/finance/invoices/${encodeURIComponent(id)}/payments`, {
+    ...payload,
+    proofFile: {
+      fileName: uploadFile.name,
+      mimeType: uploadFile.type || 'application/octet-stream',
+      fileSize: uploadFile.size,
+      fileBase64,
+    },
   });
 }
 

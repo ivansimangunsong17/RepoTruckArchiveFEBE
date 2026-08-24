@@ -404,6 +404,7 @@ function MasterDataPage({
   extraDetailContent,
   extraFormContent,
   readOnly = false,
+  hideRowNumber = false,
 }) {
   const { confirmAction, notify } = useFeedback();
   const { user } = useAuth();
@@ -477,7 +478,7 @@ function MasterDataPage({
     ['rowNumber', 'number', '__rowNumber'].includes(column.key)
     && String(column.label || '').trim().toLowerCase() === 'no',
   );
-  const tableColumns = hasRowNumberColumn ? columns : [ROW_NUMBER_COLUMN, ...columns];
+  const tableColumns = hideRowNumber || hasRowNumberColumn ? columns : [ROW_NUMBER_COLUMN, ...columns];
   const rowNumberColumn = tableColumns.find(isRowNumberColumn);
 
   function renderColumnValue(column, row, meta) {
@@ -486,18 +487,19 @@ function MasterDataPage({
       : formatFallbackCellValue(row[column.key]);
   }
 
-  function renderRowActions(row, className = 'justify-center') {
+  function renderRowActions(row, className = 'justify-center', rowNumber = null) {
+    const rowLabel = rowNumber ? `${singular} baris ${rowNumber}` : singular;
     return (
       <div className={`table-actions ${className}`.trim()}>
-        <button type="button" onClick={() => setDetailRow(row)} aria-label={`Lihat ${singular}`}>
+        <button type="button" onClick={() => setDetailRow(row)} aria-label={`Lihat ${rowLabel}`}>
           <Eye size={15} />
         </button>
         {canManageMaster ? (
           <>
-            <button type="button" onClick={() => handleEdit(row)} aria-label={`Edit ${singular}`}>
+            <button type="button" onClick={() => handleEdit(row)} aria-label={`Edit ${rowLabel}`}>
               <Edit3 size={15} />
             </button>
-            <button className="danger" type="button" onClick={() => handleDelete(row.id)} aria-label={`Arsipkan ${singular}`}>
+            <button className="danger" type="button" onClick={() => handleDelete(row.id)} aria-label={`Arsipkan ${rowLabel}`}>
               <Archive size={15} />
             </button>
           </>
@@ -533,6 +535,7 @@ function MasterDataPage({
       rowNumber,
       rowIndex,
       columnIndex: tableColumns.indexOf(column),
+      onViewDetail: () => setDetailRow(row),
     });
 
     return (
@@ -577,7 +580,7 @@ function MasterDataPage({
         ) : null}
 
         <div className="master-mobile-card-actions">
-          {renderRowActions(row, 'master-mobile-action-group')}
+          {renderRowActions(row, 'master-mobile-action-group', rowNumber)}
         </div>
       </article>
     );
@@ -1130,12 +1133,13 @@ function MasterDataPage({
                             rowNumber: (page - 1) * pageSize + rowIndex + 1,
                             rowIndex,
                             columnIndex,
+                            onViewDetail: () => setDetailRow(row),
                           })}
                         </div>
                       </td>
                     ))}
                     <td data-label="Aksi" className="master-cell-actions !w-32">
-                      {renderRowActions(row)}
+                      {renderRowActions(row, undefined, (page - 1) * pageSize + rowIndex + 1)}
                     </td>
                   </tr>
                 )) : null}

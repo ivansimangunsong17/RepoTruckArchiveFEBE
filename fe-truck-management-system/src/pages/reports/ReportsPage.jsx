@@ -789,7 +789,8 @@ function DetailTable({ columns, rows, rowRenderer }) {
   );
 }
 
-function normalizeReportTab(tab) {
+function normalizeReportTab(tab, { revenueOnly = false } = {}) {
+  if (revenueOnly) return 'revenue';
   if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'repo' || tab === 'master') return tab;
   return 'revenue';
 }
@@ -1512,6 +1513,7 @@ function ReportsPage() {
   const archive = useArchiveData();
   const { user } = useAuth();
   const { notify } = useFeedback();
+  const isFinanceOnly = user?.role === USER_ROLES.FINANCE;
   const [searchParams, setSearchParams] = useSearchParams();
   const initialPeriod = useMemo(() => currentPeriod(), []);
   const [month, setMonth] = useState(initialPeriod.month);
@@ -1530,7 +1532,7 @@ function ReportsPage() {
   const [repoLoading, setRepoLoading] = useState(true);
   const [repoError, setRepoError] = useState('');
   const [publicHolidays, setPublicHolidays] = useState([]);
-  const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab')));
+  const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab'), { revenueOnly: isFinanceOnly }));
   const [dataSource, setDataSource] = useState('all');
   const [driverCommissionFilter, setDriverCommissionFilter] = useState('all');
   const [driverCommissionPaymentFilter, setDriverCommissionPaymentFilter] = useState('all');
@@ -1556,8 +1558,8 @@ function ReportsPage() {
   }, [activePeriodKey, dataSource]);
 
   useEffect(() => {
-    setSelectedReport(normalizeReportTab(searchParams.get('tab')));
-  }, [searchParams]);
+    setSelectedReport(normalizeReportTab(searchParams.get('tab'), { revenueOnly: isFinanceOnly }));
+  }, [searchParams, isFinanceOnly]);
 
   useEffect(() => {
     if (selectedReport !== 'utilization') setUtilizationModalOpen(false);
@@ -1605,7 +1607,7 @@ function ReportsPage() {
   }, [activePeriodKey]);
 
   function selectReport(report) {
-    const normalized = normalizeReportTab(report);
+    const normalized = normalizeReportTab(report, { revenueOnly: isFinanceOnly });
     setSelectedReport(normalized);
     setSearchParams((currentParams) => {
       const nextParams = new URLSearchParams(currentParams);
@@ -1655,8 +1657,8 @@ function ReportsPage() {
 
     Promise.allSettled([
       fetchMonthlyRevenueReport({ month, year, ...reportSourceParams }),
-      loadUtilizationRows(),
-      fetchDriverPerformanceReport({
+      isFinanceOnly ? Promise.resolve([]) : loadUtilizationRows(),
+      isFinanceOnly ? Promise.resolve(null) : fetchDriverPerformanceReport({
         month: selectedDriverCommissionPeriod?.from ? 'all' : activePeriodKey,
         ...(driverCommissionFilter !== 'all' ? { commissionStatus: driverCommissionFilter } : {}),
         ...(driverCommissionPaymentFilter !== 'all' ? { commissionPaymentStatus: driverCommissionPaymentFilter } : {}),
@@ -1666,7 +1668,7 @@ function ReportsPage() {
         } : {}),
         ...reportSourceParams,
       }),
-      fetchOperationReport({
+      isFinanceOnly ? Promise.resolve(null) : fetchOperationReport({
         page: 1,
         pageSize: 100,
         status: 'repo_stored',
@@ -1722,7 +1724,7 @@ function ReportsPage() {
     return () => {
       active = false;
     };
-  }, [activePeriodKey, driverCommissionFilter, driverCommissionPaymentFilter, month, reportSourceParams, selectedDriverCommissionPeriod, year]);
+  }, [activePeriodKey, driverCommissionFilter, driverCommissionPaymentFilter, isFinanceOnly, month, reportSourceParams, selectedDriverCommissionPeriod, year]);
 
   const masterTruckRows = archive.masters?.trucks;
   const masterDriverRows = archive.masters?.drivers;
@@ -1910,7 +1912,7 @@ function ReportsPage() {
       </section>
       )}
 
-      <section className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-3'}`}>
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Jasa Angkut"
@@ -1922,32 +1924,36 @@ function ReportsPage() {
           expanded={selectedReport === 'revenue'}
           onClick={() => selectReport('revenue')}
         />
-        <SummaryToggleCard
-          icon={Truck}
-          label="Utilization Report"
-          value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
-          helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
-          secondaryLabel="AVG Terpakai"
-          secondaryValue={`${formatDecimal(averageUsedTrucksPerDay)} / ${utilizationSummary.activeTruckCount} truck per hari`}
-          tertiaryLabel="Truck Aktif"
-          tertiaryValue={`${utilizationSummary.activeTruckCount} Unit`}
-          tone="sky"
-          expanded={selectedReport === 'utilization'}
-          onClick={() => selectReport('utilization')}
-        />
-        <SummaryToggleCard
-          icon={Users}
-          label="Driver Performance"
-          value={`${driverSummary.totalTrips} Trip`}
-          helper={`${driverSummary.activeDrivers} sopir menjalankan trip`}
-          secondaryLabel="Rata-rata Trip/Sopir"
-          secondaryValue={`${formatDecimal(driverSummary.averageTripsPerActiveDriver)} Trip`}
-          tertiaryLabel="Komisi Sopir"
-          tertiaryValue={formatCurrency(driverSummary.totalDriverCommission)}
-          tone="amber"
-          expanded={selectedReport === 'driver'}
-          onClick={() => selectReport('driver')}
-        />
+        {!isFinanceOnly ? (
+          <>
+            <SummaryToggleCard
+              icon={Truck}
+              label="Utilization Report"
+              value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
+              helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
+              secondaryLabel="AVG Terpakai"
+              secondaryValue={`${formatDecimal(averageUsedTrucksPerDay)} / ${utilizationSummary.activeTruckCount} truck per hari`}
+              tertiaryLabel="Truck Aktif"
+              tertiaryValue={`${utilizationSummary.activeTruckCount} Unit`}
+              tone="sky"
+              expanded={selectedReport === 'utilization'}
+              onClick={() => selectReport('utilization')}
+            />
+            <SummaryToggleCard
+              icon={Users}
+              label="Driver Performance"
+              value={`${driverSummary.totalTrips} Trip`}
+              helper={`${driverSummary.activeDrivers} sopir menjalankan trip`}
+              secondaryLabel="Rata-rata Trip/Sopir"
+              secondaryValue={`${formatDecimal(driverSummary.averageTripsPerActiveDriver)} Trip`}
+              tertiaryLabel="Komisi Sopir"
+              tertiaryValue={formatCurrency(driverSummary.totalDriverCommission)}
+              tone="amber"
+              expanded={selectedReport === 'driver'}
+              onClick={() => selectReport('driver')}
+            />
+          </>
+        ) : null}
       </section>
 
       {selectedReport === 'master' ? (

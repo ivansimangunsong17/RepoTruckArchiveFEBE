@@ -3,7 +3,17 @@ import test from 'node:test';
 
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
-const { approveFinanceCorrection, rejectFinanceCorrection, rejectRpuj, saveInvoiceNumber, uploadInvoiceDocument } = await import('./finance.service.js');
+const {
+  approveFinanceCorrection,
+  createOperationalFundRequest,
+  depositOperationalFund,
+  reconcileContainerJobExpense,
+  rejectFinanceCorrection,
+  rejectOperationalFundRequest,
+  rejectRpuj,
+  saveInvoiceNumber,
+  uploadInvoiceDocument,
+} = await import('./finance.service.js');
 const { mapInvoiceDocuments } = await import('./finance.repository.js');
 const {
   financeCorrectionTypes,
@@ -23,6 +33,62 @@ test('reject RPUJ membatasi catatan maksimal 500 karakter', () => {
   assert.throws(
     () => rejectRpuj('job-1', { rejectionNote: 'a'.repeat(501) }, { name: 'Finance Test' }),
     (error) => error.code === 'RPUJ_REJECTION_NOTE_TOO_LONG' && error.statusCode === 400,
+  );
+});
+
+test('pengajuan saldo operasional mewajibkan tanggal valid dan nominal positif', () => {
+  assert.throws(
+    () => createOperationalFundRequest({ requestDate: '20-08-2026', amount: 1000000 }, { name: 'Operational Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_DATE_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => createOperationalFundRequest({ requestDate: '2026-08-20', amount: 0 }, { name: 'Operational Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_AMOUNT_INVALID' && error.statusCode === 400,
+  );
+});
+
+test('deposit saldo operasional langsung memakai validasi tanggal, nominal, dan bukti transfer', async () => {
+  await assert.rejects(
+    () => depositOperationalFund({ requestDate: '20-08-2026', amount: 1000000 }, { name: 'Finance Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_DATE_INVALID' && error.statusCode === 400,
+  );
+  await assert.rejects(
+    () => depositOperationalFund({ requestDate: '2026-08-20', amount: 0 }, { name: 'Finance Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_AMOUNT_INVALID' && error.statusCode === 400,
+  );
+  await assert.rejects(
+    () => depositOperationalFund({ requestDate: '2026-08-20', amount: 1000000 }, { name: 'Finance Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_DEPOSIT_PROOF_REQUIRED' && error.statusCode === 400,
+  );
+});
+
+test('pengajuan saldo operasional membatasi keterangan dan catatan reject', () => {
+  assert.throws(
+    () => createOperationalFundRequest({ requestDate: '2026-08-20', amount: 1000000, purpose: 'a'.repeat(501) }, { name: 'Operational Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_PURPOSE_TOO_LONG' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => rejectOperationalFundRequest('fund-1', { rejectionNote: '   ' }, { name: 'Finance Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_REJECTION_NOTE_REQUIRED' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => rejectOperationalFundRequest('fund-1', { rejectionNote: 'a'.repeat(501) }, { name: 'Finance Test' }),
+    (error) => error.code === 'OPERATIONAL_FUND_REJECTION_NOTE_TOO_LONG' && error.statusCode === 400,
+  );
+});
+
+test('rekonsiliasi biaya container job memvalidasi status dan catatan klarifikasi', () => {
+  assert.throws(
+    () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'selesai' }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_FINANCE_STATUS_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'perlu_klarifikasi', financeNote: '   ' }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_REQUIRED' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'sudah_dicek', financeNote: 'a'.repeat(501) }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_TOO_LONG' && error.statusCode === 400,
   );
 });
 

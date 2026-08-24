@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { sendError, sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
+import { actorHasPermission } from '../../utils/permissions.js';
 import {
   createAttachment,
   deleteAttachment,
@@ -9,6 +10,31 @@ import {
   resolveAttachmentFilePath,
   updateAttachment,
 } from './attachments.service.js';
+
+const FINANCE_ATTACHMENT_ENTITY_PERMISSIONS = {
+  operational_fund_transaction: 'finance.operational_fund.read',
+  operational_fund_request: 'finance.operational_fund.read',
+  operational_fund_batch: 'finance.operational_fund.read',
+  driver_commission_payment: 'finance.read',
+  driver_commission_batch: 'finance.read',
+  finance_correction_request: 'finance.correction.read',
+};
+
+const FINANCE_SENSITIVE_CONTAINER_JOB_CATEGORIES = new Set(['expensePaymentProof']);
+const FINANCE_SENSITIVE_SALES_ORDER_CATEGORIES = new Set(['paymentProof']);
+
+export function resolveRequiredFinancePermission(attachment) {
+  if (FINANCE_ATTACHMENT_ENTITY_PERMISSIONS[attachment.entityType]) {
+    return FINANCE_ATTACHMENT_ENTITY_PERMISSIONS[attachment.entityType];
+  }
+  if (attachment.entityType === 'container_job' && FINANCE_SENSITIVE_CONTAINER_JOB_CATEGORIES.has(attachment.category)) {
+    return 'finance.operational_fund.read';
+  }
+  if (attachment.entityType === 'sales_order' && FINANCE_SENSITIVE_SALES_ORDER_CATEGORIES.has(attachment.category)) {
+    return 'finance.invoice.read';
+  }
+  return null;
+}
 
 export async function uploadAttachmentController(request, response) {
   const saved = await createAttachment(request.body);
@@ -66,6 +92,15 @@ export async function listAttachmentsController(request, response) {
     return;
   }
 
+  const requiredPermission = resolveRequiredFinancePermission({ entityType });
+  if (requiredPermission && !actorHasPermission(request.user, requiredPermission)) {
+    sendError(response, {
+      code: 'ATTACHMENT_ACCESS_DENIED',
+      message: 'Anda tidak memiliki akses untuk melihat daftar dokumen ini.',
+    }, 403);
+    return;
+  }
+
   const rows = await listAttachments(entityType, entityId);
   sendSuccess(response, rows);
 }
@@ -77,6 +112,15 @@ export async function downloadAttachmentController(request, response) {
       code: 'ATTACHMENT_NOT_FOUND',
       message: 'Dokumen tidak ditemukan.',
     }, 404);
+    return;
+  }
+
+  const requiredPermission = resolveRequiredFinancePermission(attachment);
+  if (requiredPermission && !actorHasPermission(request.user, requiredPermission)) {
+    sendError(response, {
+      code: 'ATTACHMENT_ACCESS_DENIED',
+      message: 'Anda tidak memiliki akses untuk membuka dokumen ini.',
+    }, 403);
     return;
   }
 

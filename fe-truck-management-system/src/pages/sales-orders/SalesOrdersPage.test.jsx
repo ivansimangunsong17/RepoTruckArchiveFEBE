@@ -38,6 +38,9 @@ describe('SalesOrdersPage billing status flow', () => {
     useArchiveData.mockReturnValue({
       isDatabaseMode: true,
       orders: [],
+      masters: { trucks: [], drivers: [], destinations: [], customers: [], depots: [], terminals: [] },
+      updateJob: vi.fn(),
+      refresh: vi.fn(),
     });
     fetchSalesOrdersPage.mockResolvedValue({
       rows: [{
@@ -136,6 +139,20 @@ describe('SalesOrdersPage billing status flow', () => {
         deliveryMethod: 'whatsapp',
       }),
     ));
+  });
+
+  it('membuka form update container job langsung dari detail Sales Order', async () => {
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    expect(await screen.findByText('Pembayaran: Tempo 14 hari')).toBeInTheDocument();
+
+    const updateButtons = screen.getAllByRole('button', { name: /update/i });
+    expect(updateButtons.length).toBeGreaterThan(0);
+    await user.click(updateButtons[0]);
+
+    expect(await screen.findByLabelText('Truck')).toBeInTheDocument();
   });
 
   it('memfilter Sales Order yang dokumen Accurate-nya siap dikirim', async () => {

@@ -6,11 +6,12 @@ const SERVICE_OPTIONS = [
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Stevedoring and Port Service',
+  'Handling',
   'Jasa Lainnya',
 ];
 const SERVICE_ALIASES = {
-  'Jasa Handling': 'Stevedoring and Port Service',
+  'Jasa Handling': 'Handling',
+  'Stevedoring and Port Service': 'Handling',
 };
 
 function isContainerService(serviceName) {
@@ -405,4 +406,8 @@ export function requestSalesOrderCancellation(id, payload = {}) {
 
 export function reviewSalesOrderCancellation(id, payload = {}) {
   return httpClient.patch(`/sales-orders/${id}/cancel-review`, payload);
+}
+
+export function fetchCustomerOutstandingSummary(customerName) {
+  return httpClient.get(`/sales-orders/customer-outstanding?customer=${encodeURIComponent(customerName)}`);
 }

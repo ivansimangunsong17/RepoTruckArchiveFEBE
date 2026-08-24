@@ -47,8 +47,8 @@
 .document-preview-modal > header button:hover { border-color: #efc3c5; color: var(--primary); background: #fff5f5; }
 .document-preview-body { display: grid; flex: 1; min-height: 0; overflow: hidden; place-items: stretch; background: #f4f6f9; }
 .document-preview-body iframe { width: 100%; height: 100%; border: 0; background: white; }
-.document-preview-image-scroll { display: grid; min-height: 0; overflow: auto; place-items: start center; padding: 16px; overscroll-behavior: contain; }
-.document-preview-image-scroll img { display: block; width: auto; max-width: none; height: auto; max-height: none; }
+.document-preview-image-scroll { display: grid; min-width: 0; min-height: 0; overflow: hidden; place-items: center; padding: 16px; overscroll-behavior: contain; }
+.document-preview-image-scroll img { display: block; width: auto; max-width: 100%; height: auto; max-height: 100%; object-fit: contain; }
 .position-list > div > div strong { font-size: .68rem; }
 .position-dot { width: 8px; height: 8px; border-radius: 50%; background: #aab3c0; box-shadow: 0 0 0 4px #eef1f5; }
 .position-dot.moving { background: var(--primary); box-shadow: 0 0 0 4px #ffe8e9; }

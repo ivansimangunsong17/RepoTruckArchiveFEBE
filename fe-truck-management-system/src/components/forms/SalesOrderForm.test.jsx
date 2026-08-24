@@ -2,6 +2,20 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import SalesOrderForm from './SalesOrderForm';
+import { fetchCustomerOutstandingSummary } from '../../services/archive/salesOrderService';
+
+vi.mock('../../services/archive/salesOrderService', () => ({
+  fetchCustomerOutstandingSummary: vi.fn(),
+}));
+
+fetchCustomerOutstandingSummary.mockResolvedValue({
+  customer: '',
+  openInvoiceCount: 0,
+  totalOutstandingAmount: 0,
+  worstDaysOverdue: 0,
+  overdueCount: 0,
+  needsReview: 0,
+});
 
 const customers = [{
   id: 'customer-1',
@@ -429,5 +443,68 @@ describe('SalesOrderForm', () => {
         expect.objectContaining({ id: 'job-cancelled', status: 'cancelled' }),
       ],
     }));
+  });
+
+  it('menampilkan status outstanding customer saat customer yang punya piutang dipilih', async () => {
+    fetchCustomerOutstandingSummary.mockResolvedValueOnce({
+      customer: 'PT Armada Test',
+      openInvoiceCount: 2,
+      totalOutstandingAmount: 5000000,
+      worstDaysOverdue: 12,
+      overdueCount: 1,
+      needsReview: 0,
+    });
+
+    const order = {
+      id: 'so-1',
+      soNumber: 'SO-EDIT-002',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 100000 }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' }],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(fetchCustomerOutstandingSummary).toHaveBeenCalledWith('PT Armada Test');
+    expect(await screen.findByText(/Rp\s*5\.000\.000/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 invoice belum lunas/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 di antaranya sudah lewat jatuh tempo \(maks 12 hari\)/i)).toBeInTheDocument();
+  });
+
+  it('tidak menampilkan status outstanding ketika customer belum punya piutang', async () => {
+    const order = {
+      id: 'so-1',
+      soNumber: 'SO-EDIT-003',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 100000 }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' }],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await screen.findByLabelText('Customer');
+    expect(screen.queryByText(/outstanding customer ini/i)).not.toBeInTheDocument();
   });
 });

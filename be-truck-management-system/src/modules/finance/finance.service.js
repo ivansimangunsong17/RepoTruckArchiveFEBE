@@ -1,7 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import {
   approveFinanceCorrectionRequest,
   approveRpujRequest,
   createFinanceCorrectionRequest,
+  closeOperationalFundBatchRecord,
+  depositOperationalFundRecord,
+  createOperationalFundRequestRecord,
   getCompletedTripDetail,
   getCompletedTripsPage,
   getFinanceCorrectionRequestsBySalesOrder,
@@ -9,10 +13,21 @@ import {
   getFinanceDashboard,
   getInvoiceOrderDetail,
   getInvoiceOrdersPage,
+  getSalesOrderOutstandingPage,
+  getContainerJobExpensesReconciliationPage,
+  getOperationalFundRequestsPage,
+  getOperationalFundBatchesPage,
+  getOperationalFundTransactionsPage,
   getOrderVerificationsPage,
   getRpujRequestsPage,
+  approveOperationalFundRequestRecord,
+  listSalesOrderPayments,
   markInvoiceDocumentUploaded,
+  markOperationalFundTransferUploadedRecord,
   markRpujTransferUploaded,
+  reconcileContainerJobExpenseRecord,
+  recordSalesOrderPayment,
+  rejectOperationalFundRequestRecord,
   rejectRpujRequest,
   rejectFinanceCorrectionRequest,
   updateInvoiceNumber,
@@ -74,6 +89,216 @@ export function fetchRpujRequests(query = {}) {
   });
 }
 
+function normalizeOperationalFundRequestDate(value) {
+  if (!value) return new Date().toISOString().slice(0, 10);
+  const normalized = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const error = new Error('Tanggal pengajuan saldo operasional tidak valid.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_DATE_INVALID';
+    throw error;
+  }
+  return normalized;
+}
+
+function normalizeOperationalFundAmount(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error('Nominal saldo operasional wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_AMOUNT_INVALID';
+    throw error;
+  }
+  return Math.round(amount);
+}
+
+function normalizeOperationalFundPurpose(value) {
+  const purpose = String(value || '').trim();
+  if (purpose.length > 500) {
+    const error = new Error('Keterangan saldo operasional maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_PURPOSE_TOO_LONG';
+    throw error;
+  }
+  return purpose;
+}
+
+export function fetchOperationalFundRequests(query = {}) {
+  return getOperationalFundRequestsPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
+    query: query.query || query.search || '',
+    status: query.status || '',
+  });
+}
+
+export function fetchOperationalFundBatches(query = {}) {
+  return getOperationalFundBatchesPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
+    status: query.status || '',
+  });
+}
+
+export function fetchOperationalFundTransactions(query = {}) {
+  return getOperationalFundTransactionsPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
+    query: query.query || query.search || '',
+    transactionType: query.transactionType || query.type || '',
+    category: query.category || '',
+    batchId: query.batchId || '',
+    batchDate: query.batchDate || '',
+    status: query.status || 'posted',
+  });
+}
+
+export function createOperationalFundRequest(payload = {}, actor) {
+  return createOperationalFundRequestRecord({
+    requestDate: normalizeOperationalFundRequestDate(payload.requestDate || payload.date),
+    amount: normalizeOperationalFundAmount(payload.amount),
+    purpose: normalizeOperationalFundPurpose(payload.purpose || payload.notes),
+    actorName: actor?.name || actor?.email || 'Operational',
+  });
+}
+
+export async function depositOperationalFund(payload = {}, actor) {
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const requestDate = normalizeOperationalFundRequestDate(payload.requestDate || payload.date);
+  const amount = normalizeOperationalFundAmount(payload.amount);
+  const purpose = normalizeOperationalFundPurpose(payload.purpose || payload.notes || 'Deposit saldo operasional harian dari Finance');
+  if (!payload.fileName || !payload.fileBase64) {
+    const error = new Error('Bukti transfer deposit saldo wajib diupload.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_DEPOSIT_PROOF_REQUIRED';
+    throw error;
+  }
+  const transactionId = randomUUID();
+  const attachment = await createAttachment({
+    fileName: payload.fileName,
+    mimeType: payload.mimeType,
+    fileSize: payload.fileSize,
+    fileBase64: payload.fileBase64,
+    entityType: 'operational_fund_transaction',
+    entityId: transactionId,
+    category: 'transferProof',
+    uploadedByName: actorName,
+    notes: payload.purpose || payload.notes || 'Bukti transfer deposit saldo operasional',
+  });
+  return depositOperationalFundRecord({
+    id: transactionId,
+    requestDate,
+    amount,
+    purpose,
+    proofAttachmentId: attachment.id,
+    actorName,
+  });
+}
+
+export function closeOperationalFundBatch(id, payload = {}, actor) {
+  const closeNote = String(payload.closeNote || payload.note || '').trim();
+  if (closeNote.length > 500) {
+    const error = new Error('Catatan close batch maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_BATCH_CLOSE_NOTE_TOO_LONG';
+    throw error;
+  }
+  return closeOperationalFundBatchRecord(id, {
+    closeNote,
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function approveOperationalFundRequest(id, payload = {}, actor) {
+  return approveOperationalFundRequestRecord(id, {
+    ...payload,
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function rejectOperationalFundRequest(id, payload = {}, actor) {
+  const rejectionNote = String(payload.rejectionNote || payload.note || '').trim();
+  if (!rejectionNote) {
+    const error = new Error('Catatan reject saldo operasional wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_REJECTION_NOTE_REQUIRED';
+    throw error;
+  }
+  if (rejectionNote.length > 500) {
+    const error = new Error('Catatan reject saldo operasional maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_REJECTION_NOTE_TOO_LONG';
+    throw error;
+  }
+  return rejectOperationalFundRequestRecord(id, {
+    rejectionNote,
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export async function uploadOperationalFundTransferProof(id, payload = {}, actor) {
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const attachment = await createAttachment({
+    ...payload,
+    entityType: 'operational_fund_request',
+    entityId: id,
+    category: 'operationalFundTransferProof',
+    uploadedByName: actorName,
+    notes: payload.notes || 'Bukti transfer saldo operasional',
+  });
+  const request = await markOperationalFundTransferUploadedRecord(id, {
+    actorName,
+    transferProofAttachmentId: attachment.id,
+  });
+  return { ...request, transferProofFile: attachment, transferProof: attachment.fileName || request.transferProof };
+}
+
+export function fetchContainerJobExpensesForReconciliation(query = {}) {
+  return getContainerJobExpensesReconciliationPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
+    query: query.query || query.search || '',
+    paymentStatus: query.paymentStatus || '',
+    financeCheckStatus: query.financeCheckStatus || query.status || '',
+  });
+}
+
+export function reconcileContainerJobExpense(id, payload = {}, actor) {
+  const financeCheckStatus = String(payload.financeCheckStatus || payload.status || '').trim();
+  if (!['belum_dicek', 'sudah_dicek', 'perlu_klarifikasi', 'dikoreksi'].includes(financeCheckStatus)) {
+    const error = new Error('Status cek Finance biaya container job tidak valid.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_FINANCE_STATUS_INVALID';
+    throw error;
+  }
+  const financeNote = String(payload.financeNote || payload.note || '').trim();
+  if (financeCheckStatus === 'perlu_klarifikasi' && !financeNote) {
+    const error = new Error('Catatan klarifikasi biaya container job wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_REQUIRED';
+    throw error;
+  }
+  if (financeNote.length > 500) {
+    const error = new Error('Catatan cek Finance biaya container job maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_TOO_LONG';
+    throw error;
+  }
+  return reconcileContainerJobExpenseRecord(id, {
+    financeCheckStatus,
+    financeNote,
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
 export function approveRpuj(id, payload = {}, actor) {
   return approveRpujRequest(id, {
     ...payload,
@@ -124,6 +349,16 @@ export function fetchInvoiceOrders(query = {}) {
     query: query.query || query.search || '',
     status: query.status || '',
     invoiceDocumentFilter: query.invoiceDocumentFilter || query.documentFilter || '',
+  });
+}
+
+export function fetchSalesOrderOutstanding(query = {}) {
+  return getSalesOrderOutstandingPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || query.search || '',
+    agingBucket: query.agingBucket || '',
+    dataReviewStatus: query.dataReviewStatus || '',
   });
 }
 
@@ -208,6 +443,44 @@ export async function uploadInvoiceDocument(id, payload = {}, actor) {
     : await createAttachment(attachmentPayload);
   const invoice = await markInvoiceDocumentUploaded(id, { category, actorName });
   return { ...invoice, uploadedDocument: attachment };
+}
+
+export async function recordInvoicePayment(id, payload = {}, actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Pembayaran invoice hanya dapat dicatat oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_INVOICE_PAYMENT_FORBIDDEN';
+    throw error;
+  }
+  const actorName = actor?.name || actor?.email || 'Finance';
+
+  let proofAttachmentId = payload.proofAttachmentId || null;
+  if (!proofAttachmentId && payload.proofFile) {
+    const attachment = await createAttachment({
+      ...payload.proofFile,
+      entityType: 'sales_order',
+      entityId: id,
+      category: 'paymentProof',
+      uploadedByName: actorName,
+      notes: payload.proofFile.notes || 'Bukti transfer pembayaran invoice',
+    });
+    proofAttachmentId = attachment.id;
+  }
+
+  return recordSalesOrderPayment(id, {
+    amount: payload.amount,
+    paymentDate: payload.paymentDate,
+    referenceNumber: payload.referenceNumber,
+    proofAttachmentId,
+    note: payload.note,
+    idempotencyKey: payload.idempotencyKey,
+    actorUserId: actor?.id || null,
+    actorName,
+  });
+}
+
+export function fetchInvoicePayments(id) {
+  return listSalesOrderPayments(id);
 }
 
 export function requestFinanceCorrection(id, payload = {}, actor) {

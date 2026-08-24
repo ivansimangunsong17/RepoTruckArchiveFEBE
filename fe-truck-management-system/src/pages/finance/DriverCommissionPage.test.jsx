@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DriverCommissionPage from './DriverCommissionPage';
@@ -30,7 +30,6 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
   fetchDriverCommissionBatchDetail: vi.fn(),
   fetchDriverCommissionBatches: vi.fn(),
   fetchDriverCommissionPeriodReport: vi.fn(),
-  payDriverCommissionPayment: vi.fn(),
   rejectDriverCommissionBatch: vi.fn(),
   uploadDriverCommissionTransferProof: vi.fn(),
 }));
@@ -204,7 +203,8 @@ describe('DriverCommissionPage finance', () => {
     render(<DriverCommissionPage />);
 
     expect((await screen.findAllByText('Rahmat')).length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('Pilih batch komisi')).toHaveValue('batch-1');
+    expect(screen.getByLabelText('Pilih batch komisi')).toHaveTextContent('13 Agustus 2026');
+    expect(screen.getByLabelText('Pilih batch komisi')).toHaveTextContent('19 Agustus 2026');
     expect(screen.getAllByText(/BCA 123456/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
@@ -222,10 +222,11 @@ describe('DriverCommissionPage finance', () => {
 
     render(<DriverCommissionPage />);
 
-    const batchSelect = await screen.findByLabelText('Pilih batch komisi');
-    await waitFor(() => expect(batchSelect).toHaveValue('batch-1'));
+    const batchTrigger = await screen.findByLabelText('Pilih batch komisi');
+    await waitFor(() => expect(batchTrigger).toHaveTextContent('13 Agustus 2026'));
 
-    await user.selectOptions(batchSelect, 'batch-2');
+    await user.click(batchTrigger);
+    await user.click(await screen.findByRole('button', { name: /pilih batch 06 agustus 2026 - 12 agustus 2026/i }));
 
     await waitFor(() => {
       expect(fetchDriverCommissionBatchDetail).toHaveBeenLastCalledWith('batch-2');
@@ -234,6 +235,36 @@ describe('DriverCommissionPage finance', () => {
         periodEnd: '2026-08-12',
       });
     });
+    expect(await screen.findByText('Jajam')).toBeInTheDocument();
+  });
+
+  it('membuka modal pilih batch dari card Periode dan memilih batch mengganti report', async () => {
+    const user = userEvent.setup();
+    fetchDriverCommissionBatches.mockResolvedValue({
+      rows: [batchDetail, olderBatchDetail],
+      pagination: { page: 1, pageSize: 20, total: 2 },
+    });
+    fetchDriverCommissionBatchDetail.mockImplementation((id) => Promise.resolve(id === 'batch-2' ? olderBatchDetail : batchDetail));
+    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => Promise.resolve(periodStart === '2026-08-06' ? olderPeriodReport : periodReport));
+
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /periode/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /pilih batch komisi/i });
+    expect(within(dialog).getByText(/13 Agustus 2026 - 19 Agustus 2026/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByText(/06 Agustus 2026 - 12 Agustus 2026/i));
+
+    await waitFor(() => {
+      expect(fetchDriverCommissionBatchDetail).toHaveBeenLastCalledWith('batch-2');
+      expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
+        periodStart: '2026-08-06',
+        periodEnd: '2026-08-12',
+      });
+    });
+    expect(screen.queryByRole('dialog', { name: /pilih batch komisi/i })).not.toBeInTheDocument();
     expect(await screen.findByText('Jajam')).toBeInTheDocument();
   });
 

@@ -37,6 +37,7 @@ test('jasa non-container masuk reimbursement dan bukan revenue', () => {
   const reimbursementServices = [
     'Bon Muat/Bongkar',
     'Tila/Gatepass',
+    'Handling',
     'Stevedoring and Port Service',
     'Jasa Handling',
     'Jasa Lainnya',

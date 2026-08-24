@@ -37,4 +37,15 @@ describe('DocumentLink', () => {
 
     openSpy.mockRestore();
   });
+
+  it('menampilkan gambar preview dalam area yang menyesuaikan viewport', async () => {
+    createAttachmentDownloadUrl.mockResolvedValue('https://api.test/attachments/image-id');
+
+    render(<DocumentLink file={{ name: 'bukti.jpg', path: 'image-id', type: 'image/jpeg' }} label="View" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View bukti.jpg' }));
+
+    const image = await screen.findByAltText('bukti.jpg');
+    expect(image.closest('.document-preview-image-scroll')).toBeInTheDocument();
+  });
 });

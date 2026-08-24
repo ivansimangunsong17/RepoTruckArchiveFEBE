@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DriverCommissionOperationalPage from './DriverCommissionOperationalPage';
 import {
+  fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
   submitDriverCommissionBatch,
 } from '../../services/finance/driverCommissionService';
@@ -24,6 +25,7 @@ vi.mock('../../contexts/FeedbackContext', () => ({
 }));
 
 vi.mock('../../services/finance/driverCommissionService', () => ({
+  fetchDriverCommissionBatches: vi.fn(),
   fetchDriverCommissionPeriodReport: vi.fn(),
   submitDriverCommissionBatch: vi.fn(),
 }));
@@ -98,9 +100,61 @@ const reportFixture = {
   ],
 };
 
+const previousPeriodReport = {
+  ...reportFixture,
+  periodStart: '2026-08-06',
+  periodEnd: '2026-08-12',
+  status: 'submitted',
+  activeBatch: {
+    id: 'batch-previous',
+    periodStart: '2026-08-06',
+    periodEnd: '2026-08-12',
+    status: 'submitted',
+    submittedAt: '2026-08-13T03:00:00.000Z',
+  },
+  summary: {
+    totalDrivers: 1,
+    totalItems: 1,
+    totalAmount: 100000,
+    unsubmittedItems: 0,
+    submittedItems: 1,
+    paidItems: 0,
+    paidAmount: 0,
+    unpaidAmount: 100000,
+  },
+  drivers: [
+    {
+      driverId: 'driver-3',
+      driverName: 'Asep',
+      totalItems: 1,
+      totalAmount: 100000,
+      unpaidAmount: 100000,
+      unpaidItems: 1,
+      submittedItems: 1,
+      approvedItems: 0,
+      paidItems: 0,
+      items: [
+        {
+          containerJobId: 'job-previous',
+          soNumber: 'SO-003',
+          containerNumber: 'CONT-003',
+          containerSize: '20FT',
+          customerName: 'PT C',
+          destination: 'Bekasi',
+          truckPlateNumber: 'B 3000 CC',
+          completedDate: '2026-08-06',
+          amount: 100000,
+          paymentStatus: 'pending',
+        },
+      ],
+    },
+  ],
+};
+
 describe('DriverCommissionOperationalPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [] });
     fetchDriverCommissionPeriodReport.mockResolvedValue(reportFixture);
     submitDriverCommissionBatch.mockResolvedValue({ id: 'batch-1' });
     confirmAction.mockResolvedValue(true);
@@ -111,6 +165,7 @@ describe('DriverCommissionOperationalPage', () => {
     render(<DriverCommissionOperationalPage />);
 
     expect((await screen.findAllByText('Rahmat')).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Pilih batch komisi')).toBeInTheDocument();
     expect(screen.getByText('Jajam')).toBeInTheDocument();
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
@@ -128,6 +183,109 @@ describe('DriverCommissionOperationalPage', () => {
     await user.click(screen.getAllByRole('button', { name: /detail/i })[1]);
 
     expect(await screen.findByText('CONT-002')).toBeInTheDocument();
+  });
+
+  it('memuat report sesuai batch yang dipilih dari dropdown', async () => {
+    const user = userEvent.setup();
+    fetchDriverCommissionBatches.mockResolvedValue({
+      rows: [
+        {
+          id: 'batch-previous',
+          periodStart: '2026-08-06',
+          periodEnd: '2026-08-12',
+          status: 'submitted',
+          totalItems: 1,
+          totalAmount: 100000,
+        },
+      ],
+    });
+    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => (
+      Promise.resolve(periodStart === '2026-08-06' ? previousPeriodReport : reportFixture)
+    ));
+
+    render(<DriverCommissionOperationalPage />);
+
+    const batchTrigger = await screen.findByLabelText('Pilih batch komisi');
+    await user.click(batchTrigger);
+    await user.click(await screen.findByRole('button', { name: /06 agustus 2026 - 12 agustus 2026/i }));
+
+    await waitFor(() => {
+      expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
+        periodStart: '2026-08-06',
+        periodEnd: '2026-08-12',
+      });
+    });
+    expect(await screen.findByText('Asep')).toBeInTheDocument();
+  });
+
+  it('membuka modal pilih batch dari card Periode dan memilih batch mengganti report', async () => {
+    const user = userEvent.setup();
+    fetchDriverCommissionBatches.mockResolvedValue({
+      rows: [
+        {
+          id: 'batch-previous',
+          periodStart: '2026-08-06',
+          periodEnd: '2026-08-12',
+          status: 'submitted',
+          totalItems: 1,
+          totalAmount: 100000,
+        },
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    });
+    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => (
+      Promise.resolve(periodStart === '2026-08-06' ? previousPeriodReport : reportFixture)
+    ));
+
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /periode/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /riwayat batch yang sudah diajukan/i });
+    await user.click(within(dialog).getByText(/06 Agustus 2026 - 12 Agustus 2026/i));
+
+    await waitFor(() => {
+      expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
+        periodStart: '2026-08-06',
+        periodEnd: '2026-08-12',
+      });
+    });
+    expect(screen.queryByRole('dialog', { name: /riwayat batch yang sudah diajukan/i })).not.toBeInTheDocument();
+    expect(await screen.findByText('Asep')).toBeInTheDocument();
+  });
+
+  it('memfilter riwayat batch berdasarkan bulan di modal Riwayat Batch', async () => {
+    const user = userEvent.setup();
+    fetchDriverCommissionBatches.mockResolvedValue({
+      rows: [
+        {
+          id: 'batch-previous',
+          periodStart: '2026-08-06',
+          periodEnd: '2026-08-12',
+          status: 'submitted',
+          totalItems: 1,
+          totalAmount: 100000,
+        },
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+    });
+
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /periode/i }));
+    await screen.findByRole('dialog', { name: /riwayat batch yang sudah diajukan/i });
+
+    fetchDriverCommissionBatches.mockClear();
+    await user.selectOptions(screen.getByLabelText('Filter batch komisi bulan'), '07');
+
+    await waitFor(() => {
+      expect(fetchDriverCommissionBatches).toHaveBeenLastCalledWith(expect.objectContaining({
+        periodStart: '2026-07-01',
+        periodEnd: '2026-07-31',
+      }));
+    });
   });
 
   it('mengajukan batch komisi dengan periode otomatis', async () => {
@@ -161,5 +319,36 @@ describe('DriverCommissionOperationalPage', () => {
     expect(screen.queryByLabelText('Dari')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Sampai')).not.toBeInTheDocument();
     expect(screen.getByText(/otomatis kamis sampai rabu/i)).toBeInTheDocument();
+  });
+
+  it('menampilkan panel sopir tertahan beserta progres kuota ritasinya', async () => {
+    fetchDriverCommissionPeriodReport.mockResolvedValue({
+      ...reportFixture,
+      withheld: [
+        {
+          driverKey: 'driver-4',
+          driverId: 'driver-4',
+          driverName: 'Dedi',
+          pendingItems: 4,
+          pendingAmount: 200000,
+          target: 6,
+          remaining: 2,
+        },
+      ],
+    });
+
+    render(<DriverCommissionOperationalPage />);
+
+    expect(await screen.findByText('Sopir Tertahan (Belum Capai Kuota Mingguan)')).toBeInTheDocument();
+    expect(screen.getByText('Dedi')).toBeInTheDocument();
+    expect(screen.getByText('4/6 ritasi')).toBeInTheDocument();
+    expect(screen.getByText(/Rp\s*200\.000 tertahan, butuh 2 ritasi lagi/i)).toBeInTheDocument();
+  });
+
+  it('tidak menampilkan panel sopir tertahan kalau semua sopir sudah lolos kuota', async () => {
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findAllByText('Rahmat');
+    expect(screen.queryByText('Sopir Tertahan (Belum Capai Kuota Mingguan)')).not.toBeInTheDocument();
   });
 });

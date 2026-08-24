@@ -15,4 +15,9 @@ describe('hasPermission', () => {
     expect(hasPermission({ role: USER_ROLES.OPERATIONAL }, 'operations.update')).toBe(true);
     expect(hasPermission({ role: USER_ROLES.OPERATIONAL }, 'future.permission.manage')).toBe(false);
   });
+
+  it('memberikan finance akses baca laporan', () => {
+    expect(hasPermission({ role: USER_ROLES.FINANCE }, 'reports.read')).toBe(true);
+    expect(hasPermission(USER_ROLES.FINANCE, 'reports.read')).toBe(true);
+  });
 });

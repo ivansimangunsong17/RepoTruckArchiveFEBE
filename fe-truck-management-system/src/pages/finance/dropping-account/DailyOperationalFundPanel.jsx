@@ -1,0 +1,371 @@
+import { AlertTriangle, Banknote, CheckCircle2, Download, ReceiptText } from 'lucide-react';
+import DocumentLink from '../../../components/common/DocumentLink';
+import { downloadCsv } from '../../../utils/csvExport';
+import { formatCurrency } from '../../../utils/formatCurrency';
+import { formatDate } from '../../../utils/formatDate';
+import AmountField from '../shared/AmountField';
+import StatusPill from '../shared/StatusPill';
+import {
+  defaultExpenseReconciliationSummary,
+  defaultOperationalFundBatch,
+  defaultOperationalFundSummary,
+  defaultOperationalFundTransactionSummary,
+  expenseCategoryLabels,
+  expenseFinanceStatusLabels,
+  expensePaymentStatusLabels,
+  operationalFundBatchStatusLabel,
+  operationalFundTransactionCategoryLabels,
+  operationalFundTransactionCsvRows,
+  operationalFundTransactionTypeLabels,
+  readableLabel,
+} from './operationalFundUtils';
+
+function DailyOperationalFundPanel({
+  batch = defaultOperationalFundBatch,
+  batchDate = '',
+  batchLoading = false,
+  batchError = '',
+  batchBusy = false,
+  fundRows = [],
+  fundSummary = defaultOperationalFundSummary,
+  fundLoading = false,
+  fundError = '',
+  fundBusyId = '',
+  canRequest = false,
+  canDeposit = false,
+  pendingCloseBatches = [],
+  onBatchDateChange,
+  onCloseBatch,
+  onOpenRequest,
+  onOpenDeposit,
+  onApproveFund,
+  onRejectFund,
+  transactionRows = [],
+  transactionSummary = defaultOperationalFundTransactionSummary,
+  transactionLoading = false,
+  transactionError = '',
+  expenseRows = [],
+  expenseSummary = defaultExpenseReconciliationSummary,
+  expenseLoading = false,
+  expenseError = '',
+  expenseBusyId = '',
+  onOpenExpenseCheckConfirm,
+  onOpenExpenseClarification,
+}) {
+  const normalizedFundSummary = {
+    submitted: Number(fundSummary.submitted || 0),
+    approved: Number(fundSummary.approved || 0),
+    transferred: Number(fundSummary.transferred || 0),
+    rejected: Number(fundSummary.rejected || 0),
+  };
+  const normalizedTransactionSummary = {
+    totalCredit: Number(transactionSummary.totalCredit || 0),
+    totalDebit: Number(transactionSummary.totalDebit || 0),
+    balance: Number(transactionSummary.balance || 0),
+    creditCount: Number(transactionSummary.creditCount || 0),
+    debitCount: Number(transactionSummary.debitCount || 0),
+    voidCount: Number(transactionSummary.voidCount || 0),
+  };
+  const normalizedExpenseSummary = {
+    belumDicek: Number(expenseSummary.belumDicek || 0),
+    perluKlarifikasi: Number(expenseSummary.perluKlarifikasi || 0),
+    dikoreksi: Number(expenseSummary.dikoreksi || 0),
+    pendingAmount: Number(expenseSummary.pendingAmount || 0),
+  };
+  const pendingFundRows = fundRows.filter((row) => row.status === 'submitted');
+  const hasActionRows = pendingFundRows.length > 0 || expenseRows.length > 0;
+  const normalizedBatch = { ...defaultOperationalFundBatch, ...batch };
+  const unresolvedBatchExpenses = Number(normalizedBatch.uncheckedCount || 0) + Number(normalizedBatch.needClarificationCount || 0);
+  const canCloseBatch = Boolean(normalizedBatch.id)
+    && normalizedBatch.status !== 'closed'
+    && unresolvedBatchExpenses === 0
+    && !batchBusy;
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const showPendingCloseWarning = batchDate === todayDate && pendingCloseBatches.length > 0;
+  function exportTransactionRows() {
+    downloadCsv(
+      'rekening-dropping-finance',
+      ['No', 'Tanggal', 'Keterangan', 'Kategori', 'Uang Masuk', 'Uang Keluar', 'Saldo', 'Bukti'],
+      operationalFundTransactionCsvRows(transactionRows),
+    );
+  }
+
+  return (
+    <section className="border-b border-slate-200 bg-slate-50 p-2.5">
+      <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Batch Dropping Harian</h3>
+            <p className="mt-0.5 text-[11px] font-medium text-slate-500">Satu batch tanggal: top up masuk, uang keluar, bukti, validasi Finance, dan close batch.</p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+              Batch Dropping
+              <input
+                className="master-filter-select max-w-none normal-case"
+                onChange={(event) => onBatchDateChange?.(event.target.value)}
+                type="date"
+                value={batchDate}
+              />
+            </label>
+            <StatusPill value={batchLoading ? 'Memuat Batch' : operationalFundBatchStatusLabel(normalizedBatch.status)} />
+            {canDeposit ? (
+              <button className="primary-button" onClick={onOpenDeposit} type="button">
+                <Banknote size={15} /> Deposit Saldo
+              </button>
+            ) : null}
+            <button
+              className="primary-button"
+              disabled={!canCloseBatch}
+              onClick={onCloseBatch}
+              type="button"
+            >
+              <CheckCircle2 size={15} /> Close Batch
+            </button>
+            {canRequest ? (
+              <button className="secondary-button" onClick={onOpenRequest} type="button">
+                <ReceiptText size={15} /> Ajukan Saldo
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {showPendingCloseWarning ? (
+          <div className="alert warning mx-4 mt-3 flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+            <span>
+              Batch dropping tanggal {pendingCloseBatches.map((row) => formatDate(row.batchDate)).join(', ')} belum ditutup. Mohon close batch sebelumnya sebelum melanjutkan transaksi hari ini.
+            </span>
+          </div>
+        ) : null}
+
+        <div className="grid gap-3 border-b border-slate-100 p-3 md:grid-cols-3">
+          <AmountField
+            highlight
+            label="Sisa Saldo Batch"
+            value={normalizedTransactionSummary.balance}
+            helper={unresolvedBatchExpenses ? `${unresolvedBatchExpenses} transaksi belum valid` : ''}
+          />
+          <AmountField label="Total Uang Masuk" value={normalizedTransactionSummary.totalCredit} />
+          <AmountField label="Uang Keluar Batch" value={normalizedTransactionSummary.totalDebit} />
+        </div>
+
+        {fundLoading || transactionLoading || expenseLoading || batchLoading ? (
+          <div className="px-4 py-3 text-xs font-semibold text-slate-500">Memuat rincian batch dropping...</div>
+        ) : null}
+        {!batchLoading && batchError ? <div className="px-4 py-2 text-xs font-bold text-rose-700">{batchError}</div> : null}
+        {!fundLoading && fundError ? <div className="px-4 py-2 text-xs font-bold text-rose-700">{fundError}</div> : null}
+        {!transactionLoading && transactionError ? <div className="px-4 py-2 text-xs font-bold text-rose-700">{transactionError}</div> : null}
+        {!expenseLoading && expenseError ? <div className="px-4 py-2 text-xs font-bold text-rose-700">{expenseError}</div> : null}
+        {!batchLoading && normalizedBatch.status === 'closed' ? (
+          <div className="mx-4 mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+            Batch ini sudah ditutup{normalizedBatch.closedByName ? ` oleh ${normalizedBatch.closedByName}` : ''}. Data setelah close terkunci untuk pembukuan harian.
+          </div>
+        ) : null}
+
+        {!fundLoading && !fundError && pendingFundRows.length ? (
+          <div className="border-b border-slate-100 px-4 py-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h4 className="text-xs font-black text-slate-950">Pengajuan Saldo Menunggu Keputusan</h4>
+              <StatusPill value={`${normalizedFundSummary.submitted} pengajuan`} />
+            </div>
+            <div className="grid gap-1.5">
+              {pendingFundRows.map((row) => {
+                const busy = fundBusyId === row.id;
+                return (
+                  <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 md:grid-cols-[130px_140px_1fr_150px] md:items-center" key={row.id}>
+                    <span className="text-xs font-bold text-slate-700">{row.requestDate}</span>
+                    <strong className="text-xs font-black text-slate-950">{formatCurrency(row.amount)}</strong>
+                    <span className="text-xs font-medium text-slate-600">{row.purpose}</span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button className="h-8 rounded-md bg-emerald-600 px-2 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40" disabled={busy} onClick={() => onApproveFund(row.id)} type="button">Setujui</button>
+                      <button className="h-8 rounded-md border border-rose-200 bg-white px-2 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40" disabled={busy} onClick={() => onRejectFund(row.id)} type="button">Tolak</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-black text-slate-950">Catatan Saldo</h4>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-500">Pencatatan utama: masuk menambah saldo, keluar mengurangi saldo.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusPill value={`${normalizedTransactionSummary.voidCount} void`} />
+              <button
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                disabled={!transactionRows.length}
+                onClick={exportTransactionRows}
+                type="button"
+              >
+                <Download size={13} /> Export CSV
+              </button>
+            </div>
+          </div>
+          {!transactionLoading && !transactionError && !transactionRows.length ? (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold text-slate-500">
+              Belum ada catatan saldo pada filter ini.
+            </div>
+          ) : null}
+          {!transactionLoading && !transactionError && transactionRows.length ? (
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <table className="w-full min-w-[920px] divide-y divide-slate-200 text-left text-sm">
+                <colgroup>
+                  <col className="w-[13%]" />
+                  <col className="w-[37%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[11%]" />
+                </colgroup>
+                <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="whitespace-nowrap px-4 py-3">Tanggal</th>
+                    <th className="px-4 py-3">Keterangan</th>
+                    <th className="px-4 py-3 text-right">Uang Masuk</th>
+                    <th className="px-4 py-3 text-right">Uang Keluar</th>
+                    <th className="px-4 py-3 text-right">Saldo</th>
+                    <th className="px-4 py-3 text-right">Bukti</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {transactionRows.map((row) => (
+                    <tr className="align-middle hover:bg-slate-50/70" key={row.id}>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs font-medium text-slate-700">{row.transactionDate}</td>
+                      <td className="px-4 py-3">
+                        <span className="line-clamp-2 block text-xs font-bold text-slate-900">{row.description}</span>
+                        <span className="mt-1 block text-[10px] font-semibold text-slate-500">{operationalFundTransactionCategoryLabels[row.category] || row.category || '-'}</span>
+                        <span className="mt-0.5 block text-[10px] font-medium text-slate-400">{row.soNumber || row.containerNumber || operationalFundTransactionTypeLabels[row.transactionType] || '-'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-semibold text-emerald-700">{row.moneyIn ? formatCurrency(row.moneyIn) : <span className="text-slate-300">-</span>}</td>
+                      <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{row.moneyOut ? formatCurrency(row.moneyOut) : <span className="text-slate-300">-</span>}</td>
+                      <td className="px-4 py-3 text-right text-xs font-semibold text-slate-900">{row.runningBalance == null ? '-' : formatCurrency(row.runningBalance)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {row.proofAttachment ? (
+                          <DocumentLink
+                            className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-[10px] font-bold text-slate-800 hover:bg-slate-50"
+                            file={row.proofAttachment}
+                            label="View"
+                          />
+                        ) : (
+                          <span className="text-[10px] font-semibold text-slate-400">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t border-slate-100 px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-black text-slate-950">Perlu Dicek Finance</h4>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-500">Biaya dari Operational yang belum ditutup atau perlu klarifikasi.</p>
+            </div>
+            <StatusPill value={`${normalizedExpenseSummary.perluKlarifikasi} klarifikasi`} />
+          </div>
+          {!expenseLoading && !expenseError && !expenseRows.length ? (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold text-slate-500">
+              Tidak ada biaya yang perlu dicek.
+            </div>
+          ) : null}
+          {!expenseLoading && !expenseError && expenseRows.length ? (
+            <div className="table-wrap rounded-md border border-slate-200">
+              <table className="data-table master-table finance-master-table min-w-[1060px] table-fixed">
+                <colgroup>
+                  <col className="w-[20%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    {['SO / Container', 'Driver', 'Biaya', 'Pembayaran', 'Status', 'Aksi'].map((column) => (
+                      <th key={column}>{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenseRows.map((row) => {
+                    const busy = expenseBusyId === row.id;
+                    const alreadyChecked = row.financeCheckStatus === 'sudah_dicek';
+                    return (
+                      <tr className="align-middle hover:bg-slate-50" key={row.id}>
+                        <td className="px-3 py-2">
+                          <span className="block text-xs font-black text-slate-950">{row.soNumber}</span>
+                          <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{row.containerNumber} - {row.destination}</span>
+                          <span className="mt-0.5 block text-[10px] font-medium text-slate-400">{row.customer}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="block text-xs font-bold text-slate-800">{row.driverName}</span>
+                          <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{row.truck}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="block text-xs font-black text-slate-900">{readableLabel(expenseCategoryLabels, row.category)}</span>
+                          <span className="mt-0.5 block text-[11px] font-black text-slate-950">{formatCurrency(row.amount)}</span>
+                          <span className="mt-0.5 line-clamp-2 block text-[10px] font-medium text-slate-500">{row.description}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <StatusPill value={readableLabel(expensePaymentStatusLabels, row.paymentStatus)} />
+                          <span className="mt-1 block text-[10px] font-medium text-slate-500">{row.paidAt || row.createdAt || '-'}</span>
+                          {row.proofAttachment ? (
+                            <DocumentLink
+                              className="mt-1 inline-flex h-7 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+                              file={row.proofAttachment}
+                              label="Bukti"
+                            />
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          <StatusPill value={readableLabel(expenseFinanceStatusLabels, row.financeCheckStatus)} />
+                          {row.financeNote ? <span className="mt-1 line-clamp-2 block text-[10px] font-medium text-slate-500">{row.financeNote}</span> : null}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="grid min-w-[160px] grid-cols-2 gap-1.5">
+                            <button
+                              className="inline-flex h-8 items-center justify-center rounded-md bg-emerald-600 px-2 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                              disabled={busy || alreadyChecked}
+                              onClick={() => onOpenExpenseCheckConfirm(row.id)}
+                              type="button"
+                            >
+                              Dicek
+                            </button>
+                            <button
+                              className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 bg-white px-2 text-[10px] font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40"
+                              disabled={busy}
+                              onClick={() => onOpenExpenseClarification(row.id)}
+                              type="button"
+                            >
+                              Klarifikasi
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+
+        {!fundLoading && !transactionLoading && !expenseLoading && !transactionRows.length && !hasActionRows ? (
+          <div className="border-t border-slate-100 px-4 py-3 text-xs font-semibold text-slate-500">
+            Belum ada pencatatan saldo pada filter ini.
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+export default DailyOperationalFundPanel;

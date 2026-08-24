@@ -22,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   Truck,
+  Wallet,
   Warehouse,
 } from 'lucide-react';
 import { USER_ROLES } from './roles';
@@ -47,7 +48,7 @@ const operationalRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.OPERATIONAL,
 ];
-const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
+const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
 
 export const navigationGroups = [
@@ -89,6 +90,12 @@ export const navigationGroups = [
         to: '/operations',
         label: 'Container Job',
         icon: ClipboardCheck,
+        roles: operationalRoles,
+      },
+      {
+        to: '/operations/rekening-dropping',
+        label: 'Rekening Dropping',
+        icon: ReceiptText,
         roles: operationalRoles,
       },
       {
@@ -144,9 +151,10 @@ export const navigationGroups = [
     items: [
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
       { to: '/finance/order-verification', label: 'Verifikasi Order', icon: CheckCircle2, roles: financeRoles },
-      { to: '/finance/rpuj-approval', label: 'Approval RPUJ', icon: ReceiptText, roles: financeRoles },
+      { to: '/finance/rpuj-approval', label: 'Rekening Dropping', icon: ReceiptText, roles: financeRoles },
       { to: '/finance/driver-commissions', label: 'Pembayaran Komisi', icon: CircleDollarSign, roles: financeRoles },
       { to: '/finance/invoices', label: 'Input Invoice', icon: ClipboardList, roles: financeRoles },
+      { to: '/finance/outstanding', label: 'Customer Outstanding', icon: Wallet, roles: financeRoles },
     ],
   },
   {

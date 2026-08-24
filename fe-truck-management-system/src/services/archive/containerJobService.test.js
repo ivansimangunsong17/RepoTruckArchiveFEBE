@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelContainerJob, fetchContainerJobsPage, generateContainerJobSpk, updateContainerJob } from './containerJobService';
+import {
+  cancelContainerJob,
+  correctContainerJobExpense,
+  createContainerJobExpense,
+  fetchContainerJobExpenseLedger,
+  fetchContainerJobExpenses,
+  fetchContainerJobsPage,
+  generateContainerJobSpk,
+  uploadContainerJobExpenseProof,
+  updateContainerJob,
+} from './containerJobService';
 import { httpClient } from '../api/httpClient';
 import { deleteAttachmentFile, uploadAttachmentFile } from '../files/fileService';
 
@@ -57,6 +67,127 @@ describe('containerJobService', () => {
 
     expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1', { status: 'running' });
     expect(result.status).toBe('running');
+  });
+
+  it('mengambil ledger transaksi biaya Container Job', async () => {
+    httpClient.get.mockResolvedValue([{ id: 'expense-1', category: 'uj_awal' }]);
+
+    const result = await fetchContainerJobExpenses('job-1');
+
+    expect(httpClient.get).toHaveBeenCalledWith('/container-jobs/job-1/expenses');
+    expect(result[0].category).toBe('uj_awal');
+  });
+
+  it('mengambil halaman ledger biaya Container Job untuk rekening dropping operational', async () => {
+    httpClient.get.mockResolvedValue({ rows: [], total: 0 });
+
+    await fetchContainerJobExpenseLedger({
+      page: 2,
+      pageSize: 50,
+      query: 'SO-001',
+      ledgerStatus: 'need_correction',
+      financeCheckStatus: 'perlu_klarifikasi',
+      paymentStatus: 'sudah_dibayar',
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-20',
+    });
+
+    expect(httpClient.get).toHaveBeenCalledWith('/container-jobs/expenses?page=2&pageSize=50&query=SO-001&ledgerStatus=need_correction&financeCheckStatus=perlu_klarifikasi&paymentStatus=sudah_dibayar&dateFrom=2026-08-01&dateTo=2026-08-20');
+  });
+
+  it('mencatat transaksi biaya Container Job dengan bukti pembayaran', async () => {
+    const proofFile = new File(['proof'], 'tol.pdf', { type: 'application/pdf' });
+    uploadAttachmentFile.mockResolvedValue({ id: 'attachment-proof-1' });
+    httpClient.post.mockResolvedValue({ id: 'expense-1', category: 'tol' });
+
+    await createContainerJobExpense('job-1', {
+      category: 'tol',
+      amount: 125000,
+      description: 'Tol dalam kota',
+      recipientType: 'vendor',
+      recipientName: 'Gerbang Tol',
+      paymentStatus: 'sudah_dibayar',
+      proofFile,
+      updatedBy: 'Ops',
+    });
+
+    expect(uploadAttachmentFile).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'container_job',
+      entityId: 'job-1',
+      category: 'expensePaymentProof',
+      file: proofFile,
+      uploadedByName: 'Ops',
+    }));
+    expect(httpClient.post).toHaveBeenCalledWith('/container-jobs/job-1/expenses', expect.objectContaining({
+      category: 'tol',
+      amount: 125000,
+      paymentStatus: 'sudah_dibayar',
+      proofAttachmentId: 'attachment-proof-1',
+    }));
+  });
+
+  it('mengirim koreksi transaksi biaya Container Job dengan bukti baru', async () => {
+    const proofFile = new File(['proof'], 'tol-koreksi.pdf', { type: 'application/pdf' });
+    uploadAttachmentFile.mockResolvedValue({ id: 'attachment-proof-2' });
+    httpClient.patch.mockResolvedValue({ id: 'expense-1', financeCheckStatus: 'dikoreksi' });
+
+    await correctContainerJobExpense('job-1', 'expense-1', {
+      category: 'tol',
+      amount: 150000,
+      description: 'Tol koreksi',
+      recipientType: 'vendor',
+      recipientName: 'Gerbang Tol',
+      paymentStatus: 'sudah_dibayar',
+      proofFile,
+      updatedBy: 'Ops',
+    });
+
+    expect(uploadAttachmentFile).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'container_job',
+      entityId: 'job-1',
+      category: 'expensePaymentProof',
+      file: proofFile,
+      uploadedByName: 'Ops',
+    }));
+    expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1/expenses/expense-1/correction', expect.objectContaining({
+      category: 'tol',
+      amount: 150000,
+      paymentStatus: 'sudah_dibayar',
+      proofAttachmentId: 'attachment-proof-2',
+    }));
+  });
+
+  it('mengupload bukti pembayaran transaksi biaya dari halaman rekening dropping operational', async () => {
+    const proofFile = new File(['proof'], 'transfer-tol.pdf', { type: 'application/pdf' });
+    uploadAttachmentFile.mockResolvedValue({ id: 'attachment-proof-3' });
+    httpClient.patch.mockResolvedValue({ id: 'expense-1', paymentStatus: 'sudah_dibayar' });
+
+    await uploadContainerJobExpenseProof('job-1', 'expense-1', {
+      proofFile,
+      paidAt: '2026-08-20T08:00:00.000Z',
+      updatedBy: 'Ops',
+      description: 'Transfer tol',
+    });
+
+    expect(uploadAttachmentFile).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'container_job',
+      entityId: 'job-1',
+      category: 'expensePaymentProof',
+      file: proofFile,
+      notes: 'Transfer tol',
+      uploadedByName: 'Ops',
+    }));
+    expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1/expenses/expense-1/proof', {
+      paidAt: '2026-08-20T08:00:00.000Z',
+      proofAttachmentId: 'attachment-proof-3',
+    });
+  });
+
+  it('menolak upload bukti transaksi biaya tanpa file', async () => {
+    await expect(uploadContainerJobExpenseProof('job-1', 'expense-1')).rejects.toThrow('File bukti pembayaran wajib dipilih.');
+
+    expect(uploadAttachmentFile).not.toHaveBeenCalled();
+    expect(httpClient.patch).not.toHaveBeenCalled();
   });
 
   it('mengupload dokumen sebelum complete job', async () => {

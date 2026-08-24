@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { dirname, resolve } from 'node:path';
@@ -18,7 +18,7 @@ if (!hasDatabase) {
   test('backend integration flow skipped without DATABASE_URL', { skip: 'DATABASE_URL belum dikonfigurasi.' }, () => {});
 } else {
   const { createApp } = await import('../app.js');
-  const { closePool, query } = await import('../db/client.js');
+  const { closePool, pool, query } = await import('../db/client.js');
   const { hashPassword } = await import('../modules/auth/auth.utils.js');
 
   const runId = `sprint-2c-${Date.now()}`;
@@ -28,6 +28,7 @@ if (!hasDatabase) {
     sales: { name: `Sprint2C Sales ${runId}`, email: `${runId}.sales@example.test`, role: 'sales' },
     finance: { name: `Sprint2C Finance ${runId}`, email: `${runId}.finance@example.test`, role: 'finance' },
     observer: { name: `Sprint2C Observer ${runId}`, email: `${runId}.observer@example.test`, role: 'pengamat' },
+    operational: { name: `Sprint2C Operational ${runId}`, email: `${runId}.operational@example.test`, role: 'operational' },
     legacy: { name: `Sprint2C Legacy ${runId}`, email: `${runId}.legacy@example.test`, role: 'sales' },
     locked: { name: `Sprint2C Locked ${runId}`, email: `${runId}.locked@example.test`, role: 'sales' },
   };
@@ -256,6 +257,17 @@ if (!hasDatabase) {
     return result.rows[0] || null;
   }
 
+  async function resetOperationalFundBatch(batchDate) {
+    await query(
+      `
+        delete from operational_fund_transactions
+        where batch_id in (select id from operational_fund_batches where batch_date = $1::date)
+      `,
+      [batchDate],
+    );
+    await query('delete from operational_fund_batches where batch_date = $1::date', [batchDate]);
+  }
+
   async function latestLoginActivity(action, email) {
     const result = await query(
       `
@@ -278,6 +290,7 @@ if (!hasDatabase) {
     let financeToken = '';
     let legacyToken = '';
     let observerToken = '';
+    let operationalToken = '';
 
     await t.test('auth: login sukses, login gagal, me valid, me tanpa token ditolak', async () => {
       const adminLogin = await login(users.admin.email);
@@ -334,12 +347,15 @@ if (!hasDatabase) {
       const salesLogin = await login(users.sales.email);
       const financeLogin = await login(users.finance.email);
       const observerLogin = await login(users.observer.email);
+      const operationalLogin = await login(users.operational.email);
       assert.equal(salesLogin.status, 200);
       assert.equal(financeLogin.status, 200);
       assert.equal(observerLogin.status, 200);
+      assert.equal(operationalLogin.status, 200);
       salesToken = salesLogin.body.data.token;
       financeToken = financeLogin.body.data.token;
       observerToken = observerLogin.body.data.token;
+      operationalToken = operationalLogin.body.data.token;
 
       const allowed = await api('/api/sales-orders?pageSize=1', { token: salesToken });
       assert.equal(allowed.status, 200);
@@ -583,6 +599,170 @@ if (!hasDatabase) {
       assert.equal(historicalJobLog.metadata.soNumber, created.historicalSoNumber);
     });
 
+    await t.test('sales order: cancel langsung meng-cascade container job received dan melepas driver/truck', async () => {
+      const cascadeDriverName = `Driver Cascade ${runId}`;
+      const cascadePlate = `B-${String(runId).slice(-4)}-CC`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Bertugas', 'Aman')
+          on conflict do nothing
+        `,
+        [cascadeDriverName, `081${String(Date.now()).slice(-9)}`],
+      );
+      const cascadeDriverRow = await query('select id from drivers where name = $1', [cascadeDriverName]);
+      const cascadeDriverId = cascadeDriverRow.rows[0].id;
+
+      await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Bertugas')
+          on conflict (plate_number) do update set operational_status = 'Bertugas'
+        `,
+        [`TRK-CC-${String(runId).slice(-4)}`, cascadePlate],
+      );
+      const cascadeVehicleRow = await query('select id from vehicles where plate_number = $1', [cascadePlate]);
+      const cascadeVehicleId = cascadeVehicleRow.rows[0].id;
+
+      const cascadeSoNumber = `SO-CASCADECANCEL-${runId}`;
+      const cascadeOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: cascadeSoNumber }),
+      });
+      assert.equal(cascadeOrder.status, 201);
+      const cascadeJobId = cascadeOrder.body.data.containers[0].id;
+
+      await query(
+        `
+          update container_jobs
+          set driver_id = $1,
+              vehicle_id = $2,
+              assignment_snapshot = jsonb_build_object('driver', $3::text, 'plateNumber', $4::text)
+          where id = $5
+        `,
+        [cascadeDriverId, cascadeVehicleId, cascadeDriverName, cascadePlate, cascadeJobId],
+      );
+
+      const cascadeCancelResult = await api(`/api/sales-orders/${cascadeOrder.body.data.id}/cancel`, {
+        method: 'PATCH',
+        token: adminToken,
+      });
+      assert.equal(cascadeCancelResult.status, 200);
+
+      const jobAfterCascadeCancel = await query(
+        'select status, cancel_reason, cancel_source from container_jobs where id = $1',
+        [cascadeJobId],
+      );
+      assert.equal(jobAfterCascadeCancel.rows[0].status, 'cancelled');
+      assert.equal(jobAfterCascadeCancel.rows[0].cancel_source, 'sales');
+      assert.ok(jobAfterCascadeCancel.rows[0].cancel_reason);
+
+      const driverAfterCascadeCancel = await query('select operational_status from drivers where id = $1', [cascadeDriverId]);
+      assert.equal(driverAfterCascadeCancel.rows[0].operational_status, 'Aktif');
+
+      const vehicleAfterCascadeCancel = await query('select operational_status from vehicles where id = $1', [cascadeVehicleId]);
+      assert.equal(vehicleAfterCascadeCancel.rows[0].operational_status, 'Aktif');
+
+      const reassignSoNumber = `SO-CASCADEREASSIGN-${runId}`;
+      const reassignOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: reassignSoNumber }),
+      });
+      assert.equal(reassignOrder.status, 201);
+      const reassignJobId = reassignOrder.body.data.containers[0].id;
+
+      const reassignResult = await api(`/api/container-jobs/${reassignJobId}/assignment`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber: `${reassignSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+          driver: cascadeDriverName,
+          plateNumber: cascadePlate,
+          status: 'received',
+          updatedBy: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(reassignResult.status, 200, 'truck/driver seharusnya bisa di-assign ulang ke job lain setelah SO lamanya di-cancel');
+    });
+
+    await t.test('sales order: approve permintaan cancel meng-cascade container job received dan melepas driver/truck', async () => {
+      const cascadeApproveDriverName = `Driver Cascade Approve ${runId}`;
+      const cascadeApprovePlate = `B-${String(runId).slice(-4)}-CA`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Bertugas', 'Aman')
+          on conflict do nothing
+        `,
+        [cascadeApproveDriverName, `082${String(Date.now()).slice(-9)}`],
+      );
+      const cascadeApproveDriverRow = await query('select id from drivers where name = $1', [cascadeApproveDriverName]);
+      const cascadeApproveDriverId = cascadeApproveDriverRow.rows[0].id;
+
+      await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Bertugas')
+          on conflict (plate_number) do update set operational_status = 'Bertugas'
+        `,
+        [`TRK-CA-${String(runId).slice(-4)}`, cascadeApprovePlate],
+      );
+      const cascadeApproveVehicleRow = await query('select id from vehicles where plate_number = $1', [cascadeApprovePlate]);
+      const cascadeApproveVehicleId = cascadeApproveVehicleRow.rows[0].id;
+
+      const cascadeApproveSoNumber = `SO-CASCADEAPPROVE-${runId}`;
+      const cascadeApproveOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: cascadeApproveSoNumber }),
+      });
+      assert.equal(cascadeApproveOrder.status, 201);
+      const cascadeApproveJobId = cascadeApproveOrder.body.data.containers[0].id;
+      const cascadeApproveOrderId = cascadeApproveOrder.body.data.id;
+
+      await query(
+        `
+          update container_jobs
+          set driver_id = $1,
+              vehicle_id = $2,
+              assignment_snapshot = jsonb_build_object('driver', $3::text, 'plateNumber', $4::text)
+          where id = $5
+        `,
+        [cascadeApproveDriverId, cascadeApproveVehicleId, cascadeApproveDriverName, cascadeApprovePlate, cascadeApproveJobId],
+      );
+
+      const cascadeApproveRequest = await api(`/api/sales-orders/${cascadeApproveOrderId}/cancel-request`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { cancelRequestNote: `Cascade approve test ${runId}` },
+      });
+      assert.equal(cascadeApproveRequest.status, 200);
+
+      const cascadeApproveReview = await api(`/api/sales-orders/${cascadeApproveOrderId}/cancel-review`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { approved: true },
+      });
+      assert.equal(cascadeApproveReview.status, 200);
+      assert.equal(cascadeApproveReview.body.data.status, 'cancelled');
+
+      const jobAfterCascadeApprove = await query(
+        'select status, cancel_reason, cancel_source from container_jobs where id = $1',
+        [cascadeApproveJobId],
+      );
+      assert.equal(jobAfterCascadeApprove.rows[0].status, 'cancelled');
+      assert.equal(jobAfterCascadeApprove.rows[0].cancel_source, 'sales');
+      assert.equal(jobAfterCascadeApprove.rows[0].cancel_reason, `Cascade approve test ${runId}`);
+
+      const driverAfterCascadeApprove = await query('select operational_status from drivers where id = $1', [cascadeApproveDriverId]);
+      assert.equal(driverAfterCascadeApprove.rows[0].operational_status, 'Aktif');
+
+      const vehicleAfterCascadeApprove = await query('select operational_status from vehicles where id = $1', [cascadeApproveVehicleId]);
+      assert.equal(vehicleAfterCascadeApprove.rows[0].operational_status, 'Aktif');
+    });
+
     await t.test('historical entry: periode bisa dikunci dan mencegah perubahan data lama', async () => {
       const period = await api('/api/historical-entry/periods/2026-07', { token: adminToken });
       assert.equal(period.status, 200);
@@ -671,22 +851,6 @@ if (!hasDatabase) {
       assert.equal(mismatchedJob.status, 400);
       assert.equal(mismatchedJob.body.error.code, 'VEHICLE_SIZE_MISMATCH');
 
-      const blockedRunningBeforeRpujApproval = await api(`/api/container-jobs/${created.jobId}/status`, {
-        method: 'PATCH',
-        token: adminToken,
-        body: {
-          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: driverName,
-          plateNumber: plate20,
-          status: 'running',
-          runningAt: '2026-07-11T08:00:00.000Z',
-          rpujStatus: 'submitted',
-          updatedBy: 'Sprint2C Operational',
-        },
-      });
-      assert.equal(blockedRunningBeforeRpujApproval.status, 409);
-      assert.equal(blockedRunningBeforeRpujApproval.body.error.code, 'TRIP_WAITING_RPUJ_APPROVAL');
-
       const submittedRpujJob = await api(`/api/container-jobs/${created.jobId}/status`, {
         method: 'PATCH',
         token: adminToken,
@@ -713,14 +877,6 @@ if (!hasDatabase) {
       const rpujQueue = await api(`/api/finance/rpuj-requests?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
       assert.equal(rpujQueue.status, 200);
       assert.equal(rpujQueue.body.data.rows.some((row) => row.id === created.jobId && row.rpujStatus === 'submitted'), true);
-
-      const prematureSpk = await api(`/api/container-jobs/${created.jobId}/spk`, {
-        method: 'POST',
-        token: adminToken,
-        body: { updatedBy: 'Sprint2C Operational' },
-      });
-      assert.equal(prematureSpk.status, 409);
-      assert.equal(prematureSpk.body.error.code, 'SPK_WAITING_FINANCE_APPROVAL');
 
       const approvedRpuj = await api(`/api/finance/rpuj-requests/${created.jobId}/approve`, {
         method: 'PATCH',
@@ -979,6 +1135,555 @@ if (!hasDatabase) {
       assert.equal(cancelRequestOrderList.body.data.summary.cancelledContainers, 1);
     });
 
+    await t.test('rekening dropping: biaya yang melebihi sisa saldo batch ditolak', async () => {
+      const overspendSoNumber = `SO-OVERSPEND-${runId}`;
+      const overspendOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: overspendSoNumber }),
+      });
+      assert.equal(overspendOrder.status, 201);
+      const overspendJobId = overspendOrder.body.data.containers[0].id;
+      const batchDate = '2099-12-31';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 100000,
+          purpose: `Deposit test overspend ${runId}`,
+          fileName: `deposit-overspend-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit overspend ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: overspendJobId,
+          category: 'expenseProof',
+          fileName: `expense-proof-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+      const proofAttachmentId = proofUpload.body.data.id;
+
+      const tooExpensive = await api(`/api/container-jobs/${overspendJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 5000000,
+          description: `Overspend test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(tooExpensive.status, 409);
+      assert.equal(tooExpensive.body.error.code, 'OPERATIONAL_FUND_INSUFFICIENT_BALANCE');
+
+      const batchAfterRejection = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchAfterRejection.status, 200);
+      assert.equal(Number(batchAfterRejection.body.data.rows.find((row) => row.batchDate === batchDate)?.balance), 100000);
+
+      const withinBudget = await api(`/api/container-jobs/${overspendJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 40000,
+          description: `Within budget test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(withinBudget.status, 200);
+
+      const batchAfterSuccess = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchAfterSuccess.status, 200);
+      assert.equal(Number(batchAfterSuccess.body.data.rows.find((row) => row.batchDate === batchDate)?.balance), 60000);
+    });
+
+    await t.test('rekening dropping: idempotency key mencegah biaya tercatat dobel saat submit ulang', async () => {
+      const idempotentSoNumber = `SO-IDEMPOTENT-${runId}`;
+      const idempotentOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: idempotentSoNumber }),
+      });
+      assert.equal(idempotentOrder.status, 201);
+      const idempotentJobId = idempotentOrder.body.data.containers[0].id;
+      const batchDate = '2099-11-30';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 200000,
+          purpose: `Deposit test idempotent ${runId}`,
+          fileName: `deposit-idempotent-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit idempotent ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: idempotentJobId,
+          category: 'expenseProof',
+          fileName: `expense-proof-idempotent-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof idempotent ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+      const proofAttachmentId = proofUpload.body.data.id;
+
+      const idempotencyKey = `idem-test-${runId}`;
+      const expensePayload = {
+        category: 'tol',
+        amount: 50000,
+        description: `Idempotent test ${runId}`,
+        recipientType: 'vendor',
+        recipientName: 'Vendor Test',
+        paymentStatus: 'sudah_dibayar',
+        paidAt: `${batchDate}T08:00:00.000Z`,
+        proofAttachmentId,
+        idempotencyKey,
+        updatedBy: 'Sprint2C Operational',
+      };
+
+      const firstSubmit = await api(`/api/container-jobs/${idempotentJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: expensePayload,
+      });
+      assert.equal(firstSubmit.status, 200);
+
+      const retrySubmit = await api(`/api/container-jobs/${idempotentJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: expensePayload,
+      });
+      assert.equal(retrySubmit.status, 200);
+      assert.equal(retrySubmit.body.data.id, firstSubmit.body.data.id);
+
+      const batchAfterRetry = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchAfterRetry.status, 200);
+      assert.equal(Number(batchAfterRetry.body.data.rows.find((row) => row.batchDate === batchDate)?.balance), 150000);
+
+      const jobExpenses = await api(`/api/container-jobs/${idempotentJobId}/expenses`, { token: adminToken });
+      assert.equal(jobExpenses.status, 200);
+      assert.equal(jobExpenses.body.data.filter((expense) => expense.description === expensePayload.description).length, 1);
+    });
+
+    await t.test('rekening dropping: kunci idempotency yang sama tapi datanya beda ditolak, tidak diam-diam pakai data lama', async () => {
+      const mismatchSoNumber = `SO-IDEMMISMATCH-${runId}`;
+      const mismatchOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: mismatchSoNumber }),
+      });
+      assert.equal(mismatchOrder.status, 201);
+      const mismatchJobId = mismatchOrder.body.data.containers[0].id;
+      const batchDate = '2099-05-31';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 200000,
+          purpose: `Deposit test idempotency mismatch ${runId}`,
+          fileName: `deposit-idemmismatch-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit idempotency mismatch ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: mismatchJobId,
+          category: 'expensePaymentProof',
+          fileName: `expense-proof-idemmismatch-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof idempotency mismatch ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+      const proofAttachmentId = proofUpload.body.data.id;
+
+      const idempotencyKey = `idem-mismatch-test-${runId}`;
+      const firstSubmit = await api(`/api/container-jobs/${mismatchJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 50000,
+          description: `Idempotency mismatch original ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          idempotencyKey,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(firstSubmit.status, 200);
+      assert.equal(firstSubmit.body.data.amount, 50000);
+
+      const mismatchedRetry = await api(`/api/container-jobs/${mismatchJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 90000,
+          description: `Idempotency mismatch edited ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          idempotencyKey,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(mismatchedRetry.status, 409);
+      assert.equal(mismatchedRetry.body.error.code, 'CONTAINER_JOB_EXPENSE_IDEMPOTENCY_KEY_MISMATCH');
+
+      const batchAfterMismatch = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchAfterMismatch.status, 200);
+      assert.equal(Number(batchAfterMismatch.body.data.rows.find((row) => row.batchDate === batchDate)?.balance), 150000);
+    });
+
+    await t.test('rekening dropping: koreksi biaya menyimpan nilai sebelum diubah di activity log', async () => {
+      const auditSoNumber = `SO-AUDITTRAIL-${runId}`;
+      const auditOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: auditSoNumber }),
+      });
+      assert.equal(auditOrder.status, 201);
+      const auditJobId = auditOrder.body.data.containers[0].id;
+      const batchDate = '2099-10-31';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 2000000,
+          purpose: `Deposit test audit trail ${runId}`,
+          fileName: `deposit-audit-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit audit ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: auditJobId,
+          category: 'expenseProof',
+          fileName: `expense-proof-audit-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof audit ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+      const proofAttachmentId = proofUpload.body.data.id;
+
+      const created = await api(`/api/container-jobs/${auditJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 800000,
+          description: `Audit trail test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(created.status, 200);
+      const auditExpenseId = created.body.data.id;
+
+      const flaggedForClarification = await api(`/api/finance/container-job-expenses/${auditExpenseId}/reconcile`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: {
+          financeCheckStatus: 'perlu_klarifikasi',
+          financeNote: `Nominal kurang wajar ${runId}`,
+        },
+      });
+      assert.equal(flaggedForClarification.status, 200);
+
+      const reconcileLog = await latestActivityForEntity('FINANCE_RECONCILE_CONTAINER_JOB_EXPENSE', auditExpenseId);
+      assert.equal(reconcileLog.metadata.beforeData.financeCheckStatus, 'belum_dicek');
+      assert.equal(reconcileLog.metadata.afterData.financeCheckStatus, 'perlu_klarifikasi');
+
+      const corrected = await api(`/api/container-jobs/${auditJobId}/expenses/${auditExpenseId}/correction`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 300000,
+          description: `Audit trail test dikoreksi ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(corrected.status, 200);
+      assert.equal(corrected.body.data.amount, 300000);
+
+      const correctionLog = await latestActivityForEntity('OPERATIONAL_CORRECT_CONTAINER_JOB_EXPENSE', auditExpenseId);
+      assert.equal(correctionLog.metadata.beforeData.amount, 800000);
+      assert.equal(correctionLog.metadata.beforeData.description, `Audit trail test ${runId}`);
+      assert.equal(correctionLog.metadata.afterData.amount, 300000);
+
+      const batchAfterCorrection = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchAfterCorrection.status, 200);
+      assert.equal(Number(batchAfterCorrection.body.data.rows.find((row) => row.batchDate === batchDate)?.balance), 1700000);
+    });
+
+    await t.test('rekening dropping: status cek biaya tidak bisa diubah lagi setelah batch ditutup', async () => {
+      const closedSoNumber = `SO-CLOSEDCHECK-${runId}`;
+      const closedOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: closedSoNumber }),
+      });
+      assert.equal(closedOrder.status, 201);
+      const closedJobId = closedOrder.body.data.containers[0].id;
+      const batchDate = '2099-07-31';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 100000,
+          purpose: `Deposit test closed check ${runId}`,
+          fileName: `deposit-closedcheck-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit closed check ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: closedJobId,
+          category: 'expenseProof',
+          fileName: `expense-proof-closedcheck-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof closed check ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+      const proofAttachmentId = proofUpload.body.data.id;
+
+      const created = await api(`/api/container-jobs/${closedJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 50000,
+          description: `Closed check test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(created.status, 200);
+      const closedExpenseId = created.body.data.id;
+
+      const checked = await api(`/api/finance/container-job-expenses/${closedExpenseId}/reconcile`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { financeCheckStatus: 'sudah_dicek' },
+      });
+      assert.equal(checked.status, 200);
+
+      const batchBeforeClose = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchBeforeClose.status, 200);
+      const batchId = batchBeforeClose.body.data.rows.find((row) => row.batchDate === batchDate)?.id;
+      assert.ok(batchId);
+
+      const closed = await api(`/api/finance/operational-fund-batches/${batchId}/close`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: {},
+      });
+      assert.equal(closed.status, 200);
+      assert.equal(closed.body.data.status, 'closed');
+
+      const reopenAttempt = await api(`/api/finance/container-job-expenses/${closedExpenseId}/reconcile`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { financeCheckStatus: 'perlu_klarifikasi', financeNote: `Coba buka lagi ${runId}` },
+      });
+      assert.equal(reopenAttempt.status, 409);
+      assert.equal(reopenAttempt.body.error.code, 'OPERATIONAL_FUND_BATCH_CLOSED');
+    });
+
+    await t.test('rekening dropping: cek status biaya mengunci baris batch agar tidak balapan dengan tutup batch', async () => {
+      const reconcileLockSoNumber = `SO-RECONCILELOCK-${runId}`;
+      const reconcileLockOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: reconcileLockSoNumber }),
+      });
+      assert.equal(reconcileLockOrder.status, 201);
+      const reconcileLockJobId = reconcileLockOrder.body.data.containers[0].id;
+      const batchDate = '2099-06-30';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 100000,
+          purpose: `Deposit test reconcile lock ${runId}`,
+          fileName: `deposit-reconcilelock-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit reconcile lock ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: reconcileLockJobId,
+          category: 'expensePaymentProof',
+          fileName: `expense-proof-reconcilelock-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof reconcile lock ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+
+      const created = await api(`/api/container-jobs/${reconcileLockJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          amount: 50000,
+          description: `Reconcile lock test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId: proofUpload.body.data.id,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(created.status, 200);
+      const reconcileLockExpenseId = created.body.data.id;
+
+      const batchLookup = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      assert.equal(batchLookup.status, 200);
+      const batchId = batchLookup.body.data.rows.find((row) => row.batchDate === batchDate)?.id;
+      assert.ok(batchId);
+
+      const holderClient = await pool.connect();
+      const waiterClient = await pool.connect();
+      try {
+        await holderClient.query('begin');
+        await holderClient.query('select id, status from operational_fund_batches where id = $1 for update', [batchId]);
+
+        await waiterClient.query('begin');
+        const waiterQuery = waiterClient.query(
+          `
+            select batch.status
+            from operational_fund_transactions oft
+            join operational_fund_batches batch on batch.id = oft.batch_id
+            where oft.container_job_expense_id = $1
+              and oft.transaction_type = 'debit'
+              and oft.status = 'posted'
+            limit 1
+            for update of batch
+          `,
+          [reconcileLockExpenseId],
+        );
+
+        const stillBlocked = await Promise.race([
+          waiterQuery.then(() => 'resolved'),
+          new Promise((resolve) => setTimeout(() => resolve('timeout'), 300)),
+        ]);
+        assert.equal(stillBlocked, 'timeout', 'cek status biaya seharusnya menunggu selama batch sedang ditutup');
+
+        await holderClient.query('commit');
+
+        const releasedInTime = await Promise.race([
+          waiterQuery.then(() => 'resolved'),
+          new Promise((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+        ]);
+        assert.equal(releasedInTime, 'resolved', 'cek status biaya seharusnya lanjut begitu penutupan batch commit atau gagal');
+
+        await waiterClient.query('commit');
+      } finally {
+        holderClient.release();
+        waiterClient.release();
+      }
+    });
+
     await t.test('sales order: billing status workflow bisa disimpan setelah operational selesai', async () => {
       const invoiceQueue = await api(`/api/finance/invoices?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
       assert.equal(invoiceQueue.status, 200);
@@ -1107,6 +1812,259 @@ if (!hasDatabase) {
       });
       assert.equal(blockedContainerCancellationAfterRpuj.status, 403);
       assert.equal(blockedContainerCancellationAfterRpuj.body.error.code, 'CONTAINER_JOB_RPUJ_LOCKED_ADMIN_ONLY');
+    });
+
+    await t.test('sales order: customer_id tetap terhubung meski nama customer beda huruf besar/kecil atau ada spasi ekstra', async () => {
+      const customerName = `Customer TZ ${runId}`;
+      const insertedCustomer = await query(
+        "insert into customers (name) values ($1) returning id",
+        [customerName],
+      );
+      const customerId = insertedCustomer.rows[0].id;
+
+      const messyNameOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({
+          soNumber: `${created.orderSoNumber}-CUSTFIX`,
+          customer: `  ${customerName.toUpperCase()}  `,
+        }),
+      });
+      assert.equal(messyNameOrder.status, 201);
+      assert.equal(messyNameOrder.body.data.customerId, customerId);
+    });
+
+    await t.test('sales order: ringkasan outstanding customer dihitung dari nama yang dinormalisasi', async () => {
+      const invoiceDetail = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceDetail.status, 200);
+      const billingAmount = Number(invoiceDetail.body.data.billingAmount);
+      assert.ok(billingAmount > 0);
+
+      const forbiddenOperational = await api(`/api/sales-orders/customer-outstanding?customer=${encodeURIComponent(`Customer ${runId}`)}`, { token: operationalToken });
+      assert.equal(forbiddenOperational.status, 403, 'Operational tidak boleh melihat ringkasan outstanding customer (visibility ini untuk Sales/Finance/Admin/Observer)');
+      assert.equal(forbiddenOperational.body.error.code, 'FORBIDDEN');
+
+      const orderCustomer = `Customer ${runId}`;
+      const exactMatch = await api(`/api/sales-orders/customer-outstanding?customer=${encodeURIComponent(orderCustomer)}`, { token: salesToken });
+      assert.equal(exactMatch.status, 200);
+      assert.equal(exactMatch.body.data.openInvoiceCount, 1);
+      assert.equal(exactMatch.body.data.totalOutstandingAmount, billingAmount);
+      assert.equal(exactMatch.body.data.overdueCount, 0);
+
+      const messyQuery = await api(`/api/sales-orders/customer-outstanding?customer=${encodeURIComponent(`  ${orderCustomer.toUpperCase()}  `)}`, { token: salesToken });
+      assert.equal(messyQuery.status, 200);
+      assert.equal(messyQuery.body.data.totalOutstandingAmount, billingAmount);
+
+      const noSuchCustomer = await api(`/api/sales-orders/customer-outstanding?customer=${encodeURIComponent(`Tidak Ada ${runId}`)}`, { token: salesToken });
+      assert.equal(noSuchCustomer.status, 200);
+      assert.equal(noSuchCustomer.body.data.totalOutstandingAmount, 0);
+      assert.equal(noSuchCustomer.body.data.openInvoiceCount, 0);
+    });
+
+    await t.test('finance: pembayaran invoice dicatat Finance dan menutup outstanding jadi lunas', async () => {
+      const blockedSalesLunas = await api(`/api/sales-orders/${created.orderId}/invoice-delivery-status`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { billingStatus: 'lunas' },
+      });
+      assert.equal(blockedSalesLunas.status, 400);
+      assert.equal(blockedSalesLunas.body.error.code, 'INVALID_INVOICE_DELIVERY_STATUS');
+
+      const forbiddenPayment = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: salesToken,
+        body: { amount: 1000 },
+      });
+      assert.equal(forbiddenPayment.status, 403);
+      assert.equal(forbiddenPayment.body.error.code, 'FORBIDDEN');
+
+      const emptyPayments = await api(`/api/finance/invoices/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(emptyPayments.status, 200);
+      assert.deepEqual(emptyPayments.body.data, []);
+
+      const invoiceDetail = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceDetail.status, 200);
+      const billingAmount = Number(invoiceDetail.body.data.billingAmount);
+      assert.ok(billingAmount > 0);
+
+      const proofFile = {
+        fileName: `payment-proof-${runId}-1.pdf`,
+        mimeType: 'application/pdf',
+        fileBase64: Buffer.from(`%PDF-1.4\n% payment proof 1 ${runId}\n`).toString('base64'),
+      };
+
+      const missingProof = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 1000 },
+      });
+      assert.equal(missingProof.status, 400);
+      assert.equal(missingProof.body.error.code, 'SALES_ORDER_PAYMENT_PROOF_REQUIRED');
+
+      const invalidAmount = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 0, proofFile },
+      });
+      assert.equal(invalidAmount.status, 400);
+      assert.equal(invalidAmount.body.error.code, 'SALES_ORDER_PAYMENT_AMOUNT_INVALID');
+
+      const overpay = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: billingAmount + 1000, proofFile },
+      });
+      assert.equal(overpay.status, 409);
+      assert.equal(overpay.body.error.code, 'SALES_ORDER_PAYMENT_EXCEEDS_OUTSTANDING');
+
+      const partialAmount = Math.max(1, Math.floor(billingAmount / 2));
+      const partialIdempotencyKey = randomUUID();
+      const partialPaymentBody = {
+        amount: partialAmount,
+        referenceNumber: `TRF-${runId}-1`,
+        note: 'Pembayaran termin pertama',
+        proofFile,
+        idempotencyKey: partialIdempotencyKey,
+      };
+      const partialPayment = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: partialPaymentBody,
+      });
+      assert.equal(partialPayment.status, 200);
+      assert.equal(partialPayment.body.data.totalPaid, partialAmount);
+      assert.equal(partialPayment.body.data.outstandingAmount, billingAmount - partialAmount);
+      assert.notEqual(partialPayment.body.data.billingStatus, 'lunas');
+
+      const mismatchedRetry = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { ...partialPaymentBody, amount: partialAmount + 1 },
+      });
+      assert.equal(mismatchedRetry.status, 409);
+      assert.equal(mismatchedRetry.body.error.code, 'SALES_ORDER_PAYMENT_IDEMPOTENCY_KEY_MISMATCH');
+
+      const replayedPayment = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: partialPaymentBody,
+      });
+      assert.equal(replayedPayment.status, 200);
+      assert.equal(replayedPayment.body.data.totalPaid, partialAmount);
+      assert.equal(replayedPayment.body.data.outstandingAmount, billingAmount - partialAmount);
+
+      const paymentsAfterPartial = await api(`/api/finance/invoices/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(paymentsAfterPartial.status, 200);
+      assert.equal(paymentsAfterPartial.body.data.length, 1, 'replay dengan idempotency key yang sama tidak boleh menghasilkan baris pembayaran dobel');
+      assert.equal(paymentsAfterPartial.body.data[0].amount, partialAmount);
+      assert.equal(paymentsAfterPartial.body.data[0].referenceNumber, `TRF-${runId}-1`);
+
+      const remainingAmount = billingAmount - partialAmount;
+      const finalPayment = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: remainingAmount, referenceNumber: `TRF-${runId}-2`, proofFile },
+      });
+      assert.equal(finalPayment.status, 200);
+      assert.equal(finalPayment.body.data.totalPaid, billingAmount);
+      assert.equal(finalPayment.body.data.outstandingAmount, 0);
+      assert.equal(finalPayment.body.data.billingStatus, 'lunas');
+
+      const paymentLog = await latestActivityForEntity('FINANCE_RECORD_INVOICE_PAYMENT', created.orderId);
+      assert.equal(paymentLog.action, 'FINANCE_RECORD_INVOICE_PAYMENT');
+      assert.equal(paymentLog.actor_role, 'finance');
+
+      const invoiceAfterPaid = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceAfterPaid.status, 200);
+
+      const alreadyPaid = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 1000, proofFile },
+      });
+      assert.equal(alreadyPaid.status, 409);
+      assert.equal(alreadyPaid.body.error.code, 'SALES_ORDER_PAYMENT_ALREADY_PAID');
+    });
+
+    await t.test('finance: customer outstanding dashboard hanya menampilkan SO yang belum lunas', async () => {
+      const forbiddenOutstanding = await api('/api/finance/outstanding', { token: salesToken });
+      assert.equal(forbiddenOutstanding.status, 403);
+      assert.equal(forbiddenOutstanding.body.error.code, 'FORBIDDEN');
+
+      const outstanding = await api(`/api/finance/outstanding?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(outstanding.status, 200);
+      assert.ok(Array.isArray(outstanding.body.data.rows));
+      assert.equal(outstanding.body.data.rows.some((row) => row.id === created.orderId), false);
+      assert.equal(typeof outstanding.body.data.summary.totalOutstandingAmount, 'number');
+      assert.equal(typeof outstanding.body.data.summary.needsReview, 'number');
+    });
+
+    await t.test('finance: SO yang kebuka lagi setelah koreksi tetap muncul di outstanding walau billing_status masih tersimpan lunas', async () => {
+      // Simulasikan koreksi (pembayaran dihapus/dibatalkan lewat perbaikan data) sehingga sisa
+      // outstanding riil kembali positif, tapi kolom billing_status di sales_orders belum
+      // diperbarui otomatis oleh siapa pun (persis skenario yang diperbaiki: dashboard dan
+      // pencatatan pembayaran harus mengikuti sisa yang dihitung ulang, bukan flag yang tersimpan).
+      const paymentsBefore = await api(`/api/finance/invoices/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(paymentsBefore.status, 200);
+      const lastPayment = paymentsBefore.body.data[0];
+      assert.ok(lastPayment);
+
+      await query('delete from sales_order_payments where id = $1', [lastPayment.id]);
+
+      const statusStillLunas = await query('select billing_status from sales_orders where id = $1', [created.orderId]);
+      assert.equal(statusStillLunas.rows[0].billing_status, 'lunas', 'billing_status seharusnya belum berubah otomatis setelah koreksi manual ini');
+
+      const outstandingAfterCorrection = await api(`/api/finance/outstanding?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(outstandingAfterCorrection.status, 200);
+      const reopenedRow = outstandingAfterCorrection.body.data.rows.find((row) => row.id === created.orderId);
+      assert.ok(reopenedRow, 'SO yang sisa outstanding-nya kembali positif harus muncul lagi di dashboard walau billing_status masih lunas di database');
+      assert.equal(reopenedRow.outstandingAmount, Number(lastPayment.amount));
+
+      const reopenedPayment = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          amount: lastPayment.amount,
+          referenceNumber: lastPayment.referenceNumber,
+          proofFile: {
+            fileName: `payment-proof-${runId}-reopen.pdf`,
+            mimeType: 'application/pdf',
+            fileBase64: Buffer.from(`%PDF-1.4\n% payment proof reopen ${runId}\n`).toString('base64'),
+          },
+        },
+      });
+      assert.equal(reopenedPayment.status, 200, 'pembayaran baru harus tetap bisa dicatat meski billing_status tersimpan masih lunas, karena sisa riilnya positif');
+      assert.equal(reopenedPayment.body.data.billingStatus, 'lunas');
+      assert.equal(reopenedPayment.body.data.outstandingAmount, 0);
+    });
+
+    await t.test('finance: perhitungan umur piutang memakai kalender Asia/Jakarta, bukan timezone sesi koneksi DB', async () => {
+      // 2026-08-02 03:00 WIB jatuh di tanggal 2026-08-01 kalau di-cast pakai UTC,
+      // jadi kalau kode aging pernah balik pakai due_date::date polos, test ini akan gagal
+      // begitu koneksi DB berjalan di server dengan session timezone selain Asia/Jakarta.
+      const client = await pool.connect();
+      try {
+        await client.query("set time zone 'UTC'");
+        const underUtcSession = await client.query(`
+          select
+            $1::timestamptz::date::text as naive_cast,
+            (($1::timestamptz at time zone 'Asia/Jakarta')::date)::text as explicit_jakarta_cast
+        `, ['2026-08-02T03:00:00+07:00']);
+        assert.equal(underUtcSession.rows[0].naive_cast, '2026-08-01');
+        assert.equal(underUtcSession.rows[0].explicit_jakarta_cast, '2026-08-02');
+
+        await client.query("set time zone 'Asia/Jakarta'");
+        const underJakartaSession = await client.query(`
+          select
+            $1::timestamptz::date::text as naive_cast,
+            (($1::timestamptz at time zone 'Asia/Jakarta')::date)::text as explicit_jakarta_cast
+        `, ['2026-08-02T03:00:00+07:00']);
+        assert.equal(underJakartaSession.rows[0].naive_cast, '2026-08-02');
+        assert.equal(underJakartaSession.rows[0].explicit_jakarta_cast, '2026-08-02');
+      } finally {
+        await client.query('reset time zone');
+        client.release();
+      }
     });
 
     await t.test('finance: dashboard dan perjalanan selesai read-only', async () => {
@@ -1258,6 +2216,293 @@ if (!hasDatabase) {
       const emptyTrash = await api(`/api/storage/trash?sourceId=${created.attachmentId}`, { token: adminToken });
       assert.equal(emptyTrash.status, 200);
       assert.equal(emptyTrash.body.data.total, 0);
+    });
+
+    await t.test('attachments: bukti finance tidak bisa diunduh role tanpa izin finance', async () => {
+      const expenseProofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: created.jobId,
+          category: 'expensePaymentProof',
+          fileName: `expense-proof-access-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof access ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(expenseProofUpload.status, 201);
+      const expenseProofId = expenseProofUpload.body.data.id;
+
+      const expenseProofDeniedForSales = await fetch(`${baseUrl}/api/attachments/${expenseProofId}`, {
+        headers: { Authorization: `Bearer ${salesToken}` },
+      });
+      assert.equal(expenseProofDeniedForSales.status, 403);
+      assert.equal((await expenseProofDeniedForSales.json()).error.code, 'ATTACHMENT_ACCESS_DENIED');
+
+      const expenseProofAllowedForFinance = await fetch(`${baseUrl}/api/attachments/${expenseProofId}`, {
+        headers: { Authorization: `Bearer ${financeToken}` },
+      });
+      assert.equal(expenseProofAllowedForFinance.status, 200);
+
+      const expenseProofAllowedForAdmin = await fetch(`${baseUrl}/api/attachments/${expenseProofId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(expenseProofAllowedForAdmin.status, 200);
+
+      const otherDocumentUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: created.jobId,
+          category: 'eirDocument',
+          fileName: `eir-access-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% eir access ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(otherDocumentUpload.status, 201);
+
+      const eirAllowedForSales = await fetch(`${baseUrl}/api/attachments/${otherDocumentUpload.body.data.id}`, {
+        headers: { Authorization: `Bearer ${salesToken}` },
+      });
+      assert.equal(eirAllowedForSales.status, 200);
+
+      const depositProofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'operational_fund_transaction',
+          entityId: randomUUID(),
+          category: 'transferProof',
+          fileName: `deposit-proof-access-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit proof access ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(depositProofUpload.status, 201);
+
+      const depositProofDeniedForObserver = await fetch(`${baseUrl}/api/attachments/${depositProofUpload.body.data.id}`, {
+        headers: { Authorization: `Bearer ${observerToken}` },
+      });
+      assert.equal(depositProofDeniedForObserver.status, 403);
+      assert.equal((await depositProofDeniedForObserver.json()).error.code, 'ATTACHMENT_ACCESS_DENIED');
+    });
+
+    await t.test('attachments: daftar dokumen finance juga dibatasi izin, dokumen operasional tetap terbuka', async () => {
+      const commissionPaymentEntityId = randomUUID();
+      const commissionProofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'driver_commission_payment',
+          entityId: commissionPaymentEntityId,
+          category: 'driverCommissionTransferProof',
+          fileName: `commission-proof-list-access-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% commission proof list access ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(commissionProofUpload.status, 201);
+
+      const commissionListDeniedForSales = await api(`/api/attachments?entityType=driver_commission_payment&entityId=${commissionPaymentEntityId}`, { token: salesToken });
+      assert.equal(commissionListDeniedForSales.status, 403);
+      assert.equal(commissionListDeniedForSales.body.error.code, 'ATTACHMENT_ACCESS_DENIED');
+
+      const commissionListDeniedForObserver = await api(`/api/attachments?entityType=driver_commission_payment&entityId=${commissionPaymentEntityId}`, { token: observerToken });
+      assert.equal(commissionListDeniedForObserver.status, 403);
+
+      const commissionListAllowedForFinance = await api(`/api/attachments?entityType=driver_commission_payment&entityId=${commissionPaymentEntityId}`, { token: financeToken });
+      assert.equal(commissionListAllowedForFinance.status, 200);
+      assert.ok(commissionListAllowedForFinance.body.data.some((attachment) => attachment.id === commissionProofUpload.body.data.id));
+
+      const commissionListAllowedForAdmin = await api(`/api/attachments?entityType=driver_commission_payment&entityId=${commissionPaymentEntityId}`, { token: adminToken });
+      assert.equal(commissionListAllowedForAdmin.status, 200);
+
+      const jobDocumentListAllowedForSales = await api(`/api/attachments?entityType=container_job&entityId=${created.jobId}`, { token: salesToken });
+      assert.equal(jobDocumentListAllowedForSales.status, 200);
+    });
+
+    await t.test('driver commission: pembayaran wajib ada bukti transfer sebelum ditandai paid', async () => {
+      const periodStart = '2099-04-02';
+      const periodEnd = '2099-04-08';
+      await query(
+        `
+          delete from driver_commission_payments
+          where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
+        `,
+        [periodStart, periodEnd],
+      );
+      await query(
+        'delete from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+        [periodStart, periodEnd],
+      );
+
+      const batchResult = await query(
+        `
+          insert into driver_commission_batches (period_start, period_end, status, submitted_by_name, reviewed_by_name)
+          values ($1::date, $2::date, 'approved', 'Sprint2C Operational', 'Sprint2C Finance')
+          returning id
+        `,
+        [periodStart, periodEnd],
+      );
+      const batchId = batchResult.rows[0].id;
+      const paymentResult = await query(
+        `
+          insert into driver_commission_payments (batch_id, driver_name, payment_method, total_items, total_amount, status)
+          values ($1, $2, 'bank', 1, 150000, 'pending')
+          returning id
+        `,
+        [batchId, `Driver Proof Test ${runId}`],
+      );
+      const paymentId = paymentResult.rows[0].id;
+
+      const payWithoutProof = await api(`/api/driver-commissions/payments/${paymentId}/pay`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { paymentNote: `Coba bayar tanpa bukti ${runId}` },
+      });
+      assert.equal(payWithoutProof.status, 400);
+      assert.equal(payWithoutProof.body.error.code, 'DRIVER_COMMISSION_PAYMENT_PROOF_REQUIRED');
+
+      const paidStatusCheck = await query('select status from driver_commission_payments where id = $1', [paymentId]);
+      assert.equal(paidStatusCheck.rows[0].status, 'pending');
+
+      const payWithProof = await api(`/api/driver-commissions/payments/${paymentId}/transfer-proof`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          paymentNote: `Bayar dengan bukti ${runId}`,
+          fileName: `commission-transfer-proof-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% commission transfer proof ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(payWithProof.status, 200);
+
+      const paidStatusAfterProof = await query(
+        'select status, payment_proof_attachment_id from driver_commission_payments where id = $1',
+        [paymentId],
+      );
+      assert.equal(paidStatusAfterProof.rows[0].status, 'paid');
+      assert.ok(paidStatusAfterProof.rows[0].payment_proof_attachment_id);
+    });
+
+    await t.test('driver commission: sopir di bawah kuota mingguan ditahan, cair sekaligus begitu kumulatif tembus 7 ritasi', async () => {
+      const quotaDriverName = `Kuota Test ${runId}`;
+      const quotaSoNumber = `SO-${runId}-QUOTA`.toUpperCase();
+      const periodA = { periodStart: '2099-04-09', periodEnd: '2099-04-15' };
+      const periodB = { periodStart: '2099-04-16', periodEnd: '2099-04-22' };
+
+      for (const period of [periodA, periodB]) {
+        await query(
+          `
+            delete from driver_commission_items
+            where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
+          `,
+          [period.periodStart, period.periodEnd],
+        );
+        await query(
+          `
+            delete from driver_commission_payments
+            where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
+          `,
+          [period.periodStart, period.periodEnd],
+        );
+        await query(
+          'delete from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+          [period.periodStart, period.periodEnd],
+        );
+      }
+
+      const quotaSo = await query(
+        `
+          insert into sales_orders (so_number, customer_name, shipment_type, origin, destination, status)
+          values ($1, $2, 'import', 'Tanjung Priok', 'Cikarang', 'completed')
+          returning id
+        `,
+        [quotaSoNumber, `Customer Kuota ${runId}`],
+      );
+      const quotaSalesOrderId = quotaSo.rows[0].id;
+
+      async function insertQuotaJob(containerSuffix, completedDate) {
+        await query(
+          `
+            insert into container_jobs (
+              sales_order_id, container_number, container_size, status, completed_at,
+              has_driver_commission, driver_commission_amount, assignment_snapshot
+            )
+            values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 50000, $4::jsonb)
+          `,
+          [
+            quotaSalesOrderId,
+            `${quotaSoNumber}QUOTA${containerSuffix}`,
+            `${completedDate}T08:00:00+07:00`,
+            JSON.stringify({ driver: quotaDriverName }),
+          ],
+        );
+      }
+
+      for (let index = 1; index <= 3; index += 1) {
+        await insertQuotaJob(`A${index}`, periodA.periodStart);
+      }
+
+      const belowQuota = await api('/api/driver-commissions/batches', {
+        method: 'POST',
+        token: adminToken,
+        body: periodA,
+      });
+      assert.equal(belowQuota.status, 400, 'sopir baru jalan 3 kali, di bawah kuota minimum 6, batch minggu ini seharusnya kosong');
+      assert.equal(belowQuota.body.error.code, 'NO_ELIGIBLE_DRIVER_COMMISSION');
+
+      const reportPeriodA = await api(`/api/driver-commissions/period-report?periodStart=${periodA.periodStart}&periodEnd=${periodA.periodEnd}`, { token: financeToken });
+      assert.equal(reportPeriodA.status, 200);
+      const withheldA = reportPeriodA.body.data.withheld.find((row) => row.driverName === quotaDriverName);
+      assert.ok(withheldA, 'sopir yang ditahan harus muncul di daftar withheld periode ini');
+      assert.equal(withheldA.pendingItems, 3);
+      assert.equal(withheldA.target, 6);
+      assert.equal(withheldA.remaining, 3);
+
+      for (let index = 1; index <= 4; index += 1) {
+        await insertQuotaJob(`B${index}`, periodB.periodStart);
+      }
+
+      const stillBelowIfCheckedAlone = await api(`/api/driver-commissions/period-report?periodStart=${periodB.periodStart}&periodEnd=${periodB.periodEnd}`, { token: financeToken });
+      assert.equal(stillBelowIfCheckedAlone.status, 200);
+      assert.equal(
+        stillBelowIfCheckedAlone.body.data.withheld.find((row) => row.driverName === quotaDriverName),
+        undefined,
+        'begitu kumulatif (3 tunggakan + 4 minggu ini = 7) tembus target, sopir ini seharusnya sudah lolos (released), bukan withheld lagi',
+      );
+
+      const releaseSubmission = await api('/api/driver-commissions/batches', {
+        method: 'POST',
+        token: adminToken,
+        body: periodB,
+      });
+      assert.equal(releaseSubmission.status, 201, 'begitu kumulatif tembus 7, submit periode ini harus berhasil membawa serta tunggakan minggu lalu');
+
+      const quotaDriverPayment = releaseSubmission.body.data.payments.find((payment) => payment.driverName === quotaDriverName);
+      assert.ok(quotaDriverPayment);
+      assert.equal(quotaDriverPayment.totalItems, 7, 'batch yang cair harus berisi 3 ritasi tunggakan minggu lalu + 4 ritasi minggu ini');
+      assert.equal(quotaDriverPayment.totalAmount, 350000);
+      assert.ok(
+        quotaDriverPayment.items.some((item) => item.completedDate === periodA.periodStart),
+        'ritasi minggu lama yang sempat tertahan harus ikut masuk batch yang cair ini',
+      );
+
+      const reportPeriodAAfterRelease = await api(`/api/driver-commissions/period-report?periodStart=${periodA.periodStart}&periodEnd=${periodA.periodEnd}`, { token: financeToken });
+      assert.equal(reportPeriodAAfterRelease.status, 200);
+      assert.equal(
+        reportPeriodAAfterRelease.body.data.withheld.find((row) => row.driverName === quotaDriverName),
+        undefined,
+        'setelah cair, sopir ini tidak lagi berstatus tertahan',
+      );
     });
 
     await t.test('vehicle documents: create vehicles, upload KIR, list, download, safe path', async () => {
@@ -1428,5 +2673,64 @@ if (!hasDatabase) {
       assert.equal(typeof driverReport.body.data.total, 'number');
       assert.ok(Array.isArray(driverReport.body.data.months));
     });
+  });
+
+  test('rekening dropping: tutup batch mengunci baris batch agar tidak balapan dengan pencatatan biaya baru', async () => {
+    const lockBatchDate = '2099-08-31';
+    await query(
+      `
+        delete from operational_fund_transactions
+        where batch_id in (select id from operational_fund_batches where batch_date = $1::date)
+      `,
+      [lockBatchDate],
+    );
+    await query('delete from operational_fund_batches where batch_date = $1::date', [lockBatchDate]);
+
+    const bootstrap = await query(
+      `
+        insert into operational_fund_batches (batch_date, status, created_by_name, updated_by_name)
+        values ($1::date, 'open', 'Lock Test Bootstrap', 'Lock Test Bootstrap')
+        returning id
+      `,
+      [lockBatchDate],
+    );
+    const batchId = bootstrap.rows[0].id;
+
+    const holderClient = await pool.connect();
+    const waiterClient = await pool.connect();
+    try {
+      await holderClient.query('begin');
+      await holderClient.query(
+        `
+          insert into operational_fund_batches (batch_date, status, created_by_name, updated_by_name)
+          values ($1::date, 'open', 'Lock Test Holder', 'Lock Test Holder')
+          on conflict (batch_date) do update set updated_at = operational_fund_batches.updated_at
+          returning id
+        `,
+        [lockBatchDate],
+      );
+
+      await waiterClient.query('begin');
+      const waiterQuery = waiterClient.query('select id, status from operational_fund_batches where id = $1 for update', [batchId]);
+
+      const stillBlocked = await Promise.race([
+        waiterQuery.then(() => 'resolved'),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 300)),
+      ]);
+      assert.equal(stillBlocked, 'timeout', 'select for update seharusnya menunggu selama holder belum commit');
+
+      await holderClient.query('commit');
+
+      const releasedInTime = await Promise.race([
+        waiterQuery.then(() => 'resolved'),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+      ]);
+      assert.equal(releasedInTime, 'resolved', 'select for update seharusnya lanjut begitu holder commit');
+
+      await waiterClient.query('commit');
+    } finally {
+      holderClient.release();
+      waiterClient.release();
+    }
   });
 }

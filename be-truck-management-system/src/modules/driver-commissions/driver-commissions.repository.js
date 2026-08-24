@@ -113,6 +113,65 @@ function reportDriverKey(row = {}) {
   return row.driverId || `name:${String(row.driverName || '').trim().toLowerCase()}`;
 }
 
+// Kuota ritasi mingguan: mendorong sopir tetap aktif jalan. Sopir yang baru pertama kali (tidak
+// punya tunggakan dari minggu sebelumnya) perlu minimal 6 ritasi berkomisi minggu itu supaya
+// langsung cair minggu itu juga. Kalau kurang dari 6, seluruh komisi minggu itu ditahan dan
+// digabung (bukan hangus) dengan ritasi minggu-minggu berikutnya; begitu totalnya tembus 7,
+// seluruh tunggakan cair sekaligus. Tidak ada batas waktu penahanan.
+export const DRIVER_COMMISSION_QUOTA_FRESH_WEEK_MINIMUM = 6;
+export const DRIVER_COMMISSION_QUOTA_RELEASE_THRESHOLD = 7;
+
+// Fungsi murni (tanpa akses DB) supaya mudah diuji: menerima SEMUA ritasi berkomisi milik sopir
+// yang belum pernah masuk batch mana pun (completed_date sampai dengan periodEnd, tidak dibatasi
+// periodStart, karena tunggakan bisa berasal dari berminggu-minggu sebelumnya), lalu memutuskan
+// per sopir mana yang lolos kuota (released, ikut diajukan periode ini) dan mana yang masih
+// ditahan (withheld, informasi untuk ditampilkan ke Operational).
+export function applyDriverCommissionQuota(rows = [], period) {
+  const byDriver = new Map();
+  for (const row of rows) {
+    const key = reportDriverKey(row);
+    if (!byDriver.has(key)) byDriver.set(key, []);
+    byDriver.get(key).push(row);
+  }
+
+  const released = [];
+  const withheld = [];
+
+  for (const driverRows of byDriver.values()) {
+    const backlog = driverRows.filter((row) => String(row.completedDate || '') < period.periodStart);
+    const thisWeek = driverRows.filter((row) => (
+      String(row.completedDate || '') >= period.periodStart && String(row.completedDate || '') <= period.periodEnd
+    ));
+    const isCarryingBacklog = backlog.length > 0;
+    const total = backlog.length + thisWeek.length;
+    const target = isCarryingBacklog ? DRIVER_COMMISSION_QUOTA_RELEASE_THRESHOLD : DRIVER_COMMISSION_QUOTA_FRESH_WEEK_MINIMUM;
+    const passes = total >= target;
+
+    if (passes) {
+      released.push(...backlog, ...thisWeek);
+    } else if (total > 0) {
+      const sample = driverRows[0];
+      withheld.push({
+        driverKey: reportDriverKey(sample),
+        driverId: sample.driverId || null,
+        driverName: sample.driverName || '',
+        pendingItems: total,
+        pendingAmount: driverRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        target,
+        remaining: Math.max(target - total, 0),
+      });
+    }
+  }
+
+  released.sort((left, right) => (
+    String(left.completedDate || '').localeCompare(String(right.completedDate || ''))
+      || String(left.driverName || '').localeCompare(String(right.driverName || ''), 'id-ID', { numeric: true })
+  ));
+  withheld.sort((left, right) => left.driverName.localeCompare(right.driverName, 'id-ID', { numeric: true }));
+
+  return { released, withheld };
+}
+
 function pickBatchStatus(current, next) {
   const rank = { unsubmitted: 0, submitted: 1, approved: 2, paid: 3 };
   const currentStatus = current || 'unsubmitted';
@@ -142,6 +201,16 @@ function mapReportEligibleRow(row = {}) {
 }
 
 function mapReportSubmittedRow(row = {}) {
+  const paymentProofAttachment = row.payment_proof_attachment_id
+    ? {
+        id: row.payment_proof_attachment_id,
+        name: row.proof_file_name || '',
+        size: row.proof_file_size == null ? 0 : Number(row.proof_file_size),
+        type: row.proof_mime_type || '',
+        path: row.payment_proof_attachment_id,
+      }
+    : null;
+
   return {
     ...mapItemRow(row),
     paymentMethod: row.payment_method === 'emoney' ? 'emoney' : 'bank',
@@ -156,6 +225,7 @@ function mapReportSubmittedRow(row = {}) {
     paidAt: row.paid_at,
     paidByName: row.paid_by_name || '',
     paymentProofAttachmentId: row.payment_proof_attachment_id || null,
+    paymentProofAttachment,
     paymentNote: row.payment_note || '',
     truckPlateNumber: row.truck_plate_number || '',
     source: 'batch',
@@ -228,6 +298,7 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
       paymentId: row.paymentId || null,
       paymentStatus: row.paymentStatus || 'unsubmitted',
       paymentProofAttachmentId: row.paymentProofAttachmentId || null,
+      paymentProofAttachment: row.paymentProofAttachment || null,
       paymentNote: row.paymentNote || '',
       paidAt: row.paidAt || null,
       paidByName: row.paidByName || '',
@@ -261,6 +332,7 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
     current.paymentId = current.paymentId || row.paymentId || null;
     current.paymentStatus = pickPaymentStatus(current.paymentStatus, row.paymentStatus);
     current.paymentProofAttachmentId = current.paymentProofAttachmentId || row.paymentProofAttachmentId || null;
+    current.paymentProofAttachment = current.paymentProofAttachment || row.paymentProofAttachment || null;
     current.paymentNote = current.paymentNote || row.paymentNote || '';
     current.paidAt = current.paidAt || row.paidAt || null;
     current.paidByName = current.paidByName || row.paidByName || '';
@@ -327,6 +399,9 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
   return { summary, drivers };
 }
 
+// Diambil semua ritasi berkomisi yang belum pernah masuk batch mana pun dengan completed_date
+// SAMPAI DENGAN periodEnd (tanpa batas bawah periodStart) — supaya tunggakan kuota dari
+// minggu-minggu sebelumnya ikut terbawa dan bisa dievaluasi bersama oleh applyDriverCommissionQuota.
 async function findEligibleRows(period, db = { query }) {
   const result = await db.query(
     `
@@ -364,7 +439,7 @@ async function findEligibleRows(period, db = { query }) {
       left join drivers d on d.id = cj.driver_id and d.archived_at is null
       where cj.status = 'completed'
         and cj.completed_at is not null
-        and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+        and (cj.completed_at at time zone 'Asia/Jakarta')::date <= $1::date
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.driver_commission_amount, 0) > 0
         and nullif(coalesce(d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
@@ -377,25 +452,31 @@ async function findEligibleRows(period, db = { query }) {
         )
       order by completed_date asc, driver_name asc, so.so_number asc, cj.container_number asc nulls last
     `,
-    [period.periodStart, period.periodEnd],
+    [period.periodEnd],
   );
 
   return result.rows.map(mapEligibleRow);
 }
 
+async function findEligibleRowsWithQuota(period, db = { query }) {
+  const rows = await findEligibleRows(period, db);
+  return applyDriverCommissionQuota(rows, period);
+}
+
 export async function findEligibleDriverCommissions(period) {
-  const rows = await findEligibleRows(period);
+  const { released, withheld } = await findEligibleRowsWithQuota(period);
   return {
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
-    summary: summarizeEligibleRows(rows),
-    rows,
+    summary: summarizeEligibleRows(released),
+    rows: released,
+    withheld,
   };
 }
 
 export async function findDriverCommissionPeriodReport(period) {
-  const [eligibleRows, submittedResult, batchesResult] = await Promise.all([
-    findEligibleRows(period),
+  const [{ released: eligibleRows, withheld }, submittedResult, batchesResult] = await Promise.all([
+    findEligibleRowsWithQuota(period),
     query(
       `
         select
@@ -412,12 +493,16 @@ export async function findDriverCommissionPeriodReport(period) {
           dcp.paid_at,
           dcp.paid_by_name,
           dcp.payment_proof_attachment_id,
+          proof.file_name as proof_file_name,
+          proof.mime_type as proof_mime_type,
+          proof.file_size as proof_file_size,
           dcp.payment_note,
           cj.assignment_snapshot->>'plateNumber' as truck_plate_number
         from driver_commission_items dci
         join driver_commission_batches dcb on dcb.id = dci.batch_id
         join driver_commission_payments dcp on dcp.id = dci.payment_id
         left join container_jobs cj on cj.id = dci.container_job_id
+        left join attachments proof on proof.id = dcp.payment_proof_attachment_id
         where dci.voided_at is null
           and dci.completed_date between $1::date and $2::date
           and dcb.status in ('submitted', 'approved', 'paid')
@@ -450,6 +535,7 @@ export async function findDriverCommissionPeriodReport(period) {
     periodEnd: period.periodEnd,
     status: activeBatch?.status || (rows.length ? 'draft' : 'empty'),
     activeBatch,
+    withheld,
     ...grouped,
   };
 }
@@ -564,9 +650,9 @@ export async function createDriverCommissionBatch(period, actor = {}) {
       throw error;
     }
 
-    const eligibleRows = await findEligibleRows(period, client);
+    const { released: eligibleRows } = await findEligibleRowsWithQuota(period, client);
     if (!eligibleRows.length) {
-      const error = new Error('Tidak ada komisi sopir yang eligible untuk periode ini.');
+      const error = new Error('Tidak ada komisi sopir yang eligible untuk periode ini (kemungkinan semua sopir masih di bawah kuota ritasi mingguan).');
       error.statusCode = 400;
       error.code = 'NO_ELIGIBLE_DRIVER_COMMISSION';
       throw error;
@@ -786,6 +872,13 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
       );
 
       return findDriverCommissionBatchById(current.batch_id, client);
+    }
+
+    if (!nextProofAttachmentId && !current.payment_proof_attachment_id) {
+      const error = new Error('Bukti transfer wajib diupload sebelum pembayaran komisi ditandai paid.');
+      error.statusCode = 400;
+      error.code = 'DRIVER_COMMISSION_PAYMENT_PROOF_REQUIRED';
+      throw error;
     }
 
     await client.query(

@@ -1,5 +1,5 @@
 import { query, withTransaction } from '../../db/client.js';
-import { mapContainerJob, toAssignmentSnapshot } from './container-jobs.mapper.js';
+import { mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.container_type,
@@ -46,6 +46,36 @@ const attachmentColumns = `
   mime_type, file_size, notes, uploaded_by_name, created_at
 `;
 
+const expenseColumns = `
+  expense.id,
+  expense.sales_order_id,
+  expense.container_job_id,
+  expense.driver_id,
+  expense.category,
+  expense.amount,
+  expense.description,
+  expense.recipient_type,
+  expense.recipient_name,
+  expense.payment_status,
+  expense.paid_at,
+  expense.paid_by_name,
+  expense.proof_attachment_id,
+  expense.finance_check_status,
+  expense.finance_checked_by_name,
+  expense.finance_checked_at,
+  expense.finance_note,
+  expense.source,
+  expense.source_ref_id,
+  expense.created_by_name,
+  expense.updated_by_name,
+  expense.created_at,
+  expense.updated_at,
+  proof.file_name as proof_file_name,
+  proof.storage_path as proof_storage_path,
+  proof.mime_type as proof_mime_type,
+  proof.file_size as proof_file_size
+`;
+
 function parsePage(options = {}) {
   const page = Math.max(1, Number(options.page || 1));
   const pageSize = Math.max(1, Math.min(100, Number(options.pageSize || 20)));
@@ -56,9 +86,116 @@ function normalizeBooleanFlag(value) {
   return value === true || String(value || '').toLowerCase() === 'true' || value === '1';
 }
 
+async function findExpenseRowsByJobId(executeQuery, id) {
+  const result = await executeQuery(
+    `
+      select ${expenseColumns}
+      from container_job_expenses expense
+      left join attachments proof on proof.id = expense.proof_attachment_id
+      where expense.container_job_id = $1
+      order by expense.created_at asc, expense.id asc
+    `,
+    [id],
+  );
+  return result.rows;
+}
+
 function periodFromDate(value, fallback = '') {
   const datePeriod = String(value || '').trim().match(/^(\d{4}-\d{2})-/)?.[1] || '';
   return normalizeOptionalText(datePeriod || fallback);
+}
+
+function operationalFundCategoryFromExpense(category = '') {
+  if (category === 'uj_awal') return 'uj_order';
+  if (category === 'top_up_uj') return 'top_up_uj';
+  return 'biaya_lainnya';
+}
+
+async function ensureOperationalFundBatch(client, batchDate, actorName = 'Operational') {
+  const result = await client.query(
+    `
+      insert into operational_fund_batches (
+        batch_date,
+        status,
+        created_by_name,
+        updated_by_name
+      )
+      values (coalesce($1::date, current_date), 'open', $2, $2)
+      on conflict (batch_date) do update
+        set updated_at = operational_fund_batches.updated_at
+      returning id, batch_date, status
+    `,
+    [batchDate, actorName],
+  );
+  const batch = result.rows[0];
+  if (batch.status === 'closed') {
+    const error = new Error('Batch rekening dropping tanggal ini sudah ditutup.');
+    error.statusCode = 409;
+    error.code = 'OPERATIONAL_FUND_BATCH_CLOSED';
+    throw error;
+  }
+  return batch;
+}
+
+async function ensureSufficientOperationalFundBalance(client, batch, expenseId, newAmount) {
+  const balanceResult = await client.query(
+    `
+      select
+        coalesce(sum(amount) filter (where transaction_type = 'credit' and status = 'posted'), 0)
+        - coalesce(sum(amount) filter (where transaction_type = 'debit' and status = 'posted'), 0)
+        + coalesce(sum(amount) filter (where transaction_type = 'adjustment' and status = 'posted'), 0)
+        as balance
+      from operational_fund_transactions
+      where batch_id = $1
+    `,
+    [batch.id],
+  );
+  const currentBalance = Number(balanceResult.rows[0]?.balance || 0);
+
+  const existingDebitResult = await client.query(
+    `
+      select amount
+      from operational_fund_transactions
+      where container_job_expense_id = $1
+        and transaction_type = 'debit'
+        and status = 'posted'
+      limit 1
+    `,
+    [expenseId],
+  );
+  const existingDebitAmount = Number(existingDebitResult.rows[0]?.amount || 0);
+
+  const marginalIncrease = Number(newAmount || 0) - existingDebitAmount;
+  if (marginalIncrease > currentBalance) {
+    const error = new Error(
+      `Saldo batch rekening dropping tanggal ${batch.batch_date} tidak mencukupi. Sisa saldo Rp ${currentBalance.toLocaleString('id-ID')}, dibutuhkan Rp ${marginalIncrease.toLocaleString('id-ID')}.`,
+    );
+    error.statusCode = 409;
+    error.code = 'OPERATIONAL_FUND_INSUFFICIENT_BALANCE';
+    throw error;
+  }
+}
+
+function isFortyFeetContainer(size = '') {
+  return normalizeContainerSize(size).includes('40');
+}
+
+export function resolveJourneyMoneyAmountForSize(destinationRow = {}, containerSize = '') {
+  const amount = isFortyFeetContainer(containerSize)
+    ? destinationRow.uj_40ft ?? destinationRow.uj40ft
+    : destinationRow.uj_20ft ?? destinationRow.uj20ft;
+  const normalized = Number(amount || 0);
+  return Number.isFinite(normalized) && normalized > 0 ? Math.round(normalized) : 0;
+}
+
+export function buildAutoJourneyMoneyDescription(job = {}, assignment = {}) {
+  return [
+    'UJ',
+    job.customer_name || job.customerName,
+    job.destination,
+    job.container_size || job.containerSize,
+    assignment.plateNumber || job.assignment_snapshot?.plateNumber,
+  ].filter(Boolean).join(' ');
 }
 
 function normalizeDateOnly(value) {
@@ -230,7 +367,8 @@ async function findMappedContainerJob(client, id) {
     `,
     [id],
   );
-  return mapContainerJob(result.rows[0], attachmentResult.rows);
+  const expenseRows = await findExpenseRowsByJobId(client.query.bind(client), id);
+  return mapContainerJob(result.rows[0], attachmentResult.rows, expenseRows);
 }
 
 async function refreshOrderStatusAndMapJob(client, orderId, jobId) {
@@ -391,17 +529,6 @@ export function shouldValidateVehicleContainerSize(form = {}, existing = {}) {
   return !isHistoricalBackfill(form, existing);
 }
 
-function requireTripStartAllowed(nextStatus, rpujStatus, options = {}) {
-  if (options.allowHistoricalBackfill || options.allowAdminCorrection) return;
-  if (!['running', 'completed'].includes(nextStatus)) return;
-  if (['approved', 'paid'].includes(rpujStatus)) return;
-  throw validationError(
-    'Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.',
-    'TRIP_WAITING_RPUJ_APPROVAL',
-    409,
-  );
-}
-
 function assignmentValue(...values) {
   return values.map((value) => String(value || '').trim()).find(Boolean) || '';
 }
@@ -423,6 +550,197 @@ function requireCompleteOperationalAssignment(form, driver, vehicle, existing, m
     message || 'Lengkapi truck dan driver terlebih dahulu.',
     'CONTAINER_JOB_ASSIGNMENT_REQUIRED',
     409,
+  );
+}
+
+async function findJourneyMoneyAmount(client, job = {}) {
+  const destination = normalizeOptionalText(job.destination);
+  if (!destination) return 0;
+  const result = await client.query(
+    `
+      select uj_20ft, uj_40ft
+      from destination_locations
+      where lower(trim(name)) = lower(trim($1))
+        and archived_at is null
+      order by updated_at desc nulls last, created_at desc nulls last
+      limit 1
+    `,
+    [destination],
+  );
+  return resolveJourneyMoneyAmountForSize(result.rows[0] || {}, job.container_size);
+}
+
+async function syncAutoJourneyMoneyExpense(client, {
+  job,
+  nextStatus,
+  nextEntrySource,
+  nextDriverId,
+  runningAt,
+  assignment,
+  actorName,
+}) {
+  if (!['running', 'completed'].includes(nextStatus)) return;
+  if (nextEntrySource === 'historical') return;
+  if (['approved', 'paid'].includes(job.rpuj_status)) return;
+
+  const existingJourneyMoney = await client.query(
+    `
+      select id
+      from container_job_expenses
+      where container_job_id = $1
+        and category = 'uj_awal'
+        and payment_status <> 'batal'
+        and coalesce(source, 'manual') <> 'auto_uj_order'
+      limit 1
+    `,
+    [job.id],
+  );
+  if (existingJourneyMoney.rows[0]) return;
+
+  const amount = await findJourneyMoneyAmount(client, job);
+  if (amount <= 0) return;
+
+  const paidAt = runningAt || new Date().toISOString();
+  const description = buildAutoJourneyMoneyDescription(job, assignment);
+  const sourceRefId = job.id;
+  const expenseResult = await client.query(
+    `
+      insert into container_job_expenses (
+        sales_order_id,
+        container_job_id,
+        driver_id,
+        category,
+        amount,
+        description,
+        recipient_type,
+        recipient_name,
+        payment_status,
+        paid_at,
+        paid_by_name,
+        finance_check_status,
+        finance_checked_by_name,
+        finance_checked_at,
+        source,
+        source_ref_id,
+        created_by_name,
+        updated_by_name
+      )
+      values ($1, $2, $3, 'uj_awal', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'sudah_dicek', $8, now(), 'auto_uj_order', $9, $8, $8)
+      on conflict (source, source_ref_id)
+        where source = 'auto_uj_order' and source_ref_id is not null
+      do update set
+        sales_order_id = excluded.sales_order_id,
+        driver_id = excluded.driver_id,
+        amount = excluded.amount,
+        description = excluded.description,
+        recipient_name = excluded.recipient_name,
+        payment_status = 'sudah_dibayar',
+        paid_at = excluded.paid_at,
+        paid_by_name = excluded.paid_by_name,
+        finance_check_status = 'sudah_dicek',
+        finance_checked_by_name = excluded.finance_checked_by_name,
+        finance_checked_at = now(),
+        updated_by_name = excluded.updated_by_name,
+        updated_at = now()
+      returning id
+    `,
+    [
+      job.sales_order_id,
+      job.id,
+      nextDriverId || job.driver_id || null,
+      amount,
+      description,
+      assignment.driver || null,
+      paidAt,
+      actorName || 'Operational',
+      String(sourceRefId),
+    ],
+  );
+  const expenseId = expenseResult.rows[0].id;
+  const batchDate = paidAt ? String(paidAt).slice(0, 10) : null;
+  const batch = await ensureOperationalFundBatch(client, batchDate, actorName || 'Operational');
+
+  await client.query(
+    `
+      insert into operational_fund_transactions (
+        batch_id,
+        container_job_id,
+        container_job_expense_id,
+        transaction_date,
+        transaction_type,
+        category,
+        amount,
+        description,
+        top_name,
+        driver_name,
+        do_number,
+        customer_name,
+        source,
+        source_ref_id,
+        created_by_name,
+        updated_by_name
+      )
+      values ($1, $2, $3, coalesce($4::date, current_date), 'debit', 'uj_order', $5, $6, $7, $8, $9, $10, 'auto_uj_order', $11, $7, $7)
+      on conflict (container_job_expense_id)
+        where container_job_expense_id is not null
+          and transaction_type = 'debit'
+          and status = 'posted'
+        do update set
+        transaction_date = excluded.transaction_date,
+        category = 'uj_order',
+        amount = excluded.amount,
+        description = excluded.description,
+        batch_id = excluded.batch_id,
+        top_name = excluded.top_name,
+        driver_name = excluded.driver_name,
+        do_number = excluded.do_number,
+        customer_name = excluded.customer_name,
+        source = excluded.source,
+        source_ref_id = excluded.source_ref_id,
+        updated_by_name = excluded.updated_by_name,
+        updated_at = now()
+    `,
+    [
+      batch.id,
+      job.id,
+      expenseId,
+      batchDate,
+      amount,
+      description,
+      actorName || 'Operational',
+      assignment.driver || null,
+      job.do_number || job.destination || null,
+      job.customer_name || null,
+      String(job.id),
+    ],
+  );
+}
+
+async function voidAutoJourneyMoneyExpense(client, jobId, actorName = 'Operational') {
+  await client.query(
+    `
+      update container_job_expenses
+      set payment_status = 'batal',
+          updated_by_name = $2,
+          updated_at = now()
+      where container_job_id = $1
+        and source = 'auto_uj_order'
+        and payment_status <> 'batal'
+    `,
+    [jobId, actorName],
+  );
+  await client.query(
+    `
+      update operational_fund_transactions
+      set status = 'void',
+          updated_by_name = $2,
+          updated_at = now()
+      where container_job_id = $1
+        and source = 'auto_uj_order'
+        and transaction_type = 'debit'
+        and status = 'posted'
+    `,
+    [jobId, actorName],
   );
 }
 
@@ -544,13 +862,6 @@ async function syncResourceAssignmentStatus(client, existing, nextAssignment = {
 async function requireCompletedJobReady(client, id, form, existing, options = {}) {
   const allowHistoricalBackfill = Boolean(options.allowHistoricalBackfill);
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
-  if (!allowHistoricalBackfill && !allowAdminCorrection && !['approved', 'paid'].includes(existing.rpuj_status || form.rpujStatus)) {
-    throw validationError(
-      'Pekerjaan belum dapat diselesaikan. UJ harus disetujui/dikirim Finance terlebih dahulu.',
-      'CONTAINER_JOB_COMPLETION_INCOMPLETE',
-      409,
-    );
-  }
 
   const runningAt = form.runningAt || existing.running_at;
   const completedAt = form.completedAt;
@@ -803,7 +1114,596 @@ export async function findContainerJobById(id) {
     `,
     [id],
   );
-  return mapContainerJob(result.rows[0], attachmentResult.rows);
+  const expenseRows = await findExpenseRowsByJobId(query, id);
+  return mapContainerJob(result.rows[0], attachmentResult.rows, expenseRows);
+}
+
+export async function findContainerJobExpensesByJobId(id) {
+  const result = await query('select id from container_jobs where id = $1', [id]);
+  if (!result.rows[0]) {
+    const error = new Error('Container Job tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'CONTAINER_JOB_NOT_FOUND';
+    throw error;
+  }
+  const expenseRows = await findExpenseRowsByJobId(query, id);
+  return expenseRows.map(mapContainerJobExpense);
+}
+
+export async function findContainerJobExpenseLedger(options = {}) {
+  const { limit, offset, page, pageSize } = parsePage(options);
+  const params = [];
+  const clauses = ['1 = 1'];
+
+  if (options.financeCheckStatus) {
+    params.push(options.financeCheckStatus);
+    clauses.push(`expense.finance_check_status = $${params.length}`);
+  }
+  if (options.paymentStatus) {
+    params.push(options.paymentStatus);
+    clauses.push(`expense.payment_status = $${params.length}`);
+  }
+  if (options.ledgerStatus === 'need_proof') {
+    clauses.push("expense.payment_status = 'sudah_dibayar' and expense.proof_attachment_id is null");
+  } else if (options.ledgerStatus === 'need_correction') {
+    clauses.push("expense.finance_check_status = 'perlu_klarifikasi'");
+  } else if (options.ledgerStatus === 'waiting_finance') {
+    clauses.push("expense.finance_check_status in ('belum_dicek', 'dikoreksi')");
+  } else if (options.ledgerStatus === 'checked') {
+    clauses.push("expense.finance_check_status = 'sudah_dicek'");
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`coalesce(expense.paid_at::date, expense.created_at::date) >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`coalesce(expense.paid_at::date, expense.created_at::date) <= $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${options.query}%`);
+    clauses.push(`(
+      so.so_number ilike $${params.length}
+      or cj.container_number ilike $${params.length}
+      or so.customer_name ilike $${params.length}
+      or so.destination ilike $${params.length}
+      or expense.description ilike $${params.length}
+      or expense.recipient_name ilike $${params.length}
+      or cj.assignment_snapshot->>'driver' ilike $${params.length}
+      or cj.assignment_snapshot->>'plateNumber' ilike $${params.length}
+    )`);
+  }
+
+  const whereSql = clauses.join(' and ');
+  const rowsParams = [...params, limit, offset];
+  const rows = await query(
+    `
+      select
+        ${expenseColumns},
+        cj.id as ledger_container_job_id,
+        cj.container_number as ledger_container_number,
+        cj.container_size as ledger_container_size,
+        cj.assignment_snapshot as ledger_assignment_snapshot,
+        so.so_number as ledger_so_number,
+        so.customer_name as ledger_customer_name,
+        so.destination as ledger_destination,
+        so.trip_date as ledger_trip_date
+      from container_job_expenses expense
+      join container_jobs cj on cj.id = expense.container_job_id
+      join sales_orders so on so.id = coalesce(expense.sales_order_id, cj.sales_order_id)
+      left join attachments proof on proof.id = expense.proof_attachment_id
+      where ${whereSql}
+      order by coalesce(expense.paid_at, expense.created_at) desc, expense.created_at desc
+      limit $${params.length + 1} offset $${params.length + 2}
+    `,
+    rowsParams,
+  );
+  const summary = await query(
+    `
+      select
+        count(*)::int as total,
+        coalesce(sum(expense.amount), 0)::numeric as total_amount,
+        count(*) filter (
+          where expense.payment_status = 'sudah_dibayar'
+            and expense.proof_attachment_id is null
+        )::int as need_proof,
+        count(*) filter (where expense.finance_check_status = 'perlu_klarifikasi')::int as need_correction,
+        count(*) filter (where expense.finance_check_status in ('belum_dicek', 'dikoreksi'))::int as waiting_finance,
+        count(*) filter (where expense.finance_check_status = 'sudah_dicek')::int as checked
+      from container_job_expenses expense
+      join container_jobs cj on cj.id = expense.container_job_id
+      join sales_orders so on so.id = coalesce(expense.sales_order_id, cj.sales_order_id)
+      where ${whereSql}
+    `,
+    params,
+  );
+
+  return {
+    rows: rows.rows.map((row) => {
+      const assignment = row.ledger_assignment_snapshot || {};
+      return {
+        ...mapContainerJobExpense(row),
+        jobId: row.ledger_container_job_id,
+        soNumber: row.ledger_so_number || '',
+        containerNumber: row.ledger_container_number || '',
+        containerSize: row.ledger_container_size || '',
+        customer: row.ledger_customer_name || '',
+        destination: row.ledger_destination || '',
+        tripDate: row.ledger_trip_date || null,
+        driver: assignment.driver || '',
+        plateNumber: assignment.plateNumber || '',
+      };
+    }),
+    page,
+    pageSize,
+    total: Number(summary.rows[0]?.total || 0),
+    summary: {
+      totalAmount: Number(summary.rows[0]?.total_amount || 0),
+      needProof: Number(summary.rows[0]?.need_proof || 0),
+      needCorrection: Number(summary.rows[0]?.need_correction || 0),
+      waitingFinance: Number(summary.rows[0]?.waiting_finance || 0),
+      checked: Number(summary.rows[0]?.checked || 0),
+    },
+  };
+}
+
+async function getMappedExpenseById(client, id) {
+  const result = await client.query(
+    `
+      select ${expenseColumns}
+      from container_job_expenses expense
+      left join attachments proof on proof.id = expense.proof_attachment_id
+      where expense.id = $1
+      limit 1
+    `,
+    [id],
+  );
+  return result.rows[0] ? mapContainerJobExpense(result.rows[0]) : null;
+}
+
+export async function findContainerJobExpenseByIdRecord(id) {
+  const result = await query(
+    `
+      select ${expenseColumns}
+      from container_job_expenses expense
+      left join attachments proof on proof.id = expense.proof_attachment_id
+      where expense.id = $1
+      limit 1
+    `,
+    [id],
+  );
+  return result.rows[0] ? mapContainerJobExpense(result.rows[0]) : null;
+}
+
+export async function createContainerJobExpenseRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const jobResult = await client.query(
+      `
+        select cj.id, cj.sales_order_id, cj.driver_id, cj.status, cj.container_number,
+               cj.assignment_snapshot,
+               so.so_number, so.do_number, so.customer_name, so.destination
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.id = $1
+      `,
+      [id],
+    );
+    if (!jobResult.rows[0]) {
+      const error = new Error('Container Job tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_NOT_FOUND';
+      throw error;
+    }
+
+    const job = jobResult.rows[0];
+    const idempotencyKey = normalizeOptionalText(payload.idempotencyKey);
+    const result = await client.query(
+      `
+        insert into container_job_expenses (
+          sales_order_id,
+          container_job_id,
+          driver_id,
+          category,
+          amount,
+          description,
+          recipient_type,
+          recipient_name,
+          payment_status,
+          paid_at,
+          paid_by_name,
+          proof_attachment_id,
+          source,
+          source_ref_id,
+          idempotency_key,
+          created_by_name,
+          updated_by_name
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz, $11, $12, 'manual', $13, $14, $15, $15)
+        on conflict (idempotency_key) where idempotency_key is not null do nothing
+        returning id
+      `,
+      [
+        job.sales_order_id,
+        job.id,
+        payload.driverId || job.driver_id || null,
+        payload.category,
+        payload.amount,
+        payload.description || null,
+        payload.recipientType || 'driver',
+        payload.recipientName || null,
+        payload.paymentStatus || 'belum_dibayar',
+        payload.paidAt || (payload.paymentStatus === 'sudah_dibayar' ? new Date().toISOString() : null),
+        payload.paidByName || null,
+        payload.proofAttachmentId || null,
+        `manual:${job.id}:${payload.category}`,
+        idempotencyKey,
+        payload.actorName || 'Operational',
+      ],
+    );
+
+    if (!result.rows[0]) {
+      const duplicate = await client.query(
+        `select id from container_job_expenses where idempotency_key = $1 limit 1`,
+        [idempotencyKey],
+      );
+      const existingExpense = await getMappedExpenseById(client, duplicate.rows[0].id);
+      const payloadMatches = existingExpense
+        && existingExpense.category === payload.category
+        && Number(existingExpense.amount) === Number(payload.amount)
+        && (existingExpense.description || '') === (payload.description || '')
+        && (existingExpense.recipientName || '') === (payload.recipientName || '')
+        && existingExpense.paymentStatus === (payload.paymentStatus || 'belum_dibayar');
+      if (!payloadMatches) {
+        const error = new Error('Percobaan submit ini memakai kunci yang sama dengan biaya lain yang sudah tersimpan dengan data berbeda. Silakan catat sebagai entri baru.');
+        error.statusCode = 409;
+        error.code = 'CONTAINER_JOB_EXPENSE_IDEMPOTENCY_KEY_MISMATCH';
+        throw error;
+      }
+      return existingExpense;
+    }
+    const expenseId = result.rows[0].id;
+
+    if (payload.paymentStatus === 'sudah_dibayar') {
+      const batchDate = payload.paidAt ? String(payload.paidAt).slice(0, 10) : null;
+      const batch = await ensureOperationalFundBatch(client, batchDate, payload.actorName || 'Operational');
+      await ensureSufficientOperationalFundBalance(client, batch, expenseId, payload.amount);
+      await client.query(
+        `
+          insert into operational_fund_transactions (
+            batch_id,
+            container_job_id,
+            container_job_expense_id,
+            transaction_date,
+            transaction_type,
+            category,
+            amount,
+            description,
+            proof_attachment_id,
+            top_name,
+            driver_name,
+            do_number,
+            customer_name,
+            source,
+            source_ref_id,
+            created_by_name,
+            updated_by_name
+          )
+          values ($1, $2, $3, coalesce($4::date, current_date), 'debit', $5, $6, $7, $8, $9, $10, $11, $12, 'container_job_expense', $14, $13, $13)
+          on conflict (container_job_expense_id)
+            where container_job_expense_id is not null
+              and transaction_type = 'debit'
+              and status = 'posted'
+          do update set
+            amount = excluded.amount,
+            description = excluded.description,
+            proof_attachment_id = excluded.proof_attachment_id,
+            top_name = excluded.top_name,
+            driver_name = excluded.driver_name,
+            do_number = excluded.do_number,
+            customer_name = excluded.customer_name,
+            batch_id = excluded.batch_id,
+            source = excluded.source,
+            source_ref_id = excluded.source_ref_id,
+            updated_by_name = excluded.updated_by_name,
+            updated_at = now()
+        `,
+        [
+          batch.id,
+          job.id,
+          expenseId,
+          batchDate,
+          operationalFundCategoryFromExpense(payload.category),
+          payload.amount,
+          payload.description || `${job.so_number || '-'} ${job.container_number || ''}`.trim(),
+          payload.proofAttachmentId || null,
+          payload.actorName || 'Operational',
+          payload.recipientName || job.assignment_snapshot?.driver || null,
+          job.do_number || job.destination || null,
+          job.customer_name || null,
+          payload.actorName || 'Operational',
+          String(expenseId),
+        ],
+      );
+    }
+
+    return getMappedExpenseById(client, expenseId);
+  });
+}
+
+export async function correctContainerJobExpenseRecord(id, expenseId, payload = {}) {
+  return withTransaction(async (client) => {
+    const existingResult = await client.query(
+      `
+        select expense.*, cj.container_number, cj.assignment_snapshot,
+               so.so_number, so.do_number, so.customer_name, so.destination
+        from container_job_expenses expense
+        join container_jobs cj on cj.id = expense.container_job_id
+        join sales_orders so on so.id = cj.sales_order_id
+        where expense.id = $1 and expense.container_job_id = $2
+        limit 1
+      `,
+      [expenseId, id],
+    );
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      const error = new Error('Transaksi biaya Container Job tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
+      throw error;
+    }
+    if (existing.finance_check_status !== 'perlu_klarifikasi') {
+      const error = new Error('Transaksi biaya hanya bisa dikoreksi setelah Finance meminta klarifikasi.');
+      error.statusCode = 409;
+      error.code = 'CONTAINER_JOB_EXPENSE_CORRECTION_INVALID_STATUS';
+      throw error;
+    }
+    if (payload.paymentStatus === 'sudah_dibayar' && !payload.proofAttachmentId && !existing.proof_attachment_id) {
+      const error = new Error('Bukti pembayaran wajib diupload untuk biaya yang sudah dibayar.');
+      error.statusCode = 400;
+      error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update container_job_expenses
+        set category = $1,
+            amount = $2,
+            description = $3,
+            recipient_type = $4,
+            recipient_name = $5,
+            payment_status = $6,
+            paid_at = case
+              when $6 = 'sudah_dibayar' then coalesce($7::timestamptz, paid_at, now())
+              else null
+            end,
+            paid_by_name = case
+              when $6 = 'sudah_dibayar' then coalesce($8, paid_by_name)
+              else null
+            end,
+            proof_attachment_id = coalesce($9, proof_attachment_id),
+            finance_check_status = 'dikoreksi',
+            finance_checked_by_name = null,
+            finance_checked_at = null,
+            updated_by_name = $10,
+            updated_at = now()
+        where id = $11
+      `,
+      [
+        payload.category,
+        payload.amount,
+        payload.description || null,
+        payload.recipientType || 'driver',
+        payload.recipientName || null,
+        payload.paymentStatus || 'belum_dibayar',
+        payload.paidAt || null,
+        payload.paidByName || null,
+        payload.proofAttachmentId || null,
+        payload.actorName || 'Operational',
+        expenseId,
+      ],
+    );
+
+    if (payload.paymentStatus === 'sudah_dibayar') {
+      const batchDate = payload.paidAt ? String(payload.paidAt).slice(0, 10) : null;
+      const batch = await ensureOperationalFundBatch(client, batchDate, payload.actorName || 'Operational');
+      await ensureSufficientOperationalFundBalance(client, batch, expenseId, payload.amount);
+      await client.query(
+        `
+          insert into operational_fund_transactions (
+            batch_id,
+            container_job_id,
+            container_job_expense_id,
+            transaction_date,
+            transaction_type,
+            category,
+            amount,
+            description,
+            proof_attachment_id,
+            top_name,
+            driver_name,
+            do_number,
+            customer_name,
+            source,
+            source_ref_id,
+            created_by_name,
+            updated_by_name
+          )
+          values ($1, $2, $3, coalesce($4::date, current_date), 'debit', $5, $6, $7, $8, $9, $10, $11, $12, 'container_job_expense', $14, $13, $13)
+          on conflict (container_job_expense_id)
+            where container_job_expense_id is not null
+              and transaction_type = 'debit'
+              and status = 'posted'
+          do update set
+            transaction_date = excluded.transaction_date,
+            amount = excluded.amount,
+            description = excluded.description,
+            proof_attachment_id = excluded.proof_attachment_id,
+            top_name = excluded.top_name,
+            driver_name = excluded.driver_name,
+            do_number = excluded.do_number,
+            customer_name = excluded.customer_name,
+            batch_id = excluded.batch_id,
+            source = excluded.source,
+            source_ref_id = excluded.source_ref_id,
+            updated_by_name = excluded.updated_by_name,
+            updated_at = now()
+        `,
+        [
+          batch.id,
+          id,
+          expenseId,
+          batchDate,
+          operationalFundCategoryFromExpense(payload.category),
+          payload.amount,
+          payload.description || `${existing.so_number || '-'} ${existing.container_number || ''}`.trim(),
+          payload.proofAttachmentId || existing.proof_attachment_id || null,
+          payload.actorName || 'Operational',
+          payload.recipientName || existing.assignment_snapshot?.driver || null,
+          existing.do_number || existing.destination || null,
+          existing.customer_name || null,
+          payload.actorName || 'Operational',
+          String(expenseId),
+        ],
+      );
+    } else {
+      await client.query(
+        `
+          update operational_fund_transactions
+          set status = 'void',
+              updated_by_name = $1,
+              updated_at = now()
+          where container_job_expense_id = $2
+            and transaction_type = 'debit'
+            and status = 'posted'
+        `,
+        [payload.actorName || 'Operational', expenseId],
+      );
+    }
+
+    return getMappedExpenseById(client, expenseId);
+  });
+}
+
+export async function updateContainerJobExpenseProofRecord(id, expenseId, payload = {}) {
+  return withTransaction(async (client) => {
+    const existingResult = await client.query(
+      `
+        select expense.*, cj.container_number, cj.assignment_snapshot,
+               so.so_number, so.do_number, so.customer_name, so.destination
+        from container_job_expenses expense
+        join container_jobs cj on cj.id = expense.container_job_id
+        join sales_orders so on so.id = cj.sales_order_id
+        where expense.id = $1 and expense.container_job_id = $2
+        limit 1
+      `,
+      [expenseId, id],
+    );
+    const existing = existingResult.rows[0];
+    if (!existing) {
+      const error = new Error('Transaksi biaya Container Job tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
+      throw error;
+    }
+    if (existing.finance_check_status === 'sudah_dicek') {
+      const error = new Error('Transaksi biaya yang sudah dicek Finance tidak bisa diubah langsung.');
+      error.statusCode = 409;
+      error.code = 'CONTAINER_JOB_EXPENSE_ALREADY_RECONCILED';
+      throw error;
+    }
+
+    const nextFinanceStatus = existing.finance_check_status === 'perlu_klarifikasi'
+      ? 'dikoreksi'
+      : existing.finance_check_status || 'belum_dicek';
+
+    await client.query(
+      `
+        update container_job_expenses
+        set payment_status = 'sudah_dibayar',
+            paid_at = coalesce($1::timestamptz, paid_at, now()),
+            paid_by_name = coalesce($2, paid_by_name),
+            proof_attachment_id = $3,
+            finance_check_status = $4,
+            finance_checked_by_name = null,
+            finance_checked_at = null,
+            updated_by_name = $5,
+            updated_at = now()
+        where id = $6
+      `,
+      [
+        payload.paidAt || null,
+        payload.paidByName || null,
+        payload.proofAttachmentId,
+        nextFinanceStatus,
+        payload.actorName || 'Operational',
+        expenseId,
+      ],
+    );
+
+    const batchDate = payload.paidAt ? String(payload.paidAt).slice(0, 10) : null;
+    const batch = await ensureOperationalFundBatch(client, batchDate, payload.actorName || 'Operational');
+    await ensureSufficientOperationalFundBalance(client, batch, expenseId, existing.amount);
+    await client.query(
+      `
+        insert into operational_fund_transactions (
+          batch_id,
+          container_job_id,
+          container_job_expense_id,
+          transaction_date,
+          transaction_type,
+          category,
+          amount,
+          description,
+          proof_attachment_id,
+          top_name,
+          driver_name,
+          do_number,
+          customer_name,
+          source,
+          source_ref_id,
+          created_by_name,
+          updated_by_name
+        )
+        values ($1, $2, $3, coalesce($4::date, current_date), 'debit', $5, $6, $7, $8, $9, $10, $11, $12, 'container_job_expense', $14, $13, $13)
+        on conflict (container_job_expense_id)
+          where container_job_expense_id is not null
+            and transaction_type = 'debit'
+            and status = 'posted'
+        do update set
+          proof_attachment_id = excluded.proof_attachment_id,
+          transaction_date = excluded.transaction_date,
+          category = excluded.category,
+          batch_id = excluded.batch_id,
+          top_name = excluded.top_name,
+          driver_name = excluded.driver_name,
+          do_number = excluded.do_number,
+          customer_name = excluded.customer_name,
+          source = excluded.source,
+          source_ref_id = excluded.source_ref_id,
+          updated_by_name = excluded.updated_by_name,
+          updated_at = now()
+      `,
+      [
+        batch.id,
+        id,
+        expenseId,
+        batchDate,
+        operationalFundCategoryFromExpense(existing.category),
+        existing.amount,
+        existing.description || `${existing.so_number || '-'} ${existing.container_number || ''}`.trim(),
+        payload.proofAttachmentId,
+        payload.actorName || 'Operational',
+        existing.recipient_name || existing.assignment_snapshot?.driver || null,
+        existing.do_number || existing.destination || null,
+        existing.customer_name || null,
+        payload.actorName || 'Operational',
+        String(expenseId),
+      ],
+    );
+
+    return getMappedExpenseById(client, expenseId);
+  });
 }
 
 export async function updateContainerJob(id, form) {
@@ -822,7 +1722,8 @@ export async function updateContainerJob(id, form) {
                cj.entry_source, cj.historical_period, cj.historical_notes,
                cj.has_driver_commission, cj.driver_commission_amount,
                cj.driver_commission_source_destination_id, cj.driver_commission_note,
-               so.so_number, so.trip_date, so.finance_verification_status
+               so.so_number, so.do_number, so.customer_name, so.destination,
+               so.trip_date, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         where cj.id = $1
@@ -865,7 +1766,6 @@ export async function updateContainerJob(id, form) {
         'RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    requireTripStartAllowed(nextStatus, nextRpujStatus, { allowHistoricalBackfill, allowAdminCorrection });
     if (['running', 'completed'].includes(nextStatus)) {
       requireCompleteOperationalAssignment(
         form,
@@ -991,6 +1891,8 @@ export async function updateContainerJob(id, form) {
           : existing.rows[0].driver_commission_note,
       )
       : null;
+    const actorName = form.updatedBy || 'Operational';
+    const nextAssignmentSnapshot = toAssignmentSnapshot(nextAssignmentForm, driver, vehicle);
 
     await client.query(
       `
@@ -1045,11 +1947,11 @@ export async function updateContainerJob(id, form) {
         nextContainerNumber,
         nextDriverId,
         nextVehicleId,
-        JSON.stringify(toAssignmentSnapshot(nextAssignmentForm, driver, vehicle)),
+        JSON.stringify(nextAssignmentSnapshot),
         nextRpujStatus,
         nextRpujNotes,
         requestRpujAt,
-        form.updatedBy || 'Operational',
+        actorName,
         form.spkNumber || null,
         nextEirNumber,
         nextLoadingVoucher,
@@ -1080,10 +1982,24 @@ export async function updateContainerJob(id, form) {
         nextDriverCommissionAmount,
         nextDriverCommissionSourceDestinationId,
         nextDriverCommissionNote,
-        form.updatedBy || 'Operational',
+        actorName,
         id,
       ],
     );
+
+    if (nextStatus === 'cancelled') {
+      await voidAutoJourneyMoneyExpense(client, id, actorName);
+    } else {
+      await syncAutoJourneyMoneyExpense(client, {
+        job: existing.rows[0],
+        nextStatus,
+        nextEntrySource,
+        nextDriverId,
+        runningAt,
+        assignment: nextAssignmentSnapshot,
+        actorName,
+      });
+    }
 
     await syncResourceAssignmentStatus(client, existing.rows[0], {
       driverId: nextDriverId,
@@ -1353,12 +2269,6 @@ export async function generateContainerJobSpk(id, form = {}) {
     }
     ensureSalesOrderVerifiedForOperational(existing.rows[0]);
 
-    if (!['approved', 'paid'].includes(existing.rows[0].rpuj_status)) {
-      const error = new Error('SPK belum bisa terbit. Finance harus approve RPUJ terlebih dahulu.');
-      error.statusCode = 409;
-      error.code = 'SPK_WAITING_FINANCE_APPROVAL';
-      throw error;
-    }
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
     assertDriverAssignable(driver, existing.rows[0].driver_id);

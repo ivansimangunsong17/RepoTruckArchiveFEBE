@@ -6,6 +6,8 @@ process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters'
 const {
   adminCorrectionReason,
   canUseAdminCorrection,
+  createContainerJobExpense,
+  correctContainerJobExpense,
   ensureRepoStoragePayload,
   hasCompletedTimelineChange,
   hasDriverCommissionChange,
@@ -16,8 +18,15 @@ const {
   isInitialContainerNumberInput,
   isOtherCostLockedForRepoPickup,
   isRepoCancellationLockedForOperational,
+  updateContainerJobExpenseProof,
 } = await import('./container-jobs.service.js');
-const { hasCompleteOperationalAssignment, hasRequiredRepoCompletionDocuments, shouldValidateVehicleContainerSize } = await import('./container-jobs.repository.js');
+const {
+  buildAutoJourneyMoneyDescription,
+  hasCompleteOperationalAssignment,
+  hasRequiredRepoCompletionDocuments,
+  resolveJourneyMoneyAmountForSize,
+  shouldValidateVehicleContainerSize,
+} = await import('./container-jobs.repository.js');
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
   assert.equal(isInitialContainerNumberInput(
@@ -168,6 +177,21 @@ test('assignment operational lengkap dari payload atau snapshot tersimpan', () =
   }), true);
 });
 
+test('auto UJ memilih tarif sesuai ukuran container dan membuat keterangan ledger', () => {
+  assert.equal(resolveJourneyMoneyAmountForSize({ uj_20ft: '600000', uj_40ft: '1200000' }, '20FT'), 600000);
+  assert.equal(resolveJourneyMoneyAmountForSize({ uj_20ft: '600000', uj_40ft: '1200000' }, '40FT'), 1200000);
+  assert.equal(resolveJourneyMoneyAmountForSize({ uj_20ft: null, uj_40ft: null }, '20FT'), 0);
+  assert.equal(buildAutoJourneyMoneyDescription(
+    {
+      customer_name: 'Revo',
+      destination: 'Patimban',
+      container_size: '50X40',
+      assignment_snapshot: { plateNumber: 'B9180BEL' },
+    },
+    { driver: 'Randi', plateNumber: 'B9180BEL' },
+  ), 'UJ Revo Patimban 50X40 B9180BEL');
+});
+
 test('data lama tidak mengunci mismatch ukuran truck dan container', () => {
   assert.equal(shouldValidateVehicleContainerSize({ entrySource: 'historical' }, { entry_source: 'realtime' }), false);
   assert.equal(shouldValidateVehicleContainerSize({}, { entry_source: 'historical' }), false);
@@ -288,4 +312,41 @@ test('menolak titip container jika hanya EIR akhir yang tersedia', () => {
       repoContainerCondition: 'empty',
     },
   ), /EIR Titip/);
+});
+
+test('create expense menolak kategori, nominal, dan bukti pembayaran yang tidak valid', () => {
+  assert.throws(
+    () => createContainerJobExpense('job-1', { category: 'solar', amount: 100000 }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_CATEGORY_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => createContainerJobExpense('job-1', { category: 'tol', amount: 0 }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_AMOUNT_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => createContainerJobExpense('job-1', { category: 'tol', amount: 100000, paymentStatus: 'sudah_dibayar' }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED' && error.statusCode === 400,
+  );
+});
+
+test('correct expense memakai validasi kategori, nominal, dan status pembayaran yang sama', () => {
+  assert.throws(
+    () => correctContainerJobExpense('job-1', 'expense-1', { category: 'solar', amount: 100000 }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_CATEGORY_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => correctContainerJobExpense('job-1', 'expense-1', { category: 'tol', amount: 0 }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_AMOUNT_INVALID' && error.statusCode === 400,
+  );
+  assert.throws(
+    () => correctContainerJobExpense('job-1', 'expense-1', { category: 'tol', amount: 100000, paymentStatus: 'selesai' }, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_PAYMENT_STATUS_INVALID' && error.statusCode === 400,
+  );
+});
+
+test('upload proof expense wajib membawa bukti pembayaran', () => {
+  assert.throws(
+    () => updateContainerJobExpenseProof('job-1', 'expense-1', {}, { name: 'Operational Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED' && error.statusCode === 400,
+  );
 });

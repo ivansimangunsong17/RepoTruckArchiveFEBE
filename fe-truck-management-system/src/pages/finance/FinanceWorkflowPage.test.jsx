@@ -1,39 +1,66 @@
 import userEvent from '@testing-library/user-event';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FinanceWorkflowPage from './FinanceWorkflowPage';
+import { downloadCsv } from '../../utils/csvExport';
 import {
-  approveFinanceRpuj,
+  approveOperationalFundRequest,
+  closeOperationalFundBatch,
+  createOperationalFundRequest,
+  depositOperationalFund,
+  fetchFinanceContainerJobExpenses,
   fetchFinanceInvoiceCorrections,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
   fetchFinanceOrderCorrections,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
-  rejectFinanceRpuj,
+  fetchOperationalFundBatches,
+  fetchOperationalFundRequests,
+  fetchOperationalFundTransactions,
+  reconcileFinanceContainerJobExpense,
+  rejectOperationalFundRequest,
   requestFinanceInvoiceCorrection,
   requestFinanceOrderSoCorrection,
   updateFinanceInvoiceNumber,
   updateFinanceOrderSoNumber,
   uploadFinanceInvoiceDocument,
-  uploadFinanceRpujTransferProof,
 } from '../../services/finance/financeService';
 
+const mockAuthState = vi.hoisted(() => ({
+  user: { id: 'finance-1', role: 'finance', fullName: 'Fitri Finance' },
+}));
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({ user: mockAuthState.user }),
+}));
+
 vi.mock('../../services/finance/financeService', () => ({
-  approveFinanceRpuj: vi.fn(),
+  approveOperationalFundRequest: vi.fn(),
+  closeOperationalFundBatch: vi.fn(),
+  createOperationalFundRequest: vi.fn(),
+  depositOperationalFund: vi.fn(),
+  fetchFinanceContainerJobExpenses: vi.fn(),
   fetchFinanceInvoiceCorrections: vi.fn(),
   fetchFinanceInvoiceDetail: vi.fn(),
   fetchFinanceInvoices: vi.fn().mockResolvedValue({ rows: [] }),
   fetchFinanceOrderCorrections: vi.fn(),
   fetchFinanceOrderVerifications: vi.fn(),
   fetchFinanceRpujRequests: vi.fn(),
-  rejectFinanceRpuj: vi.fn(),
+  fetchOperationalFundBatches: vi.fn(),
+  fetchOperationalFundRequests: vi.fn(),
+  fetchOperationalFundTransactions: vi.fn(),
+  reconcileFinanceContainerJobExpense: vi.fn(),
+  rejectOperationalFundRequest: vi.fn(),
   requestFinanceInvoiceCorrection: vi.fn(),
   requestFinanceOrderSoCorrection: vi.fn(),
   updateFinanceInvoiceNumber: vi.fn(),
   updateFinanceOrderSoNumber: vi.fn(),
   uploadFinanceInvoiceDocument: vi.fn(),
-  uploadFinanceRpujTransferProof: vi.fn(),
+}));
+
+vi.mock('../../utils/csvExport', () => ({
+  downloadCsv: vi.fn(),
 }));
 
 const orderRow = {
@@ -113,6 +140,7 @@ const invoiceSummary = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuthState.user = { id: 'finance-1', role: 'finance', fullName: 'Fitri Finance' };
   fetchFinanceOrderVerifications.mockResolvedValue({ rows: [orderRow, cancelledOrderRow] });
   fetchFinanceRpujRequests.mockResolvedValue({
     rows: [rpujRow],
@@ -120,6 +148,71 @@ beforeEach(() => {
     totalPages: 1,
     summary: { submitted: 1, approved: 0, paid: 0, rejected: 0 },
   });
+  fetchOperationalFundRequests.mockResolvedValue({
+    rows: [],
+    total: 0,
+    totalPages: 1,
+    summary: { submitted: 0, approved: 0, transferred: 0, rejected: 0, approvedAmount: 0, transferredAmount: 0 },
+  });
+  fetchOperationalFundBatches.mockResolvedValue({
+    rows: [{
+      id: 'batch-2026-08-20',
+      batchDate: '2026-08-20',
+      status: 'open',
+      totalCredit: 0,
+      totalDebit: 0,
+      balance: 0,
+      transactionCount: 0,
+      creditCount: 0,
+      debitCount: 0,
+      uncheckedCount: 0,
+      needClarificationCount: 0,
+      checkedCount: 0,
+    }],
+    total: 1,
+    totalPages: 1,
+  });
+  fetchOperationalFundTransactions.mockResolvedValue({
+    rows: [],
+    total: 0,
+    totalPages: 1,
+    summary: { totalCredit: 0, totalDebit: 0, totalAdjustment: 0, balance: 0, creditCount: 0, debitCount: 0, voidCount: 0 },
+  });
+  fetchFinanceContainerJobExpenses.mockResolvedValue({
+    rows: [],
+    total: 0,
+    totalPages: 1,
+    summary: { belumDicek: 0, sudahDicek: 0, perluKlarifikasi: 0, dikoreksi: 0, totalAmount: 0, pendingAmount: 0 },
+  });
+  reconcileFinanceContainerJobExpense.mockResolvedValue({ id: 'expense-1', financeCheckStatus: 'sudah_dicek' });
+  createOperationalFundRequest.mockResolvedValue({
+    id: 'fund-new',
+    requestDate: '2026-08-20',
+    amount: 20000000,
+    purpose: 'Dropping operasional harian',
+    status: 'submitted',
+  });
+  depositOperationalFund.mockResolvedValue({
+    id: 'fund-deposit',
+    requestDate: '2026-08-20',
+    amount: 20000000,
+    purpose: 'Deposit saldo operasional harian dari Finance',
+    status: 'transferred',
+  });
+  closeOperationalFundBatch.mockResolvedValue({
+    id: 'batch-2026-08-20',
+    batchDate: '2026-08-20',
+    status: 'closed',
+    totalCredit: 20000000,
+    totalDebit: 600000,
+    balance: 19400000,
+    openingBalance: 0,
+    topUpAmount: 20000000,
+    uncheckedCount: 0,
+    needClarificationCount: 0,
+  });
+  approveOperationalFundRequest.mockResolvedValue({ id: 'fund-1', status: 'approved' });
+  rejectOperationalFundRequest.mockResolvedValue({ id: 'fund-1', status: 'rejected' });
   fetchFinanceInvoices.mockResolvedValue({ rows: [invoiceRow], summary: invoiceSummary });
   fetchFinanceOrderCorrections.mockResolvedValue([]);
   fetchFinanceInvoiceCorrections.mockResolvedValue([]);
@@ -308,74 +401,268 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByRole('tab', { name: /SO Batal/i })).toHaveTextContent('9');
   });
 
-  it('menampilkan filter tanggal dan pagination RPUJ', async () => {
+  it('tidak menampilkan flow approval RPUJ legacy di Rekening Dropping Finance', async () => {
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    expect(await screen.findByText('Batch Dropping Harian')).toBeInTheDocument();
+    expect(screen.getByText('Catatan Saldo')).toBeInTheDocument();
+    expect(screen.getByText('Perlu Dicek Finance')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Butuh Approval/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /Siap Transfer/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /UJ Dikirim/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Bulan Dropping')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upload Bukti' })).not.toBeInTheDocument();
+    expect(fetchFinanceRpujRequests).not.toHaveBeenCalled();
+  });
+
+  it('menampilkan modal validasi sebelum close batch rekening dropping', async () => {
     const user = userEvent.setup();
-    const rpujRows = Array.from({ length: 20 }, (_, index) => ({
-      ...rpujRow,
-      id: `approved-rpuj-${index + 1}`,
-      rpujStatus: 'approved',
-      status: 'Disetujui Finance',
-      containerNumber: `CONT-${String(index + 1).padStart(3, '0')}`,
-    }));
-    fetchFinanceRpujRequests.mockResolvedValue({
-      rows: rpujRows,
-      total: 47,
-      totalPages: 3,
-      summary: { submitted: 0, approved: 47, paid: 6, rejected: 0 },
+    fetchOperationalFundBatches.mockResolvedValue({
+      rows: [{
+        id: 'batch-2026-08-20',
+        batchDate: '2026-08-20',
+        status: 'open',
+        totalCredit: 20000000,
+        totalDebit: 600000,
+        balance: 19400000,
+        openingBalance: 0,
+        topUpAmount: 20000000,
+        uncheckedCount: 0,
+        needClarificationCount: 0,
+        checkedCount: 1,
+      }],
+      total: 1,
+      totalPages: 1,
+    });
+    fetchOperationalFundTransactions.mockResolvedValue({
+      rows: [],
+      total: 0,
+      totalPages: 1,
+      summary: {
+        totalCredit: 20000000,
+        totalDebit: 600000,
+        totalAdjustment: 0,
+        balance: 19400000,
+        creditCount: 1,
+        debitCount: 1,
+        voidCount: 0,
+      },
     });
 
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Siap Transfer/i }));
-    expect(screen.getByLabelText('Bulan RPUJ')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tahun RPUJ')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tanggal awal RPUJ')).toBeInTheDocument();
-    expect(screen.getByLabelText('Tanggal akhir RPUJ')).toBeInTheDocument();
-    expect(await screen.findByText('Menampilkan 1-20 dari 47 data')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /close batch/i }));
 
-    fireEvent.change(screen.getByLabelText('Tahun RPUJ'), { target: { value: '2026' } });
-    fireEvent.change(screen.getByLabelText('Bulan RPUJ'), { target: { value: '08' } });
-    await waitFor(() => {
-      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining({
-        page: 1,
-        pageSize: 20,
-        status: 'approved',
-        dateFrom: '2026-08-01',
-        dateTo: '2026-08-31',
-      }));
-    });
+    expect(closeOperationalFundBatch).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Validasi Close Batch');
+    expect(dialog).toHaveTextContent(/Rp\s*19\.400\.000/i);
+    expect(dialog).toHaveTextContent('21 Agustus 2026');
 
-    await user.click(screen.getByRole('button', { name: 'Halaman berikutnya' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Ya, Close Batch' }));
+
     await waitFor(() => {
-      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining({
-        page: 2,
-        pageSize: 20,
-        status: 'approved',
-      }));
+      expect(closeOperationalFundBatch).toHaveBeenCalledWith('batch-2026-08-20', {
+        closeNote: 'Close batch dropping 2026-08-20',
+      });
     });
   });
 
-  it('menampilkan jumlah tab RPUJ dari summary backend saat tab berpindah', async () => {
+  it('menampilkan dan memproses approval saldo operasional harian', async () => {
     const user = userEvent.setup();
-    fetchFinanceRpujRequests.mockResolvedValue({
-      rows: [{ ...rpujRow, rpujStatus: 'approved', status: 'Disetujui Finance' }],
-      summary: { submitted: 0, approved: 100, paid: 6, rejected: 0 },
+    fetchOperationalFundRequests.mockResolvedValue({
+      rows: [{
+        id: 'fund-1',
+        requestDate: '2026-08-20',
+        amount: 20000000,
+        purpose: 'Dropping operasional harian',
+        status: 'submitted',
+        requestedBy: 'Operational Test',
+      }],
+      total: 1,
+      totalPages: 1,
+      summary: { submitted: 1, approved: 0, transferred: 0, rejected: 0, approvedAmount: 0, transferredAmount: 0 },
+    });
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    expect(await screen.findByText('Batch Dropping Harian')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ajukan Saldo' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Rp\s*20\.000\.000/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Setujui' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Validasi Approval Saldo');
+    await user.click(screen.getByRole('button', { name: 'Ya, Setujui Saldo' }));
+
+    expect(approveOperationalFundRequest).toHaveBeenCalledWith('fund-1');
+  });
+
+  it('Finance bisa deposit saldo operasional langsung ke rekening dropping', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Deposit Saldo' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Deposit Saldo Operasional');
+    fireEvent.change(within(dialog).getByLabelText('Tanggal'), { target: { value: '2026-08-20' } });
+    await user.selectOptions(within(dialog).getByLabelText('Nominal'), '20000000');
+    await user.clear(within(dialog).getByPlaceholderText('Contoh: Dropping operasional tanggal berjalan.'));
+    await user.type(within(dialog).getByPlaceholderText('Contoh: Dropping operasional tanggal berjalan.'), 'Deposit saldo operasional harian dari Finance');
+    const proofFile = new File(['transfer'], 'bukti-transfer.pdf', { type: 'application/pdf' });
+    await user.upload(within(dialog).getByLabelText(/upload bukti transfer/i), proofFile);
+    await user.click(within(dialog).getByRole('button', { name: 'Validasi Deposit' }));
+    expect(depositOperationalFund).not.toHaveBeenCalled();
+
+    await screen.findByText('Validasi Deposit Saldo');
+    const validationDialog = screen.getByRole('dialog');
+    expect(validationDialog).toHaveTextContent('Validasi Deposit Saldo');
+    expect(validationDialog).toHaveTextContent(/Rp\s*20\.000\.000/i);
+    expect(validationDialog).toHaveTextContent('bukti-transfer.pdf');
+    await user.click(within(validationDialog).getByRole('button', { name: 'Ya, Deposit Saldo' }));
+
+    expect(depositOperationalFund).toHaveBeenCalledWith({
+      requestDate: '2026-08-20',
+      amount: 20000000,
+      purpose: 'Deposit saldo operasional harian dari Finance',
+      proofFile,
+    });
+  });
+
+  it('menampilkan mutasi rekening dropping dari ledger saldo operasional', async () => {
+    const user = userEvent.setup();
+    fetchOperationalFundTransactions.mockResolvedValue({
+      rows: [{
+        id: 'transaction-2',
+        transactionDate: '2026-08-20',
+        transactionType: 'debit',
+        category: 'container_job_expense',
+        amount: 125000,
+        moneyIn: 0,
+        moneyOut: 125000,
+        runningBalance: 19875000,
+        description: 'Tol Cikampek',
+        topName: 'Fitri Operational',
+        driverName: 'Driver Expense',
+        doNumber: 'DO-EXP-001',
+        customerName: 'PT Expense Test',
+        soNumber: 'SO-EXP-001',
+        customer: 'PT Expense Test',
+        destination: 'Cikarang',
+        status: 'posted',
+        proofAttachment: {
+          id: 'proof-transaction-2',
+          name: 'bukti-transfer.pdf',
+          path: 'proof-transaction-2',
+          type: 'application/pdf',
+          size: 100,
+        },
+      }, {
+        id: 'transaction-1',
+        transactionDate: '2026-08-20',
+        transactionType: 'credit',
+        category: 'dropping_in',
+        amount: 20000000,
+        moneyIn: 20000000,
+        moneyOut: 0,
+        runningBalance: 20000000,
+        description: 'Transfer saldo operasional harian dari Finance',
+        topName: 'Fitri Finance',
+        status: 'posted',
+        createdByName: 'Finance Test',
+      }],
+      total: 2,
+      totalPages: 1,
+      summary: { totalCredit: 20000000, totalDebit: 125000, totalAdjustment: 0, balance: 19875000, creditCount: 1, debitCount: 1, voidCount: 0 },
     });
 
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
-    expect(await screen.findByRole('tab', { name: /Butuh Approval/i })).toHaveTextContent('0');
-    expect(screen.getByRole('tab', { name: /Siap Transfer/i })).toHaveTextContent('100');
-    expect(screen.getByRole('tab', { name: /UJ Dikirim/i })).toHaveTextContent('6');
+    expect(await screen.findByText('Catatan Saldo')).toBeInTheDocument();
+    expect(screen.getByText('Uang Masuk')).toBeInTheDocument();
+    expect(screen.getByText('Uang Keluar')).toBeInTheDocument();
+    expect(screen.queryByText('Driver / DO')).not.toBeInTheDocument();
+    expect(screen.queryByText('TOP')).not.toBeInTheDocument();
+    expect(screen.queryByText('Customer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /export csv/i })).toBeEnabled();
+    expect(screen.getByText('Transfer saldo operasional harian dari Finance')).toBeInTheDocument();
+    expect(screen.getByText('Tol Cikampek')).toBeInTheDocument();
+    expect(screen.queryByText('Fitri Operational')).not.toBeInTheDocument();
+    expect(screen.queryByText('Driver Expense')).not.toBeInTheDocument();
+    expect(screen.queryByText('DO-EXP-001')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /view bukti-transfer.pdf/i })).toBeEnabled();
+    expect(screen.getAllByText(/Rp\s*19\.875\.000/i).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: /export csv/i }));
+    const [, headers, rows] = downloadCsv.mock.calls[0];
+    expect(headers).toEqual(['No', 'Tanggal', 'Keterangan', 'Kategori', 'Uang Masuk', 'Uang Keluar', 'Saldo', 'Bukti']);
+    expect(rows[0]).toEqual(expect.arrayContaining(['SISA SALDO', 0]));
+    expect(rows[1]).toEqual(expect.arrayContaining(['UANG MASUK', 20000000]));
+    expect(rows.at(-2)).toEqual(expect.arrayContaining(['TOTAL PENGELUARAN', 125000]));
+    expect(rows.at(-1)).toEqual(expect.arrayContaining(['SISA SALDO', 19875000]));
+    expect(fetchOperationalFundTransactions).toHaveBeenCalledWith(expect.objectContaining({
+      page: 1,
+      pageSize: 8,
+    }));
+  });
 
-    await user.click(screen.getByRole('tab', { name: /UJ Dikirim/i }));
+  it('membuat pengajuan saldo operasional harian dari panel Rekening Dropping', async () => {
+    const user = userEvent.setup();
+    mockAuthState.user = { id: 'admin-1', role: 'admin', fullName: 'Admin Test' };
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Ajukan Saldo' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Tanggal'), { target: { value: '2026-08-20' } });
+    await user.selectOptions(within(dialog).getByLabelText('Nominal'), '20000000');
+    await user.type(within(dialog).getByPlaceholderText('Contoh: Dropping operasional tanggal berjalan.'), 'Dropping operasional harian');
+    await user.click(within(dialog).getByRole('button', { name: 'Ajukan Saldo' }));
+
+    expect(createOperationalFundRequest).toHaveBeenCalledWith({
+      requestDate: '2026-08-20',
+      amount: 20000000,
+      purpose: 'Dropping operasional harian',
+    });
+  });
+
+  it('menampilkan dan menandai transaksi biaya D+1 sudah dicek', async () => {
+    const user = userEvent.setup();
+    fetchFinanceContainerJobExpenses.mockResolvedValue({
+      rows: [{
+        id: 'expense-1',
+        soNumber: 'SO-EXP-001',
+        containerNumber: 'CONT-EXP-001',
+        customer: 'PT Expense Test',
+        destination: 'Cikarang',
+        driverName: 'Driver Expense',
+        truck: 'B 2000 EX',
+        category: 'tol',
+        amount: 125000,
+        description: 'Tol Cikampek',
+        paymentStatus: 'sudah_dibayar',
+        paidAt: '2026-08-20',
+        financeCheckStatus: 'belum_dicek',
+      }],
+      total: 1,
+      totalPages: 1,
+      summary: { belumDicek: 1, sudahDicek: 0, perluKlarifikasi: 0, dikoreksi: 0, totalAmount: 125000, pendingAmount: 125000 },
+    });
+
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    expect(await screen.findByText('Perlu Dicek Finance')).toBeInTheDocument();
+    expect(screen.getByText('Tol Cikampek')).toBeInTheDocument();
+    expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Dicek' }));
+
+    expect(await screen.findByText('Validasi Cek Biaya Lapangan')).toBeInTheDocument();
+    expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Ya, Sudah Dicek' }));
 
     await waitFor(() => {
-      expect(fetchFinanceRpujRequests).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'paid' }));
+      expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', {
+        financeCheckStatus: 'sudah_dicek',
+        financeNote: '',
+      });
     });
-    expect(screen.getByRole('tab', { name: /Butuh Approval/i })).toHaveTextContent('0');
-    expect(screen.getByRole('tab', { name: /Siap Transfer/i })).toHaveTextContent('100');
-    expect(screen.getByRole('tab', { name: /UJ Dikirim/i })).toHaveTextContent('6');
   });
 
   it('menampilkan filter tanggal invoice di semua tab', async () => {
@@ -601,30 +888,6 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
-  it('menampilkan aksi view dan download untuk bukti transfer UJ', async () => {
-    const user = userEvent.setup();
-    fetchFinanceRpujRequests.mockResolvedValue({
-      rows: [{
-        ...rpujRow,
-        rpujStatus: 'paid',
-        status: 'Bukti Transfer Diupload',
-        transferProof: 'bukti-transfer.pdf',
-        transferProofFile: {
-          id: 'transfer-proof-1',
-          name: 'bukti-transfer.pdf',
-          path: 'transfer-proof-1',
-          type: 'application/pdf',
-          size: 100,
-        },
-      }],
-    });
-    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
-
-    await user.click(await screen.findByRole('tab', { name: /UJ Dikirim/i }));
-    expect(await screen.findByRole('button', { name: /View bukti-transfer.pdf/i })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /Download bukti-transfer.pdf/i })).toBeEnabled();
-  });
-
   it('menginput nomor SO melalui modal', async () => {
     const user = userEvent.setup();
     updateFinanceOrderSoNumber.mockResolvedValue({ ...orderRow, soNumber: 'SO-202607-019', verificationStatus: 'verified' });
@@ -665,78 +928,6 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(dialog).toHaveTextContent('Alasan Batal');
     expect(dialog).toHaveTextContent('Customer membatalkan pengiriman setelah nomor SO terbit.');
     expect(dialog).toHaveTextContent('Admin Test');
-  });
-
-  it('meminta validasi sebelum approve RPUJ', async () => {
-    const user = userEvent.setup();
-    approveFinanceRpuj.mockResolvedValue({ ...rpujRow, rpujStatus: 'approved', status: 'Disetujui Finance' });
-    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
-
-    expect(await screen.findByText(/Komisi mingguan Rp\s*50\.000/i)).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'Approve' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Validasi Approval RPUJ');
-    expect(screen.getByRole('dialog')).toHaveTextContent(/Rp\s*700\.000/i);
-    await user.click(screen.getByRole('button', { name: 'Ya, Approve RPUJ' }));
-
-    expect(approveFinanceRpuj).toHaveBeenCalledWith('job-1');
-  });
-
-  it('menyusun detail RPUJ dengan customer, tujuan, dan nomor container sebagai informasi utama', async () => {
-    const user = userEvent.setup();
-    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
-
-    await user.click(await screen.findByRole('button', { name: 'Detail' }));
-    const dialog = screen.getByRole('dialog');
-    expect(dialog).toHaveTextContent('SO-TEST-001');
-    expect(dialog).toHaveTextContent('PT Customer Test');
-    expect(dialog).toHaveTextContent('Tujuan');
-    expect(dialog).toHaveTextContent('Cikarang');
-    expect(dialog).toHaveTextContent('Nomor Container');
-    expect(dialog).toHaveTextContent('CONT-TEST-001');
-    expect(dialog).toHaveTextContent('Komisi Sopir');
-    expect(dialog).toHaveTextContent('Komisi Cikarang');
-    expect(dialog).not.toHaveTextContent('No. Job');
-  });
-
-  it('mewajibkan catatan ketika reject RPUJ', async () => {
-    const user = userEvent.setup();
-    rejectFinanceRpuj.mockResolvedValue({ ...rpujRow, rpujStatus: 'rejected', status: 'Ditolak Finance', rejectionNote: 'Nominal biaya perlu diperbaiki.' });
-    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
-
-    await user.click(await screen.findByRole('button', { name: 'Reject' }));
-    await user.click(screen.getByRole('button', { name: 'Ya, Reject RPUJ' }));
-    expect(screen.getByText(/Catatan reject wajib diisi/i)).toBeInTheDocument();
-    expect(rejectFinanceRpuj).not.toHaveBeenCalled();
-
-    await user.type(screen.getByLabelText(/Catatan Reject/i), 'Nominal biaya perlu diperbaiki.');
-    await user.click(screen.getByRole('button', { name: 'Ya, Reject RPUJ' }));
-    expect(rejectFinanceRpuj).toHaveBeenCalledWith('job-1', 'Nominal biaya perlu diperbaiki.');
-  });
-
-  it('memeriksa file dalam modal sebelum upload bukti transfer', async () => {
-    const user = userEvent.setup();
-    const approvedRow = { ...rpujRow, rpujStatus: 'approved', status: 'Disetujui Finance' };
-    fetchFinanceRpujRequests.mockResolvedValue({ rows: [approvedRow] });
-    uploadFinanceRpujTransferProof.mockResolvedValue({
-      ...approvedRow,
-      rpujStatus: 'paid',
-      status: 'Bukti Transfer Diupload',
-      transferProof: 'bukti-transfer.pdf',
-    });
-    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
-
-    await user.click(await screen.findByRole('tab', { name: /Siap Transfer/i }));
-    await user.click(screen.getByRole('button', { name: 'Upload Bukti' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Validasi Bukti Transfer UJ');
-    expect(uploadFinanceRpujTransferProof).not.toHaveBeenCalled();
-
-    const file = new File(['transfer'], 'bukti-transfer.pdf', { type: 'application/pdf' });
-    await user.upload(screen.getByLabelText('File bukti transfer UJ'), file);
-    expect(screen.getByText('bukti-transfer.pdf')).toBeInTheDocument();
-    expect(uploadFinanceRpujTransferProof).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: 'Konfirmasi & Upload' }));
-    expect(uploadFinanceRpujTransferProof).toHaveBeenCalledWith('job-1', file);
   });
 
   it('meminta validasi sebelum mengirim nomor invoice', async () => {

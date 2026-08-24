@@ -44,6 +44,105 @@ export function fetchContainerJob(id) {
   return httpClient.get(`/container-jobs/${id}`);
 }
 
+export function fetchContainerJobExpenses(id) {
+  return httpClient.get(`/container-jobs/${id}/expenses`);
+}
+
+export function fetchContainerJobExpenseLedger({
+  page = 1,
+  pageSize = 100,
+  query = '',
+  ledgerStatus = '',
+  financeCheckStatus = '',
+  paymentStatus = '',
+  dateFrom = '',
+  dateTo = '',
+} = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    query,
+  });
+  if (ledgerStatus) params.set('ledgerStatus', ledgerStatus);
+  if (financeCheckStatus) params.set('financeCheckStatus', financeCheckStatus);
+  if (paymentStatus) params.set('paymentStatus', paymentStatus);
+  if (dateFrom) params.set('dateFrom', dateFrom);
+  if (dateTo) params.set('dateTo', dateTo);
+  return httpClient.get(`/container-jobs/expenses?${params.toString()}`);
+}
+
+export async function createContainerJobExpense(id, payload = {}) {
+  let proofAttachment = null;
+  const proofFile = getRawFile(payload.proofFile);
+  if (proofFile) {
+    proofAttachment = await uploadAttachmentFile({
+      entityType: 'container_job',
+      entityId: id,
+      category: 'expensePaymentProof',
+      file: proofFile,
+      notes: payload.description || payload.category || 'Bukti pembayaran biaya',
+      uploadedByName: payload.updatedBy || 'Operational',
+    });
+  }
+
+  return httpClient.post(`/container-jobs/${id}/expenses`, {
+    category: payload.category,
+    amount: payload.amount,
+    description: payload.description,
+    recipientType: payload.recipientType,
+    recipientName: payload.recipientName,
+    paymentStatus: payload.paymentStatus,
+    proofAttachmentId: proofAttachment?.id || proofAttachment?.path || payload.proofAttachmentId || null,
+    idempotencyKey: payload.idempotencyKey || null,
+  });
+}
+
+export async function correctContainerJobExpense(id, expenseId, payload = {}) {
+  let proofAttachment = null;
+  const proofFile = getRawFile(payload.proofFile);
+  if (proofFile) {
+    proofAttachment = await uploadAttachmentFile({
+      entityType: 'container_job',
+      entityId: id,
+      category: 'expensePaymentProof',
+      file: proofFile,
+      notes: payload.description || payload.category || 'Bukti koreksi pembayaran biaya',
+      uploadedByName: payload.updatedBy || 'Operational',
+    });
+  }
+
+  return httpClient.patch(`/container-jobs/${id}/expenses/${expenseId}/correction`, {
+    category: payload.category,
+    amount: payload.amount,
+    description: payload.description,
+    recipientType: payload.recipientType,
+    recipientName: payload.recipientName,
+    paymentStatus: payload.paymentStatus,
+    proofAttachmentId: proofAttachment?.id || proofAttachment?.path || payload.proofAttachmentId || null,
+  });
+}
+
+export async function uploadContainerJobExpenseProof(id, expenseId, payload = {}) {
+  const proofFile = getRawFile(payload.proofFile);
+  if (!proofFile) {
+    throw new Error('File bukti pembayaran wajib dipilih.');
+  }
+
+  const proofAttachment = await uploadAttachmentFile({
+    entityType: 'container_job',
+    entityId: id,
+    category: 'expensePaymentProof',
+    file: proofFile,
+    notes: payload.description || 'Bukti pembayaran biaya',
+    uploadedByName: payload.updatedBy || 'Operational',
+  });
+
+  return httpClient.patch(`/container-jobs/${id}/expenses/${expenseId}/proof`, {
+    paidAt: payload.paidAt || null,
+    proofAttachmentId: proofAttachment?.id || proofAttachment?.path || null,
+  });
+}
+
 function getRawFile(file) {
   if (!file) return null;
   if (file instanceof File) return file;

@@ -1,14 +1,18 @@
-import { BadgeCheck, CalendarDays, ChevronRight, CircleDollarSign, FileText, RefreshCw, Send, UserRound, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, FileText, Hourglass, RefreshCw, Send, UserRound, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../contexts/FeedbackContext';
 import { hasPermission } from '../../constants/roles';
 import {
+  fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
   submitDriverCommissionBatch,
 } from '../../services/finance/driverCommissionService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
+import MonthFilterControl from '../finance/shared/MonthFilterControl';
+import { getMonthDateRange } from '../finance/shared/monthFilterUtils';
 
 const emptyReport = {
   periodStart: '',
@@ -26,6 +30,7 @@ const emptyReport = {
     unpaidAmount: 0,
   },
   drivers: [],
+  withheld: [],
 };
 
 const statusLabels = {
@@ -38,6 +43,8 @@ const statusLabels = {
   pending: 'Belum Dibayar',
   rejected: 'Ditolak',
 };
+
+const COMMISSION_PERIOD_LOOKBACK = 9;
 
 function pad2(value) {
   return String(value).padStart(2, '0');
@@ -84,6 +91,56 @@ function defaultCompletedCommissionPeriod() {
   };
 }
 
+function currentCommissionPeriod() {
+  const today = new Date();
+  const day = today.getDay();
+  const daysSinceThursday = (day - 4 + 7) % 7;
+  const currentThursday = addDays(today, -daysSinceThursday);
+  return {
+    periodStart: dateKey(currentThursday),
+    periodEnd: dateKey(addDays(currentThursday, 6)),
+  };
+}
+
+function commissionPeriodKey(period = {}) {
+  return `${period.periodStart || ''}|${period.periodEnd || ''}`;
+}
+
+function buildCommissionPeriodOptions(batches = [], selectedReport = null) {
+  const current = currentCommissionPeriod();
+  const windowStart = addDateKeyDays(current.periodStart, -(COMMISSION_PERIOD_LOOKBACK - 1) * 7);
+  const byPeriod = new Map();
+  byPeriod.set(commissionPeriodKey(current), { ...current, status: 'draft', totalItems: 0, totalAmount: 0 });
+
+  for (const batch of batches) {
+    if (!batch.periodStart || batch.periodStart < windowStart || batch.periodStart > current.periodStart) continue;
+    const key = commissionPeriodKey(batch);
+    byPeriod.set(key, {
+      ...(byPeriod.get(key) || {}),
+      ...batch,
+      status: batch.status || byPeriod.get(key)?.status || 'draft',
+    });
+  }
+
+  if (selectedReport?.periodStart && selectedReport?.periodEnd && byPeriod.has(commissionPeriodKey(selectedReport))) {
+    const key = commissionPeriodKey(selectedReport);
+    const activeBatch = selectedReport.activeBatch || {};
+    byPeriod.set(key, {
+      ...(byPeriod.get(key) || {}),
+      periodStart: selectedReport.periodStart,
+      periodEnd: selectedReport.periodEnd,
+      status: activeBatch.status || selectedReport.status || byPeriod.get(key)?.status || 'draft',
+      totalItems: selectedReport.summary?.totalItems ?? activeBatch.totalItems ?? byPeriod.get(key)?.totalItems ?? 0,
+      totalAmount: selectedReport.summary?.totalAmount ?? activeBatch.totalAmount ?? byPeriod.get(key)?.totalAmount ?? 0,
+    });
+  }
+
+  return Array.from(byPeriod.values()).sort((left, right) => (
+    String(right.periodStart || '').localeCompare(String(left.periodStart || ''))
+      || String(right.periodEnd || '').localeCompare(String(left.periodEnd || ''))
+  ));
+}
+
 function StatusPill({ status }) {
   const tone = {
     empty: 'border-slate-200 bg-slate-50 text-slate-500',
@@ -103,20 +160,36 @@ function StatusPill({ status }) {
   );
 }
 
-function MetricCard({ icon: Icon, label, value, helper }) {
+const metricCardTones = {
+  slate: 'bg-slate-100 text-slate-600',
+  sky: 'bg-sky-50 text-sky-600',
+  amber: 'bg-amber-50 text-amber-600',
+  emerald: 'bg-emerald-50 text-emerald-600',
+};
+
+function MetricCard({ icon: Icon, label, value, helper, tone = 'slate', pill = false, onClick }) {
+  const Wrapper = onClick ? 'button' : 'article';
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <Wrapper
+      className={`w-full rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:shadow-md ${onClick ? 'cursor-pointer hover:border-red-200' : ''}`}
+      onClick={onClick}
+      type={onClick ? 'button' : undefined}
+    >
       <div className="flex items-start gap-3">
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+        <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${metricCardTones[tone] || metricCardTones.slate}`}>
           <Icon size={18} />
         </span>
         <div className="min-w-0">
           <p className="text-xs font-black uppercase tracking-wide text-slate-500">{label}</p>
-          <strong className="mt-1 block break-words text-xl font-black text-slate-950">{value}</strong>
+          {pill ? (
+            <div className="mt-1.5">{value}</div>
+          ) : (
+            <strong className="mt-1 block break-words text-xl font-black text-slate-950">{value}</strong>
+          )}
           {helper ? <small className="mt-1 block text-xs leading-relaxed text-slate-500">{helper}</small> : null}
         </div>
       </div>
-    </article>
+    </Wrapper>
   );
 }
 
@@ -124,6 +197,227 @@ function driverPaymentStatus(driver) {
   if (driver.paidItems > 0 && driver.unpaidItems === 0) return 'paid';
   if (driver.submittedItems > 0 || driver.approvedItems > 0) return 'submitted';
   return 'unsubmitted';
+}
+
+function ModalPortal({ children }) {
+  if (typeof document === 'undefined') return null;
+  return createPortal(children, document.body);
+}
+
+function BatchCommissionDropdown({ periods, selectedPeriodStart, selectedPeriodEnd, selectedStatus, loading, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function handleClickOutside(event) {
+      if (containerRef.current && !containerRef.current.contains(event.target)) setOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  const disabled = loading || !periods.length;
+  const selectedKey = commissionPeriodKey({ periodStart: selectedPeriodStart, periodEnd: selectedPeriodEnd });
+
+  return (
+    <div className="relative min-w-0 flex-1" ref={containerRef}>
+      <button
+        aria-expanded={open}
+        aria-label="Pilih batch komisi"
+        className="master-filter-select flex h-10 w-full max-w-none items-center justify-between gap-2 normal-case disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <span className="truncate text-sm font-bold text-slate-900">{formatDate(selectedPeriodStart)} - {formatDate(selectedPeriodEnd)}</span>
+          <StatusPill status={selectedStatus} />
+        </span>
+        <ChevronDown className={`shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} size={16} />
+      </button>
+      {open ? (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {periods.map((period) => (
+            <button
+              className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-slate-50 ${commissionPeriodKey(period) === selectedKey ? 'bg-red-50/60' : ''}`}
+              key={commissionPeriodKey(period)}
+              onClick={() => {
+                onSelect(period);
+                setOpen(false);
+              }}
+              type="button"
+            >
+              <div className="min-w-0">
+                <strong className="block truncate text-xs font-black text-slate-900">{formatDate(period.periodStart)} - {formatDate(period.periodEnd)}</strong>
+                <small className="mt-0.5 block text-[11px] font-semibold text-slate-500">{period.totalItems || 0} job</small>
+              </div>
+              <StatusPill status={period.status} />
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const BATCH_PICKER_PAGE_SIZE = 20;
+
+function BatchPickerModal({ open, onClose, onSelectBatch, selectedPeriodStart, selectedPeriodEnd }) {
+  const [page, setPage] = useState(1);
+  const [monthFilter, setMonthFilter] = useState('');
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, open]);
+
+  useEffect(() => {
+    if (open) {
+      setPage(1);
+      setMonthFilter('');
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let active = true;
+
+    async function loadBatches() {
+      setLoading(true);
+      setError('');
+      try {
+        const { dateFrom, dateTo } = getMonthDateRange(monthFilter);
+        const result = await fetchDriverCommissionBatches({
+          page,
+          pageSize: BATCH_PICKER_PAGE_SIZE,
+          ...(dateFrom && dateTo ? { periodStart: dateFrom, periodEnd: dateTo } : {}),
+        });
+        if (!active) return;
+        setRows(result?.rows || []);
+        setTotal(Number(result?.pagination?.total || 0));
+      } catch (fetchError) {
+        if (active) {
+          setRows([]);
+          setError(fetchError.message || 'Daftar batch gagal dimuat.');
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadBatches();
+    return () => {
+      active = false;
+    };
+  }, [open, page, monthFilter]);
+
+  if (!open) return null;
+
+  const totalPages = Math.max(1, Math.ceil(total / BATCH_PICKER_PAGE_SIZE));
+  const selectedKey = commissionPeriodKey({ periodStart: selectedPeriodStart, periodEnd: selectedPeriodEnd });
+
+  return (
+    <ModalPortal>
+    <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="master-modal flex max-h-[90vh] w-full max-w-5xl flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="operational-batch-picker-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="master-form-heading">
+          <div className="min-w-0">
+            <span>Riwayat Pengajuan</span>
+            <h2 id="operational-batch-picker-title">Riwayat Batch yang Sudah Diajukan</h2>
+            <p>{total} batch yang sudah pernah diajukan ke Finance, terbaru di atas.</p>
+          </div>
+          <button className="modal-close-button" type="button" onClick={onClose} aria-label="Tutup pilih batch komisi">
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-5">
+          <MonthFilterControl
+            className="mb-4 max-w-xs"
+            label="Filter Bulan"
+            monthAriaLabel="Filter batch komisi bulan"
+            onChange={(value) => {
+              setMonthFilter(value);
+              setPage(1);
+            }}
+            value={monthFilter}
+            yearAriaLabel="Filter batch komisi tahun"
+          />
+          {loading ? <p className="text-sm font-semibold text-slate-500">Memuat batch...</p> : null}
+          {!loading && error ? <div className="alert error">{error}</div> : null}
+          {!loading && !error && !rows.length ? (
+            <p className="text-sm font-semibold text-slate-500">{monthFilter ? 'Tidak ada batch pada bulan ini.' : 'Belum ada batch komisi.'}</p>
+          ) : null}
+          {!loading && !error && rows.length ? (
+            <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {rows.map((batch) => (
+                <button
+                  className={`flex w-full flex-col gap-1 px-3 py-2 text-left hover:bg-slate-50 sm:flex-row sm:items-center sm:gap-3 ${commissionPeriodKey(batch) === selectedKey ? 'bg-red-50/60' : ''}`}
+                  key={batch.id}
+                  onClick={() => {
+                    onSelectBatch(batch);
+                    onClose();
+                  }}
+                  type="button"
+                >
+                  <div className="min-w-0 flex-1">
+                    <strong className="block break-words text-xs text-slate-950">{formatDate(batch.periodStart)} - {formatDate(batch.periodEnd)}</strong>
+                    <small className="mt-0.5 block break-words text-[11px] text-slate-500">
+                      {batch.totalItems || 0} job | {formatCurrency(batch.totalAmount || 0)} | Diajukan {batch.submittedByName || '-'} | {formatDateTime(batch.submittedAt)}
+                    </small>
+                  </div>
+                  <StatusPill status={batch.status} />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        {totalPages > 1 ? (
+          <div className="master-form-actions justify-between">
+            <button className="secondary-button inline-flex items-center gap-1.5" disabled={loading || page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">
+              <ChevronLeft size={15} /> Sebelumnya
+            </button>
+            <strong className="text-xs font-bold text-slate-700">Halaman {page} dari {totalPages}</strong>
+            <button className="secondary-button inline-flex items-center gap-1.5" disabled={loading || page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} type="button">
+              Berikutnya <ChevronRight size={15} />
+            </button>
+          </div>
+        ) : null}
+      </section>
+    </div>
+    </ModalPortal>
+  );
 }
 
 function DriverDetailModal({ driver, open, onClose }) {
@@ -145,24 +439,25 @@ function DriverDetailModal({ driver, open, onClose }) {
   if (!open || !driver) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3" role="presentation" onMouseDown={onClose}>
+    <ModalPortal>
+    <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+        className="master-modal flex max-h-[92vh] w-full max-w-4xl flex-col"
         role="dialog"
         aria-modal="true"
         aria-labelledby="driver-commission-detail-title"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+        <div className="master-form-heading">
           <div className="min-w-0">
-            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Detail Sopir</p>
-            <h2 id="driver-commission-detail-title" className="mt-1 break-words text-xl font-black text-slate-950">{driver.driverName}</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-500">{driver.totalItems} job | {formatCurrency(driver.totalAmount)}</p>
+            <span>Detail Sopir</span>
+            <h2 id="driver-commission-detail-title" className="break-words">{driver.driverName}</h2>
+            <p>{driver.totalItems} job | {formatCurrency(driver.totalAmount)}</p>
           </div>
-          <button className="secondary-button inline-flex h-10 w-10 shrink-0 items-center justify-center p-0" type="button" onClick={onClose} aria-label="Tutup detail komisi">
-            <X size={18} />
+          <button className="modal-close-button" type="button" onClick={onClose} aria-label="Tutup detail komisi">
+            <X size={17} />
           </button>
-        </header>
+        </div>
 
         <div className="overflow-y-auto p-5">
           <div className="grid gap-3 sm:grid-cols-3">
@@ -183,18 +478,15 @@ function DriverDetailModal({ driver, open, onClose }) {
           <div className="mt-5 space-y-3">
             {(driver.items || []).map((item, index) => (
               <article key={item.id || item.containerJobId || index} className="rounded-lg border border-slate-200 p-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <strong className="block break-words text-sm text-slate-950">{item.containerNumber || '-'}</strong>
-                    <small className="mt-0.5 block break-words text-xs text-slate-500">{item.soNumber || '-'} | {item.containerSize || '-'}</small>
-                  </div>
-                  <StatusPill status={item.paymentStatus || item.batchStatus || 'unsubmitted'} />
+                <div className="min-w-0">
+                  <strong className="block break-words text-sm text-slate-950">{item.containerNumber || '-'}</strong>
+                  <small className="mt-0.5 block break-words text-xs text-slate-500">{item.soNumber || '-'} | {item.containerSize || '-'}</small>
                 </div>
                 <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
-                  <div><dt className="font-black uppercase text-slate-400">Tanggal Selesai</dt><dd className="mt-0.5 font-bold text-slate-700">{formatDate(item.completedDate)}</dd></div>
-                  <div><dt className="font-black uppercase text-slate-400">Truck</dt><dd className="mt-0.5 font-bold text-slate-700">{item.truckPlateNumber || '-'}</dd></div>
-                  <div><dt className="font-black uppercase text-slate-400">Customer</dt><dd className="mt-0.5 font-bold text-slate-700">{item.customerName || '-'}</dd></div>
-                  <div><dt className="font-black uppercase text-slate-400">Tujuan</dt><dd className="mt-0.5 font-bold text-slate-700">{item.destination || '-'}</dd></div>
+                  <div><dt className="font-black uppercase text-slate-400">Tanggal Selesai</dt><dd className="ml-0 mt-0.5 font-bold text-slate-700">{formatDate(item.completedDate)}</dd></div>
+                  <div><dt className="font-black uppercase text-slate-400">Truck</dt><dd className="ml-0 mt-0.5 font-bold text-slate-700">{item.truckPlateNumber || '-'}</dd></div>
+                  <div><dt className="font-black uppercase text-slate-400">Customer</dt><dd className="ml-0 mt-0.5 font-bold text-slate-700">{item.customerName || '-'}</dd></div>
+                  <div><dt className="font-black uppercase text-slate-400">Tujuan</dt><dd className="ml-0 mt-0.5 font-bold text-slate-700">{item.destination || '-'}</dd></div>
                 </dl>
                 <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm font-black text-amber-700">
                   {formatCurrency(item.amount)}
@@ -206,6 +498,7 @@ function DriverDetailModal({ driver, open, onClose }) {
         </div>
       </section>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -213,29 +506,36 @@ function DriverCommissionOperationalPage() {
   const { user } = useAuth();
   const { notify, confirmAction } = useFeedback();
   const defaultPeriod = useMemo(() => defaultCompletedCommissionPeriod(), []);
-  const periodStart = defaultPeriod.periodStart;
-  const periodEnd = defaultPeriod.periodEnd;
+  const [periodStart, setPeriodStart] = useState(defaultPeriod.periodStart);
+  const [periodEnd, setPeriodEnd] = useState(defaultPeriod.periodEnd);
+  const [periodOptions, setPeriodOptions] = useState(() => buildCommissionPeriodOptions());
   const [report, setReport] = useState(emptyReport);
   const [selectedDriverKey, setSelectedDriverKey] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
+  const [batchPickerOpen, setBatchPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const canSubmit = hasPermission(user, 'operations.update');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
+  const withheldDrivers = report.withheld || [];
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const activeBatch = report.activeBatch || null;
   const hasActiveBatch = Boolean(activeBatch?.id);
   const validBatchPeriod = isWeeklyCommissionPeriod(periodStart, periodEnd);
   const submitDisabled = saving || loading || !summary.unsubmittedItems || hasActiveBatch || !validBatchPeriod;
 
-  const loadReport = useCallback(async () => {
+  const loadReport = useCallback(async (nextPeriodStart, nextPeriodEnd) => {
     setLoading(true);
     try {
-      const result = await fetchDriverCommissionPeriodReport({ periodStart, periodEnd });
-      const nextReport = result || emptyReport;
+      const [reportResult, batchResult] = await Promise.all([
+        fetchDriverCommissionPeriodReport({ periodStart: nextPeriodStart, periodEnd: nextPeriodEnd }),
+        fetchDriverCommissionBatches({ pageSize: 50 }),
+      ]);
+      const nextReport = reportResult || emptyReport;
       setReport(nextReport);
+      setPeriodOptions(buildCommissionPeriodOptions(batchResult?.rows || [], nextReport));
       setSelectedDriverKey((current) => {
         const nextDrivers = nextReport.drivers || [];
         if (nextDrivers.some((driver) => (driver.driverKey || driver.driverId || driver.driverName) === current)) return current;
@@ -247,11 +547,11 @@ function DriverCommissionOperationalPage() {
     } finally {
       setLoading(false);
     }
-  }, [notify, periodEnd, periodStart]);
+  }, [notify]);
 
   useEffect(() => {
-    loadReport();
-  }, [loadReport]);
+    loadReport(periodStart, periodEnd);
+  }, [loadReport, periodEnd, periodStart]);
 
   async function handleSubmitBatch() {
     if (!summary.unsubmittedItems) {
@@ -280,7 +580,7 @@ function DriverCommissionOperationalPage() {
     try {
       await submitDriverCommissionBatch({ periodStart, periodEnd });
       notify({ title: 'Komisi diajukan', message: 'Finance sudah bisa melakukan pengecekan batch komisi.' });
-      await loadReport();
+      await loadReport(periodStart, periodEnd);
     } catch (error) {
       notify({ type: 'error', title: 'Pengajuan gagal', message: error.message });
     } finally {
@@ -299,13 +599,23 @@ function DriverCommissionOperationalPage() {
               Cek komisi per sopir sebelum diajukan ke Finance untuk periode Kamis sampai Rabu.
             </p>
           </div>
-          <div className="flex flex-col gap-2 sm:min-w-[340px] sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="block text-[11px] font-black uppercase tracking-wide text-slate-500">Batch berjalan</span>
-              <strong className="mt-1 block break-words text-sm text-slate-950">{formatDate(periodStart)} - {formatDate(periodEnd)}</strong>
-              <small className="mt-0.5 block text-xs text-slate-500">Otomatis Kamis sampai Rabu.</small>
+          <div className="flex flex-col gap-2 sm:min-w-[420px] sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1">
+              <span className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Batch Komisi</span>
+              <BatchCommissionDropdown
+                loading={loading}
+                onSelect={(period) => {
+                  setPeriodStart(period.periodStart);
+                  setPeriodEnd(period.periodEnd);
+                }}
+                periods={periodOptions}
+                selectedPeriodEnd={periodEnd}
+                selectedPeriodStart={periodStart}
+                selectedStatus={report.status}
+              />
+              <small className="mt-1 block text-xs font-semibold normal-case tracking-normal text-slate-500">Periode otomatis Kamis sampai Rabu. Menampilkan minggu berjalan dan batch yang sudah diajukan dalam 2 bulan terakhir.</small>
             </div>
-            <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={loadReport} disabled={loading}>
+            <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={() => loadReport(periodStart, periodEnd)} disabled={loading}>
               <RefreshCw size={16} /> Refresh
             </button>
           </div>
@@ -313,11 +623,51 @@ function DriverCommissionOperationalPage() {
       </header>
 
       <section className="grid gap-3 md:grid-cols-4">
-        <MetricCard icon={CalendarDays} label="Periode" value={`${formatDate(periodStart)} - ${formatDate(periodEnd)}`} helper="Tanggal selesai job." />
-        <MetricCard icon={UserRound} label="Sopir" value={`${summary.totalDrivers || 0} sopir`} helper={`${summary.totalItems || 0} job komisi`} />
-        <MetricCard icon={CircleDollarSign} label="Total Komisi" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.unpaidAmount || 0)} belum dibayar`} />
-        <MetricCard icon={BadgeCheck} label="Status" value={statusLabels[report.status] || report.status || '-'} helper={activeBatch ? `Diajukan ${formatDateTime(activeBatch.submittedAt)}` : 'Belum masuk batch Finance.'} />
+        <MetricCard
+          icon={CalendarDays}
+          label="Periode"
+          tone="slate"
+          value={`${formatDate(periodStart)} - ${formatDate(periodEnd)}`}
+          helper={<>Tanggal selesai job. <span className="font-bold text-red-600">Klik untuk lihat riwayat lengkap.</span></>}
+          onClick={() => setBatchPickerOpen(true)}
+        />
+        <MetricCard icon={UserRound} label="Sopir" tone="sky" value={`${summary.totalDrivers || 0} sopir`} helper={`${summary.totalItems || 0} job komisi`} />
+        <MetricCard icon={CircleDollarSign} label="Total Komisi" tone="amber" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.unpaidAmount || 0)} belum dibayar`} />
+        <MetricCard icon={BadgeCheck} label="Status" tone="emerald" pill value={<StatusPill status={report.status} />} helper={activeBatch ? `Diajukan ${formatDateTime(activeBatch.submittedAt)}` : 'Belum masuk batch Finance.'} />
       </section>
+
+      {withheldDrivers.length ? (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 shadow-sm">
+          <div className="border-b border-amber-200 p-4">
+            <div className="flex items-center gap-2">
+              <Hourglass className="text-amber-600" size={18} />
+              <h2 className="text-base font-black text-amber-900">Sopir Tertahan (Belum Capai Kuota Mingguan)</h2>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-amber-700">
+              Komisi sopir berikut belum diajukan ke Finance karena ritasinya masih di bawah kuota. Tunggakannya tidak hilang — otomatis ikut diajukan begitu kumulatif ritasinya tembus target di minggu berikutnya.
+            </p>
+          </div>
+          <div className="divide-y divide-amber-100">
+            {withheldDrivers.map((driver) => {
+              const progressPercent = Math.min(100, Math.round((driver.pendingItems / driver.target) * 100));
+              return (
+                <div key={driver.driverKey} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <strong className="block text-sm text-amber-950">{driver.driverName}</strong>
+                    <small className="block text-xs font-semibold text-amber-700">{formatCurrency(driver.pendingAmount)} tertahan, butuh {driver.remaining} ritasi lagi</small>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-32 overflow-hidden rounded-full bg-amber-200">
+                      <div className="h-full rounded-full bg-amber-500" style={{ width: `${progressPercent}%` }} />
+                    </div>
+                    <span className="text-xs font-black text-amber-800">{driver.pendingItems}/{driver.target} ritasi</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -340,29 +690,29 @@ function DriverCommissionOperationalPage() {
               Periode ini sudah memiliki batch aktif. Perubahan pembayaran dilanjutkan di Finance.
             </div>
           ) : null}
-          <div className="table-wrap">
-            <table className="responsive-data-table w-full min-w-[860px] text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left text-xs font-black uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-3">Sopir</th>
-                  <th className="px-3 py-3 text-right">Job</th>
-                  <th className="px-3 py-3 text-right">Total Komisi</th>
-                  <th className="px-3 py-3 text-right">Belum Dibayar</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3 text-right">Detail</th>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] divide-y divide-slate-200 text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Sopir</th>
+                  <th className="px-4 py-3 text-right">Job</th>
+                  <th className="px-4 py-3 text-right">Total Komisi</th>
+                  <th className="px-4 py-3 text-right">Belum Dibayar</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Detail</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {drivers.map((driver) => {
                   const driverKey = driver.driverKey || driver.driverId || driver.driverName;
                   return (
-                  <tr key={driverKey} className="border-t border-slate-100">
-                    <td className="px-3 py-3 font-black text-slate-950" data-label="Sopir">{driver.driverName}</td>
-                    <td className="px-3 py-3 text-right font-bold text-slate-700" data-label="Job">{driver.totalItems}</td>
-                    <td className="px-3 py-3 text-right font-black text-amber-700" data-label="Total Komisi">{formatCurrency(driver.totalAmount)}</td>
-                    <td className="px-3 py-3 text-right font-bold text-rose-700" data-label="Belum Dibayar">{formatCurrency(driver.unpaidAmount)}</td>
-                    <td className="px-3 py-3" data-label="Status"><StatusPill status={driverPaymentStatus(driver)} /></td>
-                    <td className="px-3 py-3 text-right" data-label="Detail">
+                  <tr key={driverKey} className="align-middle hover:bg-slate-50/70">
+                    <td className="px-4 py-3 text-xs font-bold text-slate-950">{driver.driverName}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700">{driver.totalItems}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-amber-700">{formatCurrency(driver.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{formatCurrency(driver.unpaidAmount)}</td>
+                    <td className="px-4 py-3"><StatusPill status={driverPaymentStatus(driver)} /></td>
+                    <td className="px-4 py-3 text-right">
                       <button
                         className="secondary-button inline-flex items-center gap-2"
                         type="button"
@@ -378,8 +728,8 @@ function DriverCommissionOperationalPage() {
                   );
                 })}
                 {!drivers.length ? (
-                  <tr className="responsive-empty-row">
-                    <td className="px-3 py-8 text-center text-slate-500" colSpan={6}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
+                  <tr>
+                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={6}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -389,6 +739,17 @@ function DriverCommissionOperationalPage() {
       </section>
 
       <DriverDetailModal driver={selectedDriver} open={detailOpen} onClose={() => setDetailOpen(false)} />
+
+      <BatchPickerModal
+        onClose={() => setBatchPickerOpen(false)}
+        onSelectBatch={(batch) => {
+          setPeriodStart(batch.periodStart);
+          setPeriodEnd(batch.periodEnd);
+        }}
+        open={batchPickerOpen}
+        selectedPeriodEnd={periodEnd}
+        selectedPeriodStart={periodStart}
+      />
     </main>
   );
 }

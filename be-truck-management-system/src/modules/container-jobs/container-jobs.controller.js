@@ -1,12 +1,18 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
+  correctContainerJobExpense,
+  createContainerJobExpense,
   createContainerJobSpk,
   getContainerJob,
+  getContainerJobExpense,
+  listContainerJobExpenseLedger,
+  listContainerJobExpenses,
   listContainerJobs,
   requestContainerJobCancellation,
   reviewContainerJobCancellation,
   saveContainerJob,
+  updateContainerJobExpenseProof,
 } from './container-jobs.service.js';
 
 function isHistoricalRecord(record = {}) {
@@ -82,6 +88,75 @@ export async function listContainerJobsController(request, response) {
 export async function getContainerJobController(request, response) {
   const result = await getContainerJob(request.params.id);
   sendSuccess(response, result);
+}
+
+export async function listContainerJobExpensesController(request, response) {
+  const result = await listContainerJobExpenses(request.params.id);
+  sendSuccess(response, result);
+}
+
+export async function listContainerJobExpenseLedgerController(request, response) {
+  const result = await listContainerJobExpenseLedger(request.query);
+  sendSuccess(response, result);
+}
+
+export async function createContainerJobExpenseController(request, response) {
+  const result = await createContainerJobExpense(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_CREATE_CONTAINER_JOB_EXPENSE',
+    module: 'container_jobs',
+    entityType: 'container_job',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      expenseId: result.id,
+      category: result.category,
+      amount: result.amount,
+      paymentStatus: result.paymentStatus,
+    },
+  });
+  sendSuccess(response, result, 'Transaksi biaya Container Job berhasil dicatat.');
+}
+
+export async function correctContainerJobExpenseController(request, response) {
+  const before = await getContainerJobExpense(request.params.expenseId);
+  const result = await correctContainerJobExpense(request.params.id, request.params.expenseId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_CORRECT_CONTAINER_JOB_EXPENSE',
+    module: 'container_jobs',
+    entityType: 'container_job_expense',
+    entityId: request.params.expenseId,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      containerJobId: request.params.id,
+      category: result.category,
+      amount: result.amount,
+      paymentStatus: result.paymentStatus,
+      financeCheckStatus: result.financeCheckStatus,
+    },
+  });
+  sendSuccess(response, result, 'Koreksi transaksi biaya Container Job berhasil dikirim.');
+}
+
+export async function updateContainerJobExpenseProofController(request, response) {
+  const before = await getContainerJobExpense(request.params.expenseId);
+  const result = await updateContainerJobExpenseProof(request.params.id, request.params.expenseId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_UPLOAD_CONTAINER_JOB_EXPENSE_PROOF',
+    module: 'container_jobs',
+    entityType: 'container_job_expense',
+    entityId: request.params.expenseId,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      containerJobId: request.params.id,
+      paymentStatus: result.paymentStatus,
+      financeCheckStatus: result.financeCheckStatus,
+      proofAttachmentId: result.proofAttachmentId,
+    },
+  });
+  sendSuccess(response, result, 'Bukti pembayaran berhasil diupload.');
 }
 
 export async function updateContainerJobController(request, response) {

@@ -16,26 +16,30 @@ import { normalizeInvoiceDocumentDeliveryMethod } from './sales-orders.invoice-d
 import { isSalesOrderLockedByFinanceNumber, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
 import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-entry.permissions.js';
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
+import { getCustomerOutstandingSummary } from '../finance/finance.repository.js';
 
 const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Stevedoring and Port Service',
+  'Handling',
   'Jasa Lainnya',
 ];
 const SERVICE_ALIASES = {
-  'Jasa Handling': 'Stevedoring and Port Service',
+  'Jasa Handling': 'Handling',
+  'Stevedoring and Port Service': 'Handling',
 };
 
+// 'lunas' sengaja TIDAK ada di daftar ini. Status lunas hanya boleh terjadi lewat pembayaran yang
+// benar-benar tercatat dan menutup outstanding (lihat finance.repository.js#recordSalesOrderPayment) —
+// Sales/Admin tidak lagi bisa flip status ini secara manual lewat updateInvoiceDeliveryStatus.
 const SALES_INVOICE_DELIVERY_STATUSES = [
   'belum_dikirim',
   'belum_diterima',
   'belum_dikonfirmasi',
   'menunggu_pembayaran',
   'revisi_dispute',
-  'lunas',
 ];
 
 function isContainerService(serviceName) {
@@ -452,6 +456,10 @@ export function listSalesOrders(query) {
     entrySource: query.entrySource || '',
     historicalPeriod: query.historicalPeriod || '',
   });
+}
+
+export function fetchCustomerOutstandingSummary(customerName) {
+  return getCustomerOutstandingSummary(customerName);
 }
 
 export async function getSalesOrder(id) {

@@ -532,14 +532,14 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                 <small className="mt-1 block text-xs text-slate-500">Order dari Sales perlu nomor SO Accurate.</small>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Approval RPUJ</span>
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Rekening Dropping</span>
                 <strong className="mt-1 block text-lg text-slate-950">{queues.rpujSubmitted || 0}</strong>
-                <small className="mt-1 block text-xs text-slate-500">Pengajuan UJ menunggu approve/reject.</small>
+                <small className="mt-1 block text-xs text-slate-500">Pengajuan dropping operasional menunggu review Finance.</small>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
                 <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Transfer Pending</span>
                 <strong className="mt-1 block text-lg text-slate-950">{queues.rpujApprovedWaitingTransfer || 0}</strong>
-                <small className="mt-1 block text-xs text-slate-500">RPUJ approve, bukti transfer belum upload.</small>
+                <small className="mt-1 block text-xs text-slate-500">Dropping disetujui, bukti transfer belum upload.</small>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
                 <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Menunggu Sales</span>

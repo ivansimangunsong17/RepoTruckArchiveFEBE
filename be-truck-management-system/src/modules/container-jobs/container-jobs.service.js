@@ -1,9 +1,15 @@
 import {
+  correctContainerJobExpenseRecord,
+  createContainerJobExpenseRecord,
   generateContainerJobSpk,
   findContainerJobById,
+  findContainerJobExpenseByIdRecord,
+  findContainerJobExpenseLedger,
+  findContainerJobExpensesByJobId,
   findContainerJobsPage,
   requestContainerJobCancellation as requestContainerJobCancellationRepository,
   reviewContainerJobCancellation as reviewContainerJobCancellationRepository,
+  updateContainerJobExpenseProofRecord,
   updateContainerJob,
 } from './container-jobs.repository.js';
 import { findSalesOrderById } from '../sales-orders/sales-orders.repository.js';
@@ -16,6 +22,28 @@ import {
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
 
 const ADMIN_CORRECTION_REASON_MIN_LENGTH = 8;
+const expenseCategories = new Set([
+  'uj_awal',
+  'top_up_uj',
+  'tol',
+  'parkir',
+  'bongkar',
+  'muat',
+  'lolo',
+  'inap',
+  'terminal_depo',
+  'tunggu',
+  'reimbursement',
+  'lainnya',
+]);
+const expensePaymentStatuses = new Set([
+  'belum_dibayar',
+  'pending_pembayaran',
+  'sudah_dibayar',
+  'batal',
+  'ditahan_sopir',
+  'dipakai_job_berikutnya',
+]);
 
 function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
@@ -152,24 +180,6 @@ function hasCompleteAssignmentPayload(payload = {}) {
   return Boolean(normalizeText(payload.driver) && normalizeText(payload.plateNumber));
 }
 
-function hasRepoPickupAssignmentChange(job, payload = {}) {
-  const releasedDriverId = job?.repoReleasedDriverId || job?.repo_released_driver_id || job?.driverId || null;
-  const releasedVehicleId = job?.repoReleasedVehicleId || job?.repo_released_vehicle_id || job?.vehicleId || null;
-  const releasedDriverName = normalizeText(job?.driver || job?.assignment_snapshot?.driver);
-  const releasedPlateNumber = normalizeText(job?.plateNumber || job?.assignment_snapshot?.plateNumber);
-  const nextDriverId = payload.driverId || null;
-  const nextVehicleId = payload.vehicleId || null;
-  const nextDriverName = normalizeText(payload.driver);
-  const nextPlateNumber = normalizeText(payload.plateNumber);
-
-  return Boolean(
-    (nextDriverId && String(nextDriverId) !== String(releasedDriverId || ''))
-    || (nextVehicleId && String(nextVehicleId) !== String(releasedVehicleId || ''))
-    || (nextDriverName && nextDriverName !== releasedDriverName)
-    || (nextPlateNumber && nextPlateNumber !== releasedPlateNumber)
-  );
-}
-
 function isRepoPickupPayload(job, payload = {}) {
   return job?.status === 'repo_stored' && ['received', 'running'].includes(payload.status);
 }
@@ -252,6 +262,8 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
   if (!shouldEnforceOperationalLock(actor, payload)) return;
   if (!payload.status || payload.status === job?.status) return;
 
+  if (job?.status === 'completed' && payload.status === 'cancelled') return;
+
   if (job?.status === 'completed' || job?.status === 'cancelled') {
     const error = new Error('Status pekerjaan yang sudah selesai atau dibatalkan tidak bisa diubah lagi.');
     error.statusCode = 409;
@@ -269,15 +281,9 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
   if (job?.status === 'repo_stored') {
     if (isRepoPickupPayload(job, payload)) {
       if (!hasCompleteAssignmentPayload(payload)) {
-        const error = new Error('Container titip hanya bisa diambil setelah truck dan sopir baru diassign.');
+        const error = new Error('Container titip hanya bisa diambil setelah truck dan sopir perjalanan lanjutan diisi.');
         error.statusCode = 409;
         error.code = 'CONTAINER_JOB_REPO_PICKUP_ASSIGNMENT_REQUIRED';
-        throw error;
-      }
-      if (!hasRepoPickupAssignmentChange(job, payload)) {
-        const error = new Error('Ambil container titip wajib memakai assignment truck/sopir baru.');
-        error.statusCode = 409;
-        error.code = 'CONTAINER_JOB_REPO_PICKUP_REASSIGN_REQUIRED';
         throw error;
       }
       return;
@@ -487,6 +493,127 @@ export async function getContainerJob(id) {
   return job;
 }
 
+export function listContainerJobExpenses(id) {
+  return findContainerJobExpensesByJobId(id);
+}
+
+export function getContainerJobExpense(expenseId) {
+  return findContainerJobExpenseByIdRecord(expenseId);
+}
+
+export function listContainerJobExpenseLedger(query = {}) {
+  return findContainerJobExpenseLedger({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || '',
+    financeCheckStatus: query.financeCheckStatus || '',
+    paymentStatus: query.paymentStatus || '',
+    ledgerStatus: query.ledgerStatus || '',
+    dateFrom: query.dateFrom || '',
+    dateTo: query.dateTo || '',
+  });
+}
+
+function normalizeExpenseAmount(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error('Nominal biaya wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_AMOUNT_INVALID';
+    throw error;
+  }
+  return Math.round(amount);
+}
+
+function normalizeExpenseCategory(value) {
+  const category = String(value || '').trim();
+  if (!expenseCategories.has(category)) {
+    const error = new Error('Kategori biaya Container Job tidak valid.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_CATEGORY_INVALID';
+    throw error;
+  }
+  return category;
+}
+
+function normalizeExpensePaymentStatus(value) {
+  const status = String(value || 'belum_dibayar').trim();
+  if (!expensePaymentStatuses.has(status)) {
+    const error = new Error('Status pembayaran biaya Container Job tidak valid.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_PAYMENT_STATUS_INVALID';
+    throw error;
+  }
+  return status;
+}
+
+function normalizeExpenseText(value, field, maxLength = 500) {
+  const text = String(value || '').trim();
+  if (text.length > maxLength) {
+    const error = new Error(`${field} maksimal ${maxLength} karakter.`);
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_TEXT_TOO_LONG';
+    throw error;
+  }
+  return text;
+}
+
+export function createContainerJobExpense(id, payload = {}, actor) {
+  const paymentStatus = normalizeExpensePaymentStatus(payload.paymentStatus);
+  if (paymentStatus === 'sudah_dibayar' && !payload.proofAttachmentId) {
+    const error = new Error('Bukti pembayaran wajib diupload untuk biaya yang sudah dibayar.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
+    throw error;
+  }
+
+  return createContainerJobExpenseRecord(id, {
+    category: normalizeExpenseCategory(payload.category),
+    amount: normalizeExpenseAmount(payload.amount),
+    description: normalizeExpenseText(payload.description, 'Keterangan biaya'),
+    recipientType: normalizeExpenseText(payload.recipientType || 'driver', 'Tipe penerima', 80) || 'driver',
+    recipientName: normalizeExpenseText(payload.recipientName, 'Nama penerima', 160),
+    paymentStatus,
+    paidAt: payload.paidAt || null,
+    proofAttachmentId: payload.proofAttachmentId || null,
+    idempotencyKey: normalizeExpenseText(payload.idempotencyKey, 'Idempotency key', 100) || null,
+    paidByName: getActorName(actor),
+    actorName: getActorName(actor),
+  });
+}
+
+export function correctContainerJobExpense(id, expenseId, payload = {}, actor) {
+  const paymentStatus = normalizeExpensePaymentStatus(payload.paymentStatus);
+  return correctContainerJobExpenseRecord(id, expenseId, {
+    category: normalizeExpenseCategory(payload.category),
+    amount: normalizeExpenseAmount(payload.amount),
+    description: normalizeExpenseText(payload.description, 'Keterangan biaya'),
+    recipientType: normalizeExpenseText(payload.recipientType || 'driver', 'Tipe penerima', 80) || 'driver',
+    recipientName: normalizeExpenseText(payload.recipientName, 'Nama penerima', 160),
+    paymentStatus,
+    paidAt: payload.paidAt || null,
+    proofAttachmentId: payload.proofAttachmentId || null,
+    paidByName: getActorName(actor),
+    actorName: getActorName(actor),
+  });
+}
+
+export function updateContainerJobExpenseProof(id, expenseId, payload = {}, actor) {
+  if (!payload.proofAttachmentId) {
+    const error = new Error('Bukti pembayaran wajib diupload.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
+    throw error;
+  }
+
+  return updateContainerJobExpenseProofRecord(id, expenseId, {
+    paidAt: payload.paidAt || null,
+    proofAttachmentId: payload.proofAttachmentId,
+    paidByName: getActorName(actor),
+    actorName: getActorName(actor),
+  });
+}
+
 export async function saveContainerJob(id, payload, actor) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload Container Job harus berupa object.');
@@ -494,10 +621,14 @@ export async function saveContainerJob(id, payload, actor) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
-  const normalizedPayload = {
-    ...payload,
-    tilaGatepassDocument: payload.tilaGatepassDocument || payload.unloadingVoucher || payload.weighingDocument || '',
-  };
+  const normalizedPayload = { ...payload };
+  if (
+    Object.prototype.hasOwnProperty.call(payload, 'tilaGatepassDocument')
+    || Object.prototype.hasOwnProperty.call(payload, 'unloadingVoucher')
+    || Object.prototype.hasOwnProperty.call(payload, 'weighingDocument')
+  ) {
+    normalizedPayload.tilaGatepassDocument = payload.tilaGatepassDocument || payload.unloadingVoucher || payload.weighingDocument || '';
+  }
 
   const allowedStatuses = ['received', 'running', 'repo_stored', 'completed', 'cancelled'];
   if (normalizedPayload.status && !allowedStatuses.includes(normalizedPayload.status)) {

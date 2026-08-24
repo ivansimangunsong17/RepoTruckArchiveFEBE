@@ -235,6 +235,7 @@ function financeRowsCte() {
           when lower(btrim(coalesce(item.value->>'serviceName', item.value->>'service_name', ''))) in (
             lower('Bon Muat/Bongkar'),
             lower('Tila/Gatepass'),
+            lower('Handling'),
             lower('Stevedoring and Port Service'),
             lower('Jasa Handling'),
             lower('Jasa Lainnya')
@@ -1406,6 +1407,7 @@ function invoiceOrdersCte() {
             where lower(btrim(coalesce(line_item.value->>'serviceName', line_item.value->>'service_name', ''))) in (
               lower('Bon Muat/Bongkar'),
               lower('Tila/Gatepass'),
+              lower('Handling'),
               lower('Stevedoring and Port Service'),
               lower('Jasa Handling'),
               lower('Jasa Lainnya')
@@ -2309,6 +2311,1127 @@ async function getRpujRequestById(client, id) {
   return result.rows[0] ? mapRpujRequestRow(result.rows[0]) : null;
 }
 
+function mapOperationalFundRequestRow(row) {
+  const transferProof = row.transfer_proof_attachment_id
+    ? {
+        id: row.transfer_proof_attachment_id,
+        name: row.transfer_proof_file_name || '',
+        size: row.transfer_proof_file_size == null ? 0 : Number(row.transfer_proof_file_size),
+        type: row.transfer_proof_mime_type || '',
+        path: row.transfer_proof_attachment_id,
+        storagePath: row.transfer_proof_storage_path || '',
+      }
+    : null;
+
+  return {
+    id: row.id,
+    requestDate: row.request_date,
+    amount: Number(row.amount || 0),
+    purpose: row.purpose || '',
+    status: row.status,
+    requestedBy: row.requested_by_name || '',
+    requestedAt: row.requested_at,
+    reviewedBy: row.reviewed_by_name || '',
+    reviewedAt: row.reviewed_at,
+    rejectionNote: row.rejection_note || '',
+    transferUploadedBy: row.transfer_uploaded_by_name || '',
+    transferUploadedAt: row.transfer_uploaded_at,
+    transferProof: transferProof?.name || '',
+    transferProofFile: transferProof,
+    createdByName: row.created_by_name || '',
+    updatedByName: row.updated_by_name || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function operationalFundRequestSelect() {
+  return `
+    select
+      ofr.*,
+      proof.file_name as transfer_proof_file_name,
+      proof.mime_type as transfer_proof_mime_type,
+      proof.file_size as transfer_proof_file_size,
+      proof.storage_path as transfer_proof_storage_path
+    from operational_fund_requests ofr
+    left join attachments proof on proof.id = ofr.transfer_proof_attachment_id
+  `;
+}
+
+function mapOperationalFundBatchRow(row = {}) {
+  return {
+    id: row.id,
+    batchDate: row.batch_date,
+    status: row.status || 'open',
+    totalCredit: Number(row.total_credit || 0),
+    openingBalance: Number(row.opening_balance || 0),
+    topUpAmount: Number(row.top_up_amount || 0),
+    totalDebit: Number(row.total_debit || 0),
+    totalAdjustment: Number(row.total_adjustment || 0),
+    balance: Number(row.balance || 0),
+    transactionCount: Number(row.transaction_count || 0),
+    creditCount: Number(row.credit_count || 0),
+    debitCount: Number(row.debit_count || 0),
+    uncheckedCount: Number(row.unchecked_count || 0),
+    needClarificationCount: Number(row.need_clarification_count || 0),
+    checkedCount: Number(row.checked_count || 0),
+    closedByName: row.closed_by_name || '',
+    closedAt: row.closed_at || null,
+    closeNote: row.close_note || '',
+    createdByName: row.created_by_name || '',
+    updatedByName: row.updated_by_name || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function operationalFundBatchSelect() {
+  return `
+    select
+      batch.*,
+      coalesce(sum(oft.amount) filter (where oft.transaction_type = 'credit' and oft.status = 'posted'), 0)::numeric as total_credit,
+      coalesce(sum(oft.amount) filter (where oft.transaction_type = 'debit' and oft.status = 'posted'), 0)::numeric as total_debit,
+      coalesce(sum(oft.amount) filter (where oft.transaction_type = 'adjustment' and oft.status = 'posted'), 0)::numeric as total_adjustment,
+      (
+        coalesce(sum(oft.amount) filter (where oft.transaction_type = 'credit' and oft.status = 'posted'), 0)
+        - coalesce(sum(oft.amount) filter (where oft.transaction_type = 'debit' and oft.status = 'posted'), 0)
+        + coalesce(sum(oft.amount) filter (where oft.transaction_type = 'adjustment' and oft.status = 'posted'), 0)
+      )::numeric as balance,
+      count(oft.id) filter (where oft.status = 'posted')::int as transaction_count,
+      count(oft.id) filter (where oft.transaction_type = 'credit' and oft.status = 'posted')::int as credit_count,
+      coalesce(sum(oft.amount) filter (where oft.transaction_type = 'credit' and oft.category = 'saldo_awal' and oft.status = 'posted'), 0)::numeric as opening_balance,
+      coalesce(sum(oft.amount) filter (where oft.transaction_type = 'credit' and oft.category <> 'saldo_awal' and oft.status = 'posted'), 0)::numeric as top_up_amount,
+      count(oft.id) filter (where oft.transaction_type = 'debit' and oft.status = 'posted')::int as debit_count,
+      count(oft.id) filter (
+        where oft.transaction_type = 'debit'
+          and oft.status = 'posted'
+          and coalesce(expense.finance_check_status, 'belum_dicek') in ('belum_dicek', 'dikoreksi')
+      )::int as unchecked_count,
+      count(oft.id) filter (
+        where oft.transaction_type = 'debit'
+          and oft.status = 'posted'
+          and expense.finance_check_status = 'perlu_klarifikasi'
+      )::int as need_clarification_count,
+      count(oft.id) filter (
+        where oft.transaction_type = 'debit'
+          and oft.status = 'posted'
+          and expense.finance_check_status = 'sudah_dicek'
+      )::int as checked_count
+    from operational_fund_batches batch
+    left join operational_fund_transactions oft on oft.batch_id = batch.id
+    left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+  `;
+}
+
+async function ensureOperationalFundBatch(client, batchDate, actorName = 'System') {
+  const result = await client.query(
+    `
+      insert into operational_fund_batches (
+        batch_date,
+        status,
+        created_by_name,
+        updated_by_name
+      )
+      values ($1, 'open', $2, $2)
+      on conflict (batch_date) do update
+        set updated_at = operational_fund_batches.updated_at
+      returning id, batch_date, status
+    `,
+    [batchDate, actorName],
+  );
+  const batch = result.rows[0];
+  if (batch.status === 'closed') {
+    const error = new Error('Batch rekening dropping tanggal ini sudah ditutup.');
+    error.statusCode = 409;
+    error.code = 'OPERATIONAL_FUND_BATCH_CLOSED';
+    throw error;
+  }
+  return batch;
+}
+
+function nextDateString(value) {
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export async function getOperationalFundBatchesPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const clauses = ['1=1'];
+  const params = [];
+  if (options.status) {
+    params.push(options.status);
+    clauses.push(`batch.status = $${params.length}`);
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`batch.batch_date >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`batch.batch_date <= $${params.length}`);
+  }
+  const whereSql = `where ${clauses.join(' and ')}`;
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+  const [rows, total] = await Promise.all([
+    query(
+      `
+        ${operationalFundBatchSelect()}
+        ${whereSql}
+        group by batch.id
+        order by batch.batch_date desc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        select count(*)::int as total
+        from operational_fund_batches batch
+        ${whereSql}
+      `,
+      params,
+    ),
+  ]);
+  const totalRows = Number(total.rows[0]?.total || 0);
+  return {
+    rows: rows.rows.map(mapOperationalFundBatchRow),
+    total: totalRows,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+  };
+}
+
+export async function closeOperationalFundBatchRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query('select id, status from operational_fund_batches where id = $1 for update', [id]);
+    if (!existing.rows[0]) {
+      const error = new Error('Batch rekening dropping tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'OPERATIONAL_FUND_BATCH_NOT_FOUND';
+      throw error;
+    }
+    if (existing.rows[0].status === 'closed') {
+      const error = new Error('Batch rekening dropping sudah ditutup.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_BATCH_ALREADY_CLOSED';
+      throw error;
+    }
+
+    const pending = await client.query(
+      `
+        select count(*)::int as total
+        from operational_fund_transactions oft
+        left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+        where oft.batch_id = $1
+          and oft.status = 'posted'
+          and oft.transaction_type = 'debit'
+          and coalesce(expense.finance_check_status, 'belum_dicek') <> 'sudah_dicek'
+      `,
+      [id],
+    );
+    if (Number(pending.rows[0]?.total || 0) > 0) {
+      const error = new Error('Batch belum bisa ditutup karena masih ada uang keluar yang belum valid.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_BATCH_HAS_UNCHECKED_DEBIT';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update operational_fund_batches
+        set status = 'closed',
+            closed_by_name = $1,
+            closed_at = now(),
+            close_note = $2,
+            updated_by_name = $1,
+            updated_at = now()
+        where id = $3
+      `,
+      [payload.actorName || 'Finance', payload.closeNote || null, id],
+    );
+
+    const result = await client.query(
+      `
+        ${operationalFundBatchSelect()}
+        where batch.id = $1
+        group by batch.id
+        limit 1
+      `,
+      [id],
+    );
+    const closedBatch = mapOperationalFundBatchRow(result.rows[0]);
+    if (closedBatch.balance > 0) {
+      const nextBatchDate = nextDateString(closedBatch.batchDate);
+      const nextBatch = await ensureOperationalFundBatch(client, nextBatchDate, payload.actorName || 'Finance');
+      await client.query(
+        `
+          insert into operational_fund_transactions (
+            batch_id,
+            transaction_date,
+            transaction_type,
+            category,
+            amount,
+            description,
+            top_name,
+            source,
+            source_ref_id,
+            created_by_name,
+            updated_by_name
+          )
+          values ($1, $2, 'credit', 'saldo_awal', $3, $4, $5, 'batch_carry_forward', $6, $5, $5)
+          on conflict (source_ref_id)
+            where source = 'batch_carry_forward'
+              and status = 'posted'
+          do update set
+            batch_id = excluded.batch_id,
+            transaction_date = excluded.transaction_date,
+            amount = excluded.amount,
+            description = excluded.description,
+            top_name = excluded.top_name,
+            updated_by_name = excluded.updated_by_name,
+            updated_at = now()
+        `,
+        [
+          nextBatch.id,
+          nextBatchDate,
+          closedBatch.balance,
+          `Saldo awal dari batch ${closedBatch.batchDate}`,
+          payload.actorName || 'Finance',
+          closedBatch.id,
+        ],
+      );
+    }
+    return closedBatch;
+  });
+}
+
+function buildOperationalFundRequestFilters(options = {}) {
+  const clauses = ['1=1'];
+  const params = [];
+  if (options.status) {
+    params.push(options.status);
+    clauses.push(`ofr.status = $${params.length}`);
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`ofr.request_date >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`ofr.request_date <= $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`(
+      ofr.purpose ilike $${params.length}
+      or ofr.requested_by_name ilike $${params.length}
+      or ofr.reviewed_by_name ilike $${params.length}
+      or ofr.transfer_uploaded_by_name ilike $${params.length}
+    )`);
+  }
+  return { whereSql: `where ${clauses.join(' and ')}`, params };
+}
+
+export async function getOperationalFundRequestsPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildOperationalFundRequestFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+  const [rows, total, summary] = await Promise.all([
+    query(
+      `
+        ${operationalFundRequestSelect()}
+        ${whereSql}
+        order by ofr.request_date desc, ofr.created_at desc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        select count(*)::int as total
+        from operational_fund_requests ofr
+        ${whereSql}
+      `,
+      params,
+    ),
+    query(
+      `
+        select
+          count(*) filter (where status = 'submitted')::int as submitted,
+          count(*) filter (where status = 'approved')::int as approved,
+          count(*) filter (where status = 'transferred')::int as transferred,
+          count(*) filter (where status = 'rejected')::int as rejected,
+          coalesce(sum(amount) filter (where status in ('approved', 'transferred')), 0)::numeric as approved_amount,
+          coalesce(sum(amount) filter (where status = 'transferred'), 0)::numeric as transferred_amount
+        from operational_fund_requests ofr
+        ${whereSql}
+      `,
+      params,
+    ),
+  ]);
+
+  const totalRows = Number(total.rows[0]?.total || 0);
+  return {
+    rows: rows.rows.map(mapOperationalFundRequestRow),
+    total: totalRows,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+    summary: {
+      submitted: Number(summary.rows[0]?.submitted || 0),
+      approved: Number(summary.rows[0]?.approved || 0),
+      transferred: Number(summary.rows[0]?.transferred || 0),
+      rejected: Number(summary.rows[0]?.rejected || 0),
+      approvedAmount: Number(summary.rows[0]?.approved_amount || 0),
+      transferredAmount: Number(summary.rows[0]?.transferred_amount || 0),
+    },
+  };
+}
+
+async function getOperationalFundRequestById(client, id) {
+  const result = await client.query(
+    `
+      ${operationalFundRequestSelect()}
+      where ofr.id = $1
+      limit 1
+    `,
+    [id],
+  );
+  return result.rows[0] ? mapOperationalFundRequestRow(result.rows[0]) : null;
+}
+
+export async function createOperationalFundRequestRecord(payload = {}) {
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `
+        insert into operational_fund_requests (
+          request_date,
+          amount,
+          purpose,
+          requested_by_name,
+          created_by_name,
+          updated_by_name
+        )
+        values ($1, $2, $3, $4, $4, $4)
+        returning id
+      `,
+      [
+        payload.requestDate,
+        payload.amount,
+        payload.purpose || null,
+        payload.actorName || 'Operational',
+      ],
+    );
+    return getOperationalFundRequestById(client, result.rows[0].id);
+  });
+}
+
+export async function depositOperationalFundRecord(payload = {}) {
+  return withTransaction(async (client) => {
+    const batch = await ensureOperationalFundBatch(client, payload.requestDate, payload.actorName || 'Finance');
+    const result = await client.query(
+      `
+        insert into operational_fund_transactions (
+          id,
+          batch_id,
+          transaction_date,
+          transaction_type,
+          category,
+          amount,
+          description,
+          proof_attachment_id,
+          top_name,
+          source,
+          source_ref_id,
+          created_by_name,
+          updated_by_name
+        )
+        values ($1, $2, $3, 'credit', 'deposit_saldo', $4, $5, $6, $7, 'finance_deposit', $8, $7, $7)
+        returning id, transaction_date, amount, description, proof_attachment_id, top_name, created_at, updated_at
+      `,
+      [
+        payload.id,
+        batch.id,
+        payload.requestDate,
+        payload.amount,
+        payload.purpose || 'Deposit saldo operasional harian dari Finance',
+        payload.proofAttachmentId,
+        payload.actorName || 'Finance',
+        String(payload.id),
+      ],
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      batchId: batch.id,
+      batchDate: batch.batch_date,
+      requestDate: row.transaction_date,
+      amount: Number(row.amount || 0),
+      purpose: row.description || '',
+      status: 'transferred',
+      transferProofFile: row.proof_attachment_id ? { id: row.proof_attachment_id, path: row.proof_attachment_id } : null,
+      requestedBy: row.top_name || '',
+      reviewedBy: row.top_name || '',
+      transferUploadedBy: row.top_name || '',
+      createdByName: row.top_name || '',
+      updatedByName: row.top_name || '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  });
+}
+
+export async function approveOperationalFundRequestRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query('select id, status from operational_fund_requests where id = $1', [id]);
+    if (!existing.rows[0]) {
+      const error = new Error('Pengajuan saldo operasional tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'OPERATIONAL_FUND_REQUEST_NOT_FOUND';
+      throw error;
+    }
+    if (!['submitted', 'rejected'].includes(existing.rows[0].status)) {
+      const error = new Error('Pengajuan saldo hanya bisa disetujui saat menunggu review atau setelah ditolak.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_APPROVAL_INVALID_STATUS';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update operational_fund_requests
+        set status = 'approved',
+            reviewed_by_name = $1,
+            reviewed_at = now(),
+            rejection_note = null,
+            updated_by_name = $1,
+            updated_at = now()
+        where id = $2
+      `,
+      [payload.actorName || 'Finance', id],
+    );
+    return getOperationalFundRequestById(client, id);
+  });
+}
+
+export async function rejectOperationalFundRequestRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query('select id, status from operational_fund_requests where id = $1', [id]);
+    if (!existing.rows[0]) {
+      const error = new Error('Pengajuan saldo operasional tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'OPERATIONAL_FUND_REQUEST_NOT_FOUND';
+      throw error;
+    }
+    if (!['submitted', 'approved'].includes(existing.rows[0].status)) {
+      const error = new Error('Pengajuan saldo hanya bisa ditolak saat menunggu review atau sudah disetujui.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_REJECTION_INVALID_STATUS';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update operational_fund_requests
+        set status = 'rejected',
+            reviewed_by_name = $1,
+            reviewed_at = now(),
+            rejection_note = $2,
+            updated_by_name = $1,
+            updated_at = now()
+        where id = $3
+      `,
+      [payload.actorName || 'Finance', payload.rejectionNote, id],
+    );
+    return getOperationalFundRequestById(client, id);
+  });
+}
+
+export async function markOperationalFundTransferUploadedRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      'select id, request_date, amount, status from operational_fund_requests where id = $1',
+      [id],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Pengajuan saldo operasional tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'OPERATIONAL_FUND_REQUEST_NOT_FOUND';
+      throw error;
+    }
+    if (!['approved', 'transferred'].includes(existing.rows[0].status)) {
+      const error = new Error('Bukti transfer hanya bisa diupload setelah saldo disetujui Finance.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_TRANSFER_INVALID_STATUS';
+      throw error;
+    }
+    const batch = await ensureOperationalFundBatch(client, existing.rows[0].request_date, payload.actorName || 'Finance');
+
+    await client.query(
+      `
+        update operational_fund_requests
+        set status = 'transferred',
+            transfer_uploaded_by_name = $1,
+            transfer_uploaded_at = now(),
+            transfer_proof_attachment_id = coalesce($2, transfer_proof_attachment_id),
+            updated_by_name = $1,
+            updated_at = now()
+        where id = $3
+      `,
+      [payload.actorName || 'Finance', payload.transferProofAttachmentId || null, id],
+    );
+
+    const existingTransaction = await client.query(
+      `
+        update operational_fund_transactions
+        set batch_id = $2,
+            transaction_date = $3,
+            category = 'deposit_saldo',
+            amount = $4,
+            description = $5,
+            proof_attachment_id = $6,
+            top_name = $7,
+            source = 'finance_deposit',
+            source_ref_id = $8,
+            updated_by_name = $7,
+            updated_at = now()
+        where fund_request_id = $1
+          and category in ('dropping_in', 'deposit_saldo')
+          and status = 'posted'
+        returning id
+      `,
+      [
+        id,
+        batch.id,
+        existing.rows[0].request_date,
+        existing.rows[0].amount,
+        'Transfer saldo operasional harian dari Finance',
+        payload.transferProofAttachmentId || null,
+        payload.actorName || 'Finance',
+        String(id),
+      ],
+    );
+
+    if (!existingTransaction.rows[0]) {
+      await client.query(
+        `
+          insert into operational_fund_transactions (
+            fund_request_id,
+            batch_id,
+            transaction_date,
+            transaction_type,
+            category,
+            amount,
+            description,
+            proof_attachment_id,
+            top_name,
+            source,
+            source_ref_id,
+            created_by_name,
+            updated_by_name
+          )
+          values ($1, $2, $3, 'credit', 'deposit_saldo', $4, $5, $6, $7, 'finance_deposit', $8, $7, $7)
+        `,
+        [
+          id,
+          batch.id,
+          existing.rows[0].request_date,
+          existing.rows[0].amount,
+          'Transfer saldo operasional harian dari Finance',
+          payload.transferProofAttachmentId || null,
+          payload.actorName || 'Finance',
+          String(id),
+        ],
+      );
+    }
+
+    return getOperationalFundRequestById(client, id);
+  });
+}
+
+function mapOperationalFundTransactionRow(row) {
+  const proofAttachment = row.proof_attachment_id
+    ? {
+        id: row.proof_attachment_id,
+        name: row.proof_file_name || '',
+        size: row.proof_file_size == null ? 0 : Number(row.proof_file_size),
+        type: row.proof_mime_type || '',
+        path: row.proof_attachment_id,
+        storagePath: row.proof_storage_path || '',
+      }
+    : null;
+
+  return {
+    id: row.id,
+    batchId: row.batch_id || '',
+    batchDate: row.batch_date || row.transaction_date,
+    batchStatus: row.batch_status || 'open',
+    fundRequestId: row.fund_request_id || '',
+    containerJobId: row.container_job_id || '',
+    containerJobExpenseId: row.container_job_expense_id || '',
+    transactionDate: row.transaction_date,
+    transactionType: row.transaction_type,
+    category: row.category,
+    amount: Number(row.amount || 0),
+    description: row.description || '',
+    topName: row.top_name || '',
+    driverName: row.driver_name || '',
+    doNumber: row.do_number || '',
+    customerName: row.customer_name || '',
+    moneyIn: Number(row.money_in || 0),
+    moneyOut: Number(row.money_out || 0),
+    runningBalance: Number(row.running_balance || 0),
+    status: row.status || 'posted',
+    proofAttachmentId: row.proof_attachment_id || '',
+    proofAttachment,
+    requestDate: row.request_date || null,
+    soNumber: row.so_number || '',
+    customer: row.customer_name || '',
+    destination: row.destination || '',
+    containerNumber: row.container_number || '',
+    expenseCategory: row.expense_category || '',
+    expensePaymentStatus: row.expense_payment_status || '',
+    financeCheckStatus: row.finance_check_status || '',
+    source: row.source || 'manual',
+    sourceRefId: row.source_ref_id || '',
+    createdByName: row.created_by_name || '',
+    updatedByName: row.updated_by_name || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function operationalFundTransactionSelect() {
+  return `
+    select
+      oft.*,
+      batch.batch_date,
+      batch.status as batch_status,
+      ofr.request_date,
+      coalesce(so.accurate_so_number, so.so_number) as so_number,
+      coalesce(oft.top_name, oft.created_by_name, '') as top_name,
+      coalesce(oft.driver_name, expense.recipient_name, cj.assignment_snapshot->>'driver', '') as driver_name,
+      coalesce(oft.do_number, so.do_number, so.destination, '') as do_number,
+      coalesce(oft.customer_name, so.customer_name, '') as customer_name,
+      so.destination,
+      cj.container_number,
+      expense.category as expense_category,
+      expense.payment_status as expense_payment_status,
+      expense.finance_check_status,
+      case when oft.transaction_type = 'credit' then oft.amount else 0 end as money_in,
+      case when oft.transaction_type = 'debit' then oft.amount else 0 end as money_out,
+      (
+        select coalesce(sum(
+          case
+            when previous_oft.transaction_type = 'credit' then previous_oft.amount
+            when previous_oft.transaction_type = 'debit' then -previous_oft.amount
+            when previous_oft.transaction_type = 'adjustment' then previous_oft.amount
+            else 0
+          end
+        ), 0)::numeric
+        from operational_fund_transactions previous_oft
+        where previous_oft.status = 'posted'
+          and (
+            (oft.batch_id is not null and previous_oft.batch_id = oft.batch_id)
+            or (oft.batch_id is null and previous_oft.batch_id is null)
+          )
+          and (
+            previous_oft.transaction_date < oft.transaction_date
+            or (
+              previous_oft.transaction_date = oft.transaction_date
+              and previous_oft.created_at < oft.created_at
+            )
+            or (
+              previous_oft.transaction_date = oft.transaction_date
+              and previous_oft.created_at = oft.created_at
+              and previous_oft.id <= oft.id
+            )
+          )
+      ) as running_balance,
+      proof.file_name as proof_file_name,
+      proof.mime_type as proof_mime_type,
+      proof.file_size as proof_file_size,
+      proof.storage_path as proof_storage_path
+    from operational_fund_transactions oft
+    left join operational_fund_batches batch on batch.id = oft.batch_id
+    left join operational_fund_requests ofr on ofr.id = oft.fund_request_id
+    left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+    left join container_jobs cj on cj.id = coalesce(oft.container_job_id, expense.container_job_id)
+    left join sales_orders so on so.id = cj.sales_order_id
+    left join attachments proof on proof.id = oft.proof_attachment_id
+  `;
+}
+
+function buildOperationalFundTransactionFilters(options = {}) {
+  const clauses = ['1=1'];
+  const params = [];
+  const status = options.status || 'posted';
+  if (status !== 'all') {
+    params.push(status);
+    clauses.push(`oft.status = $${params.length}`);
+  }
+  if (options.transactionType) {
+    params.push(options.transactionType);
+    clauses.push(`oft.transaction_type = $${params.length}`);
+  }
+  if (options.category) {
+    params.push(options.category);
+    clauses.push(`oft.category = $${params.length}`);
+  }
+  if (options.batchId) {
+    params.push(options.batchId);
+    clauses.push(`oft.batch_id = $${params.length}`);
+  }
+  if (options.batchDate) {
+    params.push(options.batchDate);
+    clauses.push(`coalesce(batch.batch_date, oft.transaction_date) = $${params.length}`);
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`oft.transaction_date >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`oft.transaction_date <= $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`(
+      oft.description ilike $${params.length}
+      or oft.top_name ilike $${params.length}
+      or oft.driver_name ilike $${params.length}
+      or oft.do_number ilike $${params.length}
+      or oft.customer_name ilike $${params.length}
+      or oft.created_by_name ilike $${params.length}
+      or ofr.purpose ilike $${params.length}
+      or so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
+      or so.do_number ilike $${params.length}
+      or so.customer_name ilike $${params.length}
+      or so.destination ilike $${params.length}
+      or cj.container_number ilike $${params.length}
+      or expense.description ilike $${params.length}
+    )`);
+  }
+  return { whereSql: `where ${clauses.join(' and ')}`, params };
+}
+
+export async function getOperationalFundTransactionsPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildOperationalFundTransactionFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+  const [rows, total, summary] = await Promise.all([
+    query(
+      `
+        ${operationalFundTransactionSelect()}
+        ${whereSql}
+        order by oft.transaction_date desc, oft.created_at desc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        select count(*)::int as total
+        from operational_fund_transactions oft
+        left join operational_fund_batches batch on batch.id = oft.batch_id
+        left join operational_fund_requests ofr on ofr.id = oft.fund_request_id
+        left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+        left join container_jobs cj on cj.id = coalesce(oft.container_job_id, expense.container_job_id)
+        left join sales_orders so on so.id = cj.sales_order_id
+        ${whereSql}
+      `,
+      params,
+    ),
+    query(
+      `
+        select
+          coalesce(sum(oft.amount) filter (where oft.transaction_type = 'credit' and oft.status = 'posted'), 0)::numeric as total_credit,
+          coalesce(sum(oft.amount) filter (where oft.transaction_type = 'debit' and oft.status = 'posted'), 0)::numeric as total_debit,
+          coalesce(sum(oft.amount) filter (where oft.transaction_type = 'adjustment' and oft.status = 'posted'), 0)::numeric as total_adjustment,
+          count(*) filter (where oft.transaction_type = 'credit')::int as credit_count,
+          count(*) filter (where oft.transaction_type = 'debit')::int as debit_count,
+          count(*) filter (where oft.status = 'void')::int as void_count
+        from operational_fund_transactions oft
+        left join operational_fund_batches batch on batch.id = oft.batch_id
+        left join operational_fund_requests ofr on ofr.id = oft.fund_request_id
+        left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+        left join container_jobs cj on cj.id = coalesce(oft.container_job_id, expense.container_job_id)
+        left join sales_orders so on so.id = cj.sales_order_id
+        ${whereSql}
+      `,
+      params,
+    ),
+  ]);
+
+  const totalRows = Number(total.rows[0]?.total || 0);
+  const totalCredit = Number(summary.rows[0]?.total_credit || 0);
+  const totalDebit = Number(summary.rows[0]?.total_debit || 0);
+  const totalAdjustment = Number(summary.rows[0]?.total_adjustment || 0);
+  return {
+    rows: rows.rows.map(mapOperationalFundTransactionRow),
+    total: totalRows,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+    summary: {
+      totalCredit,
+      totalDebit,
+      totalAdjustment,
+      balance: totalCredit - totalDebit + totalAdjustment,
+      creditCount: Number(summary.rows[0]?.credit_count || 0),
+      debitCount: Number(summary.rows[0]?.debit_count || 0),
+      voidCount: Number(summary.rows[0]?.void_count || 0),
+    },
+  };
+}
+
+function mapFinanceContainerJobExpenseRow(row) {
+  const proofAttachment = row.proof_attachment_id
+    ? {
+        id: row.proof_attachment_id,
+        name: row.proof_file_name || '',
+        size: row.proof_file_size == null ? 0 : Number(row.proof_file_size),
+        type: row.proof_mime_type || '',
+        path: row.proof_attachment_id,
+        storagePath: row.proof_storage_path || '',
+      }
+    : null;
+
+  return {
+    id: row.id,
+    salesOrderId: row.sales_order_id || '',
+    containerJobId: row.container_job_id || '',
+    soNumber: row.so_number || '',
+    internalSoNumber: row.internal_so_number || row.so_number || '',
+    accurateSoNumber: row.accurate_so_number || '',
+    customer: row.customer_name || '',
+    destination: row.destination || '',
+    tripDate: row.trip_date || null,
+    containerNumber: row.container_number || '',
+    containerSize: row.container_size || '',
+    jobStatus: row.job_status || '',
+    driverName: row.driver_name || '',
+    truck: row.truck || '',
+    category: row.category || '',
+    amount: Number(row.amount || 0),
+    description: row.description || '',
+    recipientType: row.recipient_type || '',
+    recipientName: row.recipient_name || '',
+    paymentStatus: row.payment_status || 'belum_dibayar',
+    paidAt: row.paid_at || null,
+    paidByName: row.paid_by_name || '',
+    proofAttachmentId: row.proof_attachment_id || '',
+    proofAttachment,
+    financeCheckStatus: row.finance_check_status || 'belum_dicek',
+    financeCheckedByName: row.finance_checked_by_name || '',
+    financeCheckedAt: row.finance_checked_at || null,
+    financeNote: row.finance_note || '',
+    source: row.source || 'manual',
+    sourceRefId: row.source_ref_id || '',
+    createdByName: row.created_by_name || '',
+    createdAt: row.created_at || null,
+    updatedByName: row.updated_by_name || '',
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function containerJobExpenseReconciliationSelect() {
+  return `
+    select
+      expense.*,
+      coalesce(expense.sales_order_id, cj.sales_order_id) as sales_order_id,
+      coalesce(so.accurate_so_number, so.so_number) as so_number,
+      so.so_number as internal_so_number,
+      so.accurate_so_number,
+      so.customer_name,
+      so.destination,
+      so.trip_date,
+      cj.container_number,
+      cj.container_size,
+      cj.status as job_status,
+      cj.assignment_snapshot->>'driver' as driver_name,
+      cj.assignment_snapshot->>'plateNumber' as truck,
+      proof.file_name as proof_file_name,
+      proof.mime_type as proof_mime_type,
+      proof.file_size as proof_file_size,
+      proof.storage_path as proof_storage_path
+    from container_job_expenses expense
+    join container_jobs cj on cj.id = expense.container_job_id
+    join sales_orders so on so.id = cj.sales_order_id
+    left join attachments proof on proof.id = expense.proof_attachment_id
+  `;
+}
+
+function buildContainerJobExpenseFilters(options = {}) {
+  const clauses = ['1=1'];
+  const params = [];
+  if (options.financeCheckStatus === 'open') {
+    clauses.push("expense.finance_check_status in ('belum_dicek', 'dikoreksi')");
+  } else if (options.financeCheckStatus) {
+    params.push(options.financeCheckStatus);
+    clauses.push(`expense.finance_check_status = $${params.length}`);
+  }
+  if (options.paymentStatus) {
+    params.push(options.paymentStatus);
+    clauses.push(`expense.payment_status = $${params.length}`);
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`coalesce(expense.paid_at::date, expense.created_at::date) >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`coalesce(expense.paid_at::date, expense.created_at::date) <= $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`(
+      so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
+      or so.customer_name ilike $${params.length}
+      or so.destination ilike $${params.length}
+      or cj.container_number ilike $${params.length}
+      or cj.assignment_snapshot::text ilike $${params.length}
+      or expense.description ilike $${params.length}
+      or expense.recipient_name ilike $${params.length}
+    )`);
+  }
+  return { whereSql: `where ${clauses.join(' and ')}`, params };
+}
+
+export async function getContainerJobExpensesReconciliationPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildContainerJobExpenseFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+  const [rows, total, summary] = await Promise.all([
+    query(
+      `
+        ${containerJobExpenseReconciliationSelect()}
+        ${whereSql}
+        order by coalesce(expense.paid_at, expense.created_at) desc, expense.created_at desc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        select count(*)::int as total
+        from container_job_expenses expense
+        join container_jobs cj on cj.id = expense.container_job_id
+        join sales_orders so on so.id = cj.sales_order_id
+        ${whereSql}
+      `,
+      params,
+    ),
+    query(
+      `
+        select
+          count(*) filter (where expense.finance_check_status = 'belum_dicek')::int as belum_dicek,
+          count(*) filter (where expense.finance_check_status = 'sudah_dicek')::int as sudah_dicek,
+          count(*) filter (where expense.finance_check_status = 'perlu_klarifikasi')::int as perlu_klarifikasi,
+          count(*) filter (where expense.finance_check_status = 'dikoreksi')::int as dikoreksi,
+          coalesce(sum(expense.amount), 0)::numeric as total_amount,
+          coalesce(sum(expense.amount) filter (where expense.finance_check_status in ('belum_dicek', 'dikoreksi')), 0)::numeric as pending_amount
+        from container_job_expenses expense
+        join container_jobs cj on cj.id = expense.container_job_id
+        join sales_orders so on so.id = cj.sales_order_id
+        ${whereSql}
+      `,
+      params,
+    ),
+  ]);
+
+  const totalRows = Number(total.rows[0]?.total || 0);
+  return {
+    rows: rows.rows.map(mapFinanceContainerJobExpenseRow),
+    total: totalRows,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+    summary: {
+      belumDicek: Number(summary.rows[0]?.belum_dicek || 0),
+      sudahDicek: Number(summary.rows[0]?.sudah_dicek || 0),
+      perluKlarifikasi: Number(summary.rows[0]?.perlu_klarifikasi || 0),
+      dikoreksi: Number(summary.rows[0]?.dikoreksi || 0),
+      totalAmount: Number(summary.rows[0]?.total_amount || 0),
+      pendingAmount: Number(summary.rows[0]?.pending_amount || 0),
+    },
+  };
+}
+
+async function getContainerJobExpenseReconciliationById(client, id) {
+  const result = await client.query(
+    `
+      ${containerJobExpenseReconciliationSelect()}
+      where expense.id = $1
+      limit 1
+    `,
+    [id],
+  );
+  return result.rows[0] ? mapFinanceContainerJobExpenseRow(result.rows[0]) : null;
+}
+
+export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query('select id from container_job_expenses where id = $1', [id]);
+    if (!existing.rows[0]) {
+      const error = new Error('Transaksi biaya container job tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
+      throw error;
+    }
+
+    const batchResult = await client.query(
+      `
+        select batch.status
+        from operational_fund_transactions oft
+        join operational_fund_batches batch on batch.id = oft.batch_id
+        where oft.container_job_expense_id = $1
+          and oft.transaction_type = 'debit'
+          and oft.status = 'posted'
+        limit 1
+        for update of batch
+      `,
+      [id],
+    );
+    if (batchResult.rows[0]?.status === 'closed') {
+      const error = new Error('Batch rekening dropping biaya ini sudah ditutup. Status cek tidak bisa diubah lagi.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_BATCH_CLOSED';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update container_job_expenses
+        set finance_check_status = $1,
+            finance_checked_by_name = $2,
+            finance_checked_at = now(),
+            finance_note = $3,
+            updated_by_name = $2,
+            updated_at = now()
+        where id = $4
+      `,
+      [
+        payload.financeCheckStatus,
+        payload.actorName || 'Finance',
+        payload.financeNote || null,
+        id,
+      ],
+    );
+
+    return getContainerJobExpenseReconciliationById(client, id);
+  });
+}
+
 export async function approveRpujRequest(id, payload = {}) {
   return withTransaction(async (client) => {
     const existing = await client.query('select id, rpuj_status from container_jobs where id = $1', [id]);
@@ -2499,6 +3622,197 @@ export async function getInvoiceOrdersPage(options = {}) {
       completeInvoiceDocuments: Number(summary.rows[0]?.complete_invoice_documents || 0),
       sentInvoiceDocuments: Number(summary.rows[0]?.sent_invoice_documents || 0),
     },
+  };
+}
+
+function outstandingOrdersCte() {
+  return `
+    ${invoiceOrdersCte()},
+    payment_totals as (
+      select sales_order_id, coalesce(sum(amount), 0)::numeric as total_paid
+      from sales_order_payments
+      group by sales_order_id
+    ),
+    outstanding_orders_all as (
+      select
+        io.*,
+        so.ots_data_review_status,
+        coalesce(pt.total_paid, 0)::numeric as total_paid,
+        greatest(io.billing_amount - coalesce(pt.total_paid, 0), 0)::numeric as outstanding_amount,
+        case
+          when io.due_date is null then 'unknown'
+          when (io.due_date at time zone 'Asia/Jakarta')::date >= (now() at time zone 'Asia/Jakarta')::date then 'current'
+          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 30 then 'overdue_1_30'
+          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 60 then 'overdue_31_60'
+          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 90 then 'overdue_61_90'
+          else 'overdue_90_plus'
+        end as aging_bucket,
+        case
+          when io.due_date is null then 0
+          else greatest(((now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date)::int, 0)
+        end as days_overdue
+      from invoice_orders io
+      join sales_orders so on so.id = io.id
+      left join payment_totals pt on pt.sales_order_id = io.id
+    ),
+    -- Difilter dari sisa outstanding yang dihitung ulang (bukan dari billing_status='lunas' yang
+    -- tersimpan), karena billing_amount dihitung live dari finance_rows dan bisa berubah setelah
+    -- sebuah SO ditandai lunas (mis. koreksi revenue). Kalau hanya filter dari flag tersimpan, SO
+    -- yang piutangnya kebuka lagi gara-gara koreksi itu akan hilang diam-diam dari dashboard ini.
+    outstanding_orders as (
+      select *
+      from outstanding_orders_all
+      where outstanding_amount > 0
+    )
+  `;
+}
+
+function buildOutstandingFilters(options = {}) {
+  const clauses = [];
+  const params = [];
+
+  if (options.agingBucket) {
+    params.push(options.agingBucket);
+    clauses.push(`aging_bucket = $${params.length}`);
+  }
+  if (options.dataReviewStatus) {
+    params.push(options.dataReviewStatus);
+    clauses.push(`ots_data_review_status = $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`(
+      so_number ilike $${params.length}
+      or accurate_so_number ilike $${params.length}
+      or invoice_number ilike $${params.length}
+      or customer_name ilike $${params.length}
+      or destination ilike $${params.length}
+    )`);
+  }
+
+  return {
+    whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '',
+    params,
+  };
+}
+
+function mapOutstandingOrderRow(row) {
+  return {
+    id: row.id,
+    soNumber: row.so_number || '-',
+    invoiceNumber: row.invoice_number || '',
+    customer: row.customer_name || '-',
+    destination: row.destination || '-',
+    billingStatus: row.billing_status,
+    billingAmount: Number(row.billing_amount || 0),
+    totalPaid: Number(row.total_paid || 0),
+    outstandingAmount: Number(row.outstanding_amount || 0),
+    invoiceDate: row.invoice_issued_at,
+    dueDate: row.due_date,
+    paymentTerms: row.payment_terms || '-',
+    agingBucket: row.aging_bucket,
+    daysOverdue: Number(row.days_overdue || 0),
+    dataReviewStatus: row.ots_data_review_status || 'ok',
+  };
+}
+
+export async function getSalesOrderOutstandingPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildOutstandingFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+
+  const [rows, summary] = await Promise.all([
+    query(
+      `
+        ${outstandingOrdersCte()}
+        select *, count(*) over ()::int as full_count
+        from outstanding_orders
+        ${whereSql}
+        order by
+          due_date asc nulls last,
+          so_number asc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        ${outstandingOrdersCte()}
+        select
+          coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
+          count(*)::int as total_orders,
+          count(*) filter (where aging_bucket = 'current')::int as current_count,
+          count(*) filter (where aging_bucket = 'overdue_1_30')::int as overdue_1_30_count,
+          count(*) filter (where aging_bucket = 'overdue_31_60')::int as overdue_31_60_count,
+          count(*) filter (where aging_bucket = 'overdue_61_90')::int as overdue_61_90_count,
+          count(*) filter (where aging_bucket = 'overdue_90_plus')::int as overdue_90_plus_count,
+          count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count,
+          count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
+        from outstanding_orders
+      `,
+      [],
+    ),
+  ]);
+
+  const total = rows.rows[0]?.full_count ? Number(rows.rows[0].full_count) : 0;
+
+  return {
+    rows: rows.rows.map(mapOutstandingOrderRow),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    summary: {
+      totalOutstandingAmount: Number(summary.rows[0]?.total_outstanding_amount || 0),
+      totalOrders: Number(summary.rows[0]?.total_orders || 0),
+      current: Number(summary.rows[0]?.current_count || 0),
+      overdue1To30: Number(summary.rows[0]?.overdue_1_30_count || 0),
+      overdue31To60: Number(summary.rows[0]?.overdue_31_60_count || 0),
+      overdue61To90: Number(summary.rows[0]?.overdue_61_90_count || 0),
+      overdue90Plus: Number(summary.rows[0]?.overdue_90_plus_count || 0),
+      unknownDueDate: Number(summary.rows[0]?.unknown_due_date_count || 0),
+      needsReview: Number(summary.rows[0]?.needs_review_count || 0),
+    },
+  };
+}
+
+export async function getCustomerOutstandingSummary(customerName) {
+  const normalized = String(customerName || '').trim();
+  if (!normalized) {
+    return {
+      customer: '',
+      openInvoiceCount: 0,
+      totalOutstandingAmount: 0,
+      worstDaysOverdue: 0,
+      overdueCount: 0,
+      needsReview: 0,
+    };
+  }
+
+  const result = await query(
+    `
+      ${outstandingOrdersCte()}
+      select
+        count(*)::int as open_invoice_count,
+        coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
+        coalesce(max(days_overdue), 0)::int as worst_days_overdue,
+        count(*) filter (where aging_bucket not in ('current', 'unknown'))::int as overdue_count,
+        count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
+      from outstanding_orders
+      where lower(btrim(customer_name)) = lower(btrim($1))
+    `,
+    [normalized],
+  );
+
+  const row = result.rows[0] || {};
+  return {
+    customer: normalized,
+    openInvoiceCount: Number(row.open_invoice_count || 0),
+    totalOutstandingAmount: Number(row.total_outstanding_amount || 0),
+    worstDaysOverdue: Number(row.worst_days_overdue || 0),
+    overdueCount: Number(row.overdue_count || 0),
+    needsReview: Number(row.needs_review_count || 0),
   };
 }
 
@@ -2728,6 +4042,249 @@ export async function markInvoiceDocumentUploaded(id, patch = {}) {
       [id],
     );
     return updated.rows[0] ? mapInvoiceOrderRow(updated.rows[0]) : null;
+  });
+}
+
+function mapSalesOrderPaymentRow(row = {}) {
+  return {
+    id: row.id,
+    salesOrderId: row.sales_order_id,
+    amount: Number(row.amount || 0),
+    paymentDate: row.payment_date,
+    referenceNumber: row.reference_number || '',
+    note: row.note || '',
+    recordedByName: row.recorded_by_name || '',
+    proofAttachmentId: row.proof_attachment_id || null,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listSalesOrderPayments(salesOrderId) {
+  const result = await query(
+    `
+      select id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at, proof_attachment_id
+      from sales_order_payments
+      where sales_order_id = $1
+      order by payment_date desc, created_at desc
+    `,
+    [salesOrderId],
+  );
+  return result.rows.map(mapSalesOrderPaymentRow);
+}
+
+async function computeSalesOrderPaymentSummary(client, id) {
+  const invoiceResult = await client.query(
+    `
+      ${invoiceOrdersCte()}
+      select billing_amount
+      from invoice_orders
+      where id = $1
+      limit 1
+    `,
+    [id],
+  );
+  const billingAmount = Number(invoiceResult.rows[0]?.billing_amount || 0);
+
+  const [paidResult, statusResult] = await Promise.all([
+    client.query(
+      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1',
+      [id],
+    ),
+    client.query('select billing_status from sales_orders where id = $1', [id]),
+  ]);
+  const totalPaid = Number(paidResult.rows[0]?.total_paid || 0);
+
+  return {
+    billingAmount,
+    totalPaid,
+    outstandingAmount: Math.max(billingAmount - totalPaid, 0),
+    billingStatus: statusResult.rows[0]?.billing_status || null,
+  };
+}
+
+// proof_attachment_id sengaja TIDAK dibandingkan: setiap submit (termasuk replay) meng-upload
+// bukti transfernya sendiri lewat createAttachment, jadi attachment id-nya wajar berbeda-beda
+// walau ini submit ulang yang sama secara bisnis. Kesamaan yang dicek adalah nominal dan
+// referensi transaksinya, bukan record attachment mana yang kebetulan tersimpan.
+function ensurePaymentPayloadMatches(existingRow, payload) {
+  return Number(existingRow.amount) === Number(payload.amount)
+    && String(existingRow.reference_number || '') === String(payload.referenceNumber || '')
+    && String(existingRow.note || '') === String(payload.note || '');
+}
+
+// Fondasi Customer Outstanding (Phase 1): satu-satunya jalur yang boleh membawa Sales Order
+// ke status 'lunas' adalah pembayaran yang benar-benar menutup sisa outstanding-nya, dicatat
+// Finance di sini. Ini sengaja menggantikan flip manual billing_status='lunas' yang sebelumnya
+// bisa dilakukan Sales/Admin lewat updateInvoiceDeliveryStatus (lihat sales-orders.service.js).
+//
+// Bukti transfer wajib (proofAttachmentId) dan idempotencyKey wajib dicek SEBELUM validasi saldo:
+// replay dari submit yang sama (double-click/retry jaringan) harus balik ke hasil yang sama tanpa
+// insert dobel dan tanpa divalidasi ulang terhadap sisa outstanding yang sudah berkurang akibat
+// pembayaran pertama (kalau tidak, replay yang sah bisa ditolak keliru sebagai "melebihi outstanding").
+export async function recordSalesOrderPayment(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const locked = await client.query(
+      'select id, status, invoice_number, billing_status from sales_orders where id = $1 for update',
+      [id],
+    );
+    if (!locked.rows[0]) {
+      const error = new Error('Sales Order tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_NOT_FOUND';
+      throw error;
+    }
+    if (locked.rows[0].status !== 'completed') {
+      const error = new Error('Pembayaran hanya bisa dicatat setelah Sales Order selesai.');
+      error.statusCode = 400;
+      error.code = 'SALES_ORDER_PAYMENT_ORDER_NOT_COMPLETED';
+      throw error;
+    }
+    if (!String(locked.rows[0].invoice_number || '').trim()) {
+      const error = new Error('Nomor invoice belum tersedia. Input nomor invoice terlebih dahulu sebelum mencatat pembayaran.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_PAYMENT_INVOICE_NUMBER_REQUIRED';
+      throw error;
+    }
+    if (!payload.proofAttachmentId) {
+      const error = new Error('Bukti transfer wajib dilampirkan sebelum pembayaran bisa dicatat.');
+      error.statusCode = 400;
+      error.code = 'SALES_ORDER_PAYMENT_PROOF_REQUIRED';
+      throw error;
+    }
+
+    const idempotencyKey = payload.idempotencyKey || null;
+    if (idempotencyKey) {
+      const existing = await client.query(
+        'select * from sales_order_payments where idempotency_key = $1 limit 1',
+        [idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        if (!ensurePaymentPayloadMatches(existing.rows[0], payload)) {
+          const error = new Error('Percobaan submit ini memakai kunci yang sama dengan pembayaran lain yang datanya berbeda. Silakan catat sebagai entri baru.');
+          error.statusCode = 409;
+          error.code = 'SALES_ORDER_PAYMENT_IDEMPOTENCY_KEY_MISMATCH';
+          throw error;
+        }
+        const summary = await computeSalesOrderPaymentSummary(client, id);
+        return { payment: mapSalesOrderPaymentRow(existing.rows[0]), ...summary };
+      }
+    }
+
+    const invoiceResult = await client.query(
+      `
+        ${invoiceOrdersCte()}
+        select billing_amount
+        from invoice_orders
+        where id = $1
+        limit 1
+      `,
+      [id],
+    );
+    if (!invoiceResult.rows[0]) {
+      const error = new Error('Sales Order ini belum siap ditagihkan. Pastikan dokumen lengkap dan sudah diverifikasi Finance.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_PAYMENT_NOT_INVOICEABLE';
+      throw error;
+    }
+    const billingAmount = Number(invoiceResult.rows[0].billing_amount || 0);
+
+    const paidResult = await client.query(
+      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1',
+      [id],
+    );
+    const totalPaid = Number(paidResult.rows[0].total_paid || 0);
+    const remaining = billingAmount - totalPaid;
+
+    // Dicek dari sisa outstanding yang dihitung ulang, bukan dari flag billing_status='lunas' yang
+    // tersimpan: billing_amount dihitung live dari finance_rows, jadi sebuah SO yang sudah lunas
+    // bisa saja kebuka lagi (mis. koreksi revenue menaikkan tagihan) dan tetap harus bisa dibayar.
+    if (remaining <= 0) {
+      const error = new Error('Sales Order ini sudah lunas.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_PAYMENT_ALREADY_PAID';
+      throw error;
+    }
+
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      const error = new Error('Nominal pembayaran wajib lebih dari 0.');
+      error.statusCode = 400;
+      error.code = 'SALES_ORDER_PAYMENT_AMOUNT_INVALID';
+      throw error;
+    }
+    if (amount > remaining) {
+      const error = new Error(`Nominal pembayaran melebihi sisa outstanding. Sisa outstanding Rp ${remaining.toLocaleString('id-ID')}.`);
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_PAYMENT_EXCEEDS_OUTSTANDING';
+      throw error;
+    }
+
+    const inserted = await client.query(
+      `
+        insert into sales_order_payments (
+          sales_order_id, amount, payment_date, reference_number, proof_attachment_id, note,
+          recorded_by_user_id, recorded_by_name, idempotency_key
+        )
+        values ($1, $2, coalesce($3::date, (now() at time zone 'Asia/Jakarta')::date), $4, $5, $6, $7, $8, $9)
+        on conflict (idempotency_key) where idempotency_key is not null do nothing
+        returning id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at, proof_attachment_id
+      `,
+      [
+        id,
+        amount,
+        payload.paymentDate || null,
+        payload.referenceNumber || null,
+        payload.proofAttachmentId || null,
+        payload.note || null,
+        payload.actorUserId || null,
+        payload.actorName || 'Finance',
+        idempotencyKey,
+      ],
+    );
+
+    if (!inserted.rows[0]) {
+      const raced = await client.query(
+        'select * from sales_order_payments where idempotency_key = $1 limit 1',
+        [idempotencyKey],
+      );
+      if (!raced.rows[0] || !ensurePaymentPayloadMatches(raced.rows[0], payload)) {
+        const error = new Error('Percobaan submit ini memakai kunci yang sama dengan pembayaran lain yang datanya berbeda. Silakan catat sebagai entri baru.');
+        error.statusCode = 409;
+        error.code = 'SALES_ORDER_PAYMENT_IDEMPOTENCY_KEY_MISMATCH';
+        throw error;
+      }
+      const summary = await computeSalesOrderPaymentSummary(client, id);
+      return { payment: mapSalesOrderPaymentRow(raced.rows[0]), ...summary };
+    }
+
+    const newTotalPaid = totalPaid + amount;
+    const isFullyPaid = newTotalPaid >= billingAmount;
+    // Kalau status tersimpan sebelumnya 'lunas' tapi ternyata masih ada sisa (billing_amount naik
+    // gara-gara koreksi setelah lunas), turunkan lagi ke 'menunggu_pembayaran' supaya statusnya
+    // tidak nyangkut "lunas" padahal baru saja terbukti masih ada piutang yang dibayar sebagian.
+    const nextBillingStatus = isFullyPaid
+      ? 'lunas'
+      : (locked.rows[0].billing_status === 'lunas' ? 'menunggu_pembayaran' : locked.rows[0].billing_status);
+    if (nextBillingStatus !== locked.rows[0].billing_status) {
+      await client.query(
+        `
+          update sales_orders
+          set billing_status = $2,
+              updated_by_name = $3,
+              updated_at = now()
+          where id = $1
+        `,
+        [id, nextBillingStatus, payload.actorName || 'Finance'],
+      );
+    }
+
+    return {
+      payment: mapSalesOrderPaymentRow(inserted.rows[0]),
+      billingAmount,
+      totalPaid: newTotalPaid,
+      outstandingAmount: Math.max(billingAmount - newTotalPaid, 0),
+      billingStatus: nextBillingStatus,
+    };
   });
 }
 

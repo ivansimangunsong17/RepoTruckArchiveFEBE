@@ -1,10 +1,15 @@
 import {
+  correctContainerJobExpenseController,
+  createContainerJobExpenseController,
   generateContainerJobSpkController,
   getContainerJobController,
+  listContainerJobExpenseLedgerController,
+  listContainerJobExpensesController,
   listContainerJobsController,
   requestCancelContainerJobController,
   reviewCancelContainerJobController,
   updateContainerJobController,
+  updateContainerJobExpenseProofController,
 } from './container-jobs.controller.js';
 
 export const containerJobRoutes = [
@@ -16,9 +21,39 @@ export const containerJobRoutes = [
   },
   {
     method: 'GET',
+    path: '/api/container-jobs/expenses',
+    permission: 'container_job.read',
+    handler: listContainerJobExpenseLedgerController,
+  },
+  {
+    method: 'GET',
     path: '/api/container-jobs/:id',
     permission: 'container_job.read',
     handler: getContainerJobController,
+  },
+  {
+    method: 'GET',
+    path: '/api/container-jobs/:id/expenses',
+    permission: 'container_job.read',
+    handler: listContainerJobExpensesController,
+  },
+  {
+    method: 'POST',
+    path: '/api/container-jobs/:id/expenses',
+    permission: 'container_job.update',
+    handler: createContainerJobExpenseController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/expenses/:expenseId/correction',
+    permission: 'container_job.update',
+    handler: correctContainerJobExpenseController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/expenses/:expenseId/proof',
+    permission: 'container_job.update',
+    handler: updateContainerJobExpenseProofController,
   },
   {
     method: 'PATCH',

@@ -1,3 +1,4 @@
+import { FileText } from 'lucide-react';
 import MasterDataPage, { DetailDocumentActions } from '../../components/master/MasterDataPage';
 import MasterExpiryDate from '../../components/master/MasterExpiryDate';
 import { buildOperationalJobs, getActiveOperationalJobs } from '../../data/operationalDashboard';
@@ -328,7 +329,19 @@ function DriversPage({ readOnly = false }) {
       columns={[
         { key: 'truckNumber', label: 'No Lambung', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
         { key: 'nickname', label: 'Nama Panggilan', render: (_, row) => <DriverIdentity row={row} /> },
-        { key: 'nik', label: 'NIK', render: (value) => <span className="master-plain-cell">{value || '-'}</span> },
+        {
+          key: 'nik',
+          label: 'NIK',
+          render: (_value, row, meta) => (
+            <button
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+              onClick={meta.onViewDetail}
+              type="button"
+            >
+              <FileText size={12} /> Lihat Dokumen
+            </button>
+          ),
+        },
         { key: 'birthDate', label: 'Umur', render: (_, row) => <DriverAge row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (_, row) => <DriverPlate row={row} trucks={truckRows} /> },
         { key: 'licenseExpiry', label: 'Masa SIM', render: (_, row) => <DriverLicense row={row} /> },
@@ -348,6 +361,7 @@ function DriversPage({ readOnly = false }) {
       }]}
       pageClassName="driver-data-page"
       pageSize={20}
+      hideRowNumber
       showModeChip={false}
       toolbarTitle="Daftar Sopir"
       toolbarDescription="Cari nama panggilan, cek status, masa SIM, dan kelengkapan dokumen."

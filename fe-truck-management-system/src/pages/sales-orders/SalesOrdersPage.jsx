@@ -17,6 +17,7 @@ import PageHeader from '../../components/common/PageHeader';
 import StatusBadge from '../../components/common/StatusBadge';
 import EmptyState from '../../components/common/EmptyState';
 import SalesOrderForm from '../../components/forms/SalesOrderForm';
+import OperationalForm from '../../components/forms/OperationalForm';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
@@ -26,6 +27,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
 import { fetchSalesOrdersPage, updateSalesOrderInvoiceDeliveryStatus } from '../../services/archive/salesOrderService';
+import { generateContainerJobSpk } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
 const LOCAL_BILLING_STATUS_KEY = 'tms-sales-order-billing-status-v2';
@@ -72,6 +74,14 @@ const DEFAULT_CUSTOMER_DOCUMENT_STATUS_FILTER = 'invoice_ready';
 
 function valueOrDash(value) {
   return value || '-';
+}
+
+function getJobStatusLabel(status) {
+  if (status === 'completed') return 'Selesai';
+  if (status === 'running') return 'Sedang Jalan';
+  if (status === 'repo_stored') return 'Container Titip';
+  if (status === 'cancelled') return 'Batal';
+  return 'Belum Jalan';
 }
 
 function formatShipmentLabel(value) {
@@ -400,10 +410,21 @@ function getServerFilter(selectedStatus, customerDocumentsOnly = false) {
   return { status: selectedStatus, invoiced: false };
 }
 
-function ContainerDetail({ container, onRequestCancel, canRequestCancel }) {
+function ContainerDetail({ container, onRequestCancel, canRequestCancel, onEdit, canEdit }) {
   const allowRequestCancel = canRequestCancel && container.status === 'received' && container.cancelRequestStatus !== 'submitted';
+  const allowEdit = canEdit && !['cancelled'].includes(container.status);
   return (
-    <div className="container-detail">
+    <div className="container-detail" style={allowEdit ? { paddingRight: 118 } : undefined}>
+      {allowEdit ? (
+        <button
+          className="primary-button"
+          type="button"
+          onClick={() => onEdit(container)}
+          style={{ position: 'absolute', top: '50%', right: 10, transform: 'translateY(-50%)', zIndex: 1 }}
+        >
+          <Edit3 size={15} /> Update
+        </button>
+      ) : null}
       <div className="container-detail-head">
         <div><strong>{container.containerNumber || 'Container belum diisi'}</strong><span>Container {container.size} - {valueOrDash(container.type)}</span></div>
         <StatusBadge status={container.status} />
@@ -491,6 +512,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const [loading, setLoading] = useState(archive.isDatabaseMode);
   const [error, setError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [editingContainer, setEditingContainer] = useState(null);
   const [invoiceOverrides] = useState({});
   const [billingStatusOverrides, setBillingStatusOverrides] = useState(() => (
     archive.isDatabaseMode ? {} : readLocalBillingStatusOverrides()
@@ -512,6 +534,11 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const selectedOrderLockedForSales = selectedOrderLockedByFinanceForSales || selectedOrderLockedByRpujForSales;
   const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN
     || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder) && !selectedOrderLockedForSales);
+  const canUpdateContainerJob = hasPermission(user, 'operations.update');
+  const activeJobsForContainerUpdate = useMemo(
+    () => archive.orders.flatMap((order) => getOrderContainers(order)),
+    [archive.orders],
+  );
   const canModifyOrder = (order) => {
     if (!order || !canUpdateOrder) return false;
     if (user?.role === USER_ROLES.ADMIN) return true;
@@ -843,6 +870,47 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
     } finally {
       setCancelContainerSaving(false);
     }
+  }
+
+  function applyContainerUpdateToSelectedOrder(saved) {
+    setSelectedOrder((current) => {
+      if (!current || !saved) return current;
+      const containers = getOrderContainers(current).map((item) => (item.id === saved.id ? { ...item, ...saved } : item));
+      return { ...current, containers };
+    });
+  }
+
+  async function updateContainerFromDetail(form) {
+    if (!editingContainer) return;
+    const containerNumber = form.containerNumber || editingContainer.containerNumber || 'Container';
+    try {
+      const saved = await archive.updateJob(editingContainer.id, form);
+      if (archive.isDatabaseMode) setListVersion((value) => value + 1);
+      applyContainerUpdateToSelectedOrder(saved);
+      setEditingContainer(null);
+      archive.refresh?.();
+      notify({
+        title: 'Proses Operational diperbarui',
+        message: `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
+      });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
+      throw requestError;
+    }
+  }
+
+  async function generateContainerSpkFromDetail(form) {
+    if (!editingContainer?.id) {
+      throw new Error('Container Job belum dipilih.');
+    }
+    const saved = await generateContainerJobSpk(editingContainer.id, {
+      ...form,
+      updatedBy: user?.fullName || user?.name || 'Operational',
+    });
+    setEditingContainer((current) => (current?.id === saved.id ? { ...current, ...saved } : current));
+    applyContainerUpdateToSelectedOrder(saved);
+    if (archive.isDatabaseMode) setListVersion((value) => value + 1);
+    return saved;
   }
 
   async function cancelSelectedSalesOrder() {
@@ -1265,7 +1333,14 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
               <div className="container-grid">
                 {selectedOrderContainers.length ? (
                   selectedOrderContainers.map((container) => (
-                    <ContainerDetail key={container.id} container={container} canRequestCancel={canRequestCancelContainer} onRequestCancel={openRequestCancelContainer} />
+                    <ContainerDetail
+                      key={container.id}
+                      container={container}
+                      canRequestCancel={canRequestCancelContainer}
+                      onRequestCancel={openRequestCancelContainer}
+                      canEdit={canUpdateContainerJob}
+                      onEdit={setEditingContainer}
+                    />
                   ))
                 ) : (
                   <div className="archive-inline-state">
@@ -1340,6 +1415,20 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
           destinations={archive.masters.destinations}
           onClose={() => { setFormOpen(false); setEditingOrder(null); }}
           onSubmit={saveOrder}
+        />
+      ) : null}
+
+      {editingContainer ? (
+        <OperationalForm
+          container={editingContainer}
+          masterTrucks={archive.masters.trucks}
+          masterDrivers={archive.masters.drivers}
+          masterDestinations={archive.masters.destinations}
+          activeJobs={activeJobsForContainerUpdate}
+          currentUser={user}
+          onClose={() => setEditingContainer(null)}
+          onSubmit={updateContainerFromDetail}
+          onGenerateSpk={generateContainerSpkFromDetail}
         />
       ) : null}
     </div>

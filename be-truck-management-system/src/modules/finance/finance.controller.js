@@ -1,5 +1,6 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
+import { getContainerJobExpense } from '../container-jobs/container-jobs.service.js';
 import {
   approveFinanceCorrection,
   approveRpuj,
@@ -10,14 +11,28 @@ import {
   fetchFinanceDashboard,
   fetchInvoiceOrderDetail,
   fetchInvoiceOrders,
+  fetchContainerJobExpensesForReconciliation,
+  closeOperationalFundBatch,
+  fetchOperationalFundBatches,
+  fetchOperationalFundRequests,
+  fetchOperationalFundTransactions,
   fetchOrderVerifications,
   fetchRpujRequests,
+  createOperationalFundRequest,
+  depositOperationalFund,
+  fetchInvoicePayments,
+  fetchSalesOrderOutstanding,
   rejectFinanceCorrection,
+  approveOperationalFundRequest,
+  reconcileContainerJobExpense,
+  recordInvoicePayment,
+  rejectOperationalFundRequest,
   rejectRpuj,
   requestFinanceCorrection,
   saveInvoiceNumber,
   saveOrderVerificationSoNumber,
   uploadInvoiceDocument,
+  uploadOperationalFundTransferProof,
   uploadRpujTransferProof,
 } from './finance.service.js';
 
@@ -55,6 +70,125 @@ export async function updateOrderVerificationSoNumberController(request, respons
 export async function rpujRequestsController(request, response) {
   const result = await fetchRpujRequests(request.query);
   sendSuccess(response, result);
+}
+
+export async function operationalFundRequestsController(request, response) {
+  const result = await fetchOperationalFundRequests(request.query);
+  sendSuccess(response, result);
+}
+
+export async function operationalFundBatchesController(request, response) {
+  const result = await fetchOperationalFundBatches(request.query);
+  sendSuccess(response, result);
+}
+
+export async function operationalFundTransactionsController(request, response) {
+  const result = await fetchOperationalFundTransactions(request.query);
+  sendSuccess(response, result);
+}
+
+export async function closeOperationalFundBatchController(request, response) {
+  const result = await closeOperationalFundBatch(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_CLOSE_OPERATIONAL_FUND_BATCH',
+    module: 'finance',
+    entityType: 'operational_fund_batch',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: { batchDate: result.batchDate, balance: result.balance },
+  });
+  sendSuccess(response, result, 'Batch rekening dropping berhasil ditutup.');
+}
+
+export async function createOperationalFundRequestController(request, response) {
+  const result = await createOperationalFundRequest(request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_FUND_REQUEST_SUBMITTED',
+    module: 'finance',
+    entityType: 'operational_fund_request',
+    entityId: result.id,
+    afterData: result,
+    metadata: { requestDate: result.requestDate, amount: result.amount },
+  });
+  sendSuccess(response, result, 'Pengajuan saldo operasional berhasil dibuat.');
+}
+
+export async function depositOperationalFundController(request, response) {
+  const result = await depositOperationalFund(request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_DEPOSIT_OPERATIONAL_FUND',
+    module: 'finance',
+    entityType: 'operational_fund_transaction',
+    entityId: result.id,
+    afterData: result,
+    metadata: { requestDate: result.requestDate, amount: result.amount },
+  });
+  sendSuccess(response, result, 'Deposit saldo operasional berhasil dicatat.');
+}
+
+export async function approveOperationalFundRequestController(request, response) {
+  const result = await approveOperationalFundRequest(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_APPROVE_OPERATIONAL_FUND',
+    module: 'finance',
+    entityType: 'operational_fund_request',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: { requestDate: result.requestDate, amount: result.amount },
+  });
+  sendSuccess(response, result, 'Saldo operasional disetujui Finance.');
+}
+
+export async function rejectOperationalFundRequestController(request, response) {
+  const result = await rejectOperationalFundRequest(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_REJECT_OPERATIONAL_FUND',
+    module: 'finance',
+    entityType: 'operational_fund_request',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: { requestDate: result.requestDate, amount: result.amount, rejectionNote: request.body?.rejectionNote || request.body?.note || '' },
+  });
+  sendSuccess(response, result, 'Saldo operasional ditolak Finance.');
+}
+
+export async function uploadOperationalFundTransferProofController(request, response) {
+  const result = await uploadOperationalFundTransferProof(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_UPLOAD_OPERATIONAL_FUND_TRANSFER_PROOF',
+    module: 'finance',
+    entityType: 'operational_fund_request',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: { requestDate: result.requestDate, amount: result.amount, fileName: result.transferProof },
+  });
+  sendSuccess(response, result, 'Bukti transfer saldo operasional berhasil diupload.');
+}
+
+export async function containerJobExpenseReconciliationController(request, response) {
+  const result = await fetchContainerJobExpensesForReconciliation(request.query);
+  sendSuccess(response, result);
+}
+
+export async function reconcileContainerJobExpenseController(request, response) {
+  const before = await getContainerJobExpense(request.params.id);
+  const result = await reconcileContainerJobExpense(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_RECONCILE_CONTAINER_JOB_EXPENSE',
+    module: 'finance',
+    entityType: 'container_job_expense',
+    entityId: request.params.id,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      containerJobId: result.containerJobId,
+      soNumber: result.soNumber,
+      category: result.category,
+      amount: result.amount,
+      financeCheckStatus: result.financeCheckStatus,
+    },
+  });
+  sendSuccess(response, result, 'Status cek biaya container job berhasil disimpan.');
 }
 
 export async function approveRpujController(request, response) {
@@ -101,6 +235,11 @@ export async function invoiceOrdersController(request, response) {
   sendSuccess(response, result);
 }
 
+export async function outstandingOrdersController(request, response) {
+  const result = await fetchSalesOrderOutstanding(request.query);
+  sendSuccess(response, result);
+}
+
 export async function invoiceOrderDetailController(request, response) {
   const result = await fetchInvoiceOrderDetail(request.params.id);
   sendSuccess(response, result);
@@ -139,6 +278,29 @@ export async function uploadInvoiceDocumentController(request, response) {
     },
   });
   sendSuccess(response, result, 'Dokumen invoice berhasil diupload.');
+}
+
+export async function recordInvoicePaymentController(request, response) {
+  const result = await recordInvoicePayment(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_RECORD_INVOICE_PAYMENT',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      amount: result?.payment?.amount,
+      totalPaid: result?.totalPaid,
+      outstandingAmount: result?.outstandingAmount,
+      billingStatus: result?.billingStatus,
+    },
+  });
+  sendSuccess(response, result, 'Pembayaran berhasil dicatat.');
+}
+
+export async function invoicePaymentsController(request, response) {
+  const result = await fetchInvoicePayments(request.params.id);
+  sendSuccess(response, result);
 }
 
 export async function financeCorrectionsController(request, response) {

@@ -1,6 +1,7 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
+  fetchCustomerOutstandingSummary,
   getSalesOrder,
   listSalesOrders,
   removeSalesOrder,
@@ -92,6 +93,12 @@ export async function createSalesOrderController(request, response) {
       metadata: historicalContainerMetadata(saved, container),
     })));
   sendSuccess(response, saved, 'Sales Order berhasil disimpan.', 201);
+}
+
+export async function customerOutstandingSummaryController(request, response) {
+  const customerName = request.query.customer || request.query.customerName || '';
+  const result = await fetchCustomerOutstandingSummary(customerName);
+  sendSuccess(response, result);
 }
 
 export async function getSalesOrderController(request, response) {

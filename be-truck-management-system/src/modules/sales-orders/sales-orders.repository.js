@@ -241,7 +241,10 @@ async function findCustomer(client, form) {
     return result.rows[0] || null;
   }
   if (!form.customer) return null;
-  const result = await client.query('select * from customers where name = $1 and archived_at is null', [form.customer]);
+  const result = await client.query(
+    'select * from customers where lower(btrim(name)) = lower(btrim($1)) and archived_at is null',
+    [form.customer],
+  );
   return result.rows[0] || null;
 }
 
@@ -346,13 +349,72 @@ async function ensureSalesOrderCanBeCancelled(client, id) {
   }
 }
 
-function ensureContainerTripGate(container = {}) {
-  if (!['running', 'completed'].includes(container.status)) return;
-  if (['approved', 'paid'].includes(container.rpujStatus)) return;
-  const error = new Error('Status perjalanan baru bisa Sedang Jalan setelah UJ disetujui Finance.');
-  error.statusCode = 409;
-  error.code = 'TRIP_WAITING_RPUJ_APPROVAL';
-  throw error;
+async function releaseDriverIfIdle(client, driverId) {
+  if (!driverId) return;
+  await client.query(
+    `
+      update drivers
+      set operational_status = 'Aktif',
+          updated_at = now()
+      where id = $1
+        and operational_status = 'Bertugas'
+        and not exists (
+          select 1
+          from container_jobs cj
+          where cj.driver_id = $1
+            and cj.status not in ('completed', 'cancelled', 'repo_stored')
+        )
+    `,
+    [driverId],
+  );
+}
+
+async function releaseVehicleIfIdle(client, vehicleId) {
+  if (!vehicleId) return;
+  await client.query(
+    `
+      update vehicles
+      set operational_status = 'Aktif',
+          updated_at = now()
+      where id = $1
+        and operational_status = 'Bertugas'
+        and not exists (
+          select 1
+          from container_jobs cj
+          where cj.vehicle_id = $1
+            and cj.status not in ('completed', 'cancelled', 'repo_stored')
+        )
+    `,
+    [vehicleId],
+  );
+}
+
+// Guard `ensureSalesOrderCanBeCancelled` already memastikan hanya job 'received' yang boleh lolos,
+// tapi filter status di sini tetap dipertahankan sebagai safety net agar job yang levelnya sudah
+// lebih maju (running/completed/dll) tidak pernah ikut ter-cancel meski guard di atasnya berubah.
+async function cascadeCancelReceivedContainerJobs(client, salesOrderId, { cancelReason, cancelledByName } = {}) {
+  const jobs = await client.query(
+    `
+      update container_jobs
+      set status = 'cancelled',
+          cancelled_at = now(),
+          cancel_reason = $1,
+          cancel_source = 'sales',
+          cancelled_by_name = $2,
+          updated_at = now()
+      where sales_order_id = $3
+        and status = 'received'
+      returning id, driver_id, vehicle_id
+    `,
+    [cancelReason || 'Sales Order dibatalkan', cancelledByName || null, salesOrderId],
+  );
+
+  const driverIds = new Set(jobs.rows.map((row) => row.driver_id).filter(Boolean));
+  const vehicleIds = new Set(jobs.rows.map((row) => row.vehicle_id).filter(Boolean));
+  for (const driverId of driverIds) await releaseDriverIfIdle(client, driverId);
+  for (const vehicleId of vehicleIds) await releaseVehicleIfIdle(client, vehicleId);
+
+  return jobs.rows;
 }
 
 async function updateSalesOrderCancellation(client, id, patch = {}) {
@@ -506,7 +568,6 @@ export async function createSalesOrder(form) {
     const order = orderResult.rows[0];
 
     for (const container of form.containers || []) {
-      ensureContainerTripGate(container);
       const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
       const jobEntries = Object.entries(jobPayload);
       await client.query(
@@ -601,7 +662,6 @@ export async function updateSalesOrder(id, form) {
     }
 
     for (const { container, currentJob } of assignments) {
-      ensureContainerTripGate(container);
       const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
       if (currentJob) {
         const salesJobPayload = {
@@ -735,6 +795,10 @@ export async function cancelSalesOrder(id) {
       error.code = 'SALES_ORDER_NOT_FOUND';
       throw error;
     }
+    await cascadeCancelReceivedContainerJobs(client, id, {
+      cancelReason: 'Sales Order dibatalkan',
+      cancelledByName: 'Sistem',
+    });
     return result.rows[0];
   });
 }
@@ -771,7 +835,7 @@ export async function requestSalesOrderCancellation(id, patch = {}) {
 export async function reviewSalesOrderCancellation(id, patch = {}) {
   return withTransaction(async (client) => {
     const existing = await client.query(
-      'select id, status, cancel_request_status, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at from sales_orders where id = $1',
+      'select id, status, cancel_request_status, cancel_request_note, cancel_requested_by_name, cancel_requested_by_role, cancel_requested_at from sales_orders where id = $1',
       [id],
     );
     if (!existing.rows[0]) {
@@ -818,6 +882,10 @@ export async function reviewSalesOrderCancellation(id, patch = {}) {
           id,
         ],
       );
+      await cascadeCancelReceivedContainerJobs(client, id, {
+        cancelReason: patch.cancelRequestNote || existing.rows[0].cancel_request_note || 'Sales Order dibatalkan',
+        cancelledByName: patch.cancelReviewedByName || null,
+      });
       return result.rows[0];
     }
 

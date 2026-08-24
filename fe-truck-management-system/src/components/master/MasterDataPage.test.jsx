@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import MasterDataPage from './MasterDataPage';
@@ -74,6 +74,13 @@ function renderPage({ pageFields = fields, resource = 'customers', readOnly = fa
       readOnly={readOnly}
     />,
   );
+}
+
+// MasterDataPage renders the same row both as a desktop <table> row and a mobile card,
+// toggled purely by CSS media query; jsdom doesn't evaluate media queries, so both stay
+// in the accessibility tree and untargeted queries match twice. Scope to the table.
+function tableScope() {
+  return within(screen.getByRole('table'));
 }
 
 describe('MasterDataPage database mode', () => {
@@ -163,7 +170,7 @@ describe('MasterDataPage database mode', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: 'Arsipkan Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Arsipkan Data/ }));
 
     expect(confirmAction).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Arsipkan Data?',
@@ -176,7 +183,7 @@ describe('MasterDataPage database mode', () => {
     removeMaster.mockRejectedValueOnce(new Error('RLS menolak perubahan'));
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: 'Arsipkan Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Arsipkan Data/ }));
 
     await waitFor(() => expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       type: 'error',
@@ -219,11 +226,11 @@ describe('MasterDataPage database mode', () => {
       sortRows: (data) => data,
     });
 
-    expect(await screen.findByText('Data Lama')).toBeInTheDocument();
+    expect(await tableScope().findByText('Data Lama')).toBeInTheDocument();
     await user.selectOptions(screen.getByDisplayValue('Semua Status'), 'Tidak Aktif');
 
-    expect(screen.getByText('Data Belum Link')).toBeInTheDocument();
-    expect(screen.queryByText('Data Lama')).not.toBeInTheDocument();
+    expect(tableScope().getByText('Data Belum Link')).toBeInTheDocument();
+    expect(tableScope().queryByText('Data Lama')).not.toBeInTheDocument();
   });
 
   it('menyediakan view dan download dokumen hanya dari modal detail', async () => {
@@ -248,7 +255,7 @@ describe('MasterDataPage database mode', () => {
     });
 
     expect(screen.queryByRole('button', { name: 'Download NPWP-Customer.pdf' })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'Lihat Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Lihat Data/ }));
 
     expect(await screen.findByRole('button', { name: 'View NPWP-Customer.pdf' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download NPWP-Customer.pdf' })).toBeInTheDocument();
@@ -258,10 +265,10 @@ describe('MasterDataPage database mode', () => {
     useAuth.mockReturnValue({ user: { role: 'observer' } });
     renderPage();
 
-    expect(await screen.findByRole('button', { name: 'Lihat Data' })).toBeInTheDocument();
+    expect(await tableScope().findByRole('button', { name: /^Lihat Data/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Input Data Baru/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit Data' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Arsipkan Data' })).not.toBeInTheDocument();
+    expect(tableScope().queryByRole('button', { name: /^Edit Data/ })).not.toBeInTheDocument();
+    expect(tableScope().queryByRole('button', { name: /^Arsipkan Data/ })).not.toBeInTheDocument();
   });
 
   it('mengizinkan viewer menyimpan catatan monitoring dari modal detail', async () => {
@@ -285,7 +292,7 @@ describe('MasterDataPage database mode', () => {
       ],
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Lihat Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Lihat Data/ }));
     const noteInput = await screen.findByRole('textbox', { name: 'Catatan KTP Driver' });
     await user.type(noteInput, 'STID belum ada karena masih proses.');
     await user.click(screen.getByRole('button', { name: 'Simpan catatan KTP Driver' }));
@@ -323,7 +330,7 @@ describe('MasterDataPage database mode', () => {
       ],
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Lihat Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Lihat Data/ }));
     await user.click(await screen.findByRole('button', { name: 'Download NPWP-Customer.pdf' }));
 
     await waitFor(() => expect(downloadAttachmentFile).toHaveBeenCalledWith('npwp-document-id', 'NPWP-Customer.pdf'));
@@ -356,7 +363,7 @@ describe('MasterDataPage database mode', () => {
       ],
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Edit Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Edit Data/ }));
     await user.clear(screen.getByPlaceholderText('Masukkan nama'));
     await user.type(screen.getByPlaceholderText('Masukkan nama'), 'Data Baru');
 
@@ -403,7 +410,7 @@ describe('MasterDataPage database mode', () => {
       ],
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Edit Data' }));
+    await user.click(await tableScope().findByRole('button', { name: /^Edit Data/ }));
 
     const dateInput = container.querySelector('input[type="date"]');
     expect(dateInput).toHaveValue('2027-03-18');
@@ -440,7 +447,7 @@ describe('MasterDataPage database mode', () => {
         ],
       });
 
-      await user.click(await screen.findByRole('button', { name: 'Edit Data' }));
+      await user.click(await tableScope().findByRole('button', { name: /^Edit Data/ }));
 
       const dateInput = container.querySelector('input[type="date"]');
       expect(dateInput).toHaveValue('2027-03-18');

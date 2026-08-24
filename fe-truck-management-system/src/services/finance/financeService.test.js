@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { httpClient } from '../api/httpClient';
 import {
+  approveOperationalFundRequest,
   approveFinanceCorrection,
+  closeOperationalFundBatch,
+  createOperationalFundRequest,
+  depositOperationalFund,
   fetchFinanceCorrections,
   fetchFinanceInvoiceCorrections,
+  fetchFinanceContainerJobExpenses,
   fetchFinanceOrderCorrections,
+  fetchOperationalFundBatches,
+  fetchOperationalFundRequests,
+  fetchOperationalFundTransactions,
+  reconcileFinanceContainerJobExpense,
+  rejectOperationalFundRequest,
   rejectFinanceCorrection,
   requestFinanceInvoiceCorrection,
   requestFinanceOrderSoCorrection,
@@ -26,6 +36,41 @@ beforeEach(() => {
 });
 
 describe('financeService correction endpoints', () => {
+  it('memanggil endpoint saldo operasional harian', async () => {
+    const payload = { requestDate: '2026-08-20', amount: 20000000, purpose: 'Dropping operasional harian' };
+    await fetchOperationalFundBatches({ dateFrom: '2026-08-20', dateTo: '2026-08-20' });
+    await fetchOperationalFundRequests({ status: 'submitted', dateFrom: '2026-08-20' });
+    await fetchOperationalFundTransactions({ transactionType: 'debit', dateFrom: '2026-08-20' });
+    await createOperationalFundRequest(payload);
+    await depositOperationalFund(payload);
+    await approveOperationalFundRequest('fund-1');
+    await rejectOperationalFundRequest('fund-2', 'Nominal perlu disesuaikan.');
+    await closeOperationalFundBatch('batch-1', { closeNote: 'Valid' });
+
+    expect(httpClient.get).toHaveBeenCalledWith('/finance/operational-fund-batches?dateFrom=2026-08-20&dateTo=2026-08-20');
+    expect(httpClient.get).toHaveBeenCalledWith('/finance/operational-fund-requests?status=submitted&dateFrom=2026-08-20');
+    expect(httpClient.get).toHaveBeenCalledWith('/finance/operational-fund-transactions?transactionType=debit&dateFrom=2026-08-20');
+    expect(httpClient.post).toHaveBeenCalledWith('/finance/operational-fund-requests', payload);
+    expect(httpClient.post).toHaveBeenCalledWith('/finance/operational-fund-deposits', payload);
+    expect(httpClient.patch).toHaveBeenCalledWith('/finance/operational-fund-requests/fund-1/approve', {});
+    expect(httpClient.patch).toHaveBeenCalledWith('/finance/operational-fund-requests/fund-2/reject', { rejectionNote: 'Nominal perlu disesuaikan.' });
+    expect(httpClient.patch).toHaveBeenCalledWith('/finance/operational-fund-batches/batch-1/close', { closeNote: 'Valid' });
+  });
+
+  it('memanggil endpoint rekonsiliasi biaya container job', async () => {
+    await fetchFinanceContainerJobExpenses({ financeCheckStatus: 'belum_dicek', paymentStatus: 'sudah_dibayar' });
+    await reconcileFinanceContainerJobExpense('expense-1', {
+      financeCheckStatus: 'perlu_klarifikasi',
+      financeNote: 'Bukti bayar belum jelas.',
+    });
+
+    expect(httpClient.get).toHaveBeenCalledWith('/finance/container-job-expenses?financeCheckStatus=belum_dicek&paymentStatus=sudah_dibayar');
+    expect(httpClient.patch).toHaveBeenCalledWith('/finance/container-job-expenses/expense-1/reconcile', {
+      financeCheckStatus: 'perlu_klarifikasi',
+      financeNote: 'Bukti bayar belum jelas.',
+    });
+  });
+
   it('memanggil endpoint history koreksi SO dan invoice', async () => {
     await fetchFinanceOrderCorrections('order-1');
     await fetchFinanceInvoiceCorrections('invoice-1');

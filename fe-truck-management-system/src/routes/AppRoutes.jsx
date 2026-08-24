@@ -15,6 +15,7 @@ const OrderHistoryPage = lazy(() => import('../pages/dashboard/OrderHistoryPage'
 const SalesOrdersPage = lazy(() => import('../pages/sales-orders/SalesOrdersPage'));
 const HistoricalEntryPage = lazy(() => import('../pages/admin/HistoricalEntryPage'));
 const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
+const OperationalDroppingAccountPage = lazy(() => import('../pages/operations/OperationalDroppingAccountPage'));
 const DriverCommissionOperationalPage = lazy(() => import('../pages/operations/DriverCommissionOperationalPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
 const ClientsPage = lazy(() => import('../pages/admin/ClientsPage'));
@@ -37,6 +38,7 @@ const FinanceCompletedTripsPage = lazy(() => import('../pages/finance/FinanceCom
 const FinanceBillingReadinessPage = lazy(() => import('../pages/finance/FinanceBillingReadinessPage'));
 const FinanceCorrectionsPage = lazy(() => import('../pages/finance/FinanceCorrectionsPage'));
 const DriverCommissionPage = lazy(() => import('../pages/finance/DriverCommissionPage'));
+const CustomerOutstandingPage = lazy(() => import('../pages/finance/CustomerOutstandingPage'));
 
 function LazyPage({ children }) {
   const location = useLocation();
@@ -56,6 +58,7 @@ const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
 const adminRoles = [USER_ROLES.ADMIN];
 const viewerOnlyRoles = [USER_ROLES.OBSERVER];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
+const reportsPageRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
 const driverCommissionRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.FINANCE];
 
@@ -91,6 +94,7 @@ export const router = createBrowserRouter([
         { path: 'historical-entry', children: [guardedPage(adminRoles, <LazyPage><HistoricalEntryPage /></LazyPage>)] },
         { path: 'sales/customer-documents', children: [guardedPage(customerDocumentRoles, <LazyPage><SalesOrdersPage customerDocumentsOnly /></LazyPage>)] },
         { path: 'operations', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage /></LazyPage>)] },
+        { path: 'operations/rekening-dropping', children: [guardedPage(operationalRoles, <LazyPage><OperationalDroppingAccountPage /></LazyPage>)] },
         { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },
         { path: 'operations/driver-commissions', children: [guardedPage(operationalRoles, <LazyPage><DriverCommissionOperationalPage /></LazyPage>)] },
@@ -116,7 +120,7 @@ export const router = createBrowserRouter([
         { path: 'activity-log', children: [guardedPage(adminRoles, <LazyPage><ActivityLogPage /></LazyPage>)] },
         { path: 'audit-trail', element: <Navigate to="/activity-log" replace /> },
         { path: 'document-monitoring', children: [guardedPage(observerRoles, <LazyPage><DocumentMonitoringPage /></LazyPage>)] },
-        { path: 'reports', children: [guardedPage(observerRoles, <LazyPage><ReportsPage /></LazyPage>)] },
+        { path: 'reports', children: [guardedPage(reportsPageRoles, <LazyPage><ReportsPage /></LazyPage>)] },
         { path: 'finance', element: <Navigate to="/finance/order-verification" replace /> },
         { path: 'finance/order-verification', children: [guardedPage(financeRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },
         { path: 'finance/rpuj-approval', children: [guardedPage(financeRoles, <LazyPage><FinanceRpujApprovalPage /></LazyPage>)] },
@@ -125,6 +129,7 @@ export const router = createBrowserRouter([
         { path: 'finance/completed-trips', children: [guardedPage(financeRoles, <LazyPage><FinanceCompletedTripsPage /></LazyPage>)] },
         { path: 'finance/billing-readiness', children: [guardedPage(financeRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
         { path: 'finance/driver-commissions', children: [guardedPage(financeRoles, <LazyPage><DriverCommissionPage /></LazyPage>)] },
+        { path: 'finance/outstanding', children: [guardedPage(financeRoles, <LazyPage><CustomerOutstandingPage /></LazyPage>)] },
         { path: 'truck-utilization', element: <Navigate to="/reports?tab=utilization" replace /> },
         { path: 'driver-performance', element: <Navigate to="/reports" replace /> },
         { path: 'unit-performance', element: <Navigate to="/reports?tab=utilization" replace /> },

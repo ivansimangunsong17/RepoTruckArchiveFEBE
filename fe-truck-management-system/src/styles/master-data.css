@@ -224,6 +224,7 @@
 .master-form { padding: 0; }
 .master-modal-backdrop { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 24px; background: #17181cb3; backdrop-filter: blur(3px); animation: modal-fade-in .16s ease-out; }
 .master-modal { overflow: hidden; width: min(900px, 100%); max-height: calc(100vh - 48px); border: 1px solid #ffffff40; border-radius: 14px; background: white; box-shadow: 0 28px 80px #08090b59; animation: modal-slide-in .2s ease-out; }
+.master-modal.dropping-expense-modal { width: min(1040px, 100%); }
 .master-modal .master-form { display: flex; max-height: calc(100vh - 48px); flex-direction: column; }
 .master-modal .master-form-sections { overflow-y: auto; overscroll-behavior: contain; }
 .modal-close-button { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border: 1px solid #e3e7ed; border-radius: 8px; color: #6d7788; background: white; }
@@ -305,6 +306,17 @@
   color: #123f67;
   background: #eef6ff;
 }
+.neutral-document-upload .document-upload-dropzone {
+  border-style: dashed;
+  border-color: #e8a5a8;
+  color: #b91c1c;
+  background: #fef7f7;
+}
+.neutral-document-upload .document-upload-dropzone:hover {
+  border-color: #dc171f;
+  color: #9a1319;
+  background: #fef1f1;
+}
 .document-upload.compact .document-upload-dropzone > svg {
   width: 15px;
   height: 15px;
@@ -351,6 +363,7 @@
 .master-toolbar { flex-wrap: wrap; padding: 17px 20px; border-bottom: 1px solid var(--border); }
 .master-toolbar .search-field { flex: 0 1 260px; margin-left: auto; }
 .master-filter-select { min-height: 39px; max-width: 180px; padding: 0 10px; border: 1px solid #d6d8dc; border-radius: 7px; color: #4d5056; background: white; font-size: .66rem; font-weight: 650; }
+.master-status-badge { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 39px; padding: 0 14px; border: 1px solid; border-radius: 7px; font-size: .66rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
 .master-table { min-width: 700px; }
 .master-table th { padding-top: 12px; padding-bottom: 12px; color: #474a50; background: #f1f1f2; font-size: .66rem; font-weight: 800; }
 .master-table td { padding-top: 14px; padding-bottom: 14px; color: #3f4248; font-size: .74rem; font-weight: 500; }
