@@ -138,7 +138,7 @@ export function createApp() {
 
       request.query = Object.fromEntries(url.searchParams.entries());
       request.params = route.params || {};
-      authorizeRoute(route, request);
+      await authorizeRoute(route, request);
       if (mutationMethods.has(request.method) && await isStorageBackupInProgress()) {
         const error = new Error('Backup lokal sedang berjalan. Perubahan data dibuka kembali setelah backup selesai.');
         error.statusCode = 503;

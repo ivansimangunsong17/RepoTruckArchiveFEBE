@@ -33,9 +33,11 @@ function DailyOperationalFundPanel({
   fundBusyId = '',
   canRequest = false,
   canDeposit = false,
+  canReopen = false,
   pendingCloseBatches = [],
   onBatchDateChange,
   onCloseBatch,
+  onReopenBatch,
   onOpenRequest,
   onOpenDeposit,
   onApproveFund,
@@ -158,8 +160,20 @@ function DailyOperationalFundPanel({
         {!transactionLoading && transactionError ? <div className="px-4 py-2 text-xs font-bold text-rose-700">{transactionError}</div> : null}
         {!expenseLoading && expenseError ? <div className="px-4 py-2 text-xs font-bold text-rose-700">{expenseError}</div> : null}
         {!batchLoading && normalizedBatch.status === 'closed' ? (
-          <div className="mx-4 mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
-            Batch ini sudah ditutup{normalizedBatch.closedByName ? ` oleh ${normalizedBatch.closedByName}` : ''}. Data setelah close terkunci untuk pembukuan harian.
+          <div className="mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+            <span>
+              Batch ini sudah ditutup{normalizedBatch.closedByName ? ` oleh ${normalizedBatch.closedByName}` : ''}. Data setelah close terkunci untuk pembukuan harian.
+            </span>
+            {canReopen ? (
+              <button
+                className="secondary-button shrink-0"
+                disabled={batchBusy}
+                onClick={onReopenBatch}
+                type="button"
+              >
+                Buka Kembali Batch
+              </button>
+            ) : null}
           </div>
         ) : null}
 

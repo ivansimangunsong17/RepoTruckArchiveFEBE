@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FinanceWorkflowPage from './FinanceWorkflowPage';
 import { downloadCsv } from '../../utils/csvExport';
 import {
-  addFinanceOrderLineItem,
   approveOperationalFundRequest,
   closeOperationalFundBatch,
   createOperationalFundRequest,
   depositOperationalFund,
   fetchFinanceContainerJobExpenses,
+  fetchFinanceDebitNotePayments,
   fetchFinanceInvoiceCorrections,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
@@ -20,9 +20,12 @@ import {
   fetchOperationalFundRequests,
   fetchOperationalFundTransactions,
   reconcileFinanceContainerJobExpense,
+  recordFinanceDebitNotePayment,
   rejectOperationalFundRequest,
+  reopenOperationalFundBatch,
   requestFinanceInvoiceCorrection,
   requestFinanceOrderSoCorrection,
+  updateFinanceDebitNoteNumber,
   updateFinanceInvoiceNumber,
   updateFinanceOrderSoNumber,
   uploadFinanceInvoiceDocument,
@@ -37,12 +40,12 @@ vi.mock('../../hooks/useAuth', () => ({
 }));
 
 vi.mock('../../services/finance/financeService', () => ({
-  addFinanceOrderLineItem: vi.fn(),
   approveOperationalFundRequest: vi.fn(),
   closeOperationalFundBatch: vi.fn(),
   createOperationalFundRequest: vi.fn(),
   depositOperationalFund: vi.fn(),
   fetchFinanceContainerJobExpenses: vi.fn(),
+  fetchFinanceDebitNotePayments: vi.fn().mockResolvedValue([]),
   fetchFinanceInvoiceCorrections: vi.fn(),
   fetchFinanceInvoiceDetail: vi.fn(),
   fetchFinanceInvoices: vi.fn().mockResolvedValue({ rows: [] }),
@@ -53,9 +56,12 @@ vi.mock('../../services/finance/financeService', () => ({
   fetchOperationalFundRequests: vi.fn(),
   fetchOperationalFundTransactions: vi.fn(),
   reconcileFinanceContainerJobExpense: vi.fn(),
+  recordFinanceDebitNotePayment: vi.fn(),
   rejectOperationalFundRequest: vi.fn(),
+  reopenOperationalFundBatch: vi.fn(),
   requestFinanceInvoiceCorrection: vi.fn(),
   requestFinanceOrderSoCorrection: vi.fn(),
+  updateFinanceDebitNoteNumber: vi.fn(),
   updateFinanceInvoiceNumber: vi.fn(),
   updateFinanceOrderSoNumber: vi.fn(),
   uploadFinanceInvoiceDocument: vi.fn(),
@@ -623,6 +629,87 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
+  it('Admin bisa membuka kembali batch rekening dropping yang sudah closed, alasan wajib', async () => {
+    const user = userEvent.setup();
+    mockAuthState.user = { id: 'admin-1', role: 'admin', fullName: 'Admin Test' };
+    fetchOperationalFundBatches.mockResolvedValue({
+      rows: [{
+        id: 'batch-2026-08-20',
+        batchDate: '2026-08-20',
+        status: 'closed',
+        closedByName: 'Fitri Finance',
+        totalCredit: 20000000,
+        totalDebit: 600000,
+        balance: 19400000,
+        openingBalance: 0,
+        topUpAmount: 20000000,
+        uncheckedCount: 0,
+        needClarificationCount: 0,
+        checkedCount: 1,
+      }],
+      total: 1,
+      totalPages: 1,
+    });
+    fetchOperationalFundTransactions.mockResolvedValue({
+      rows: [],
+      total: 0,
+      totalPages: 1,
+      summary: {
+        totalCredit: 20000000,
+        totalDebit: 600000,
+        totalAdjustment: 0,
+        balance: 19400000,
+        creditCount: 1,
+        debitCount: 1,
+        voidCount: 0,
+      },
+    });
+
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    expect(await screen.findByText(/Batch ini sudah ditutup oleh Fitri Finance/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Buka Kembali Batch' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Buka Kembali Batch Rekening Dropping');
+    expect(within(dialog).getByRole('button', { name: 'Ya, Buka Kembali Batch' })).toBeDisabled();
+    expect(reopenOperationalFundBatch).not.toHaveBeenCalled();
+
+    await user.type(within(dialog).getByLabelText('Alasan Buka Kembali'), 'Batch ditutup terlalu cepat');
+    expect(within(dialog).getByRole('button', { name: 'Ya, Buka Kembali Batch' })).not.toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Ya, Buka Kembali Batch' }));
+
+    await waitFor(() => {
+      expect(reopenOperationalFundBatch).toHaveBeenCalledWith('batch-2026-08-20', 'Batch ditutup terlalu cepat');
+    });
+  });
+
+  it('tidak menampilkan tombol buka kembali batch untuk role Finance biasa', async () => {
+    fetchOperationalFundBatches.mockResolvedValue({
+      rows: [{
+        id: 'batch-2026-08-20',
+        batchDate: '2026-08-20',
+        status: 'closed',
+        closedByName: 'Fitri Finance',
+        totalCredit: 20000000,
+        totalDebit: 600000,
+        balance: 19400000,
+        openingBalance: 0,
+        topUpAmount: 20000000,
+        uncheckedCount: 0,
+        needClarificationCount: 0,
+        checkedCount: 1,
+      }],
+      total: 1,
+      totalPages: 1,
+    });
+
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    expect(await screen.findByText(/Batch ini sudah ditutup oleh Fitri Finance/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Buka Kembali Batch' })).not.toBeInTheDocument();
+  });
+
   it('menampilkan dan menandai transaksi biaya D+1 sudah dicek', async () => {
     const user = userEvent.setup();
     fetchFinanceContainerJobExpenses.mockResolvedValue({
@@ -759,6 +846,30 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
+  it('menampilkan kolom Jumlah Container dan Total Debit Note, serta pencarian berdasarkan nomor container', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoices.mockResolvedValue({
+      rows: [{
+        ...invoiceRow,
+        containerCount: 2,
+        debitNoteAmount: 75000,
+        containerNumbers: ['CONT-TEST-001', 'CONT-TEST-002'],
+      }],
+      summary: invoiceSummary,
+    });
+    const { container } = render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    expect(await screen.findByText('SO-TEST-001')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Container' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Total Debit Note' })).toBeInTheDocument();
+    expect(container.querySelector('td[data-label="Container"]')).toHaveTextContent('2');
+    expect(screen.getByText(/Rp\s*75\.000/i)).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/Cari No\. SO/i), 'CONT-TEST-002');
+    expect(screen.getByText('SO-TEST-001')).toBeInTheDocument();
+  });
+
   it('menampilkan aksi view dan download untuk dokumen Sales dan Operational', async () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
@@ -767,6 +878,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
 
     const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('tab', { name: /File Operational/i }));
     expect(dialog).toHaveTextContent('CONT-TEST-001');
     expect(dialog).toHaveTextContent('CONT-TEST-002');
     expect(dialog).toHaveTextContent('1 container dibatalkan; tagihan hanya menghitung container yang selesai.');
@@ -784,6 +896,102 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByRole('button', { name: /View delivery-order.pdf/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /Download delivery-order.pdf/i })).toBeEnabled();
     expect(fetchFinanceInvoiceDetail).toHaveBeenCalledWith('invoice-1');
+    await user.click(within(dialog).getByRole('tab', { name: /Debit Note/i }));
+    expect(dialog).toHaveTextContent('Debit Note (Reimbursement)');
+    expect(dialog).toHaveTextContent('Belum ada biaya reimbursement pada SO ini.');
+  });
+
+  it('menampilkan rincian Debit Note (reimbursement) pada detail invoice', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoiceDetail.mockResolvedValue({
+      ...invoiceRow,
+      billingItems: ['Jasa Angkut D20 - 1 ritase'],
+      documents: [],
+      debitNoteAmount: 75000,
+      debitNoteItems: [
+        { id: 'expense-1', category: 'lainnya', amount: 75000, description: 'Reimbursement uang MEL', recipientName: 'Vendor Test', paymentStatus: 'belum_dibayar' },
+      ],
+    });
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('tab', { name: /Debit Note/i }));
+    expect(dialog).toHaveTextContent('Debit Note (Reimbursement)');
+    expect(dialog).toHaveTextContent(/Rp\s*75\.000/i);
+    expect(dialog).toHaveTextContent('Lainnya');
+    expect(dialog).toHaveTextContent('Reimbursement uang MEL');
+  });
+
+  it('menyimpan nomor Debit Note dari dalam detail invoice', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoiceDetail.mockResolvedValue({
+      ...invoiceRow,
+      billingItems: ['Jasa Angkut D20 - 1 ritase'],
+      documents: [],
+      debitNoteAmount: 75000,
+      debitNoteNumber: '',
+      debitNoteItems: [
+        { id: 'expense-1', category: 'lainnya', amount: 75000, description: 'Reimbursement uang MEL', recipientName: 'Vendor Test', paymentStatus: 'belum_dibayar' },
+      ],
+    });
+    updateFinanceDebitNoteNumber.mockResolvedValue({ ...invoiceRow, debitNoteAmount: 75000, debitNoteNumber: 'DN-202608-001' });
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('tab', { name: /Debit Note/i }));
+    await user.type(within(dialog).getByPlaceholderText(/DN-202608-001/i), 'dn-202608-001');
+    await user.click(within(dialog).getByRole('button', { name: 'Simpan' }));
+
+    await waitFor(() => {
+      expect(updateFinanceDebitNoteNumber).toHaveBeenCalledWith('invoice-1', 'dn-202608-001');
+    });
+  });
+
+  it('mencatat pembayaran Debit Note dari dalam detail invoice', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoiceDetail.mockResolvedValue({
+      ...invoiceRow,
+      billingItems: ['Jasa Angkut D20 - 1 ritase'],
+      documents: [],
+      debitNoteAmount: 75000,
+      debitNoteNumber: 'DN-202608-001',
+      debitNoteTotalPaid: 0,
+      debitNoteOutstandingAmount: 75000,
+      debitNoteAgingBucket: 'current',
+      debitNoteItems: [
+        { id: 'expense-1', category: 'lainnya', amount: 75000, description: 'Reimbursement uang MEL', recipientName: 'Vendor Test', paymentStatus: 'belum_dibayar' },
+      ],
+    });
+    fetchFinanceDebitNotePayments.mockResolvedValue([]);
+    recordFinanceDebitNotePayment.mockResolvedValue({});
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
+
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('tab', { name: /Debit Note/i }));
+    await user.click(within(dialog).getByRole('button', { name: 'Catat Pembayaran' }));
+
+    const paymentDialog = await screen.findByRole('dialog', { name: /SO-TEST-001/i });
+    await waitFor(() => expect(fetchFinanceDebitNotePayments).toHaveBeenCalledWith('invoice-1'));
+    const proofFile = new File(['bukti'], 'bukti-dn.pdf', { type: 'application/pdf' });
+    await user.upload(within(paymentDialog).getByLabelText(/pilih bukti/i), proofFile);
+    await user.click(within(paymentDialog).getByRole('button', { name: 'Catat Pembayaran' }));
+
+    await waitFor(() => {
+      expect(recordFinanceDebitNotePayment).toHaveBeenCalledWith(
+        'invoice-1',
+        expect.objectContaining({ amount: 75000 }),
+        proofFile,
+      );
+    });
   });
 
   it('mengupload PDF Invoice Accurate dari detail invoice', async () => {
@@ -913,43 +1121,6 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(dialog).toHaveTextContent(/Rp\s*5\.200\.000/i);
     expect(dialog).toHaveTextContent('Jasa Angkut 20FT');
     expect(dialog).toHaveTextContent(/Rp\s*2\.600\.000/i);
-  });
-
-  it('menambah rincian revenue dari modal detail order finance, dibatasi hanya layanan revenue', async () => {
-    const user = userEvent.setup();
-    addFinanceOrderLineItem.mockResolvedValue({
-      ...orderRow,
-      totalAmount: 5500000,
-      lineItems: [
-        ...orderRow.lineItems,
-        { serviceName: 'Handling', qty: 1, price: 300000, total: 300000 },
-      ],
-    });
-    render(<FinanceWorkflowPage initialTabId="order-verification" />);
-
-    await user.click(await screen.findByRole('button', { name: 'Detail' }));
-    await user.click(await screen.findByRole('button', { name: /Tambah Rincian Revenue/i }));
-
-    const dialog = await screen.findByRole('dialog', { name: /Tambah Rincian Revenue/i });
-    const serviceSelect = within(dialog).getByLabelText('Layanan');
-    const options = within(serviceSelect).getAllByRole('option').map((option) => option.value);
-    expect(options).toEqual(['Jasa Angkut D20', 'Jasa Angkut D40', 'Handling', 'Jasa Lainnya']);
-
-    await user.selectOptions(serviceSelect, 'Handling');
-    await user.clear(within(dialog).getByLabelText('Qty'));
-    await user.type(within(dialog).getByLabelText('Qty'), '1');
-    await user.type(within(dialog).getByLabelText(/Harga per Unit/i), '300000');
-    await user.click(within(dialog).getByRole('button', { name: 'Tambah Rincian' }));
-
-    await waitFor(() => {
-      expect(addFinanceOrderLineItem).toHaveBeenCalledWith('order-1', expect.objectContaining({
-        serviceName: 'Handling',
-        qty: 1,
-        price: 300000,
-      }));
-    });
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Tambah Rincian Revenue/i })).not.toBeInTheDocument());
-    expect(screen.getByRole('dialog')).toHaveTextContent('Handling');
   });
 
   it('menampilkan status dan alasan SO batal di finance', async () => {

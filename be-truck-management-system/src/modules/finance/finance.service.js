@@ -1,25 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import {
-  isContainerService,
-  isOtherService,
-  normalizeLineItem,
-  REVENUE_SERVICE_OPTIONS,
-} from '../sales-orders/sales-orders.service.js';
-import {
   approveFinanceCorrectionRequest,
   approveRpujRequest,
-  addOrderVerificationLineItem,
   createFinanceCorrectionRequest,
   closeOperationalFundBatchRecord,
   depositOperationalFundRecord,
   createOperationalFundRequestRecord,
   getCompletedTripDetail,
   getCompletedTripsPage,
+  getDebitNoteOrdersPage,
+  getDebitNoteOutstandingPage,
   getFinanceCorrectionRequestsBySalesOrder,
   getFinanceCorrectionRequestsPage,
   getFinanceDashboard,
   getInvoiceOrderDetail,
   getInvoiceOrdersPage,
+  getCustomerOutstandingRollupPage,
   getSalesOrderOutstandingPage,
   getContainerJobExpensesReconciliationPage,
   getOperationalFundRequestsPage,
@@ -28,17 +24,23 @@ import {
   getOrderVerificationsPage,
   getRpujRequestsPage,
   approveOperationalFundRequestRecord,
+  listDebitNotePayments,
   listSalesOrderPayments,
   markInvoiceDocumentUploaded,
   markOperationalFundTransferUploadedRecord,
   markRpujTransferUploaded,
   reconcileContainerJobExpenseRecord,
+  recordDebitNotePayment,
   recordSalesOrderPayment,
   rejectOperationalFundRequestRecord,
   rejectRpujRequest,
   rejectFinanceCorrectionRequest,
+  reopenOperationalFundBatchRecord,
+  updateDebitNoteNumber,
   updateInvoiceNumber,
   updateOrderVerificationSoNumber,
+  voidDebitNotePayment,
+  voidSalesOrderPayment,
 } from './finance.repository.js';
 import {
   createAttachment,
@@ -81,35 +83,6 @@ export function fetchOrderVerifications(query = {}) {
 export function saveOrderVerificationSoNumber(id, payload = {}, actor) {
   return updateOrderVerificationSoNumber(id, {
     soNumber: payload.soNumber,
-    actorName: actor?.name || actor?.email || 'Finance',
-  });
-}
-
-export function saveOrderVerificationLineItem(id, payload = {}, actor) {
-  const serviceName = REVENUE_SERVICE_OPTIONS.includes(payload.serviceName) ? payload.serviceName : '';
-  if (!serviceName) {
-    const error = new Error('Layanan wajib salah satu dari Jasa Angkut D20, Jasa Angkut D40, Handling, atau Jasa Lainnya.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-
-  const lineItem = normalizeLineItem({ ...payload, serviceName });
-  if (isContainerService(lineItem.serviceName) && lineItem.price <= 0) {
-    const error = new Error('Harga container D20/D40 wajib diisi lebih dari 0.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-  if (isOtherService(lineItem.serviceName) && !String(lineItem.notes || '').trim()) {
-    const error = new Error('Isi catatan untuk rincian Jasa Lainnya.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-
-  return addOrderVerificationLineItem(id, {
-    lineItem,
     actorName: actor?.name || actor?.email || 'Finance',
   });
 }
@@ -248,6 +221,32 @@ export function closeOperationalFundBatch(id, payload = {}, actor) {
   return closeOperationalFundBatchRecord(id, {
     closeNote,
     actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function reopenOperationalFundBatch(id, payload = {}, actor) {
+  if (!actor || actor.role !== 'admin') {
+    const error = new Error('Membuka kembali batch rekening dropping hanya dapat dilakukan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'OPERATIONAL_FUND_BATCH_REOPEN_FORBIDDEN';
+    throw error;
+  }
+  const reason = String(payload.reason || '').trim();
+  if (!reason) {
+    const error = new Error('Alasan membuka kembali batch wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_BATCH_REOPEN_REASON_REQUIRED';
+    throw error;
+  }
+  if (reason.length > 500) {
+    const error = new Error('Alasan membuka kembali batch maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'OPERATIONAL_FUND_BATCH_REOPEN_REASON_TOO_LONG';
+    throw error;
+  }
+  return reopenOperationalFundBatchRecord(id, {
+    reason,
+    actorName: actor?.name || actor?.email || 'Admin',
   });
 }
 
@@ -398,6 +397,15 @@ export function fetchSalesOrderOutstanding(query = {}) {
   });
 }
 
+export function fetchCustomerOutstandingRollup(query = {}) {
+  return getCustomerOutstandingRollupPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || query.search || '',
+    agingBucket: query.agingBucket || '',
+  });
+}
+
 export async function fetchInvoiceOrderDetail(id) {
   const invoice = await getInvoiceOrderDetail(id);
   if (!invoice) {
@@ -426,6 +434,7 @@ function normalizeInvoiceUploadType(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (['invoice', 'invoicepdf', 'invoice_pdf'].includes(normalized)) return 'invoicePdf';
   if (['tax_invoice', 'taxinvoice', 'taxinvoicepdf', 'tax_invoice_pdf', 'faktur_pajak', 'faktur'].includes(normalized)) return 'taxInvoicePdf';
+  if (['debit_note', 'debitnote', 'debitnotepdf', 'debit_note_pdf'].includes(normalized)) return 'debitNotePdf';
   return '';
 }
 
@@ -472,7 +481,13 @@ export async function uploadInvoiceDocument(id, payload = {}, actor) {
     entityId: id,
     category,
     uploadedByName: actorName,
-    notes: payload.notes || (category === 'invoicePdf' ? 'Invoice dari Accurate' : 'Faktur Pajak dari Accurate'),
+    notes: payload.notes || (
+      category === 'invoicePdf'
+        ? 'Invoice dari Accurate'
+        : category === 'debitNotePdf'
+          ? 'Dokumen Debit Note'
+          : 'Faktur Pajak dari Accurate'
+    ),
   };
   const attachment = existing
     ? await updateAttachment(existing.id, attachmentPayload)
@@ -517,6 +532,117 @@ export async function recordInvoicePayment(id, payload = {}, actor) {
 
 export function fetchInvoicePayments(id) {
   return listSalesOrderPayments(id);
+}
+
+// Void sengaja lebih ketat dari record (admin-only, bukan finance+admin) -- ini jalur koreksi
+// resmi kalau Finance salah catat pembayaran, jadi butuh persetujuan level lebih tinggi dan
+// alasan wajib. reason divalidasi lagi di repository, tapi dicek juga di sini supaya error-nya
+// jelas sebelum masuk transaksi database.
+export async function voidInvoicePayment(id, paymentId, payload = {}, actor) {
+  if (!actor || actor.role !== 'admin') {
+    const error = new Error('Pembatalan pembayaran invoice hanya dapat dilakukan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_INVOICE_PAYMENT_VOID_FORBIDDEN';
+    throw error;
+  }
+  if (!String(payload.reason || '').trim()) {
+    const error = new Error('Alasan pembatalan wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'FINANCE_INVOICE_PAYMENT_VOID_REASON_REQUIRED';
+    throw error;
+  }
+  return voidSalesOrderPayment(id, paymentId, {
+    reason: payload.reason,
+    actorName: actor?.name || actor?.email || 'Admin',
+  });
+}
+
+export function fetchDebitNoteOrders(query = {}) {
+  return getDebitNoteOrdersPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || query.search || '',
+    status: query.status || '',
+  });
+}
+
+export function fetchDebitNoteOutstanding(query = {}) {
+  return getDebitNoteOutstandingPage({
+    page: query.page,
+    pageSize: query.pageSize,
+    query: query.query || query.search || '',
+    agingBucket: query.agingBucket || '',
+  });
+}
+
+export function saveDebitNoteNumber(id, payload = {}, actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Nomor Debit Note hanya dapat diinput oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_DEBIT_NOTE_NUMBER_FORBIDDEN';
+    throw error;
+  }
+  return updateDebitNoteNumber(id, {
+    debitNoteNumber: payload.debitNoteNumber,
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export async function recordDebitNotePaymentForOrder(id, payload = {}, actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Pembayaran Debit Note hanya dapat dicatat oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_DEBIT_NOTE_PAYMENT_FORBIDDEN';
+    throw error;
+  }
+  const actorName = actor?.name || actor?.email || 'Finance';
+
+  let proofAttachmentId = payload.proofAttachmentId || null;
+  if (!proofAttachmentId && payload.proofFile) {
+    const attachment = await createAttachment({
+      ...payload.proofFile,
+      entityType: 'sales_order',
+      entityId: id,
+      category: 'paymentProof',
+      uploadedByName: actorName,
+      notes: payload.proofFile.notes || 'Bukti transfer pembayaran Debit Note',
+    });
+    proofAttachmentId = attachment.id;
+  }
+
+  return recordDebitNotePayment(id, {
+    amount: payload.amount,
+    paymentDate: payload.paymentDate,
+    referenceNumber: payload.referenceNumber,
+    proofAttachmentId,
+    note: payload.note,
+    idempotencyKey: payload.idempotencyKey,
+    actorUserId: actor?.id || null,
+    actorName,
+  });
+}
+
+export function fetchDebitNotePayments(id) {
+  return listDebitNotePayments(id);
+}
+
+export async function voidDebitNotePaymentForOrder(id, paymentId, payload = {}, actor) {
+  if (!actor || actor.role !== 'admin') {
+    const error = new Error('Pembatalan pembayaran Debit Note hanya dapat dilakukan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_DEBIT_NOTE_PAYMENT_VOID_FORBIDDEN';
+    throw error;
+  }
+  if (!String(payload.reason || '').trim()) {
+    const error = new Error('Alasan pembatalan wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'FINANCE_DEBIT_NOTE_PAYMENT_VOID_REASON_REQUIRED';
+    throw error;
+  }
+  return voidDebitNotePayment(id, paymentId, {
+    reason: payload.reason,
+    actorName: actor?.name || actor?.email || 'Admin',
+  });
 }
 
 export function requestFinanceCorrection(id, payload = {}, actor) {

@@ -347,6 +347,22 @@ async function ensureSalesOrderCanBeCancelled(client, id) {
     error.code = 'SALES_ORDER_LOCKED';
     throw error;
   }
+
+  const activeExpenses = await client.query(
+    `
+      select coalesce(count(*), 0)::int as count, coalesce(sum(amount), 0)::numeric as total
+      from container_job_expenses
+      where sales_order_id = $1
+        and payment_status <> 'batal'
+    `,
+    [id],
+  );
+  if (Number(activeExpenses.rows[0].count) > 0) {
+    const error = new Error(`Sales Order tidak bisa dibatalkan karena masih ada ${activeExpenses.rows[0].count} biaya operasional aktif (total Rp ${Number(activeExpenses.rows[0].total).toLocaleString('id-ID')}) yang sudah tercatat. Batalkan atau alihkan biaya tersebut ke job lain terlebih dahulu sebelum membatalkan Sales Order.`);
+    error.statusCode = 409;
+    error.code = 'SALES_ORDER_CANCEL_HAS_ACTIVE_EXPENSE';
+    throw error;
+  }
 }
 
 async function releaseDriverIfIdle(client, driverId) {
@@ -638,8 +654,28 @@ export async function updateSalesOrder(id, form) {
       throw error;
     }
 
-    const customer = await findCustomer(client, form);
+    // Snapshot customer_name/pic/phone/address dibekukan begitu SO dibuat. findCustomer() selalu
+    // mengembalikan data TERKINI dari tabel customers, jadi hanya dipakai untuk menimpa snapshot
+    // kalau user benar-benar sedang mengganti customer pada request ini -- bukan setiap kali SO
+    // di-PATCH untuk alasan lain (destination, dsb), supaya histori tidak diam-diam ikut berubah
+    // ketika data master customer dikoreksi belakangan.
+    const requestedCustomerId = form.customerId || null;
+    const requestedCustomerName = String(form.customer || '').trim().toLowerCase();
+    const currentCustomerId = existing.rows[0].customer_id || null;
+    const currentCustomerName = String(existing.rows[0].customer_name || '').trim().toLowerCase();
+    const customerChangeRequested = requestedCustomerId
+      ? requestedCustomerId !== currentCustomerId
+      : requestedCustomerName !== currentCustomerName;
+
+    const customer = customerChangeRequested ? await findCustomer(client, form) : null;
     const payload = toSalesOrderDb(form, customer);
+    if (!customerChangeRequested) {
+      payload.customer_id = existing.rows[0].customer_id;
+      payload.customer_name = existing.rows[0].customer_name;
+      payload.customer_pic = existing.rows[0].customer_pic;
+      payload.customer_phone = existing.rows[0].customer_phone;
+      payload.customer_address = existing.rows[0].customer_address;
+    }
     const filteredPayload = await filterSalesOrderPayload(payload, client.query.bind(client));
     const entries = Object.entries(filteredPayload);
     await client.query(

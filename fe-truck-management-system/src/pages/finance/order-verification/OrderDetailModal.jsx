@@ -3,7 +3,7 @@ import CorrectionHistoryList from '../shared/CorrectionHistoryList';
 import DetailField from '../shared/DetailField';
 import { isCancelledFinanceOrder } from './orderVerificationUtils';
 
-function OrderDetailModal({ order, corrections = [], correctionsLoading = false, correctionsError = '', onClose, onOpenCorrection, onAddLineItem }) {
+function OrderDetailModal({ order, corrections = [], correctionsLoading = false, correctionsError = '', onClose, onOpenCorrection }) {
   if (!order) return null;
 
   const isCancelled = isCancelledFinanceOrder(order);
@@ -47,16 +47,9 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
                 <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Detail Harga</p>
                 <h4 className="mt-1 text-lg font-black text-slate-950">{formatCurrency(priceTotal)}</h4>
               </div>
-              <div className="flex items-start gap-3">
-                <div className="grid min-w-[180px] gap-1 text-right">
-                  <span className="text-[10px] font-black uppercase tracking-wide text-slate-500">Harga Dasar</span>
-                  <strong className="text-sm font-black text-slate-900">{formatCurrency(order.price)}</strong>
-                </div>
-                {!isCancelled && onAddLineItem ? (
-                  <button className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800" onClick={() => onAddLineItem(order.id)} type="button">
-                    + Tambah Rincian Revenue
-                  </button>
-                ) : null}
+              <div className="grid min-w-[180px] gap-1 text-right">
+                <span className="text-[10px] font-black uppercase tracking-wide text-slate-500">Harga Dasar</span>
+                <strong className="text-sm font-black text-slate-900">{formatCurrency(order.price)}</strong>
               </div>
             </div>
             {priceItems.length ? (
@@ -76,7 +69,6 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
                         <td className="px-3 py-2 font-semibold text-slate-900">
                           <span className="block break-words">{item.serviceName || '-'}</span>
                           {item.containerType ? <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{item.containerType}</span> : null}
-                          {item.notes ? <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{item.notes}</span> : null}
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-slate-700">{item.qty || '-'}</td>
                         <td className="px-3 py-2 text-right font-semibold text-slate-700">{formatCurrency(item.price)}</td>

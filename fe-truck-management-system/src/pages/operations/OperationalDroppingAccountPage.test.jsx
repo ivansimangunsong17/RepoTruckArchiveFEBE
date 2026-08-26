@@ -275,6 +275,40 @@ describe('OperationalDroppingAccountPage', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Biaya tersimpan' }));
   });
 
+  it('mencatat Reimbursement Lainnya dengan keterangan tambahan wajib diisi', async () => {
+    const user = userEvent.setup();
+    render(<OperationalDroppingAccountPage />);
+
+    await user.click(await screen.findByRole('button', { name: /catat biaya/i }));
+    await screen.findByRole('dialog', { name: /catat biaya penggunaan saldo/i });
+    await user.click(screen.getByLabelText(/^ritasi$/i));
+    await user.click(await screen.findByRole('button', { name: /SO-ARM-202608-0001/i }));
+    await user.type(screen.getByLabelText(/nominal/i), '50000');
+    await user.type(screen.getByLabelText(/penerima/i), 'Vendor Reimbursement');
+    await user.selectOptions(screen.getByLabelText(/^keterangan$/i), 'Reimbursement Lainnya');
+
+    expect(screen.queryByLabelText(/jenis biaya/i)).not.toBeInTheDocument();
+    const proofFile = new File(['proof'], 'reimbursement.pdf', { type: 'application/pdf' });
+    await user.upload(screen.getByLabelText(/pilih bukti/i), proofFile);
+    await user.click(screen.getByRole('button', { name: /validasi biaya/i }));
+
+    expect(screen.getByText('Isi keterangan untuk Reimbursement Lainnya agar pencatatan jelas.')).toBeInTheDocument();
+    expect(createContainerJobExpense).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText(/keterangan reimbursement lainnya/i), 'Biaya admin pelabuhan');
+    await user.click(screen.getByRole('button', { name: /validasi biaya/i }));
+    await user.click(await screen.findByRole('button', { name: /ya, simpan biaya/i }));
+
+    await waitFor(() => {
+      expect(createContainerJobExpense).toHaveBeenCalledWith('job-1', expect.objectContaining({
+        expenseGroup: 'reimbursement',
+        amount: 50000,
+        description: 'Reimbursement Lainnya - Biaya admin pelabuhan',
+        recipientName: 'Vendor Reimbursement',
+      }));
+    });
+  });
+
   it('memfilter transaksi yang perlu koreksi dan mengirim koreksi ke Finance', async () => {
     const user = userEvent.setup();
     fetchContainerJobExpenseLedger.mockResolvedValue({

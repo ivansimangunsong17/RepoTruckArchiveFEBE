@@ -8,6 +8,7 @@ import {
   rejectDriverCommissionBatchController,
   submitDriverCommissionBatchController,
   uploadDriverCommissionPaymentProofController,
+  voidDriverCommissionPaymentController,
 } from './driver-commissions.controller.js';
 
 export const driverCommissionRoutes = [
@@ -58,6 +59,12 @@ export const driverCommissionRoutes = [
     path: '/api/driver-commissions/payments/:id/pay',
     permission: 'finance.transfer_proof.upload',
     handler: payDriverCommissionPaymentController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/driver-commissions/payments/:id/void',
+    permission: 'driver_commission.void',
+    handler: voidDriverCommissionPaymentController,
   },
   {
     method: 'POST',

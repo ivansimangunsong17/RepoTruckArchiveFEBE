@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getMonthDateRange, normalizeMonthFilterValue } from '../shared/monthFilterUtils';
 import { ORDER_TABLE_PAGE_SIZE, normalizeFinanceOrderRow, orderVerificationStatusParam } from '../order-verification/orderVerificationUtils';
-import { addFinanceOrderLineItem, fetchFinanceOrderVerifications, updateFinanceOrderSoNumber } from '../../../services/finance/financeService';
-
-const EMPTY_LINE_ITEM_FORM = { serviceName: 'Jasa Angkut D20', containerType: '', qty: '1', price: '', notes: '' };
+import { fetchFinanceOrderVerifications, updateFinanceOrderSoNumber } from '../../../services/finance/financeService';
 
 function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
   const [activeOrderTab, setActiveOrderTab] = useState('need-so');
@@ -22,14 +20,9 @@ function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
   const [soModalId, setSoModalId] = useState('');
   const [soModalValue, setSoModalValue] = useState('');
   const [soModalError, setSoModalError] = useState('');
-  const [lineItemModalId, setLineItemModalId] = useState('');
-  const [lineItemForm, setLineItemForm] = useState(EMPTY_LINE_ITEM_FORM);
-  const [lineItemError, setLineItemError] = useState('');
-  const [lineItemSaving, setLineItemSaving] = useState(false);
 
   const selectedOrder = orderRows.find((row) => row.id === selectedOrderId);
   const soModalOrder = orderRows.find((row) => row.id === soModalId);
-  const lineItemModalOrder = orderRows.find((row) => row.id === lineItemModalId);
 
   const loadOrderVerifications = useCallback(async () => {
     if (activeTab.id !== 'order-verification') return;
@@ -158,47 +151,6 @@ function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
     setOrderRows((rows) => rows.map((row) => (row.id === id ? { ...row, soNumber: value, soNumberDraft: value } : row)));
   }
 
-  function onOpenLineItemModal(id) {
-    setLineItemModalId(id);
-    setLineItemForm(EMPTY_LINE_ITEM_FORM);
-    setLineItemError('');
-  }
-
-  function closeLineItemModal() {
-    if (lineItemSaving) return;
-    setLineItemModalId('');
-    setLineItemForm(EMPTY_LINE_ITEM_FORM);
-    setLineItemError('');
-  }
-
-  function handleLineItemFieldChange(field, value) {
-    setLineItemForm((form) => ({ ...form, [field]: value }));
-    setLineItemError('');
-  }
-
-  async function saveLineItemFromModal(event) {
-    event.preventDefault();
-    setLineItemSaving(true);
-    setLineItemError('');
-    try {
-      const saved = await addFinanceOrderLineItem(lineItemModalId, {
-        serviceName: lineItemForm.serviceName,
-        containerType: lineItemForm.containerType,
-        qty: Number(lineItemForm.qty || 1),
-        price: Number(lineItemForm.price || 0),
-        notes: lineItemForm.notes,
-      });
-      const normalized = normalizeFinanceOrderRow(saved);
-      setOrderRows((rows) => rows.map((item) => (item.id === lineItemModalId ? normalized : item)));
-      setLineItemModalId('');
-      setLineItemForm(EMPTY_LINE_ITEM_FORM);
-    } catch (error) {
-      setLineItemError(error.message || 'Rincian revenue gagal disimpan.');
-    } finally {
-      setLineItemSaving(false);
-    }
-  }
-
   return {
     activeOrderTab,
     orderFilterMonth,
@@ -218,11 +170,6 @@ function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
     soModalValue,
     soModalError,
     soModalOrder,
-    lineItemModalId,
-    lineItemModalOrder,
-    lineItemForm,
-    lineItemError,
-    lineItemSaving,
     setOrderPage,
     handleActiveOrderTabChange,
     handleOrderFilterMonthChange,
@@ -237,10 +184,6 @@ function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
     saveSoNumberFromModal,
     loadOrderVerifications,
     applySoNumberCorrection,
-    onOpenLineItemModal,
-    closeLineItemModal,
-    handleLineItemFieldChange,
-    saveLineItemFromModal,
   };
 }
 

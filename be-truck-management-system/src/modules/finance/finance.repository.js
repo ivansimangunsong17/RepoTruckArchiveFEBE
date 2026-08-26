@@ -121,7 +121,6 @@ function mapOrderVerificationRow(row) {
       qty: Number(item.qty || item.quantity || 0),
       price: Number(item.price || 0),
       total: Number(item.total || Number(item.qty || item.quantity || 0) * Number(item.price || 0)),
-      notes: item.notes || '',
     })),
     runningDate: row.trip_date,
     container: formatContainerSummary(row),
@@ -700,8 +699,14 @@ function buildInvoiceFilters(options = {}) {
       so_number ilike $${params.length}
       or accurate_so_number ilike $${params.length}
       or invoice_number ilike $${params.length}
+      or debit_note_number ilike $${params.length}
       or customer_name ilike $${params.length}
       or destination ilike $${params.length}
+      or exists (
+        select 1 from container_jobs cj
+        where cj.sales_order_id = invoice_orders.id
+          and cj.container_number ilike $${params.length}
+      )
     )`);
   }
 
@@ -1031,6 +1036,18 @@ function daysBetween(startValue, endValue = new Date()) {
   return Math.max(0, Math.floor(diff / 86400000));
 }
 
+function mapDebitNoteAgingBucket(dueDate) {
+  if (!dueDate) return 'unknown';
+  const now = new Date();
+  const due = new Date(dueDate);
+  const daysOverdue = Math.floor((now.getTime() - due.getTime()) / (24 * 60 * 60 * 1000));
+  if (daysOverdue <= 0) return 'current';
+  if (daysOverdue <= 30) return 'overdue_1_30';
+  if (daysOverdue <= 60) return 'overdue_31_60';
+  if (daysOverdue <= 90) return 'overdue_61_90';
+  return 'overdue_90_plus';
+}
+
 function mapInvoiceAging(row) {
   const now = new Date();
   const documentsCompletedAt = latestDate(row.invoice_document_uploaded_at, row.tax_invoice_document_uploaded_at);
@@ -1170,12 +1187,26 @@ function mapInvoiceOrderRow(row) {
     paymentStatus: mapPaymentStatusLabel(row.billing_status),
     billingStatus: row.billing_status || 'belum_invoice',
     invoiceInputBy: row.invoice_input_by_name || '',
+    containerCount: Math.max(Number(row.planned_jobs_count || 0) - Number(row.cancelled_jobs_count || 0), 0),
+    debitNoteNumber: row.debit_note_number || '',
+    debitNoteIssuedAt: row.debit_note_issued_at,
+    debitNoteInputBy: row.debit_note_input_by_name || '',
+    debitNoteDocumentUploadedAt: row.debit_note_document_uploaded_at,
+    debitNoteDocumentUploadedByName: row.debit_note_document_uploaded_by_name || '',
+    debitNoteDueDate: row.debit_note_due_date,
+    debitNoteAmount: Number(row.debit_note_amount || 0),
+    debitNoteItemCount: Number(row.debit_note_item_count || 0),
+    debitNoteTotalPaid: Number(row.debit_note_total_paid || 0),
+    debitNoteOutstandingAmount: Math.max(Number(row.debit_note_amount || 0) - Number(row.debit_note_total_paid || 0), 0),
+    debitNoteAgingBucket: row.debit_note_number ? mapDebitNoteAgingBucket(row.debit_note_due_date) : '',
+    containerNumbers: Array.isArray(row.container_numbers) ? row.container_numbers.filter(Boolean) : [],
   };
 }
 
 const invoiceDocumentLabels = {
   invoicePdf: 'Invoice',
   taxInvoicePdf: 'Faktur Pajak',
+  debitNotePdf: 'Dokumen Debit Note',
   spkDocument: 'SPK',
   eirDocument: 'EIR',
   loadingVoucherDocument: 'Bon Muat / Bon Bongkar',
@@ -1331,6 +1362,23 @@ function invoiceOrdersCte() {
       from container_jobs
       group by sales_order_id
     ),
+    debit_note_expense_totals as (
+      select
+        sales_order_id,
+        sum(amount)::numeric as debit_note_amount,
+        count(*)::int as debit_note_item_count
+      from container_job_expenses
+      where expense_group = 'reimbursement'
+        and sales_order_id is not null
+        and payment_status <> 'batal'
+      group by sales_order_id
+    ),
+    debit_note_payment_totals as (
+      select sales_order_id, coalesce(sum(amount), 0)::numeric as debit_note_total_paid
+      from debit_note_payments
+      where voided_at is null
+      group by sales_order_id
+    ),
     invoice_orders as (
       select
         so.id,
@@ -1355,6 +1403,24 @@ function invoiceOrdersCte() {
           else so.invoice_issued_at
         end as due_date,
         so.invoice_input_by_name,
+        so.debit_note_number,
+        so.debit_note_issued_at,
+        so.debit_note_input_by_name,
+        so.debit_note_document_uploaded_at,
+        so.debit_note_document_uploaded_by_name,
+        case
+          when so.debit_note_issued_at is null then null
+          when lower(coalesce(so.payment_type, 'cash')) = 'tempo'
+            then so.debit_note_issued_at + (greatest(coalesce(so.payment_term_days, 0), 1) * interval '1 day')
+          else so.debit_note_issued_at
+        end as debit_note_due_date,
+        coalesce(max(det.debit_note_amount), 0)::numeric as debit_note_amount,
+        coalesce(max(det.debit_note_item_count), 0)::int as debit_note_item_count,
+        coalesce(max(dnpt.debit_note_total_paid), 0)::numeric as debit_note_total_paid,
+        coalesce(
+          array_agg(distinct fr.container_number) filter (where fr.container_number is not null),
+          array[]::text[]
+        ) as container_numbers,
         so.customer_name,
         so.destination,
         so.updated_at,
@@ -1419,6 +1485,8 @@ function invoiceOrdersCte() {
       from sales_orders so
       join finance_rows fr on fr.sales_order_id = so.id
       left join order_job_statuses ojs on ojs.sales_order_id = so.id
+      left join debit_note_expense_totals det on det.sales_order_id = so.id
+      left join debit_note_payment_totals dnpt on dnpt.sales_order_id = so.id
       where so.status = 'completed'
         and so.finance_verification_status = 'verified'
         and nullif(btrim(so.accurate_so_number), '') is not null
@@ -1732,6 +1800,13 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
       throw error;
     }
 
+    if (String(existing.rows[0].accurate_so_number || '').trim()) {
+      const error = new Error('Nomor SO Accurate sudah pernah diinput. Gunakan fitur ajukan koreksi nomor SO untuk mengubahnya.');
+      error.statusCode = 409;
+      error.code = 'FINANCE_SO_NUMBER_ALREADY_ASSIGNED';
+      throw error;
+    }
+
     const duplicate = await client.query(
       `
         select id
@@ -1762,110 +1837,6 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
         where id = $3
       `,
       [soNumber, payload.actorName || 'Finance', id],
-    );
-
-    const updated = await client.query(
-      `
-        select
-          so.id,
-          so.so_number,
-          so.accurate_so_number,
-          so.finance_verification_status,
-          so.finance_verified_by_name,
-          so.finance_verified_at,
-          so.do_number,
-          so.so_date,
-          so.trip_date,
-          so.customer_name,
-          so.customer_pic,
-          so.customer_phone,
-          so.customer_address,
-          so.shipment_type,
-          so.job_type,
-          so.vessel_name,
-          so.job_description,
-          so.container_summary,
-          so.price,
-          so.total_amount,
-          to_jsonb(so)->'line_items' as line_items,
-          so.terminal,
-          ${paymentTermsExpression('so')} as payment_terms,
-          so.origin,
-          so.destination,
-          so.quantity,
-          so.status,
-          so.sales_name,
-          so.created_by_name,
-          so.cancelled_at,
-          so.cancel_request_status,
-          so.cancel_request_note,
-          so.cancel_requested_by_name,
-          so.cancel_requested_by_role,
-          so.cancel_requested_at,
-          so.cancel_reviewed_by_name,
-          so.cancel_reviewed_at,
-          so.cancel_review_note,
-          so.created_at,
-          so.updated_at,
-          so.notes,
-          to_jsonb(so)->'reference_documents' as reference_documents,
-          coalesce(count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '20FT'), 0)::int as qty_20ft,
-          coalesce(count(cj.id) filter (where upper(replace(cj.container_size, ' ', '')) = '40FT'), 0)::int as qty_40ft
-        from sales_orders so
-        left join container_jobs cj on cj.sales_order_id = so.id and cj.status <> 'cancelled'
-        where so.id = $1
-        group by so.id
-      `,
-      [id],
-    );
-
-    return mapOrderVerificationRow(updated.rows[0]);
-  });
-}
-
-export async function addOrderVerificationLineItem(id, payload = {}) {
-  return withTransaction(async (client) => {
-    const existing = await client.query(
-      `
-        select id, status, line_items
-        from sales_orders
-        where id = $1
-      `,
-      [id],
-    );
-
-    const order = existing.rows[0];
-    if (!order) {
-      const error = new Error('Request order Finance tidak ditemukan.');
-      error.statusCode = 404;
-      error.code = 'FINANCE_ORDER_VERIFICATION_NOT_FOUND';
-      throw error;
-    }
-    if (order.status === 'cancelled') {
-      const error = new Error('Sales Order yang sudah dibatalkan tidak bisa ditambah rincian.');
-      error.statusCode = 409;
-      error.code = 'SALES_ORDER_CANCELLED_LOCKED';
-      throw error;
-    }
-
-    const currentLineItems = parseJsonArray(order.line_items);
-    const nextLineItems = [...currentLineItems, payload.lineItem];
-    const quantity = nextLineItems.reduce((sum, item) => sum + Number(item.qty || 0), 0);
-    const price = nextLineItems.length === 1 ? Number(nextLineItems[0].price || 0) : 0;
-    const totalAmount = nextLineItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
-
-    await client.query(
-      `
-        update sales_orders
-        set line_items = $1::jsonb,
-            price = $2,
-            quantity = $3,
-            total_amount = $4,
-            updated_by_name = $5,
-            updated_at = now()
-        where id = $6
-      `,
-      [JSON.stringify(nextLineItems), price, quantity, totalAmount, payload.actorName || 'Finance', id],
     );
 
     const updated = await client.query(
@@ -2710,6 +2681,100 @@ export async function closeOperationalFundBatchRecord(id, payload = {}) {
       );
     }
     return closedBatch;
+  });
+}
+
+// Buka kembali batch yang sudah ditutup (Admin-only, alasan wajib divalidasi di service layer).
+// Baris ini TIDAK dihapus/diedit langsung -- status dikembalikan ke 'open' dan closed_at/closed_by_name/
+// close_note dikosongkan supaya tampilannya konsisten dengan batch open biasa; riwayat siapa yang
+// membuka kembali dan alasannya tercatat di activity log, bukan kolom tabel ini.
+// Kalau batch ini pernah membawa sisa saldo ke batch besok (carry-forward) saat ditutup, transaksi
+// carry-forward itu di-void supaya saldo tidak dobel terhitung -- tapi ditolak kalau batch besok
+// itu SENDIRI sudah ditutup, karena membatalkannya diam-diam akan mengubah saldo batch yang
+// seharusnya sudah final.
+export async function reopenOperationalFundBatchRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      'select id, batch_date, status, closed_at, closed_by_name from operational_fund_batches where id = $1 for update',
+      [id],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Batch rekening dropping tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'OPERATIONAL_FUND_BATCH_NOT_FOUND';
+      throw error;
+    }
+    if (existing.rows[0].status !== 'closed') {
+      const error = new Error('Batch rekening dropping ini belum ditutup.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_BATCH_NOT_CLOSED';
+      throw error;
+    }
+
+    const carryForward = await client.query(
+      `
+        select oft.id, oft.batch_id, oft.amount, nb.batch_date, nb.status as next_batch_status
+        from operational_fund_transactions oft
+        join operational_fund_batches nb on nb.id = oft.batch_id
+        where oft.source = 'batch_carry_forward'
+          and oft.source_ref_id = $1
+          and oft.status = 'posted'
+        for update of oft
+      `,
+      [id],
+    );
+    const carryForwardRow = carryForward.rows[0];
+    if (carryForwardRow && carryForwardRow.next_batch_status === 'closed') {
+      const error = new Error(
+        `Batch ini tidak bisa dibuka lagi karena sisa saldonya sudah mengalir ke batch tanggal ${carryForwardRow.batch_date} yang sudah ditutup. Buka dulu batch tanggal tersebut sebelum membuka batch ini.`,
+      );
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_BATCH_CARRY_FORWARD_LOCKED';
+      throw error;
+    }
+    if (carryForwardRow) {
+      await client.query(
+        `
+          update operational_fund_transactions
+          set status = 'void',
+              updated_by_name = $1,
+              updated_at = now()
+          where id = $2
+        `,
+        [payload.actorName || 'Admin', carryForwardRow.id],
+      );
+    }
+
+    await client.query(
+      `
+        update operational_fund_batches
+        set status = 'open',
+            closed_by_name = null,
+            closed_at = null,
+            close_note = null,
+            updated_by_name = $1,
+            updated_at = now()
+        where id = $2
+      `,
+      [payload.actorName || 'Admin', id],
+    );
+
+    const result = await client.query(
+      `
+        ${operationalFundBatchSelect()}
+        where batch.id = $1
+        group by batch.id
+        limit 1
+      `,
+      [id],
+    );
+    return {
+      batch: mapOperationalFundBatchRow(result.rows[0]),
+      previousClosedAt: existing.rows[0].closed_at,
+      previousClosedByName: existing.rows[0].closed_by_name || '',
+      carryForwardVoided: Boolean(carryForwardRow),
+      carryForwardAmount: carryForwardRow ? Number(carryForwardRow.amount) : 0,
+    };
   });
 }
 
@@ -3736,6 +3801,7 @@ function outstandingOrdersCte() {
     payment_totals as (
       select sales_order_id, coalesce(sum(amount), 0)::numeric as total_paid
       from sales_order_payments
+      where voided_at is null
       group by sales_order_id
     ),
     outstanding_orders_all as (
@@ -3882,6 +3948,123 @@ export async function getSalesOrderOutstandingPage(options = {}) {
   };
 }
 
+function buildCustomerOutstandingFilters(options = {}) {
+  const clauses = [];
+  const params = [];
+
+  if (options.agingBucket) {
+    params.push(options.agingBucket);
+    clauses.push(`aging_bucket = $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`customer_name ilike $${params.length}`);
+  }
+
+  return {
+    whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '',
+    params,
+  };
+}
+
+function mapCustomerOutstandingRollupRow(row) {
+  return {
+    customer: row.customer_name || '-',
+    invoiceCount: Number(row.invoice_count || 0),
+    totalOutstandingAmount: Number(row.total_outstanding_amount || 0),
+    currentAmount: Number(row.current_amount || 0),
+    overdueAmount: Number(row.overdue_amount || 0),
+    oldestOverdueDays: Number(row.oldest_overdue_days || 0),
+    needsReview: Boolean(row.needs_review),
+  };
+}
+
+export async function getCustomerOutstandingRollupPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildCustomerOutstandingFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+
+  const [rows, total, summary] = await Promise.all([
+    query(
+      `
+        ${outstandingOrdersCte()}
+        select
+          customer_name,
+          count(*)::int as invoice_count,
+          coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'current'), 0)::numeric as current_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket not in ('current', 'unknown')), 0)::numeric as overdue_amount,
+          coalesce(max(days_overdue), 0)::int as oldest_overdue_days,
+          bool_or(ots_data_review_status = 'perlu_dicek') as needs_review
+        from outstanding_orders
+        ${whereSql}
+        group by customer_name
+        order by total_outstanding_amount desc, customer_name asc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        ${outstandingOrdersCte()}
+        select count(*)::int as total
+        from (
+          select customer_name
+          from outstanding_orders
+          ${whereSql}
+          group by customer_name
+        ) grouped
+      `,
+      params,
+    ),
+    // Sama seperti summary di getSalesOrderOutstandingPage: dihitung dari SELURUH outstanding_orders
+    // (tidak ikut whereSql) supaya kartu ringkasan tetap menggambarkan kondisi global, bukan hasil
+    // filter tabel. Digabung ke endpoint rollup ini supaya CustomerOutstandingPage.jsx cukup satu
+    // kali fetch untuk data tabel + ringkasan, bukan dua kali menjalankan outstandingOrdersCte().
+    query(
+      `
+        ${outstandingOrdersCte()}
+        select
+          coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
+          count(*)::int as total_orders,
+          count(distinct customer_name)::int as total_customers,
+          count(*) filter (where aging_bucket = 'current')::int as current_count,
+          count(*) filter (where aging_bucket = 'overdue_1_30')::int as overdue_1_30_count,
+          count(*) filter (where aging_bucket = 'overdue_31_60')::int as overdue_31_60_count,
+          count(*) filter (where aging_bucket = 'overdue_61_90')::int as overdue_61_90_count,
+          count(*) filter (where aging_bucket = 'overdue_90_plus')::int as overdue_90_plus_count,
+          count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count,
+          count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
+        from outstanding_orders
+      `,
+      [],
+    ),
+  ]);
+
+  const totalCustomers = Number(total.rows[0]?.total || 0);
+
+  return {
+    rows: rows.rows.map(mapCustomerOutstandingRollupRow),
+    total: totalCustomers,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalCustomers / pageSize)),
+    summary: {
+      totalOutstandingAmount: Number(summary.rows[0]?.total_outstanding_amount || 0),
+      totalOrders: Number(summary.rows[0]?.total_orders || 0),
+      totalCustomers: Number(summary.rows[0]?.total_customers || 0),
+      current: Number(summary.rows[0]?.current_count || 0),
+      overdue1To30: Number(summary.rows[0]?.overdue_1_30_count || 0),
+      overdue31To60: Number(summary.rows[0]?.overdue_31_60_count || 0),
+      overdue61To90: Number(summary.rows[0]?.overdue_61_90_count || 0),
+      overdue90Plus: Number(summary.rows[0]?.overdue_90_plus_count || 0),
+      unknownDueDate: Number(summary.rows[0]?.unknown_due_date_count || 0),
+      needsReview: Number(summary.rows[0]?.needs_review_count || 0),
+    },
+  };
+}
+
 export async function getCustomerOutstandingSummary(customerName) {
   const normalized = String(customerName || '').trim();
   if (!normalized) {
@@ -3921,8 +4104,31 @@ export async function getCustomerOutstandingSummary(customerName) {
   };
 }
 
+function mapDebitNoteItem(row) {
+  return {
+    id: row.id,
+    category: row.category || '',
+    amount: row.amount == null ? 0 : Number(row.amount),
+    description: row.description || '',
+    recipientName: row.recipient_name || '',
+    paymentStatus: row.payment_status || '',
+    createdAt: row.created_at,
+    containerJobId: row.container_job_id || '',
+    containerNumber: row.container_number || '',
+  };
+}
+
+function mapContainerBreakdownRow(row) {
+  return {
+    containerJobId: row.container_job_id,
+    containerNumber: row.container_number || '',
+    invoiceAmount: row.invoice_amount == null ? 0 : Number(row.invoice_amount),
+    debitNoteAmount: row.debit_note_amount == null ? 0 : Number(row.debit_note_amount),
+  };
+}
+
 export async function getInvoiceOrderDetail(id) {
-  const [invoice, documents] = await Promise.all([
+  const [invoice, documents, debitNoteRows, containerBreakdown] = await Promise.all([
     query(
       `
         ${invoiceOrdersCte()}
@@ -3940,7 +4146,7 @@ export async function getInvoiceOrderDetail(id) {
           a.storage_path, a.mime_type, a.file_size, a.notes, a.uploaded_by_name,
           a.created_at,
           case
-            when a.category in ('invoicePdf', 'taxInvoicePdf') then 'Finance'
+            when a.category in ('invoicePdf', 'taxInvoicePdf', 'debitNotePdf') then 'Finance'
             else 'Sales'
           end as source,
           null::uuid as job_id,
@@ -3974,12 +4180,57 @@ export async function getInvoiceOrderDetail(id) {
       `,
       [id],
     ),
+    query(
+      `
+        select
+          expense.id, expense.category, expense.amount, expense.description,
+          expense.recipient_name, expense.payment_status, expense.created_at,
+          expense.container_job_id, cj.container_number
+        from container_job_expenses expense
+        left join container_jobs cj on cj.id = expense.container_job_id
+        where expense.sales_order_id = $1
+          and expense.expense_group = 'reimbursement'
+        order by cj.container_number asc nulls last, expense.created_at asc
+      `,
+      [id],
+    ),
+    query(
+      `
+        ${financeRowsCte()}
+        select
+          fr.id as container_job_id,
+          fr.container_number,
+          fr.total_revenue as invoice_amount,
+          coalesce(cje.debit_note_amount, 0)::numeric as debit_note_amount
+        from finance_rows fr
+        left join (
+          select container_job_id, sum(amount)::numeric as debit_note_amount
+          from container_job_expenses
+          where expense_group = 'reimbursement'
+            and container_job_id is not null
+            and payment_status <> 'batal'
+          group by container_job_id
+        ) cje on cje.container_job_id = fr.id
+        where fr.sales_order_id = $1
+        order by fr.container_number asc nulls last, fr.id asc
+      `,
+      [id],
+    ),
   ]);
 
   if (!invoice.rows[0]) return null;
+  // debitNoteItems sengaja tetap menampilkan item yang sudah 'batal' (transparansi riwayat), tapi
+  // totalnya wajib mengecualikan item batal supaya tidak ikut menagih customer untuk biaya yang
+  // sudah dikoreksi/dibatalkan.
+  const debitNoteItems = debitNoteRows.rows.map(mapDebitNoteItem);
   return {
     ...mapInvoiceOrderRow(invoice.rows[0]),
     documents: mapInvoiceDocuments(documents.rows),
+    debitNoteItems,
+    debitNoteAmount: debitNoteItems
+      .filter((item) => item.paymentStatus !== 'batal')
+      .reduce((sum, item) => sum + item.amount, 0),
+    containerBreakdown: containerBreakdown.rows.map(mapContainerBreakdownRow),
   };
 }
 
@@ -4067,9 +4318,58 @@ export async function updateInvoiceNumber(id, payload = {}) {
 }
 
 export async function markInvoiceDocumentUploaded(id, patch = {}) {
-  const category = patch.category === 'taxInvoicePdf' ? 'taxInvoicePdf' : 'invoicePdf';
+  const category = patch.category === 'taxInvoicePdf'
+    ? 'taxInvoicePdf'
+    : patch.category === 'debitNotePdf'
+      ? 'debitNotePdf'
+      : 'invoicePdf';
   const actorName = patch.actorName || 'Finance';
   const isInvoice = category === 'invoicePdf';
+
+  if (category === 'debitNotePdf') {
+    return withTransaction(async (client) => {
+      const existing = await client.query(
+        `
+          select id
+          from sales_orders
+          where id = $1
+            and status = 'completed'
+        `,
+        [id],
+      );
+
+      if (!existing.rows[0]) {
+        const error = new Error('Sales Order selesai untuk invoice tidak ditemukan.');
+        error.statusCode = 404;
+        error.code = 'FINANCE_INVOICE_ORDER_NOT_FOUND';
+        throw error;
+      }
+
+      await client.query(
+        `
+          update sales_orders
+          set debit_note_document_uploaded_at = now(),
+              debit_note_document_uploaded_by_name = $1,
+              updated_by_name = $1,
+              updated_at = now()
+          where id = $2
+        `,
+        [actorName, id],
+      );
+
+      const updated = await client.query(
+        `
+          ${invoiceOrdersCte()}
+          select *
+          from invoice_orders
+          where id = $1
+          limit 1
+        `,
+        [id],
+      );
+      return updated.rows[0] ? mapInvoiceOrderRow(updated.rows[0]) : null;
+    });
+  }
 
   return withTransaction(async (client) => {
     const existing = await client.query(
@@ -4161,13 +4461,17 @@ function mapSalesOrderPaymentRow(row = {}) {
     recordedByName: row.recorded_by_name || '',
     proofAttachmentId: row.proof_attachment_id || null,
     createdAt: row.created_at,
+    voidedAt: row.voided_at || null,
+    voidedByName: row.voided_by_name || '',
+    voidReason: row.void_reason || '',
   };
 }
 
 export async function listSalesOrderPayments(salesOrderId) {
   const result = await query(
     `
-      select id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at, proof_attachment_id
+      select id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at,
+        proof_attachment_id, voided_at, voided_by_name, void_reason
       from sales_order_payments
       where sales_order_id = $1
       order by payment_date desc, created_at desc
@@ -4192,7 +4496,7 @@ async function computeSalesOrderPaymentSummary(client, id) {
 
   const [paidResult, statusResult] = await Promise.all([
     client.query(
-      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1',
+      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1 and voided_at is null',
       [id],
     ),
     client.query('select billing_status from sales_orders where id = $1', [id]),
@@ -4294,7 +4598,7 @@ export async function recordSalesOrderPayment(id, payload = {}) {
     const billingAmount = Number(invoiceResult.rows[0].billing_amount || 0);
 
     const paidResult = await client.query(
-      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1',
+      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1 and voided_at is null',
       [id],
     );
     const totalPaid = Number(paidResult.rows[0].total_paid || 0);
@@ -4389,6 +4693,711 @@ export async function recordSalesOrderPayment(id, payload = {}) {
       totalPaid: newTotalPaid,
       outstandingAmount: Math.max(billingAmount - newTotalPaid, 0),
       billingStatus: nextBillingStatus,
+    };
+  });
+}
+
+// Void resmi untuk pembayaran invoice yang salah catat (SO salah, nominal salah, dsb). Baris
+// pembayaran TIDAK dihapus (tetap tersimpan sebagai riwayat, ditandai voided_at/voided_by_name/
+// void_reason) supaya jejaknya utuh -- hanya dikeluarkan dari perhitungan total_paid/outstanding.
+// Admin-only, alasan wajib (dicek di service layer).
+export async function voidSalesOrderPayment(salesOrderId, paymentId, payload = {}) {
+  return withTransaction(async (client) => {
+    const locked = await client.query(
+      'select id, billing_status from sales_orders where id = $1 for update',
+      [salesOrderId],
+    );
+    if (!locked.rows[0]) {
+      const error = new Error('Sales Order tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_NOT_FOUND';
+      throw error;
+    }
+
+    const paymentResult = await client.query(
+      'select * from sales_order_payments where id = $1 and sales_order_id = $2 for update',
+      [paymentId, salesOrderId],
+    );
+    const paymentRow = paymentResult.rows[0];
+    if (!paymentRow) {
+      const error = new Error('Pembayaran tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_PAYMENT_NOT_FOUND';
+      throw error;
+    }
+    if (paymentRow.voided_at) {
+      const error = new Error('Pembayaran ini sudah dibatalkan sebelumnya.');
+      error.statusCode = 409;
+      error.code = 'SALES_ORDER_PAYMENT_ALREADY_VOIDED';
+      throw error;
+    }
+
+    const reason = String(payload.reason || '').trim();
+    if (!reason) {
+      const error = new Error('Alasan pembatalan wajib diisi.');
+      error.statusCode = 400;
+      error.code = 'SALES_ORDER_PAYMENT_VOID_REASON_REQUIRED';
+      throw error;
+    }
+
+    const voided = await client.query(
+      `
+        update sales_order_payments
+        set voided_at = now(), voided_by_name = $2, void_reason = $3
+        where id = $1
+        returning id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at,
+          proof_attachment_id, voided_at, voided_by_name, void_reason
+      `,
+      [paymentId, payload.actorName || 'Admin', reason],
+    );
+
+    const invoiceResult = await client.query(
+      `
+        ${invoiceOrdersCte()}
+        select billing_amount
+        from invoice_orders
+        where id = $1
+        limit 1
+      `,
+      [salesOrderId],
+    );
+    const billingAmount = Number(invoiceResult.rows[0]?.billing_amount || 0);
+    const paidResult = await client.query(
+      'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1 and voided_at is null',
+      [salesOrderId],
+    );
+    const totalPaid = Number(paidResult.rows[0].total_paid || 0);
+    const outstandingAmount = Math.max(billingAmount - totalPaid, 0);
+    const nextBillingStatus = outstandingAmount > 0 && locked.rows[0].billing_status === 'lunas'
+      ? 'menunggu_pembayaran'
+      : locked.rows[0].billing_status;
+    if (nextBillingStatus !== locked.rows[0].billing_status) {
+      await client.query(
+        `update sales_orders set billing_status = $2, updated_by_name = $3, updated_at = now() where id = $1`,
+        [salesOrderId, nextBillingStatus, payload.actorName || 'Admin'],
+      );
+    }
+
+    return {
+      payment: mapSalesOrderPaymentRow(voided.rows[0]),
+      billingAmount,
+      totalPaid,
+      outstandingAmount,
+      billingStatus: nextBillingStatus,
+    };
+  });
+}
+
+// Debit Note (reimbursement) receivable: mirror persis pola Invoice Outstanding di atas, tapi
+// sumber tagihannya container_job_expenses (expense_group='reimbursement'), bukan finance_rows.
+// Digabung satu Debit Note per SO (jumlah seluruh item reimbursement pada SO tersebut), sengaja
+// TIDAK digabung ke angka Trucking OTS (lihat FiturOutstanding.md prinsip #10).
+function debitNoteOrdersCte() {
+  return `
+    with debit_note_expense_totals as (
+      select
+        sales_order_id,
+        sum(amount)::numeric as debit_note_amount,
+        count(*)::int as item_count
+      from container_job_expenses
+      where expense_group = 'reimbursement'
+        and sales_order_id is not null
+        and payment_status <> 'batal'
+      group by sales_order_id
+    ),
+    debit_note_orders as (
+      select
+        so.id,
+        coalesce(so.accurate_so_number, so.so_number) as so_number,
+        so.customer_name,
+        so.destination,
+        so.debit_note_number,
+        so.debit_note_issued_at,
+        so.debit_note_input_by_name,
+        case
+          when so.debit_note_issued_at is null then null
+          when lower(coalesce(so.payment_type, 'cash')) = 'tempo'
+            then so.debit_note_issued_at + (greatest(coalesce(so.payment_term_days, 0), 1) * interval '1 day')
+          else so.debit_note_issued_at
+        end as due_date,
+        ${paymentTermsExpression('so')} as payment_terms,
+        det.debit_note_amount,
+        det.item_count
+      from sales_orders so
+      join debit_note_expense_totals det on det.sales_order_id = so.id
+      where so.status = 'completed'
+    )
+  `;
+}
+
+function buildDebitNoteFilters(options = {}) {
+  const clauses = [];
+  const params = [];
+
+  if (options.status === 'need-number') {
+    clauses.push(`nullif(btrim(debit_note_number), '') is null`);
+  } else if (options.status === 'issued') {
+    clauses.push(`nullif(btrim(debit_note_number), '') is not null`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`(
+      so_number ilike $${params.length}
+      or debit_note_number ilike $${params.length}
+      or customer_name ilike $${params.length}
+      or destination ilike $${params.length}
+    )`);
+  }
+
+  return {
+    whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '',
+    params,
+  };
+}
+
+function mapDebitNoteOrderRow(row) {
+  return {
+    id: row.id,
+    soNumber: row.so_number || '-',
+    customer: row.customer_name || '-',
+    destination: row.destination || '-',
+    debitNoteNumber: row.debit_note_number || '',
+    debitNoteIssuedAt: row.debit_note_issued_at,
+    debitNoteInputBy: row.debit_note_input_by_name || '',
+    dueDate: row.due_date,
+    paymentTerms: row.payment_terms || '-',
+    debitNoteAmount: Number(row.debit_note_amount || 0),
+    itemCount: Number(row.item_count || 0),
+  };
+}
+
+export async function getDebitNoteOrdersPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildDebitNoteFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+
+  const [rows, total, summary] = await Promise.all([
+    query(
+      `
+        ${debitNoteOrdersCte()}
+        select *
+        from debit_note_orders
+        ${whereSql}
+        order by debit_note_issued_at desc nulls last, so_number desc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        ${debitNoteOrdersCte()}
+        select count(*)::int as total
+        from debit_note_orders
+        ${whereSql}
+      `,
+      params,
+    ),
+    query(
+      `
+        ${debitNoteOrdersCte()}
+        select
+          count(*) filter (where nullif(btrim(debit_note_number), '') is null)::int as need_number,
+          count(*) filter (where nullif(btrim(debit_note_number), '') is not null)::int as issued
+        from debit_note_orders
+      `,
+      [],
+    ),
+  ]);
+
+  return {
+    rows: rows.rows.map(mapDebitNoteOrderRow),
+    total: Number(total.rows[0]?.total || 0),
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(Number(total.rows[0]?.total || 0) / pageSize)),
+    summary: {
+      needNumber: Number(summary.rows[0]?.need_number || 0),
+      issued: Number(summary.rows[0]?.issued || 0),
+    },
+  };
+}
+
+export async function updateDebitNoteNumber(id, payload = {}) {
+  const debitNoteNumber = String(payload.debitNoteNumber || '').trim();
+  if (!debitNoteNumber) {
+    const error = new Error('Nomor Debit Note wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select id, debit_note_number
+        from sales_orders
+        where id = $1
+          and status = 'completed'
+      `,
+      [id],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Sales Order selesai untuk Debit Note tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'FINANCE_DEBIT_NOTE_ORDER_NOT_FOUND';
+      throw error;
+    }
+
+    const currentNumber = String(existing.rows[0].debit_note_number || '').trim();
+    if (currentNumber && currentNumber.toLowerCase() !== debitNoteNumber.toLowerCase()) {
+      const error = new Error('Nomor Debit Note sudah terisi.');
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_NUMBER_ALREADY_SET';
+      throw error;
+    }
+
+    const duplicate = await client.query(
+      `
+        select id
+        from sales_orders
+        where lower(debit_note_number) = lower($1)
+          and id <> $2
+        limit 1
+      `,
+      [debitNoteNumber, id],
+    );
+    if (duplicate.rows[0]) {
+      const error = new Error('Nomor Debit Note sudah digunakan oleh Sales Order lain.');
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_NUMBER_DUPLICATE';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update sales_orders
+        set debit_note_number = $1,
+            debit_note_issued_at = coalesce(debit_note_issued_at, now()),
+            debit_note_input_by_name = coalesce(debit_note_input_by_name, $2),
+            updated_by_name = $2,
+            updated_at = now()
+        where id = $3
+      `,
+      [debitNoteNumber, payload.actorName || 'Finance', id],
+    );
+
+    const updated = await client.query(
+      `
+        ${debitNoteOrdersCte()}
+        select *
+        from debit_note_orders
+        where id = $1
+        limit 1
+      `,
+      [id],
+    );
+    return updated.rows[0] ? mapDebitNoteOrderRow(updated.rows[0]) : null;
+  });
+}
+
+function debitNoteOutstandingCte() {
+  return `
+    ${debitNoteOrdersCte()},
+    debit_note_payment_totals as (
+      select sales_order_id, coalesce(sum(amount), 0)::numeric as total_paid
+      from debit_note_payments
+      where voided_at is null
+      group by sales_order_id
+    ),
+    debit_note_outstanding_all as (
+      select
+        dno.*,
+        coalesce(pt.total_paid, 0)::numeric as total_paid,
+        greatest(dno.debit_note_amount - coalesce(pt.total_paid, 0), 0)::numeric as outstanding_amount,
+        case
+          when dno.due_date is null then 'unknown'
+          when (dno.due_date at time zone 'Asia/Jakarta')::date >= (now() at time zone 'Asia/Jakarta')::date then 'current'
+          when (now() at time zone 'Asia/Jakarta')::date - (dno.due_date at time zone 'Asia/Jakarta')::date <= 30 then 'overdue_1_30'
+          when (now() at time zone 'Asia/Jakarta')::date - (dno.due_date at time zone 'Asia/Jakarta')::date <= 60 then 'overdue_31_60'
+          when (now() at time zone 'Asia/Jakarta')::date - (dno.due_date at time zone 'Asia/Jakarta')::date <= 90 then 'overdue_61_90'
+          else 'overdue_90_plus'
+        end as aging_bucket,
+        case
+          when dno.due_date is null then 0
+          else greatest(((now() at time zone 'Asia/Jakarta')::date - (dno.due_date at time zone 'Asia/Jakarta')::date)::int, 0)
+        end as days_overdue
+      from debit_note_orders dno
+      left join debit_note_payment_totals pt on pt.sales_order_id = dno.id
+      where nullif(btrim(dno.debit_note_number), '') is not null
+    ),
+    debit_note_outstanding as (
+      select *
+      from debit_note_outstanding_all
+      where outstanding_amount > 0
+    )
+  `;
+}
+
+function buildDebitNoteOutstandingFilters(options = {}) {
+  const clauses = [];
+  const params = [];
+
+  if (options.agingBucket) {
+    params.push(options.agingBucket);
+    clauses.push(`aging_bucket = $${params.length}`);
+  }
+  if (options.query) {
+    params.push(`%${String(options.query).trim()}%`);
+    clauses.push(`(
+      so_number ilike $${params.length}
+      or debit_note_number ilike $${params.length}
+      or customer_name ilike $${params.length}
+      or destination ilike $${params.length}
+    )`);
+  }
+
+  return {
+    whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '',
+    params,
+  };
+}
+
+function mapDebitNoteOutstandingRow(row) {
+  return {
+    id: row.id,
+    soNumber: row.so_number || '-',
+    debitNoteNumber: row.debit_note_number || '',
+    customer: row.customer_name || '-',
+    destination: row.destination || '-',
+    debitNoteAmount: Number(row.debit_note_amount || 0),
+    totalPaid: Number(row.total_paid || 0),
+    outstandingAmount: Number(row.outstanding_amount || 0),
+    debitNoteIssuedAt: row.debit_note_issued_at,
+    dueDate: row.due_date,
+    paymentTerms: row.payment_terms || '-',
+    agingBucket: row.aging_bucket,
+    daysOverdue: Number(row.days_overdue || 0),
+  };
+}
+
+export async function getDebitNoteOutstandingPage(options = {}) {
+  const { page, pageSize, offset } = parsePage(options);
+  const { whereSql, params } = buildDebitNoteOutstandingFilters(options);
+  const limitIndex = params.length + 1;
+  const offsetIndex = params.length + 2;
+
+  const [rows, summary] = await Promise.all([
+    query(
+      `
+        ${debitNoteOutstandingCte()}
+        select *, count(*) over ()::int as full_count
+        from debit_note_outstanding
+        ${whereSql}
+        order by due_date asc nulls last, so_number asc
+        limit $${limitIndex} offset $${offsetIndex}
+      `,
+      [...params, pageSize, offset],
+    ),
+    query(
+      `
+        ${debitNoteOutstandingCte()}
+        select
+          coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
+          count(*)::int as total_orders,
+          count(*) filter (where aging_bucket = 'current')::int as current_count,
+          count(*) filter (where aging_bucket = 'overdue_1_30')::int as overdue_1_30_count,
+          count(*) filter (where aging_bucket = 'overdue_31_60')::int as overdue_31_60_count,
+          count(*) filter (where aging_bucket = 'overdue_61_90')::int as overdue_61_90_count,
+          count(*) filter (where aging_bucket = 'overdue_90_plus')::int as overdue_90_plus_count,
+          count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count
+        from debit_note_outstanding
+      `,
+      [],
+    ),
+  ]);
+
+  const total = rows.rows[0]?.full_count ? Number(rows.rows[0].full_count) : 0;
+
+  return {
+    rows: rows.rows.map(mapDebitNoteOutstandingRow),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    summary: {
+      totalOutstandingAmount: Number(summary.rows[0]?.total_outstanding_amount || 0),
+      totalOrders: Number(summary.rows[0]?.total_orders || 0),
+      current: Number(summary.rows[0]?.current_count || 0),
+      overdue1To30: Number(summary.rows[0]?.overdue_1_30_count || 0),
+      overdue31To60: Number(summary.rows[0]?.overdue_31_60_count || 0),
+      overdue61To90: Number(summary.rows[0]?.overdue_61_90_count || 0),
+      overdue90Plus: Number(summary.rows[0]?.overdue_90_plus_count || 0),
+      unknownDueDate: Number(summary.rows[0]?.unknown_due_date_count || 0),
+    },
+  };
+}
+
+function mapDebitNotePaymentRow(row = {}) {
+  return {
+    id: row.id,
+    salesOrderId: row.sales_order_id,
+    amount: Number(row.amount || 0),
+    paymentDate: row.payment_date,
+    referenceNumber: row.reference_number || '',
+    note: row.note || '',
+    recordedByName: row.recorded_by_name || '',
+    proofAttachmentId: row.proof_attachment_id || null,
+    createdAt: row.created_at,
+    voidedAt: row.voided_at || null,
+    voidedByName: row.voided_by_name || '',
+    voidReason: row.void_reason || '',
+  };
+}
+
+export async function listDebitNotePayments(salesOrderId) {
+  const result = await query(
+    `
+      select id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at,
+        proof_attachment_id, voided_at, voided_by_name, void_reason
+      from debit_note_payments
+      where sales_order_id = $1
+      order by payment_date desc, created_at desc
+    `,
+    [salesOrderId],
+  );
+  return result.rows.map(mapDebitNotePaymentRow);
+}
+
+async function computeDebitNotePaymentSummary(client, id) {
+  const debitNoteResult = await client.query(
+    `
+      ${debitNoteOrdersCte()}
+      select debit_note_amount
+      from debit_note_orders
+      where id = $1
+      limit 1
+    `,
+    [id],
+  );
+  const debitNoteAmount = Number(debitNoteResult.rows[0]?.debit_note_amount || 0);
+
+  const paidResult = await client.query(
+    'select coalesce(sum(amount), 0)::numeric as total_paid from debit_note_payments where sales_order_id = $1 and voided_at is null',
+    [id],
+  );
+  const totalPaid = Number(paidResult.rows[0]?.total_paid || 0);
+
+  return {
+    debitNoteAmount,
+    totalPaid,
+    outstandingAmount: Math.max(debitNoteAmount - totalPaid, 0),
+  };
+}
+
+function ensureDebitNotePaymentPayloadMatches(existingRow, payload) {
+  return Number(existingRow.amount) === Number(payload.amount)
+    && String(existingRow.reference_number || '') === String(payload.referenceNumber || '')
+    && String(existingRow.note || '') === String(payload.note || '');
+}
+
+export async function recordDebitNotePayment(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const locked = await client.query(
+      'select id, status, debit_note_number from sales_orders where id = $1 for update',
+      [id],
+    );
+    if (!locked.rows[0]) {
+      const error = new Error('Sales Order tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_NOT_FOUND';
+      throw error;
+    }
+    if (locked.rows[0].status !== 'completed') {
+      const error = new Error('Pembayaran Debit Note hanya bisa dicatat setelah Sales Order selesai.');
+      error.statusCode = 400;
+      error.code = 'DEBIT_NOTE_PAYMENT_ORDER_NOT_COMPLETED';
+      throw error;
+    }
+    if (!String(locked.rows[0].debit_note_number || '').trim()) {
+      const error = new Error('Nomor Debit Note belum tersedia. Input nomor Debit Note terlebih dahulu sebelum mencatat pembayaran.');
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_PAYMENT_NUMBER_REQUIRED';
+      throw error;
+    }
+    if (!payload.proofAttachmentId) {
+      const error = new Error('Bukti transfer wajib dilampirkan sebelum pembayaran bisa dicatat.');
+      error.statusCode = 400;
+      error.code = 'DEBIT_NOTE_PAYMENT_PROOF_REQUIRED';
+      throw error;
+    }
+
+    const idempotencyKey = payload.idempotencyKey || null;
+    if (idempotencyKey) {
+      const existing = await client.query(
+        'select * from debit_note_payments where idempotency_key = $1 limit 1',
+        [idempotencyKey],
+      );
+      if (existing.rows[0]) {
+        if (!ensureDebitNotePaymentPayloadMatches(existing.rows[0], payload)) {
+          const error = new Error('Percobaan submit ini memakai kunci yang sama dengan pembayaran lain yang datanya berbeda. Silakan catat sebagai entri baru.');
+          error.statusCode = 409;
+          error.code = 'DEBIT_NOTE_PAYMENT_IDEMPOTENCY_KEY_MISMATCH';
+          throw error;
+        }
+        const summary = await computeDebitNotePaymentSummary(client, id);
+        return { payment: mapDebitNotePaymentRow(existing.rows[0]), ...summary };
+      }
+    }
+
+    const debitNoteResult = await client.query(
+      `
+        ${debitNoteOrdersCte()}
+        select debit_note_amount
+        from debit_note_orders
+        where id = $1
+        limit 1
+      `,
+      [id],
+    );
+    if (!debitNoteResult.rows[0]) {
+      const error = new Error('Sales Order ini belum memiliki biaya reimbursement yang bisa ditagihkan.');
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_PAYMENT_NOT_BILLABLE';
+      throw error;
+    }
+    const debitNoteAmount = Number(debitNoteResult.rows[0].debit_note_amount || 0);
+
+    const paidResult = await client.query(
+      'select coalesce(sum(amount), 0)::numeric as total_paid from debit_note_payments where sales_order_id = $1 and voided_at is null',
+      [id],
+    );
+    const totalPaid = Number(paidResult.rows[0].total_paid || 0);
+    const remaining = debitNoteAmount - totalPaid;
+
+    if (remaining <= 0) {
+      const error = new Error('Debit Note ini sudah lunas.');
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_PAYMENT_ALREADY_PAID';
+      throw error;
+    }
+
+    const amount = Number(payload.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      const error = new Error('Nominal pembayaran wajib lebih dari 0.');
+      error.statusCode = 400;
+      error.code = 'DEBIT_NOTE_PAYMENT_AMOUNT_INVALID';
+      throw error;
+    }
+    if (amount > remaining) {
+      const error = new Error(`Nominal pembayaran melebihi sisa outstanding. Sisa outstanding Rp ${remaining.toLocaleString('id-ID')}.`);
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_PAYMENT_EXCEEDS_OUTSTANDING';
+      throw error;
+    }
+
+    const inserted = await client.query(
+      `
+        insert into debit_note_payments (
+          sales_order_id, amount, payment_date, reference_number, proof_attachment_id, note,
+          recorded_by_user_id, recorded_by_name, idempotency_key
+        )
+        values ($1, $2, coalesce($3::date, (now() at time zone 'Asia/Jakarta')::date), $4, $5, $6, $7, $8, $9)
+        on conflict (idempotency_key) where idempotency_key is not null do nothing
+        returning id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at, proof_attachment_id
+      `,
+      [
+        id,
+        amount,
+        payload.paymentDate || null,
+        payload.referenceNumber || null,
+        payload.proofAttachmentId || null,
+        payload.note || null,
+        payload.actorUserId || null,
+        payload.actorName || 'Finance',
+        idempotencyKey,
+      ],
+    );
+
+    if (!inserted.rows[0]) {
+      const raced = await client.query(
+        'select * from debit_note_payments where idempotency_key = $1 limit 1',
+        [idempotencyKey],
+      );
+      if (!raced.rows[0] || !ensureDebitNotePaymentPayloadMatches(raced.rows[0], payload)) {
+        const error = new Error('Percobaan submit ini memakai kunci yang sama dengan pembayaran lain yang datanya berbeda. Silakan catat sebagai entri baru.');
+        error.statusCode = 409;
+        error.code = 'DEBIT_NOTE_PAYMENT_IDEMPOTENCY_KEY_MISMATCH';
+        throw error;
+      }
+      const summary = await computeDebitNotePaymentSummary(client, id);
+      return { payment: mapDebitNotePaymentRow(raced.rows[0]), ...summary };
+    }
+
+    return {
+      payment: mapDebitNotePaymentRow(inserted.rows[0]),
+      debitNoteAmount,
+      totalPaid: totalPaid + amount,
+      outstandingAmount: Math.max(debitNoteAmount - (totalPaid + amount), 0),
+    };
+  });
+}
+
+// Void resmi untuk pembayaran Debit Note yang salah catat -- mirror persis voidSalesOrderPayment
+// di atas (baris tidak dihapus, hanya ditandai voided_at/voided_by_name/void_reason dan
+// dikeluarkan dari perhitungan total_paid/outstanding). Admin-only, alasan wajib.
+export async function voidDebitNotePayment(salesOrderId, paymentId, payload = {}) {
+  return withTransaction(async (client) => {
+    const locked = await client.query('select id from sales_orders where id = $1 for update', [salesOrderId]);
+    if (!locked.rows[0]) {
+      const error = new Error('Sales Order tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'SALES_ORDER_NOT_FOUND';
+      throw error;
+    }
+
+    const paymentResult = await client.query(
+      'select * from debit_note_payments where id = $1 and sales_order_id = $2 for update',
+      [paymentId, salesOrderId],
+    );
+    const paymentRow = paymentResult.rows[0];
+    if (!paymentRow) {
+      const error = new Error('Pembayaran Debit Note tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'DEBIT_NOTE_PAYMENT_NOT_FOUND';
+      throw error;
+    }
+    if (paymentRow.voided_at) {
+      const error = new Error('Pembayaran ini sudah dibatalkan sebelumnya.');
+      error.statusCode = 409;
+      error.code = 'DEBIT_NOTE_PAYMENT_ALREADY_VOIDED';
+      throw error;
+    }
+
+    const reason = String(payload.reason || '').trim();
+    if (!reason) {
+      const error = new Error('Alasan pembatalan wajib diisi.');
+      error.statusCode = 400;
+      error.code = 'DEBIT_NOTE_PAYMENT_VOID_REASON_REQUIRED';
+      throw error;
+    }
+
+    const voided = await client.query(
+      `
+        update debit_note_payments
+        set voided_at = now(), voided_by_name = $2, void_reason = $3
+        where id = $1
+        returning id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at,
+          proof_attachment_id, voided_at, voided_by_name, void_reason
+      `,
+      [paymentId, payload.actorName || 'Admin', reason],
+    );
+
+    const summary = await computeDebitNotePaymentSummary(client, salesOrderId);
+
+    return {
+      payment: mapDebitNotePaymentRow(voided.rows[0]),
+      ...summary,
     };
   });
 }

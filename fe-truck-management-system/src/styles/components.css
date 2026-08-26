@@ -742,6 +742,41 @@
   box-shadow: 0 10px 24px #1118270a;
 }
 
+.order-dashboard-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.order-dashboard-nav-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: white;
+  color: #5f6268;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.order-dashboard-nav-card:hover {
+  border-color: #c5c7cc;
+  color: #303237;
+}
+
+.order-dashboard-nav-card.is-active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 6px 16px #dc171f26;
+}
+
 .weekly-orders-page .page-header {
   align-items: flex-end;
   margin-bottom: 10px;

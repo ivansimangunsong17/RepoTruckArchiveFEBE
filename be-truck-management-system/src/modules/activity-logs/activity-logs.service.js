@@ -54,22 +54,6 @@ export function listActivityLogs(query) {
   });
 }
 
-export function saveActivityLog(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    const error = new Error('Payload activity log harus berupa object.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-  if (!payload.action) {
-    const error = new Error('Action activity log wajib diisi.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-  return createActivityLog(payload);
-}
-
 export function recordActivityLog(request, payload = {}) {
   if (!payload.action) {
     const error = new Error('Action activity log wajib diisi.');

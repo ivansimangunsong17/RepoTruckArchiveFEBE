@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { USER_ROLES } from './roles';
 import { navigationGroups } from './navigation';
 
+function groupItems(label) {
+  const group = navigationGroups.find((item) => item.label === label);
+  return group?.items.flatMap((item) => item.children || item) || [];
+}
+
 describe('navigationGroups', () => {
   it('menampilkan menu finance untuk admin dan finance', () => {
-    const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
-    const financeItems = monitoringGroup?.items.filter((item) => item.to.startsWith('/finance')) || [];
+    const financeItems = groupItems('Finance').filter((item) => item.to.startsWith('/finance'));
 
     expect(financeItems).toHaveLength(5);
     financeItems.forEach((item) => {
@@ -15,14 +19,10 @@ describe('navigationGroups', () => {
 
   it('menampilkan struktur menu order untuk finance', () => {
     const orderGroup = navigationGroups.find((group) => group.label === 'Order');
-    const runningItem = orderGroup?.items.find((item) => item.to === '/order-running');
-    const weeklyItem = orderGroup?.items.find((item) => item.to === '/weekly-orders');
-    const historyItem = orderGroup?.items.find((item) => item.to === '/order-history');
+    const dashboardItem = orderGroup?.items.find((item) => item.to === '/order-running');
 
-    expect(orderGroup?.items.map((item) => item.label)).toEqual(['Order Berjalan', 'Order Mingguan', 'Riwayat Order']);
-    expect(runningItem?.roles).toContain(USER_ROLES.FINANCE);
-    expect(weeklyItem?.roles).toContain(USER_ROLES.FINANCE);
-    expect(historyItem?.roles).toContain(USER_ROLES.FINANCE);
+    expect(orderGroup?.items.map((item) => item.label)).toEqual(['Dashboard']);
+    expect(dashboardItem?.roles).toContain(USER_ROLES.FINANCE);
   });
 
   it('membatasi menu container titip untuk admin dan operational', () => {
@@ -43,10 +43,10 @@ describe('navigationGroups', () => {
 
   it('memisahkan menu komisi Operational dan Finance', () => {
     const operationalGroup = navigationGroups.find((group) => group.label === 'Operational');
-    const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
+    const financeItems = groupItems('Finance');
 
     const operationalCommission = operationalGroup?.items.find((item) => item.to === '/operations/driver-commissions');
-    const financeCommission = monitoringGroup?.items.find((item) => item.to === '/finance/driver-commissions');
+    const financeCommission = financeItems.find((item) => item.to === '/finance/driver-commissions');
 
     expect(operationalCommission?.label).toBe('Report Komisi');
     expect(operationalCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
@@ -71,8 +71,7 @@ describe('navigationGroups', () => {
   });
 
   it('menambahkan menu laporan untuk finance', () => {
-    const monitoringGroup = navigationGroups.find((group) => group.label === 'Monitoring');
-    const reportsItem = monitoringGroup?.items.find((item) => item.to === '/reports');
+    const reportsItem = groupItems('Finance').find((item) => item.to === '/reports');
 
     expect(reportsItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
   });
@@ -83,8 +82,6 @@ describe('navigationGroups', () => {
 
     expect(viewerItems.map((item) => item.to)).toEqual([
       '/order-running',
-      '/weekly-orders',
-      '/order-history',
       '/viewer/clients',
       '/viewer/end-users',
       '/viewer/drivers',

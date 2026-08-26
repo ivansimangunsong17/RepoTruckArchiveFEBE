@@ -40,7 +40,6 @@ function normalizeFinanceOrderRow(row = {}) {
       qty: Number(item.qty || item.quantity || 0),
       price: Number(item.price || 0),
       total: Number(item.total || Number(item.qty || item.quantity || 0) * Number(item.price || 0)),
-      notes: item.notes || '',
     }))
     : [];
   return {

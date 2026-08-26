@@ -8,10 +8,14 @@ import {
   normalizeFinanceInvoiceRow,
 } from '../invoice/invoiceUtils';
 import {
+  fetchFinanceDebitNotePayments,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
+  recordFinanceDebitNotePayment,
+  updateFinanceDebitNoteNumber,
   updateFinanceInvoiceNumber,
   uploadFinanceInvoiceDocument,
+  voidFinanceDebitNotePayment,
 } from '../../../services/finance/financeService';
 
 function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
@@ -36,6 +40,14 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
   const [invoiceDetailError, setInvoiceDetailError] = useState('');
   const [invoiceConfirmId, setInvoiceConfirmId] = useState('');
   const [invoiceConfirmError, setInvoiceConfirmError] = useState('');
+  const [debitNoteNumberSaving, setDebitNoteNumberSaving] = useState(false);
+  const [debitNoteNumberError, setDebitNoteNumberError] = useState('');
+  const [debitNotePayments, setDebitNotePayments] = useState([]);
+  const [debitNotePaymentsLoading, setDebitNotePaymentsLoading] = useState(false);
+  const [debitNotePaymentSaving, setDebitNotePaymentSaving] = useState(false);
+  const [debitNotePaymentError, setDebitNotePaymentError] = useState('');
+  const [debitNotePaymentVoidBusyId, setDebitNotePaymentVoidBusyId] = useState('');
+  const [debitNotePaymentVoidError, setDebitNotePaymentVoidError] = useState('');
 
   const selectedInvoiceSummary = invoiceRows.find((row) => row.id === selectedInvoiceId);
   const selectedInvoice = invoiceDetail || selectedInvoiceSummary;
@@ -164,6 +176,9 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     setInvoiceDetail(null);
     setInvoiceDetailError('');
     setInvoiceDocumentUploadError('');
+    setDebitNoteNumberError('');
+    setDebitNotePayments([]);
+    setDebitNotePaymentError('');
   }
 
   function closeInvoiceDetail() {
@@ -171,6 +186,77 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     setInvoiceDetail(null);
     setInvoiceDetailError('');
     setInvoiceDocumentUploadError('');
+    setDebitNoteNumberError('');
+    setDebitNotePayments([]);
+    setDebitNotePaymentError('');
+  }
+
+  async function submitDebitNoteNumber(id, debitNoteNumber) {
+    const trimmed = String(debitNoteNumber || '').trim();
+    if (!trimmed) {
+      setDebitNoteNumberError('Nomor Debit Note wajib diisi.');
+      return;
+    }
+    setDebitNoteNumberSaving(true);
+    setDebitNoteNumberError('');
+    try {
+      const saved = await updateFinanceDebitNoteNumber(id, trimmed);
+      const normalized = normalizeFinanceInvoiceRow(saved);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, ...normalized } : item)));
+      setInvoiceDetail((current) => (current && current.id === id ? { ...current, ...normalized } : current));
+    } catch (error) {
+      setDebitNoteNumberError(error.message || 'Nomor Debit Note gagal disimpan.');
+      throw error;
+    } finally {
+      setDebitNoteNumberSaving(false);
+    }
+  }
+
+  async function loadDebitNotePayments(id) {
+    setDebitNotePaymentsLoading(true);
+    try {
+      const result = await fetchFinanceDebitNotePayments(id);
+      setDebitNotePayments(result || []);
+    } catch (error) {
+      setDebitNotePayments([]);
+    } finally {
+      setDebitNotePaymentsLoading(false);
+    }
+  }
+
+  async function confirmDebitNotePayment(id, payload, file) {
+    setDebitNotePaymentSaving(true);
+    setDebitNotePaymentError('');
+    try {
+      await recordFinanceDebitNotePayment(id, payload, file);
+      const detail = await fetchFinanceInvoiceDetail(id);
+      const normalized = normalizeFinanceInvoiceRow(detail);
+      setInvoiceDetail(normalized);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, ...normalized } : item)));
+      await loadDebitNotePayments(id);
+    } catch (error) {
+      setDebitNotePaymentError(error.message || 'Pembayaran Debit Note gagal disimpan.');
+      throw error;
+    } finally {
+      setDebitNotePaymentSaving(false);
+    }
+  }
+
+  async function voidDebitNotePayment(id, paymentId, reason) {
+    setDebitNotePaymentVoidBusyId(paymentId);
+    setDebitNotePaymentVoidError('');
+    try {
+      await voidFinanceDebitNotePayment(id, paymentId, reason);
+      const detail = await fetchFinanceInvoiceDetail(id);
+      const normalized = normalizeFinanceInvoiceRow(detail);
+      setInvoiceDetail(normalized);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, ...normalized } : item)));
+      await loadDebitNotePayments(id);
+    } catch (error) {
+      setDebitNotePaymentVoidError(error.message || 'Pembayaran Debit Note gagal dibatalkan.');
+    } finally {
+      setDebitNotePaymentVoidBusyId('');
+    }
   }
 
   function closeInvoiceConfirmModal() {
@@ -293,6 +379,18 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     invoiceConfirmId,
     invoiceConfirmError,
     invoiceConfirmRow,
+    debitNoteNumberSaving,
+    debitNoteNumberError,
+    debitNotePayments,
+    debitNotePaymentsLoading,
+    debitNotePaymentSaving,
+    debitNotePaymentError,
+    debitNotePaymentVoidBusyId,
+    debitNotePaymentVoidError,
+    submitDebitNoteNumber,
+    loadDebitNotePayments,
+    confirmDebitNotePayment,
+    voidDebitNotePayment,
     setInvoicePage,
     handleActiveInvoiceTabChange,
     handleActiveInvoiceDocumentFilterChange,

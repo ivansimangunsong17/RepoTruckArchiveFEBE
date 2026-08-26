@@ -21,7 +21,12 @@ const FINANCE_ATTACHMENT_ENTITY_PERMISSIONS = {
 };
 
 const FINANCE_SENSITIVE_CONTAINER_JOB_CATEGORIES = new Set(['expensePaymentProof']);
-const FINANCE_SENSITIVE_SALES_ORDER_CATEGORIES = new Set(['paymentProof']);
+const FINANCE_SENSITIVE_SALES_ORDER_CATEGORY_PERMISSIONS = {
+  paymentProof: 'finance.invoice.read',
+  invoicePdf: 'finance.invoice.read',
+  taxInvoicePdf: 'finance.invoice.read',
+  debitNotePdf: 'finance.debit_note.read',
+};
 
 export function resolveRequiredFinancePermission(attachment) {
   if (FINANCE_ATTACHMENT_ENTITY_PERMISSIONS[attachment.entityType]) {
@@ -30,8 +35,8 @@ export function resolveRequiredFinancePermission(attachment) {
   if (attachment.entityType === 'container_job' && FINANCE_SENSITIVE_CONTAINER_JOB_CATEGORIES.has(attachment.category)) {
     return 'finance.operational_fund.read';
   }
-  if (attachment.entityType === 'sales_order' && FINANCE_SENSITIVE_SALES_ORDER_CATEGORIES.has(attachment.category)) {
-    return 'finance.invoice.read';
+  if (attachment.entityType === 'sales_order' && FINANCE_SENSITIVE_SALES_ORDER_CATEGORY_PERMISSIONS[attachment.category]) {
+    return FINANCE_SENSITIVE_SALES_ORDER_CATEGORY_PERMISSIONS[attachment.category];
   }
   return null;
 }
@@ -102,7 +107,11 @@ export async function listAttachmentsController(request, response) {
   }
 
   const rows = await listAttachments(entityType, entityId);
-  sendSuccess(response, rows);
+  const visibleRows = rows.filter((row) => {
+    const rowPermission = resolveRequiredFinancePermission(row);
+    return !rowPermission || actorHasPermission(request.user, rowPermission);
+  });
+  sendSuccess(response, visibleRows);
 }
 
 export async function downloadAttachmentController(request, response) {

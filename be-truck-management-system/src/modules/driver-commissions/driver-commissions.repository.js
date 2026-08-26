@@ -77,6 +77,9 @@ function mapPaymentRow(row = {}) {
     paidAt: row.paid_at,
     paymentProofAttachmentId: row.payment_proof_attachment_id || null,
     paymentNote: row.payment_note || '',
+    voidedAt: row.voided_at || null,
+    voidedByName: row.voided_by_name || '',
+    voidReason: row.void_reason || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -227,6 +230,9 @@ function mapReportSubmittedRow(row = {}) {
     paymentProofAttachmentId: row.payment_proof_attachment_id || null,
     paymentProofAttachment,
     paymentNote: row.payment_note || '',
+    voidedAt: row.voided_at || null,
+    voidedByName: row.voided_by_name || '',
+    voidReason: row.void_reason || '',
     truckPlateNumber: row.truck_plate_number || '',
     source: 'batch',
   };
@@ -493,6 +499,9 @@ export async function findDriverCommissionPeriodReport(period) {
           dcp.paid_at,
           dcp.paid_by_name,
           dcp.payment_proof_attachment_id,
+          dcp.voided_at,
+          dcp.voided_by_name,
+          dcp.void_reason,
           proof.file_name as proof_file_name,
           proof.mime_type as proof_mime_type,
           proof.file_size as proof_file_size,
@@ -910,6 +919,76 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
     if (Number(remaining.rows[0]?.total || 0) === 0) {
       await client.query(
         "update driver_commission_batches set status = 'paid', updated_at = now() where id = $1",
+        [current.batch_id],
+      );
+    }
+
+    return findDriverCommissionBatchById(current.batch_id, client);
+  });
+}
+
+// Void resmi untuk pembayaran komisi sopir yang salah catat (salah sopir/nominal). Beda dari
+// pembayaran invoice/Debit Note (ledger banyak baris), status pembayaran komisi cuma field
+// mutable tunggal ('pending' <-> 'paid'), jadi void di sini artinya mengembalikan status ke
+// 'pending' (bukan menambah baris pembalik) sambil tetap merekam voided_at/voided_by_name/
+// void_reason dan melepas proof lama supaya pembayaran ulang wajib upload bukti baru. Kalau
+// batch induknya sempat naik jadi 'paid' gara-gara payment ini, turunkan lagi ke 'approved'.
+// Admin-only, alasan wajib.
+export async function voidDriverCommissionPayment(id, payload = {}, actor = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select dcp.id, dcp.batch_id, dcp.status as payment_status, dcb.status as batch_status
+        from driver_commission_payments dcp
+        join driver_commission_batches dcb on dcb.id = dcp.batch_id
+        where dcp.id = $1
+        for update of dcp, dcb
+      `,
+      [id],
+    );
+    if (!existing.rows.length) {
+      const error = new Error('Pembayaran komisi tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'DRIVER_COMMISSION_PAYMENT_NOT_FOUND';
+      throw error;
+    }
+
+    const current = existing.rows[0];
+    if (current.payment_status !== 'paid') {
+      const error = new Error('Hanya pembayaran berstatus paid yang bisa dibatalkan.');
+      error.statusCode = 400;
+      error.code = 'DRIVER_COMMISSION_PAYMENT_NOT_PAID';
+      throw error;
+    }
+
+    const reason = String(payload.reason || '').trim();
+    if (!reason) {
+      const error = new Error('Alasan pembatalan wajib diisi.');
+      error.statusCode = 400;
+      error.code = 'DRIVER_COMMISSION_PAYMENT_VOID_REASON_REQUIRED';
+      throw error;
+    }
+
+    await client.query(
+      `
+        update driver_commission_payments
+        set status = 'pending',
+            paid_by_user_id = null,
+            paid_by_name = null,
+            paid_at = null,
+            payment_proof_attachment_id = null,
+            voided_at = now(),
+            voided_by_name = $2,
+            void_reason = $3,
+            updated_at = now()
+        where id = $1
+      `,
+      [id, actor.name || 'Admin', reason],
+    );
+
+    if (current.batch_status === 'paid') {
+      await client.query(
+        "update driver_commission_batches set status = 'approved', updated_at = now() where id = $1",
         [current.batch_id],
       );
     }

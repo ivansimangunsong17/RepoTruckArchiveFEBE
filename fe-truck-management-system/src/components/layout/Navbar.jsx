@@ -7,10 +7,8 @@ import { useArchiveData } from '../../hooks/useArchiveData';
 import { fetchOperationReport } from '../../services/reports/reportService';
 
 const routeLabels = {
-  dashboard: 'Order Berjalan',
-  'order-running': 'Order Berjalan',
-  'weekly-orders': 'Order Mingguan',
-  'order-history': 'Riwayat Order',
+  dashboard: 'Dashboard',
+  'order-running': 'Dashboard',
   profile: 'Profil Saya',
   'sales-orders': 'Sales Order',
   'historical-entry': 'Input Data Lama',

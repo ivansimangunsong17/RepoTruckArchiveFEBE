@@ -1,18 +1,25 @@
-import { AlertTriangle, BadgeCheck, ChevronLeft, ChevronRight, CircleDollarSign, Clock3, RefreshCw, Search, Upload, Wallet, X } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Download, RefreshCw, Search, Wallet, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../contexts/FeedbackContext';
 import { USER_ROLES } from '../../constants/roles';
+import PageHeader from '../../components/common/PageHeader';
+import EmptyState from '../../components/common/EmptyState';
+import AttachmentUploadField from '../../components/common/AttachmentUploadField';
 import {
   fetchFinanceInvoicePayments,
   fetchFinanceOutstanding,
+  fetchFinanceOutstandingByCustomer,
   recordFinanceInvoicePayment,
+  voidFinanceInvoicePayment,
 } from '../../services/finance/financeService';
+import { downloadCsv } from '../../utils/csvExport';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 
 const PAGE_SIZE = 20;
+const DETAIL_PAGE_SIZE = 100;
 
 const emptySummary = {
   totalOutstandingAmount: 0,
@@ -50,30 +57,36 @@ const AGING_TONE = {
   unknown: 'border-slate-200 bg-slate-50 text-slate-500',
 };
 
+function customerRollupCsvRows(rows) {
+  return rows.map((row) => [
+    row.customer || '-',
+    row.totalOutstandingAmount || 0,
+    row.currentAmount || 0,
+    row.overdueAmount || 0,
+    row.oldestOverdueDays || 0,
+    row.invoiceCount || 0,
+  ]);
+}
+
 function AgingBadge({ bucket }) {
   const tone = AGING_TONE[bucket] || AGING_TONE.unknown;
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase leading-none ${tone}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black uppercase leading-none ${tone}`}>
       {AGING_LABELS[bucket] || bucket || '-'}
     </span>
   );
 }
 
-function MetricCard({ icon: Icon, label, value, helper, tone = 'red' }) {
-  const toneClass = tone === 'amber' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600';
+function MetricCard({ icon: Icon, label, value, helper, tone = 'text-slate-950' }) {
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneClass}`}>
-          <Icon size={18} />
-        </span>
-        <div className="min-w-0">
-          <p className="text-xs font-black uppercase tracking-wide text-slate-500">{label}</p>
-          <strong className="mt-1 block break-words text-xl font-black text-slate-950">{value}</strong>
-          {helper ? <small className="mt-1 block text-xs leading-relaxed text-slate-500">{helper}</small> : null}
-        </div>
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-400">
+        <Icon size={15} />
+        <span>{label}</span>
       </div>
-    </article>
+      <strong className={`mt-3 block text-xl ${tone}`}>{value}</strong>
+      <span className="mt-1 block text-xs font-semibold text-slate-500">{helper}</span>
+    </div>
   );
 }
 
@@ -82,135 +95,272 @@ function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
 
-function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onChange, form, onClose, onConfirm }) {
+function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment, onClose, onRecordPayment }) {
+  if (!customer) return null;
+
+  return (
+    <ModalPortal>
+      <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+        <section className="master-modal customer-outstanding-detail-modal" role="dialog" aria-modal="true" aria-labelledby="customer-outstanding-detail-title" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="master-form-heading">
+            <div className="min-w-0">
+              <span>Detail Piutang</span>
+              <h2 id="customer-outstanding-detail-title">{customer.customer}</h2>
+              <p>{customer.invoiceCount} invoice belum lunas</p>
+            </div>
+            <button className="modal-close-button" type="button" onClick={onClose} aria-label="Tutup detail piutang">
+              <X size={17} />
+            </button>
+          </div>
+
+          <div className="master-form-sections">
+            <div className="master-fieldset">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Total Piutang Belum Lunas</span>
+                <strong className="text-2xl font-black normal-case text-amber-700">{formatCurrency(customer.totalOutstandingAmount)}</strong>
+              </div>
+            </div>
+            {error ? <div className="alert error">{error}</div> : null}
+            {loading ? (
+              <p className="p-2 text-sm font-semibold text-slate-500">Memuat rincian invoice...</p>
+            ) : !error && !rows.length ? (
+              <EmptyState title="Tidak ada invoice" description="Customer ini tidak memiliki invoice outstanding." />
+            ) : !error ? (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] divide-y divide-slate-200 text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">No. SO</th>
+                      <th className="px-4 py-3">No. Invoice</th>
+                      <th className="px-4 py-3 text-right">Tagihan</th>
+                      <th className="px-4 py-3 text-right">Dibayar</th>
+                      <th className="px-4 py-3 text-right">Outstanding</th>
+                      <th className="px-4 py-3">Jatuh Tempo</th>
+                      <th className="px-4 py-3">Umur Piutang</th>
+                      <th className="px-4 py-3 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rows.map((row) => (
+                      <tr key={row.id} className="align-middle hover:bg-slate-50/70">
+                        <td className="px-4 py-3 font-black text-slate-950">
+                          {row.soNumber}
+                          {row.dataReviewStatus === 'perlu_dicek' ? (
+                            <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-700">
+                              <AlertTriangle size={10} /> Perlu Ditinjau
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-medium text-slate-700">{row.invoiceNumber || '-'}</td>
+                        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.billingAmount)}</td>
+                        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.totalPaid)}</td>
+                        <td className="px-4 py-3 text-right text-sm font-black text-amber-700">{formatCurrency(row.outstandingAmount)}</td>
+                        <td className="px-4 py-3 text-xs font-medium text-slate-700">{row.dueDate ? formatDate(row.dueDate) : '-'}</td>
+                        <td className="px-4 py-3"><AgingBadge bucket={row.agingBucket} /></td>
+                        <td className="px-4 py-3 text-right">
+                          {canRecordPayment ? (
+                            <button className="secondary-button" onClick={() => onRecordPayment(row)} type="button">
+                              Catat Pembayaran
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="master-form-actions">
+            <button className="secondary-button" onClick={onClose} type="button">Tutup</button>
+          </div>
+        </section>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onChange, form, onClose, onConfirm, canVoidPayment, voidBusyId, voidError, onVoidPayment }) {
+  const [voidingId, setVoidingId] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
+
+  useEffect(() => {
+    setVoidingId(null);
+    setVoidReason('');
+  }, [row?.id]);
+
   if (!row) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3" role="presentation" onMouseDown={onClose}>
-      <section
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="customer-outstanding-payment-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Catat Pembayaran</p>
-            <h2 id="customer-outstanding-payment-title" className="mt-1 break-words text-xl font-black text-slate-950">{row.soNumber}</h2>
-            <p className="mt-1 text-sm font-semibold text-slate-500">{row.customer}</p>
-          </div>
-          <button className="secondary-button inline-flex h-10 w-10 shrink-0 items-center justify-center p-0" type="button" onClick={onClose} aria-label="Tutup catat pembayaran">
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="overflow-y-auto p-5">
-          <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <span className="block text-[11px] font-black uppercase text-slate-400">Total Tagihan</span>
-                <strong className="mt-1 block text-sm text-slate-800">{formatCurrency(row.billingAmount)}</strong>
+    <ModalPortal>
+      <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+        <section className="master-modal max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="customer-outstanding-payment-title" onMouseDown={(event) => event.stopPropagation()}>
+          <form
+            className="master-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onConfirm();
+            }}
+          >
+            <div className="master-form-heading">
+              <div className="min-w-0">
+                <span>Catat Pembayaran</span>
+                <h2 id="customer-outstanding-payment-title">{row.soNumber}</h2>
+                <p>{row.customer}</p>
               </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <span className="block text-[11px] font-black uppercase text-slate-400">Sudah Dibayar</span>
-                <strong className="mt-1 block text-sm text-slate-800">{formatCurrency(row.totalPaid)}</strong>
-              </div>
-              <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
-                <span className="block text-[11px] font-black uppercase text-amber-600">Sisa Outstanding</span>
-                <strong className="mt-1 block text-lg text-amber-700">{formatCurrency(row.outstandingAmount)}</strong>
-              </div>
+              <button className="modal-close-button" type="button" onClick={onClose} aria-label="Tutup catat pembayaran">
+                <X size={17} />
+              </button>
             </div>
 
-            <div className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3.5">
-              <BadgeCheck className="mt-0.5 shrink-0 text-emerald-600" size={18} />
-              <p className="text-xs font-semibold leading-relaxed text-emerald-800">
-                Pembayaran ini akan mencatat pelunasan penuh sebesar <strong>{formatCurrency(row.outstandingAmount)}</strong> (sisa outstanding saat ini). Nominal tidak diinput manual supaya tidak ada risiko salah ketik &mdash; sesuai catatan bahwa outstanding di sini tidak dicicil.
-              </p>
-            </div>
+            <div className="master-form-sections">
+              <fieldset className="master-fieldset">
+                <legend>Ringkasan Tagihan</legend>
+                <div className="master-form-grid">
+                  <div className="master-field">
+                    <span>Total Tagihan</span>
+                    <strong className="text-sm font-black normal-case text-slate-950">{formatCurrency(row.billingAmount)}</strong>
+                  </div>
+                  <div className="master-field">
+                    <span>Sudah Dibayar</span>
+                    <strong className="text-sm font-black normal-case text-slate-950">{formatCurrency(row.totalPaid)}</strong>
+                  </div>
+                  <div className="master-field span-full">
+                    <span>Sisa Outstanding</span>
+                    <strong className="text-lg font-black normal-case text-amber-700">{formatCurrency(row.outstandingAmount)}</strong>
+                  </div>
+                </div>
+                <div className="alert warning mt-3">
+                  Pembayaran ini akan mencatat pelunasan penuh sebesar <strong>{formatCurrency(row.outstandingAmount)}</strong> (sisa outstanding saat ini). Nominal tidak diinput manual supaya tidak ada risiko salah ketik &mdash; outstanding di sini tidak dicicil.
+                </div>
+              </fieldset>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-xs font-bold text-slate-700 sm:col-span-2">
-                Tanggal Pembayaran
-                <input
-                  className="h-10 max-w-xs rounded-lg border border-slate-300 px-3 text-sm font-bold text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
-                  onChange={(event) => onChange({ ...form, paymentDate: event.target.value })}
-                  type="date"
-                  value={form.paymentDate}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-bold text-slate-700 sm:col-span-2">
-                Nomor Referensi Transfer
-                <input
-                  className="h-10 rounded-lg border border-slate-300 px-3 text-sm font-bold text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
-                  maxLength={80}
-                  onChange={(event) => onChange({ ...form, referenceNumber: event.target.value })}
-                  placeholder="Contoh: TRF-20260821-001"
-                  value={form.referenceNumber}
-                />
-              </label>
-              <label className="grid gap-1.5 text-xs font-bold text-slate-700 sm:col-span-2">
-                Catatan
-                <textarea
-                  className="min-h-16 resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100"
-                  maxLength={500}
-                  onChange={(event) => onChange({ ...form, note: event.target.value })}
-                  value={form.note}
-                />
-              </label>
-              <div className="grid gap-1.5 text-xs font-bold text-slate-700 sm:col-span-2">
-                <span>Bukti Transfer <span className="font-semibold text-rose-600">Wajib diisi</span></span>
-                <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2.5">
-                  <label className="secondary-button inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap">
-                    <Upload size={15} /> Pilih File
+              <fieldset className="master-fieldset">
+                <legend>Detail Pembayaran</legend>
+                <div className="master-form-grid">
+                  <label className="master-field">
+                    <span>Tanggal Pembayaran</span>
                     <input
-                      accept="application/pdf,image/jpeg,image/png"
-                      aria-label="Bukti Transfer"
-                      className="sr-only"
-                      onChange={(event) => onChange({ ...form, proofFile: event.target.files?.[0] || null })}
-                      type="file"
+                      onChange={(event) => onChange({ ...form, paymentDate: event.target.value })}
+                      type="date"
+                      value={form.paymentDate}
                     />
                   </label>
-                  <span className={`min-w-0 truncate text-xs font-semibold normal-case ${form.proofFile ? 'text-slate-700' : 'text-slate-400'}`}>
-                    {form.proofFile ? form.proofFile.name : 'Belum ada file dipilih (PDF, JPG, atau PNG)'}
-                  </span>
+                  <label className="master-field">
+                    <span>Nomor Referensi Transfer</span>
+                    <input
+                      maxLength={80}
+                      onChange={(event) => onChange({ ...form, referenceNumber: event.target.value })}
+                      placeholder="Contoh: TRF-20260821-001"
+                      value={form.referenceNumber}
+                    />
+                  </label>
+                  <label className="master-field span-full">
+                    <span>Catatan</span>
+                    <textarea
+                      maxLength={500}
+                      onChange={(event) => onChange({ ...form, note: event.target.value })}
+                      rows={3}
+                      value={form.note}
+                    />
+                  </label>
+                  <div className="master-field span-full">
+                    <AttachmentUploadField
+                      compact
+                      helper="Wajib. Format PDF, JPG, PNG."
+                      id="customer-outstanding-payment-proof"
+                      label="Bukti Transfer"
+                      onClear={() => onChange({ ...form, proofFile: null })}
+                      onSelect={(file, validationError) => {
+                        if (validationError) return;
+                        onChange({ ...form, proofFile: file });
+                      }}
+                      title={form.proofFile?.name ? 'Ganti Bukti' : 'Pilih Bukti'}
+                      value={form.proofFile}
+                    />
+                  </div>
                 </div>
-              </div>
+              </fieldset>
+
+              {error ? <div className="alert error">{error}</div> : null}
+
+              <fieldset className="master-fieldset">
+                <legend>Riwayat Pembayaran</legend>
+                {paymentsLoading ? (
+                  <p className="text-xs font-semibold text-slate-500">Memuat riwayat...</p>
+                ) : payments.length ? (
+                  <ul className="grid gap-2">
+                    {payments.map((payment) => (
+                      <li key={payment.id} className="border-t border-slate-100 pt-2 text-xs first:border-t-0 first:pt-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className={payment.voidedAt ? 'opacity-60' : ''}>
+                            <strong className={`block text-slate-800 ${payment.voidedAt ? 'line-through' : ''}`}>{formatCurrency(payment.amount)}</strong>
+                            <span className="block text-slate-500">{formatDate(payment.paymentDate)} {payment.referenceNumber ? `- ${payment.referenceNumber}` : ''}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {payment.voidedAt ? (
+                              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
+                            ) : (
+                              <span className="text-slate-400">{payment.recordedByName || '-'}</span>
+                            )}
+                            {canVoidPayment && !payment.voidedAt ? (
+                              <button
+                                className="rounded-md border border-rose-200 px-2 py-1 text-[10px] font-black uppercase text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                disabled={voidBusyId === payment.id}
+                                onClick={() => { setVoidingId(voidingId === payment.id ? null : payment.id); setVoidReason(''); }}
+                                type="button"
+                              >
+                                Batalkan
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                        {payment.voidedAt ? (
+                          <p className="mt-1 text-[10px] font-semibold text-rose-600">Alasan: {payment.voidReason} &middot; oleh {payment.voidedByName}</p>
+                        ) : null}
+                        {voidingId === payment.id ? (
+                          <div className="mt-2 grid gap-1.5 rounded-md border border-rose-200 bg-rose-50 p-2">
+                            <textarea
+                              className="w-full rounded-md border border-rose-200 px-2 py-1.5 text-xs"
+                              onChange={(event) => setVoidReason(event.target.value)}
+                              placeholder="Alasan pembatalan (wajib)"
+                              rows={2}
+                              value={voidReason}
+                            />
+                            {voidError ? <p className="text-[10px] font-semibold text-rose-700">{voidError}</p> : null}
+                            <div className="flex justify-end gap-2">
+                              <button className="secondary-button" onClick={() => setVoidingId(null)} type="button">Batal</button>
+                              <button
+                                className="rounded-md border border-rose-300 bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                disabled={!voidReason.trim() || voidBusyId === payment.id}
+                                onClick={() => onVoidPayment(payment.id, voidReason)}
+                                type="button"
+                              >
+                                {voidBusyId === payment.id ? 'Membatalkan...' : 'Konfirmasi Batalkan'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs font-semibold text-slate-500">Belum ada pembayaran tercatat.</p>
+                )}
+              </fieldset>
             </div>
 
-            {error ? <p className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
-
-            <div className="rounded-lg border border-slate-200 p-3">
-              <span className="block text-[11px] font-black uppercase text-slate-400">Riwayat Pembayaran</span>
-              {paymentsLoading ? (
-                <p className="mt-2 text-xs font-semibold text-slate-500">Memuat riwayat...</p>
-              ) : payments.length ? (
-                <ul className="mt-2 space-y-2">
-                  {payments.map((payment) => (
-                    <li key={payment.id} className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs first:border-t-0 first:pt-0">
-                      <div>
-                        <strong className="block text-slate-800">{formatCurrency(payment.amount)}</strong>
-                        <span className="block text-slate-500">{formatDate(payment.paymentDate)} {payment.referenceNumber ? `- ${payment.referenceNumber}` : ''}</span>
-                      </div>
-                      <span className="text-slate-400">{payment.recordedByName || '-'}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-2 text-xs font-semibold text-slate-500">Belum ada pembayaran tercatat.</p>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2">
+            <div className="master-form-actions">
               <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Batal</button>
-              <button className="primary-button" disabled={busy || Number(row.outstandingAmount) <= 0 || !form.proofFile} onClick={onConfirm} type="button">
+              <button className="primary-button" disabled={busy || Number(row.outstandingAmount) <= 0 || !form.proofFile} type="submit">
                 {busy ? 'Menyimpan...' : 'Tandai Lunas'}
               </button>
             </div>
-          </div>
-        </div>
-      </section>
-    </div>
+          </form>
+        </section>
+      </div>
+    </ModalPortal>
   );
 }
 
@@ -218,8 +368,9 @@ function CustomerOutstandingPage() {
   const { user } = useAuth();
   const { notify } = useFeedback();
   const canRecordPayment = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
+  const canVoidPayment = user?.role === USER_ROLES.ADMIN;
 
-  const [rows, setRows] = useState([]);
+  const [customerRows, setCustomerRows] = useState([]);
   const [summary, setSummary] = useState(emptySummary);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -229,22 +380,32 @@ function CustomerOutstandingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [detailCustomer, setDetailCustomer] = useState(null);
+  const [detailRows, setDetailRows] = useState([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+
   const [selectedRow, setSelectedRow] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ paymentDate: '', referenceNumber: '', note: '', proofFile: null, idempotencyKey: crypto.randomUUID() });
   const [paymentError, setPaymentError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [voidBusyId, setVoidBusyId] = useState('');
+  const [voidError, setVoidError] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const result = await fetchFinanceOutstanding({ page, pageSize: PAGE_SIZE, query, agingBucket });
-      setRows(result?.rows || []);
-      setSummary(result?.summary || emptySummary);
-      setTotal(Number(result?.total || 0));
-      setTotalPages(Math.max(1, Number(result?.totalPages || 1)));
+      // Satu fetch saja: /finance/outstanding/by-customer sudah mengembalikan data tabel rollup
+      // DAN summary sekaligus, supaya query outstanding yang berat tidak dijalankan dua kali
+      // (dulu ada panggilan kedua ke fetchFinanceOutstanding({ pageSize: 1 }) hanya untuk summary).
+      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, agingBucket });
+      setCustomerRows(rollup?.rows || []);
+      setTotal(Number(rollup?.total || 0));
+      setTotalPages(Math.max(1, Number(rollup?.totalPages || 1)));
+      setSummary(rollup?.summary || emptySummary);
     } catch (err) {
       setError(err.message || 'Data outstanding gagal dimuat.');
     } finally {
@@ -252,9 +413,38 @@ function CustomerOutstandingPage() {
     }
   }, [page, query, agingBucket]);
 
+  function exportCustomerRows() {
+    downloadCsv(
+      'customer-outstanding',
+      ['Customer', 'Total OTS', 'Current', 'Overdue', 'Oldest Overdue (Hari)', 'Jumlah Invoice'],
+      customerRollupCsvRows(customerRows),
+    );
+  }
+
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  function loadDetailRows(customerName) {
+    setDetailLoading(true);
+    setDetailError('');
+    fetchFinanceOutstanding({ query: customerName, pageSize: DETAIL_PAGE_SIZE })
+      .then((result) => setDetailRows((result?.rows || []).filter((row) => row.customer === customerName)))
+      .catch((err) => setDetailError(err.message || 'Rincian invoice gagal dimuat.'))
+      .finally(() => setDetailLoading(false));
+  }
+
+  function openDetailModal(row) {
+    setDetailCustomer(row);
+    setDetailRows([]);
+    loadDetailRows(row.customer);
+  }
+
+  function closeDetailModal() {
+    setDetailCustomer(null);
+    setDetailRows([]);
+    setDetailError('');
+  }
 
   function openPaymentModal(row) {
     setSelectedRow(row);
@@ -306,6 +496,7 @@ function CustomerOutstandingPage() {
       notify({ title: 'Pembayaran tercatat', message: `${selectedRow.soNumber} berhasil diperbarui.` });
       closePaymentModal();
       await loadData();
+      if (detailCustomer) loadDetailRows(detailCustomer.customer);
     } catch (err) {
       if (err.payload?.error?.code === 'SALES_ORDER_PAYMENT_IDEMPOTENCY_KEY_MISMATCH') {
         setPaymentForm((current) => ({ ...current, idempotencyKey: crypto.randomUUID() }));
@@ -313,6 +504,24 @@ function CustomerOutstandingPage() {
       setPaymentError(err.message || 'Pembayaran gagal disimpan.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function voidPayment(paymentId, reason) {
+    if (!selectedRow) return;
+    setVoidBusyId(paymentId);
+    setVoidError('');
+    try {
+      await voidFinanceInvoicePayment(selectedRow.id, paymentId, reason);
+      notify({ title: 'Pembayaran dibatalkan', message: `${selectedRow.soNumber} - outstanding kebuka lagi.` });
+      const refreshed = await fetchFinanceInvoicePayments(selectedRow.id).catch(() => []);
+      setPayments(refreshed || []);
+      await loadData();
+      if (detailCustomer) loadDetailRows(detailCustomer.customer);
+    } catch (err) {
+      setVoidError(err.message || 'Pembayaran gagal dibatalkan.');
+    } finally {
+      setVoidBusyId('');
     }
   }
 
@@ -340,38 +549,44 @@ function CustomerOutstandingPage() {
       label: 'Perlu Ditinjau',
       value: `${summary.needsReview || 0} SO`,
       helper: 'Data invoice lama/tidak lengkap',
-      tone: 'amber',
+      tone: 'text-amber-700',
     },
   ]), [summary]);
 
   return (
-    <main className="space-y-5">
-      <header className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Finance"
+        title="Customer Outstanding"
+        description="Piutang customer dari Sales Order yang sudah selesai tapi belum lunas, dijumlahkan per customer dari tagihan dikurangi pembayaran yang sudah tercatat."
+      />
+
+      <section className="grid gap-3 md:grid-cols-4">
+        {summaryCards.map((card) => (
+          <MetricCard key={card.label} icon={card.icon} label={card.label} value={card.value} helper={card.helper} tone={card.tone} />
+        ))}
+      </section>
+
+      <section className="panel master-table-panel">
+        <div className="master-toolbar flex-wrap gap-y-3">
           <div>
-            <p className="text-xs font-black uppercase tracking-wide text-slate-500">Finance</p>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">Customer Outstanding</h1>
-            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-              Piutang customer dari Sales Order yang sudah selesai tapi belum lunas, dihitung dari tagihan dikurangi pembayaran yang sudah tercatat.
-            </p>
+            <span>Piutang</span>
+            <h2>Piutang per Customer</h2>
+            <p>Diurutkan dari total outstanding terbesar. Klik Detail untuk melihat rincian invoice.</p>
           </div>
-          <div className="flex flex-col gap-2 sm:min-w-[420px] sm:flex-row sm:items-end">
-            <label className="min-w-0 flex-1 text-xs font-black uppercase tracking-wide text-slate-500">
-              Cari
-              <div className="relative mt-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-                <input
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm font-bold normal-case text-slate-900 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
-                  onChange={(event) => { setPage(1); setQuery(event.target.value); }}
-                  placeholder="No. SO, invoice, atau customer"
-                  value={query}
-                />
-              </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="search-field md:w-72">
+              <Search size={16} />
+              <input
+                onChange={(event) => { setPage(1); setQuery(event.target.value); }}
+                placeholder="Nama customer"
+                value={query}
+              />
             </label>
-            <label className="min-w-0 text-xs font-black uppercase tracking-wide text-slate-500">
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
               Umur Piutang
               <select
-                className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case text-slate-900 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                className="master-filter-select"
                 onChange={(event) => { setPage(1); setAgingBucket(event.target.value); }}
                 value={agingBucket}
               >
@@ -380,106 +595,106 @@ function CustomerOutstandingPage() {
                 ))}
               </select>
             </label>
-            <button className="secondary-button inline-flex items-center justify-center gap-2" onClick={loadData} type="button" disabled={loading}>
-              <RefreshCw size={16} /> Refresh
+            <button className="secondary-button" onClick={exportCustomerRows} type="button" disabled={!customerRows.length}>
+              <Download size={15} /> Export CSV
+            </button>
+            <button className="secondary-button" onClick={loadData} type="button" disabled={loading}>
+              <RefreshCw size={15} /> Refresh
             </button>
           </div>
         </div>
-      </header>
 
-      <section className="grid gap-3 md:grid-cols-4">
-        {summaryCards.map((card) => (
-          <MetricCard key={card.label} icon={card.icon} label={card.label} value={card.value} helper={card.helper} tone={card.tone} />
-        ))}
-      </section>
-
-      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 p-4">
-          <h2 className="text-base font-black text-slate-950">Daftar Piutang</h2>
-          <p className="text-xs text-slate-500">Diurutkan dari tanggal jatuh tempo terdekat.</p>
-        </div>
-
-        {error ? <div className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700">{error}</div> : null}
-
-        <div className="table-wrap">
-          <table className="responsive-data-table w-full min-w-[1080px] text-sm">
-            <thead>
-              <tr className="bg-slate-50 text-left text-xs font-black uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-3">No. SO</th>
-                <th className="px-3 py-3">Customer</th>
-                <th className="px-3 py-3">No. Invoice</th>
-                <th className="px-3 py-3 text-right">Tagihan</th>
-                <th className="px-3 py-3 text-right">Dibayar</th>
-                <th className="px-3 py-3 text-right">Outstanding</th>
-                <th className="px-3 py-3">Jatuh Tempo</th>
-                <th className="px-3 py-3">Umur Piutang</th>
-                <th className="px-3 py-3 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id} className="border-t border-slate-100">
-                  <td className="px-3 py-3 font-black text-slate-950" data-label="No. SO">
-                    {row.soNumber}
-                    {row.dataReviewStatus === 'perlu_dicek' ? (
-                      <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-black uppercase text-amber-700">
-                        <AlertTriangle size={10} /> Perlu Ditinjau
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-3 text-slate-700" data-label="Customer">{row.customer}</td>
-                  <td className="px-3 py-3 text-slate-700" data-label="No. Invoice">{row.invoiceNumber || '-'}</td>
-                  <td className="px-3 py-3 text-right font-bold text-slate-700" data-label="Tagihan">{formatCurrency(row.billingAmount)}</td>
-                  <td className="px-3 py-3 text-right font-bold text-slate-700" data-label="Dibayar">{formatCurrency(row.totalPaid)}</td>
-                  <td className="px-3 py-3 text-right font-black text-amber-700" data-label="Outstanding">{formatCurrency(row.outstandingAmount)}</td>
-                  <td className="px-3 py-3 text-slate-700" data-label="Jatuh Tempo">{row.dueDate ? formatDate(row.dueDate) : '-'}</td>
-                  <td className="px-3 py-3" data-label="Umur Piutang"><AgingBadge bucket={row.agingBucket} /></td>
-                  <td className="px-3 py-3 text-right" data-label="Aksi">
-                    {canRecordPayment ? (
-                      <button className="secondary-button inline-flex items-center gap-2" onClick={() => openPaymentModal(row)} type="button">
-                        Catat Pembayaran
+        {error ? (
+          <div className="m-4 rounded-md border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</div>
+        ) : null}
+        {loading ? (
+          <div className="p-6 text-sm font-semibold text-slate-500">Memuat data outstanding...</div>
+        ) : null}
+        {!loading && !error && !customerRows.length ? (
+          <div className="p-6">
+            <EmptyState title="Tidak ada piutang" description="Tidak ada customer dengan piutang yang cocok dengan filter ini." />
+          </div>
+        ) : null}
+        {!loading && !error && customerRows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] divide-y divide-slate-200 text-left text-sm">
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3 text-right">Total OTS</th>
+                  <th className="px-4 py-3 text-right">Current</th>
+                  <th className="px-4 py-3 text-right">Overdue</th>
+                  <th className="px-4 py-3 text-right">Oldest Overdue</th>
+                  <th className="px-4 py-3 text-right">Detail</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {customerRows.map((row) => (
+                  <tr key={row.customer} className="align-middle hover:bg-slate-50/70">
+                    <td className="px-4 py-3 font-black text-slate-950">
+                      {row.customer}
+                      {row.needsReview ? (
+                        <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-700">
+                          <AlertTriangle size={10} /> Perlu Ditinjau
+                        </span>
+                      ) : null}
+                      <span className="ml-1.5 text-[10px] font-semibold normal-case text-slate-400">{row.invoiceCount} invoice</span>
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm font-black text-amber-700">{formatCurrency(row.totalOutstandingAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.currentAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.overdueAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-medium text-slate-700">{row.oldestOverdueDays > 0 ? `${row.oldestOverdueDays} hari` : '-'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button className="secondary-button" onClick={() => openDetailModal(row)} type="button">
+                        Detail
                       </button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-              {!rows.length ? (
-                <tr className="responsive-empty-row">
-                  <td className="px-3 py-8 text-center text-slate-500" colSpan={9}>{loading ? 'Memuat data outstanding...' : 'Tidak ada piutang yang cocok dengan filter ini.'}</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
-          <span className="text-xs font-semibold text-slate-500">Menampilkan {rows.length ? (page - 1) * PAGE_SIZE + 1 : 0}-{(page - 1) * PAGE_SIZE + rows.length} dari {total} data</span>
-          <div className="flex items-center gap-2">
-            <button className="secondary-button inline-flex h-8 w-8 items-center justify-center p-0" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} type="button" aria-label="Halaman sebelumnya">
-              <ChevronLeft size={15} />
-            </button>
-            <strong className="text-xs font-bold text-slate-600">Halaman {page} dari {totalPages}</strong>
-            <button className="secondary-button inline-flex h-8 w-8 items-center justify-center p-0" disabled={page === totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} type="button" aria-label="Halaman berikutnya">
-              <ChevronRight size={15} />
-            </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex flex-col gap-2 border-t border-slate-100 px-4 py-3 text-xs font-semibold text-slate-500 md:flex-row md:items-center md:justify-between">
+              <span>Menampilkan {customerRows.length ? (page - 1) * PAGE_SIZE + 1 : 0}-{(page - 1) * PAGE_SIZE + customerRows.length} dari {total} customer</span>
+              <div className="flex items-center justify-end gap-2">
+                <button className="secondary-button" type="button" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+                  <ChevronLeft size={14} /> Sebelumnya
+                </button>
+                <strong className="text-slate-700">Halaman {page} dari {totalPages}</strong>
+                <button className="secondary-button" type="button" disabled={page === totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+                  Berikutnya <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : null}
       </section>
 
-      <ModalPortal>
-        <RecordPaymentModal
-          row={selectedRow}
-          busy={saving}
-          error={paymentError}
-          payments={payments}
-          paymentsLoading={paymentsLoading}
-          form={paymentForm}
-          onChange={setPaymentForm}
-          onClose={closePaymentModal}
-          onConfirm={confirmPayment}
-        />
-      </ModalPortal>
-    </main>
+      <CustomerDetailModal
+        customer={detailCustomer}
+        rows={detailRows}
+        loading={detailLoading}
+        error={detailError}
+        canRecordPayment={canRecordPayment}
+        onClose={closeDetailModal}
+        onRecordPayment={openPaymentModal}
+      />
+
+      <RecordPaymentModal
+        row={selectedRow}
+        busy={saving}
+        error={paymentError}
+        payments={payments}
+        paymentsLoading={paymentsLoading}
+        form={paymentForm}
+        onChange={setPaymentForm}
+        onClose={closePaymentModal}
+        onConfirm={confirmPayment}
+        canVoidPayment={canVoidPayment}
+        voidBusyId={voidBusyId}
+        voidError={voidError}
+        onVoidPayment={voidPayment}
+      />
+    </div>
   );
 }
 

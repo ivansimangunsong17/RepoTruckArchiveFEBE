@@ -751,7 +751,17 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
   if (isAssignmentReleasedStatus(nextStatus)) return;
   const driverName = String(form.driver || driver?.name || '').trim();
   const plateNumber = String(form.plateNumber || vehicle?.plate_number || '').trim();
-  if (!driver?.id && !driverName && !vehicle?.id && !plateNumber) return;
+  const driverId = driver?.id || form.driverId || null;
+  const vehicleId = vehicle?.id || form.vehicleId || null;
+  if (!driverId && !driverName && !vehicleId && !plateNumber) return;
+
+  // Kunci baris master driver/vehicle (urutan tetap: driver dulu baru vehicle) supaya dua request
+  // assignment yang datang bersamaan untuk driver/truck yang sama diserialkan di sini, bukan cuma
+  // lolos berdua karena SELECT check di bawah tidak melihat tulisan satu sama lain (TOCTOU).
+  // Unique index partial di migrasi 202608250003 adalah jaring pengaman terakhir kalau lock ini
+  // entah bagaimana terlewati (misal race lewat assignment_snapshot berbasis nama/plat saja).
+  if (driverId) await client.query('select id from drivers where id = $1 for update', [driverId]);
+  if (vehicleId) await client.query('select id from vehicles where id = $1 for update', [vehicleId]);
 
   const result = await client.query(
     `
@@ -768,7 +778,7 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
         )
       limit 1
     `,
-    [id, driver?.id || form.driverId || null, vehicle?.id || form.vehicleId || null, driverName, plateNumber],
+    [id, driverId, vehicleId, driverName, plateNumber],
   );
 
   if (result.rows[0]) {
@@ -1711,7 +1721,24 @@ export async function updateContainerJobExpenseProofRecord(id, expenseId, payloa
   });
 }
 
+const ASSIGNMENT_UNIQUE_CONSTRAINTS = new Set(['uq_container_jobs_driver_active', 'uq_container_jobs_vehicle_active']);
+
 export async function updateContainerJob(id, form) {
+  try {
+    return await updateContainerJobTransaction(id, form);
+  } catch (error) {
+    if (error.code === '23505' && ASSIGNMENT_UNIQUE_CONSTRAINTS.has(error.constraint)) {
+      throw validationError(
+        'Driver atau truck baru saja ter-assign ke job lain oleh permintaan lain yang bersamaan. Muat ulang dan pilih driver/truck lain.',
+        'ASSIGNMENT_ALREADY_ACTIVE',
+        409,
+      );
+    }
+    throw error;
+  }
+}
+
+async function updateContainerJobTransaction(id, form) {
   return withTransaction(async (client) => {
     const existing = await client.query(
       `
@@ -1760,6 +1787,24 @@ export async function updateContainerJob(id, form) {
         'CONTAINER_JOB_COMPLETED_CANNOT_CANCEL',
         409,
       );
+    }
+    if (nextStatus === 'cancelled' && currentJob.status !== 'cancelled') {
+      const activeExpenses = await client.query(
+        `
+          select coalesce(count(*), 0)::int as count, coalesce(sum(amount), 0)::numeric as total
+          from container_job_expenses
+          where container_job_id = $1
+            and payment_status <> 'batal'
+        `,
+        [id],
+      );
+      if (Number(activeExpenses.rows[0].count) > 0) {
+        throw validationError(
+          `Container Job tidak bisa dibatalkan karena masih ada ${activeExpenses.rows[0].count} biaya aktif (total Rp ${Number(activeExpenses.rows[0].total).toLocaleString('id-ID')}) yang sudah tercatat. Batalkan atau alihkan biaya tersebut ke job lain terlebih dahulu.`,
+          'CONTAINER_JOB_CANCEL_HAS_ACTIVE_EXPENSE',
+          409,
+        );
+      }
     }
     const nextRpujStatus = normalizeRpujStatusForOperational(currentJob, form.rpujStatus);
     if (nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(currentJob.rpuj_status)) {
@@ -1814,16 +1859,36 @@ export async function updateContainerJob(id, form) {
     const nextDriverId = driver?.id || form.driverId || (hasDriverAssignmentInput ? null : existing.rows[0].driver_id);
     const nextVehicleId = vehicle?.id || form.vehicleId || (hasVehicleAssignmentInput ? null : existing.rows[0].vehicle_id);
     const existingAssignment = existing.rows[0].assignment_snapshot || {};
+    // Snapshot (nama sopir/truck, rekening bank, e-money) dibekukan begitu assignment dibuat.
+    // findDriver()/findVehicle() di atas selalu mengambil data TERKINI dari tabel master, jadi
+    // hasilnya hanya boleh dipakai untuk membangun ulang snapshot kalau sopir/truck-nya BENAR-BENAR
+    // diganti pada request ini -- bukan setiap kali status job diperbarui (received/running/completed
+    // rutin mengirim ulang driver/plateNumber yang sama di body) -- supaya rekening bank sopir dkk
+    // tidak diam-diam ikut berubah kalau data master driver dikoreksi belakangan.
+    const driverIdentityChanging = hasDriverAssignmentInput && (
+      form.driverId
+        ? form.driverId !== existing.rows[0].driver_id
+        : String(form.driver || '').trim() !== String(existingAssignment.driver || '').trim()
+    );
+    const vehicleIdentityChanging = hasVehicleAssignmentInput && (
+      form.vehicleId
+        ? form.vehicleId !== existing.rows[0].vehicle_id
+        : String(form.plateNumber || '').trim() !== String(existingAssignment.plateNumber || '').trim()
+    );
+    // Kalau identitas driver/vehicle BENAR-BENAR berubah, default-nya sengaja dikosongkan (bukan
+    // diwarisi dari existingAssignment) -- supaya fallback ke driver?.bank_name/vehicle?.unit_code
+    // di toAssignmentSnapshot() benar-benar terpakai, bukan keburu ketutup oleh nilai lama yang
+    // masih truthy (existingAssignment.driverBankName dkk).
     const nextAssignmentForm = {
-      driver: existingAssignment.driver || '',
-      plateNumber: existingAssignment.plateNumber || '',
-      chassis: existingAssignment.vehicleDetail || '',
-      driverPaymentMethod: existingAssignment.driverPaymentMethod || 'bank',
-      driverBankName: existingAssignment.driverBankName || '',
-      driverBankAccountNumber: existingAssignment.driverBankAccountNumber || '',
-      driverBankAccountHolder: existingAssignment.driverBankAccountHolder || '',
-      driverEmoneyProvider: existingAssignment.driverEmoneyProvider || '',
-      driverEmoneyNumber: existingAssignment.driverEmoneyNumber || '',
+      driver: driverIdentityChanging ? '' : (existingAssignment.driver || ''),
+      plateNumber: vehicleIdentityChanging ? '' : (existingAssignment.plateNumber || ''),
+      chassis: vehicleIdentityChanging ? '' : (existingAssignment.vehicleDetail || ''),
+      driverPaymentMethod: driverIdentityChanging ? 'bank' : (existingAssignment.driverPaymentMethod || 'bank'),
+      driverBankName: driverIdentityChanging ? '' : (existingAssignment.driverBankName || ''),
+      driverBankAccountNumber: driverIdentityChanging ? '' : (existingAssignment.driverBankAccountNumber || ''),
+      driverBankAccountHolder: driverIdentityChanging ? '' : (existingAssignment.driverBankAccountHolder || ''),
+      driverEmoneyProvider: driverIdentityChanging ? '' : (existingAssignment.driverEmoneyProvider || ''),
+      driverEmoneyNumber: driverIdentityChanging ? '' : (existingAssignment.driverEmoneyNumber || ''),
       ...form,
     };
     const nextRepoLocation = normalizeOptionalText(form.repoLocation ?? existing.rows[0].repo_location);
@@ -1897,7 +1962,11 @@ export async function updateContainerJob(id, form) {
       )
       : null;
     const actorName = form.updatedBy || 'Operational';
-    const nextAssignmentSnapshot = toAssignmentSnapshot(nextAssignmentForm, driver, vehicle);
+    const nextAssignmentSnapshot = toAssignmentSnapshot(
+      nextAssignmentForm,
+      driverIdentityChanging ? driver : null,
+      vehicleIdentityChanging ? vehicle : null,
+    );
 
     await client.query(
       `
@@ -2110,6 +2179,22 @@ export async function reviewContainerJobCancellation(id, form = {}) {
     }
 
     if (form.approved) {
+      const activeExpenses = await client.query(
+        `
+          select coalesce(count(*), 0)::int as count, coalesce(sum(amount), 0)::numeric as total
+          from container_job_expenses
+          where container_job_id = $1
+            and payment_status <> 'batal'
+        `,
+        [id],
+      );
+      if (Number(activeExpenses.rows[0].count) > 0) {
+        const error = new Error(`Container Job tidak bisa dibatalkan karena masih ada ${activeExpenses.rows[0].count} biaya aktif (total Rp ${Number(activeExpenses.rows[0].total).toLocaleString('id-ID')}) yang sudah tercatat. Batalkan atau alihkan biaya tersebut ke job lain terlebih dahulu sebelum menyetujui pembatalan.`);
+        error.statusCode = 409;
+        error.code = 'CONTAINER_JOB_CANCEL_HAS_ACTIVE_EXPENSE';
+        throw error;
+      }
+
       const cancelReason = String(
         form.cancelRequestNote
         || existing.rows[0].cancel_request_note

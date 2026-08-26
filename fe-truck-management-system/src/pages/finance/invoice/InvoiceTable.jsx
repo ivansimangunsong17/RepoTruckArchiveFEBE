@@ -64,7 +64,7 @@ function InvoiceTable({
     if (activeInvoiceTab === 'need-number') return ['all', 'missing-documents'].includes(filter.id);
     return ['all', 'complete', 'sent'].includes(filter.id);
   });
-  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${row.invoiceNumber} ${row.invoiceStatus}`.toLowerCase().includes(query.toLowerCase()));
+  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${row.invoiceNumber} ${row.invoiceStatus} ${row.debitNoteNumber || ''} ${(row.containerNumbers || []).join(' ')}`.toLowerCase().includes(query.toLowerCase()));
   const filteredRows = searchedRows.filter((row) => {
     if (!currentTab.match(row)) return false;
     if (!canFilterDocuments) return true;
@@ -210,21 +210,23 @@ function InvoiceTable({
       <div className="finance-invoice-table-wrap">
         <table className="data-table master-table finance-master-table finance-invoice-table table-fixed">
           <colgroup>
-            <col className="w-[4%]" />
+            <col className="w-[3%]" />
+            <col className="w-[7%]" />
+            <col className="w-[11%]" />
+            <col className="w-[5%]" />
             <col className="w-[8%]" />
-            <col className="w-[13%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[8%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
             <col className="w-[11%]" />
             <col className="w-[8%]" />
-            <col className="w-[8%]" />
-            <col className="w-[8%]" />
-            <col className="w-[10%]" />
-            <col className="w-[13%]" />
-            <col className="w-[9%]" />
-            <col className="w-[8%]" />
+            <col className="w-[7%]" />
           </colgroup>
           <thead>
             <tr>
-              {['No', 'Nomor SO', 'Customer', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Penagihan', 'No. Invoice', 'Lama Pelunasan', 'Aksi'].map((column) => (
+              {['No', 'Nomor SO', 'Customer', 'Container', 'Status', 'Selesai', 'Invoice', 'Jatuh Tempo', 'Total Invoice', 'Total Debit Note', 'No. Invoice', 'Lama Pelunasan', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -244,13 +246,26 @@ function InvoiceTable({
                     <span className="block truncate font-semibold text-slate-900">{row.customer}</span>
                     <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-500">{row.destination}</span>
                   </td>
+                  <td className="text-center font-semibold text-slate-700" data-label="Container">{row.containerCount || row.plannedJobsCount || 0}</td>
                   <td className="finance-invoice-status" data-label="Status">
                     <StatusPill className="max-w-full overflow-hidden text-ellipsis" value={row.invoiceStatus} />
                   </td>
                   <td className="finance-invoice-date text-slate-700" data-label="Selesai">{row.completedAt}</td>
                   <td className="finance-invoice-date text-slate-700" data-label="Invoice">{row.invoiceDate}</td>
                   <td className="finance-invoice-date text-slate-700" data-label="Jatuh Tempo">{row.dueDate}</td>
-                  <td className="finance-invoice-total font-semibold text-slate-900" data-label="Total Penagihan">{formatCurrency(row.billingAmount)}</td>
+                  <td className="finance-invoice-total font-semibold text-slate-900" data-label="Total Invoice">{formatCurrency(row.billingAmount)}</td>
+                  <td className="font-semibold text-slate-700" data-label="Total Debit Note">
+                    {row.debitNoteAmount ? (
+                      <div className="grid gap-0.5">
+                        <span>{formatCurrency(row.debitNoteAmount)}</span>
+                        {!row.debitNoteNumber ? (
+                          <span className="inline-flex w-fit items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-700">Perlu Nomor</span>
+                        ) : row.debitNoteOutstandingAmount > 0 ? (
+                          <span className="inline-flex w-fit items-center rounded-full bg-rose-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-rose-700">Belum Lunas</span>
+                        ) : null}
+                      </div>
+                    ) : '-'}
+                  </td>
                   <td className="finance-invoice-number" data-label="No. Invoice">
                     {needsInvoiceNumber ? (
                       <input
@@ -295,7 +310,7 @@ function InvoiceTable({
             })}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={11}>Tidak ada data pada klasifikasi ini.</td>
+                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={13}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>

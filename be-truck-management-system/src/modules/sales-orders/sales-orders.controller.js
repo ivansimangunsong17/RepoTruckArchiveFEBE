@@ -29,6 +29,48 @@ function historicalMetadata(record = {}) {
   };
 }
 
+const adminCorrectionAuditFields = {
+  customer: 'Customer',
+  destination: 'Tujuan',
+  container: 'Container/Layanan',
+  serviceName: 'Jenis Layanan',
+  cargoType: 'Ukuran Container',
+  totalAmount: 'Total Nilai',
+  paymentType: 'Jenis Pembayaran',
+  paymentTermDays: 'Termin Pembayaran',
+};
+
+export function isAdminCorrectionPayload(payload = {}) {
+  return payload.adminCorrectionMode === true || String(payload.adminCorrectionMode || '').toLowerCase() === 'true';
+}
+
+export function adminCorrectionMetadata(payload = {}, order = {}) {
+  if (!isAdminCorrectionPayload(payload)) return {};
+  return {
+    adminCorrection: true,
+    adminCorrectionReason: String(payload.adminCorrectionReason || '').trim(),
+    soNumber: order.soNumber,
+  };
+}
+
+function normalizeAuditValue(value) {
+  if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+export function adminCorrectionChanges(before = {}, after = {}) {
+  return Object.entries(adminCorrectionAuditFields)
+    .filter(([field]) => normalizeAuditValue(before[field]) !== normalizeAuditValue(after[field]))
+    .map(([field, label]) => ({
+      field,
+      label,
+      before: before[field] ?? null,
+      after: after[field] ?? null,
+    }));
+}
+
 function historicalContainerMetadata(order = {}, container = {}) {
   return {
     salesOrderId: order.id,
@@ -116,7 +158,23 @@ export async function updateSalesOrderController(request, response) {
     entityId: saved.id,
     beforeData: before,
     afterData: saved,
+    metadata: adminCorrectionMetadata(request.body, saved),
   });
+  if (isAdminCorrectionPayload(request.body)) {
+    const changes = adminCorrectionChanges(before, saved);
+    await safeRecordActivityLog(request, {
+      action: 'ADMIN_CORRECTION_SALES_ORDER',
+      module: 'sales_orders',
+      entityType: 'sales_order',
+      entityId: saved.id,
+      beforeData: Object.fromEntries(changes.map((item) => [item.field, item.before])),
+      afterData: Object.fromEntries(changes.map((item) => [item.field, item.after])),
+      metadata: {
+        ...adminCorrectionMetadata(request.body, saved),
+        changedFields: changes.map((item) => item.label),
+      },
+    });
+  }
   if (isHistoricalRecord(before) || isHistoricalRecord(saved)) {
     await safeRecordActivityLog(request, {
       action: 'UPDATE_HISTORICAL_SALES_ORDER',

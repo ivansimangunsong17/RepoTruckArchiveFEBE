@@ -343,6 +343,71 @@ if (!hasDatabase) {
       assert.equal(lockoutLog.metadata.code, 'LOGIN_LOCKED');
     });
 
+    await t.test('auth: nonaktifkan/turunkan role user langsung berlaku untuk token yang sudah terbit, tidak nunggu token expired', async () => {
+      const freshUserEmail = `${runId}.freshaccess@example.test`;
+      const createdUser = await api('/api/users', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          name: `Sprint2C Fresh Access ${runId}`,
+          email: freshUserEmail,
+          password,
+          role: 'sales',
+        },
+      });
+      assert.equal(createdUser.status, 201);
+      const freshUserId = createdUser.body.data.id;
+
+      const freshLogin = await login(freshUserEmail);
+      assert.equal(freshLogin.status, 200);
+      const freshToken = freshLogin.body.data.token;
+
+      // Selagi masih role sales: endpoint khusus Finance (finance.invoice.read) harus ditolak.
+      const deniedAsSales = await api('/api/finance/invoices', { token: freshToken });
+      assert.equal(deniedAsSales.status, 403);
+      assert.equal(deniedAsSales.body.error.code, 'FORBIDDEN');
+
+      // Admin menaikkan role user ini jadi finance -- TANPA user login ulang / minta token baru.
+      const promoted = await api(`/api/users/${freshUserId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { role: 'finance' },
+      });
+      assert.equal(promoted.status, 200);
+      assert.equal(promoted.body.data.role, 'finance');
+
+      // Token LAMA (masih membawa role sales secara literal di dalamnya) langsung dapat akses
+      // finance begitu role di DB berubah -- tidak perlu menunggu token itu kedaluwarsa.
+      const allowedAfterPromote = await api('/api/finance/invoices', { token: freshToken });
+      assert.equal(allowedAfterPromote.status, 200);
+
+      // Admin menonaktifkan user ini.
+      const disabled = await api(`/api/users/${freshUserId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { status: 'Nonaktif' },
+      });
+      assert.equal(disabled.status, 200);
+      assert.equal(disabled.body.data.status, 'Nonaktif');
+
+      // Token LAMA yang sama (belum expired, signature masih valid) langsung ditolak setelah
+      // akunnya dinonaktifkan -- ini inti perbaikannya: sebelumnya token tetap sah sampai 12 jam.
+      const deniedAfterDisable = await api('/api/finance/invoices', { token: freshToken });
+      assert.equal(deniedAfterDisable.status, 401);
+      assert.equal(deniedAfterDisable.body.error.code, 'UNAUTHORIZED');
+
+      const meAfterDisable = await api('/api/auth/me', { token: freshToken });
+      assert.equal(meAfterDisable.status, 401);
+
+      // Reaktivasi supaya tidak meninggalkan akun nonaktif nyangkut untuk test lain di file ini.
+      const reactivated = await api(`/api/users/${freshUserId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { status: 'Aktif' },
+      });
+      assert.equal(reactivated.status, 200);
+    });
+
     await t.test('permission: role tanpa permission ditolak dan role dengan permission diterima', async () => {
       const salesLogin = await login(users.sales.email);
       const financeLogin = await login(users.finance.email);
@@ -486,20 +551,30 @@ if (!hasDatabase) {
       assert.equal(financeVerified.body.data.accurateSoNumber, created.orderSoNumber);
       assert.equal(financeVerified.body.data.verificationStatus, 'verified');
 
-      const rejectedReimbursementLineItem = await api(`/api/finance/order-verifications/${created.orderId}/line-items`, {
-        method: 'POST',
+      const blockedReassignSoNumber = await api(`/api/finance/order-verifications/${created.orderId}/so-number`, {
+        method: 'PATCH',
         token: financeToken,
-        body: { serviceName: 'Bon Muat/Bongkar', qty: 1, price: 50000 },
+        body: { soNumber: `${created.orderSoNumber}-GANTI` },
       });
-      assert.equal(rejectedReimbursementLineItem.status, 400);
+      assert.equal(blockedReassignSoNumber.status, 409);
+      assert.equal(blockedReassignSoNumber.body.error.code, 'FINANCE_SO_NUMBER_ALREADY_ASSIGNED');
 
-      const addedRevenueLineItem = await api(`/api/finance/order-verifications/${created.orderId}/line-items`, {
+      const soCorrectionRequest = await api(`/api/finance/order-verifications/${created.orderId}/corrections`, {
         method: 'POST',
         token: financeToken,
-        body: { serviceName: 'Handling', qty: 2, price: 150000 },
+        body: {
+          requestedValue: `${created.orderSoNumber}-KOREKSI`,
+          reason: `Salah input nomor SO ${runId}, perlu dikoreksi`,
+        },
       });
-      assert.equal(addedRevenueLineItem.status, 200);
-      assert.equal(addedRevenueLineItem.body.data.lineItems.some((item) => item.serviceName === 'Handling' && item.qty === 2 && item.total === 300000), true);
+      assert.equal(soCorrectionRequest.status, 200);
+      assert.equal(soCorrectionRequest.body.data.correctionType, 'so_number');
+      assert.equal(soCorrectionRequest.body.data.currentValue, created.orderSoNumber);
+      assert.equal(soCorrectionRequest.body.data.requestedValue, `${created.orderSoNumber}-KOREKSI`);
+      assert.equal(soCorrectionRequest.body.data.status, 'pending');
+      assert.equal(soCorrectionRequest.body.data.requiresAdminApproval, true);
+      // Order sudah punya container job aktif, jadi koreksi wajib approval Admin dan nomor SO Accurate belum berubah.
+      assert.equal(soCorrectionRequest.body.data.soNumber, created.orderSoNumber);
 
       const list = await api(`/api/sales-orders?query=${encodeURIComponent(created.orderSoNumber)}`, { token: adminToken });
       assert.equal(list.status, 200);
@@ -541,7 +616,7 @@ if (!hasDatabase) {
       assert.equal(blockedSalesUpdate.status, 403);
       assert.equal(blockedSalesUpdate.body.error.code, 'SALES_ORDER_OWNER_FORBIDDEN');
 
-      const updatedOrder = await api(`/api/sales-orders/${created.orderId}`, {
+      const blockedAdminUpdateWithoutCorrection = await api(`/api/sales-orders/${created.orderId}`, {
         method: 'PATCH',
         token: adminToken,
         body: salesOrderPayload({
@@ -550,8 +625,56 @@ if (!hasDatabase) {
           updatedBy: 'Sprint2C Admin',
         }),
       });
+      assert.equal(blockedAdminUpdateWithoutCorrection.status, 403);
+      assert.equal(blockedAdminUpdateWithoutCorrection.body.error.code, 'SALES_ORDER_FINANCE_NUMBER_LOCKED_CORRECTION_REQUIRED');
+
+      const blockedAdminCorrectionShortReason = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Karawang',
+          updatedBy: 'Sprint2C Admin',
+          adminCorrectionMode: true,
+          adminCorrectionReason: 'pendek',
+        }),
+      });
+      assert.equal(blockedAdminCorrectionShortReason.status, 400);
+      assert.equal(blockedAdminCorrectionShortReason.body.error.code, 'ADMIN_CORRECTION_REASON_REQUIRED');
+
+      const blockedSalesCorrectionAttempt = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Karawang',
+          updatedBy: 'Sprint2C Sales',
+          adminCorrectionMode: true,
+          adminCorrectionReason: 'Sales mencoba pakai mode koreksi admin',
+        }),
+      });
+      assert.equal(blockedSalesCorrectionAttempt.status, 403);
+      assert.equal(blockedSalesCorrectionAttempt.body.error.code, 'ADMIN_CORRECTION_ADMIN_ONLY');
+
+      const updatedOrder = await api(`/api/sales-orders/${created.orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          containerId: created.jobId,
+          destination: 'Karawang',
+          updatedBy: 'Sprint2C Admin',
+          adminCorrectionMode: true,
+          adminCorrectionReason: `Koreksi tujuan SO ${runId} salah input`,
+        }),
+      });
       assert.equal(updatedOrder.status, 200);
       assert.equal(updatedOrder.body.data.destination, 'Karawang');
+
+      const adminCorrectionLog = await latestActivityForEntity('ADMIN_CORRECTION_SALES_ORDER', created.orderId);
+      assert.equal(adminCorrectionLog.action, 'ADMIN_CORRECTION_SALES_ORDER');
+      assert.equal(adminCorrectionLog.actor_role, 'admin');
+      assert.ok(String(adminCorrectionLog.metadata.adminCorrectionReason || '').includes(runId));
+      assert.ok((adminCorrectionLog.metadata.changedFields || []).includes('Tujuan'));
 
       const blockedBillingUpdate = await api(`/api/sales-orders/${created.orderId}`, {
         method: 'PATCH',
@@ -562,6 +685,8 @@ if (!hasDatabase) {
           invoiceNumber: `INV-${runId}-EARLY`,
           billingStatus: 'belum_dikirim',
           updatedBy: 'Sprint2C Admin',
+          adminCorrectionMode: true,
+          adminCorrectionReason: `Coba ubah billing status SO ${runId}`,
         }),
       });
       assert.equal(blockedBillingUpdate.status, 400);
@@ -1150,6 +1275,85 @@ if (!hasDatabase) {
       assert.equal(cancelRequestOrderList.body.data.summary.cancelledContainers, 1);
     });
 
+    await t.test('container job & sales order: tidak bisa dibatalkan kalau sudah ada biaya aktif tercatat (biaya jadi orphan)', async () => {
+      const expenseCancelSoNumber = `SO-EXPCANCEL-${runId}`;
+      const expenseCancelOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: expenseCancelSoNumber }),
+      });
+      assert.equal(expenseCancelOrder.status, 201);
+      const expenseCancelOrderId = expenseCancelOrder.body.data.id;
+      const expenseCancelJobId = expenseCancelOrder.body.data.containers[0].id;
+
+      const uj = await api(`/api/container-jobs/${expenseCancelJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'uj_awal',
+          expenseGroup: 'operational',
+          amount: 200000,
+          description: `UJ awal sebelum cancel test ${runId}`,
+          recipientType: 'driver',
+          recipientName: `Driver ${runId}`,
+          paymentStatus: 'belum_dibayar',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(uj.status, 200);
+
+      const jobCancelRequest = await api(`/api/container-jobs/${expenseCancelJobId}/cancel-request`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { cancelRequestNote: `Batal setelah UJ keluar ${runId}` },
+      });
+      assert.equal(jobCancelRequest.status, 200);
+
+      const blockedJobCancelApproval = await api(`/api/container-jobs/${expenseCancelJobId}/cancel-review`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { approved: true },
+      });
+      assert.equal(blockedJobCancelApproval.status, 409);
+      assert.equal(blockedJobCancelApproval.body.error.code, 'CONTAINER_JOB_CANCEL_HAS_ACTIVE_EXPENSE');
+
+      const blockedSoDirectCancel = await api(`/api/sales-orders/${expenseCancelOrderId}/cancel`, {
+        method: 'PATCH',
+        token: adminToken,
+      });
+      assert.equal(blockedSoDirectCancel.status, 409);
+      assert.equal(blockedSoDirectCancel.body.error.code, 'SALES_ORDER_CANCEL_HAS_ACTIVE_EXPENSE');
+
+      const blockedSoCancelRequestReview = await api(`/api/sales-orders/${expenseCancelOrderId}/cancel-request`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { cancelRequestNote: `Batal SO setelah UJ keluar ${runId}` },
+      });
+      assert.equal(blockedSoCancelRequestReview.status, 200);
+      const blockedSoCancelReview = await api(`/api/sales-orders/${expenseCancelOrderId}/cancel-review`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { approved: true },
+      });
+      assert.equal(blockedSoCancelReview.status, 409);
+      assert.equal(blockedSoCancelReview.body.error.code, 'SALES_ORDER_CANCEL_HAS_ACTIVE_EXPENSE');
+
+      // Setelah biaya dibatalkan (bukan job/SO-nya), pembatalan job baru bisa disetujui lagi.
+      const voidExpense = await query(
+        `update container_job_expenses set payment_status = 'batal' where container_job_id = $1`,
+        [expenseCancelJobId],
+      );
+      assert.equal(voidExpense.rowCount, 1);
+
+      const allowedJobCancelApproval = await api(`/api/container-jobs/${expenseCancelJobId}/cancel-review`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { approved: true },
+      });
+      assert.equal(allowedJobCancelApproval.status, 200);
+      assert.equal(allowedJobCancelApproval.body.data.status, 'cancelled');
+    });
+
     await t.test('rekening dropping: biaya yang melebihi sisa saldo batch ditolak', async () => {
       const overspendSoNumber = `SO-OVERSPEND-${runId}`;
       const overspendOrder = await api('/api/sales-orders', {
@@ -1707,6 +1911,210 @@ if (!hasDatabase) {
       }
     });
 
+    await t.test('rekening dropping: batch yang sudah closed bisa dibuka kembali Admin, alasan wajib, carry-forward dibatalkan', async () => {
+      const batchDate = '2099-09-15';
+      const nextBatchDate = '2099-09-16';
+      await resetOperationalFundBatch(batchDate);
+      await resetOperationalFundBatch(nextBatchDate);
+
+      const reopenSoNumber = `SO-REOPENBATCH-${runId}`;
+      const reopenOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: reopenSoNumber }),
+      });
+      assert.equal(reopenOrder.status, 201);
+      const reopenJobId = reopenOrder.body.data.containers[0].id;
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 200000,
+          purpose: `Deposit test reopen batch ${runId}`,
+          fileName: `deposit-reopenbatch-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit reopen batch ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const proofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: reopenJobId,
+          category: 'expensePaymentProof',
+          fileName: `expense-proof-reopenbatch-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof reopen batch ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(proofUpload.status, 201);
+
+      const expense = await api(`/api/container-jobs/${reopenJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          expenseGroup: 'operational',
+          amount: 50000,
+          description: `Reopen batch test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Reopen Batch Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId: proofUpload.body.data.id,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(expense.status, 200);
+
+      const checked = await api(`/api/finance/container-job-expenses/${expense.body.data.id}/reconcile`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { financeCheckStatus: 'sudah_dicek' },
+      });
+      assert.equal(checked.status, 200);
+
+      const batchLookup = await api(`/api/finance/operational-fund-batches?dateFrom=${batchDate}&dateTo=${batchDate}`, { token: financeToken });
+      const batchId = batchLookup.body.data.rows.find((row) => row.batchDate === batchDate)?.id;
+      assert.ok(batchId);
+
+      const closed = await api(`/api/finance/operational-fund-batches/${batchId}/close`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: {},
+      });
+      assert.equal(closed.status, 200);
+      assert.equal(closed.body.data.status, 'closed');
+      assert.equal(closed.body.data.balance, 150000);
+
+      const nextBatchAfterClose = await api(`/api/finance/operational-fund-batches?dateFrom=${nextBatchDate}&dateTo=${nextBatchDate}`, { token: financeToken });
+      const nextBatchRowAfterClose = nextBatchAfterClose.body.data.rows.find((row) => row.batchDate === nextBatchDate);
+      assert.ok(nextBatchRowAfterClose, 'batch besok harus otomatis dibuat karena ada sisa saldo carry-forward');
+      assert.equal(nextBatchRowAfterClose.balance, 150000, 'sisa saldo batch yang ditutup harus mengalir jadi saldo awal batch besok');
+
+      // Operational tidak bisa lagi catat biaya "sudah dibayar" di tanggal yang sudah closed.
+      const blockedExpense = await api(`/api/container-jobs/${reopenJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'parkir',
+          expenseGroup: 'operational',
+          amount: 10000,
+          description: `Biaya sore setelah closed keliru ${runId}`,
+          recipientType: 'driver',
+          recipientName: 'Driver Reopen Batch Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T15:00:00.000Z`,
+          proofAttachmentId: proofUpload.body.data.id,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(blockedExpense.status, 409);
+      assert.equal(blockedExpense.body.error.code, 'OPERATIONAL_FUND_BATCH_CLOSED');
+
+      const blockedForFinance = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { reason: 'Finance coba buka sendiri' },
+      });
+      assert.equal(blockedForFinance.status, 403);
+      assert.equal(blockedForFinance.body.error.code, 'FORBIDDEN');
+
+      const blockedNoReason = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {},
+      });
+      assert.equal(blockedNoReason.status, 400);
+      assert.equal(blockedNoReason.body.error.code, 'OPERATIONAL_FUND_BATCH_REOPEN_REASON_REQUIRED');
+
+      const reopenReason = `Batch ditutup terlalu cepat, masih ada biaya sore ${runId}`;
+      const reopened = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: reopenReason },
+      });
+      assert.equal(reopened.status, 200);
+      assert.equal(reopened.body.data.status, 'open');
+      assert.equal(reopened.body.data.closedByName, '');
+
+      const nextBatchAfterReopen = await api(`/api/finance/operational-fund-batches?dateFrom=${nextBatchDate}&dateTo=${nextBatchDate}`, { token: financeToken });
+      const nextBatchRowAfterReopen = nextBatchAfterReopen.body.data.rows.find((row) => row.batchDate === nextBatchDate);
+      assert.equal(nextBatchRowAfterReopen.balance, 0, 'carry-forward yang sudah dibatalkan tidak boleh lagi menyumbang saldo batch besok');
+
+      const reopenLog = await latestActivityForEntity('FINANCE_REOPEN_OPERATIONAL_FUND_BATCH', batchId);
+      assert.equal(reopenLog.action, 'FINANCE_REOPEN_OPERATIONAL_FUND_BATCH');
+      assert.equal(reopenLog.metadata.reason, reopenReason);
+      assert.equal(reopenLog.metadata.carryForwardVoided, true);
+
+      // Sekarang biaya sore yang tadi ditolak seharusnya bisa dicatat.
+      const allowedExpense = await api(`/api/container-jobs/${reopenJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'parkir',
+          expenseGroup: 'operational',
+          amount: 10000,
+          description: `Biaya sore setelah dibuka lagi ${runId}`,
+          recipientType: 'driver',
+          recipientName: 'Driver Reopen Batch Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T15:00:00.000Z`,
+          proofAttachmentId: proofUpload.body.data.id,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(allowedExpense.status, 200);
+
+      const reopenAgainNotClosed = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: 'Coba buka lagi batch yang belum closed' },
+      });
+      assert.equal(reopenAgainNotClosed.status, 409);
+      assert.equal(reopenAgainNotClosed.body.error.code, 'OPERATIONAL_FUND_BATCH_NOT_CLOSED');
+
+      // Tutup lagi batch ini, lalu tutup juga batch besoknya - kali ini reopen harus ditolak
+      // karena akan mengubah diam-diam saldo batch besok yang sudah final.
+      const checkedAgain = await api(`/api/finance/container-job-expenses/${allowedExpense.body.data.id}/reconcile`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { financeCheckStatus: 'sudah_dicek' },
+      });
+      assert.equal(checkedAgain.status, 200);
+
+      const closedAgain = await api(`/api/finance/operational-fund-batches/${batchId}/close`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: {},
+      });
+      assert.equal(closedAgain.status, 200);
+      assert.equal(closedAgain.body.data.status, 'closed');
+
+      const nextBatchId = nextBatchRowAfterReopen.id;
+      const nextBatchClosed = await api(`/api/finance/operational-fund-batches/${nextBatchId}/close`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: {},
+      });
+      assert.equal(nextBatchClosed.status, 200);
+      assert.equal(nextBatchClosed.body.data.status, 'closed');
+
+      const blockedByNextClosed = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: 'Coba buka lagi padahal batch besok sudah closed' },
+      });
+      assert.equal(blockedByNextClosed.status, 409);
+      assert.equal(blockedByNextClosed.body.error.code, 'OPERATIONAL_FUND_BATCH_CARRY_FORWARD_LOCKED');
+    });
+
     await t.test('sales order: billing status workflow bisa disimpan setelah operational selesai', async () => {
       const invoiceQueue = await api(`/api/finance/invoices?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
       assert.equal(invoiceQueue.status, 200);
@@ -1835,6 +2243,375 @@ if (!hasDatabase) {
       });
       assert.equal(blockedContainerCancellationAfterRpuj.status, 403);
       assert.equal(blockedContainerCancellationAfterRpuj.body.error.code, 'CONTAINER_JOB_RPUJ_LOCKED_ADMIN_ONLY');
+    });
+
+    await t.test('finance: rincian invoice vs debit note pada detail invoice mengikuti expense_group container job expense', async () => {
+      const reimbursementExpense = await api(`/api/container-jobs/${created.jobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'lainnya',
+          expenseGroup: 'reimbursement',
+          amount: 75000,
+          description: `Reimbursement debit note test ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Reimbursement Test',
+          paymentStatus: 'belum_dibayar',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(reimbursementExpense.status, 200);
+
+      const operationalExpense = await api(`/api/container-jobs/${created.jobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'tol',
+          expenseGroup: 'operational',
+          amount: 30000,
+          description: `Operational debit note test ${runId}`,
+          recipientType: 'driver',
+          recipientName: 'Driver Operational Test',
+          paymentStatus: 'belum_dibayar',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(operationalExpense.status, 200);
+
+      const invoiceDetail = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceDetail.status, 200);
+      assert.equal(invoiceDetail.body.data.debitNoteAmount, 75000);
+      assert.equal(invoiceDetail.body.data.debitNoteItems.length, 1);
+      assert.equal(invoiceDetail.body.data.debitNoteItems[0].category, 'lainnya');
+      assert.equal(invoiceDetail.body.data.debitNoteItems[0].amount, 75000);
+      assert.equal(invoiceDetail.body.data.debitNoteItems.some((item) => item.category === 'tol'), false);
+      assert.equal(invoiceDetail.body.data.debitNoteItems[0].containerJobId, created.jobId);
+      assert.equal(
+        invoiceDetail.body.data.debitNoteItems[0].containerNumber,
+        `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+      );
+
+      // Biaya reimbursement yang sudah dikoreksi jadi 'batal' tidak boleh ikut menaikkan total Debit Note,
+      // baik di angka gabungan maupun di rincian per-container.
+      const voidableExpense = await api(`/api/container-jobs/${created.jobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'lainnya',
+          expenseGroup: 'reimbursement',
+          amount: 15000,
+          description: `Reimbursement akan divoid ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Void Test',
+          paymentStatus: 'belum_dibayar',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(voidableExpense.status, 200);
+      await query(`update container_job_expenses set payment_status = 'batal' where id = $1`, [voidableExpense.body.data.id]);
+
+      const invoiceDetailAfterVoid = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceDetailAfterVoid.status, 200);
+      assert.equal(invoiceDetailAfterVoid.body.data.debitNoteAmount, 75000, 'biaya reimbursement yang sudah batal tidak boleh ikut ditagihkan di total Debit Note');
+      const voidedItem = invoiceDetailAfterVoid.body.data.debitNoteItems.find((item) => item.id === voidableExpense.body.data.id);
+      assert.ok(voidedItem, 'item yang sudah batal tetap harus tampil di rincian untuk transparansi, bukan dihapus dari daftar');
+      assert.equal(voidedItem.paymentStatus, 'batal');
+      const containerRowAfterVoid = invoiceDetailAfterVoid.body.data.containerBreakdown.find((row) => row.containerJobId === created.jobId);
+      assert.equal(containerRowAfterVoid.debitNoteAmount, 75000, 'rincian per-container juga harus mengecualikan biaya reimbursement yang sudah batal');
+    });
+
+    await t.test('finance: Input Invoice - rincian per container dan pencarian nomor container', async () => {
+      const containerNumber = `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`;
+
+      const invoiceDetail = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceDetail.status, 200);
+      assert.ok(Array.isArray(invoiceDetail.body.data.containerBreakdown));
+      assert.equal(invoiceDetail.body.data.containerBreakdown.length, 1);
+      const containerRow = invoiceDetail.body.data.containerBreakdown[0];
+      assert.equal(containerRow.containerNumber, containerNumber);
+      assert.equal(containerRow.debitNoteAmount, 75000);
+      const sumInvoiceAmount = invoiceDetail.body.data.containerBreakdown.reduce((sum, row) => sum + row.invoiceAmount, 0);
+      const sumDebitNoteAmount = invoiceDetail.body.data.containerBreakdown.reduce((sum, row) => sum + row.debitNoteAmount, 0);
+      assert.equal(sumInvoiceAmount, invoiceDetail.body.data.billingAmount);
+      assert.equal(sumDebitNoteAmount, invoiceDetail.body.data.debitNoteAmount);
+
+      const invoiceList = await api(`/api/finance/invoices?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(invoiceList.status, 200);
+      const listRow = invoiceList.body.data.rows.find((row) => row.id === created.orderId);
+      assert.ok(listRow, 'baris SO harus ada pada daftar Input Invoice');
+      assert.equal(listRow.debitNoteAmount, 75000);
+      assert.ok(listRow.containerCount >= 1);
+
+      const searchByContainer = await api(`/api/finance/invoices?query=${encodeURIComponent(containerNumber)}`, { token: financeToken });
+      assert.equal(searchByContainer.status, 200);
+      assert.ok(searchByContainer.body.data.rows.some((row) => row.id === created.orderId), 'pencarian nomor container harus menemukan SO yang sesuai');
+
+      const searchByUnknownContainer = await api(`/api/finance/invoices?query=${encodeURIComponent('ZZZ-CONTAINER-NOT-FOUND')}`, { token: financeToken });
+      assert.equal(searchByUnknownContainer.status, 200);
+      assert.equal(searchByUnknownContainer.body.data.rows.some((row) => row.id === created.orderId), false);
+
+      const debitNotePdfBase64 = Buffer.from(`%PDF-1.4\n% debit note ${runId}\n`).toString('base64');
+      const uploadedDebitNoteDocument = await api(`/api/finance/invoices/${created.orderId}/documents/debit_note`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          fileName: `debit-note-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: debitNotePdfBase64,
+        },
+      });
+      assert.equal(uploadedDebitNoteDocument.status, 200);
+      assert.ok(uploadedDebitNoteDocument.body.data.debitNoteDocumentUploadedAt);
+      assert.equal(uploadedDebitNoteDocument.body.data.uploadedDocument.category, 'debitNotePdf');
+
+      const invoiceDetailAfterUpload = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.ok(invoiceDetailAfterUpload.body.data.documents.some((document) => document.category === 'debitNotePdf'));
+    });
+
+    await t.test('finance: Debit Note Outstanding - antrian nomor, aging, dan pembayaran terpisah dari Invoice', async () => {
+      const queue = await api(`/api/finance/debit-notes?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(queue.status, 200);
+      const queueRow = queue.body.data.rows.find((row) => row.id === created.orderId);
+      assert.ok(queueRow, 'SO dengan biaya reimbursement harus muncul di antrian butuh nomor Debit Note');
+      assert.equal(queueRow.debitNoteAmount, 75000);
+      assert.equal(queueRow.debitNoteNumber, '');
+
+      const proofFile = {
+        fileName: `debit-note-proof-${runId}.pdf`,
+        mimeType: 'application/pdf',
+        fileBase64: Buffer.from(`%PDF-1.4\n% debit note proof ${runId}\n`).toString('base64'),
+      };
+
+      const paymentBeforeNumber = await api(`/api/finance/debit-notes/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 75000, proofFile },
+      });
+      assert.equal(paymentBeforeNumber.status, 409);
+      assert.equal(paymentBeforeNumber.body.error.code, 'DEBIT_NOTE_PAYMENT_NUMBER_REQUIRED');
+
+      const debitNoteNumber = `DN-${runId}-001`;
+      const savedNumber = await api(`/api/finance/debit-notes/${created.orderId}/number`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { debitNoteNumber },
+      });
+      assert.equal(savedNumber.status, 200);
+      assert.equal(savedNumber.body.data.debitNoteNumber, debitNoteNumber);
+
+      const numberLog = await latestActivityForEntity('FINANCE_INPUT_DEBIT_NOTE_NUMBER', created.orderId);
+      assert.equal(numberLog.action, 'FINANCE_INPUT_DEBIT_NOTE_NUMBER');
+
+      const outstanding = await api(`/api/finance/debit-notes/outstanding?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(outstanding.status, 200);
+      const outstandingRow = outstanding.body.data.rows.find((row) => row.id === created.orderId);
+      assert.ok(outstandingRow, 'Debit Note yang sudah bernomor harus muncul di Outstanding');
+      assert.equal(outstandingRow.debitNoteAmount, 75000);
+      assert.equal(outstandingRow.outstandingAmount, 75000);
+      assert.equal(outstandingRow.agingBucket, 'current');
+
+      const overpay = await api(`/api/finance/debit-notes/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 100000, proofFile },
+      });
+      assert.equal(overpay.status, 409);
+      assert.equal(overpay.body.error.code, 'DEBIT_NOTE_PAYMENT_EXCEEDS_OUTSTANDING');
+
+      const partialPayment = await api(`/api/finance/debit-notes/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 25000, referenceNumber: `TRF-DN-${runId}-1`, proofFile },
+      });
+      assert.equal(partialPayment.status, 200);
+      assert.equal(partialPayment.body.data.totalPaid, 25000);
+      assert.equal(partialPayment.body.data.outstandingAmount, 50000);
+
+      const finalPayment = await api(`/api/finance/debit-notes/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 50000, referenceNumber: `TRF-DN-${runId}-2`, proofFile },
+      });
+      assert.equal(finalPayment.status, 200);
+      assert.equal(finalPayment.body.data.totalPaid, 75000);
+      assert.equal(finalPayment.body.data.outstandingAmount, 0);
+
+      const paymentLog = await latestActivityForEntity('FINANCE_RECORD_DEBIT_NOTE_PAYMENT', created.orderId);
+      assert.equal(paymentLog.action, 'FINANCE_RECORD_DEBIT_NOTE_PAYMENT');
+
+      const payments = await api(`/api/finance/debit-notes/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(payments.status, 200);
+      assert.equal(payments.body.data.length, 2);
+
+      const outstandingAfterPaid = await api(`/api/finance/debit-notes/outstanding?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(outstandingAfterPaid.status, 200);
+      assert.equal(outstandingAfterPaid.body.data.rows.some((row) => row.id === created.orderId), false, 'Debit Note yang sudah lunas tidak boleh lagi muncul di Outstanding');
+
+      const invoiceDetailUnaffected = await api(`/api/finance/invoices/${created.orderId}`, { token: financeToken });
+      assert.equal(invoiceDetailUnaffected.status, 200);
+      assert.notEqual(invoiceDetailUnaffected.body.data.billingStatus, 'lunas', 'pembayaran Debit Note tidak boleh ikut melunaskan Invoice');
+    });
+
+    await t.test('finance: biaya reimbursement yang sudah di-void (batal) tidak ikut ditagihkan di Debit Note', async () => {
+      const voidDnSoNumber = `SO-VOIDDN-${runId}`;
+      const voidDnOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: voidDnSoNumber }),
+      });
+      assert.equal(voidDnOrder.status, 201);
+      const voidDnOrderId = voidDnOrder.body.data.id;
+      const voidDnJobId = voidDnOrder.body.data.containers[0].id;
+      const voidDnInternalSoNumber = voidDnOrder.body.data.soNumber;
+
+      const keptExpense = await api(`/api/container-jobs/${voidDnJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'lainnya',
+          expenseGroup: 'reimbursement',
+          amount: 60000,
+          description: `Reimbursement tetap aktif ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Void DN Test',
+          paymentStatus: 'belum_dibayar',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(keptExpense.status, 200);
+
+      const voidedExpense = await api(`/api/container-jobs/${voidDnJobId}/expenses`, {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          category: 'lainnya',
+          expenseGroup: 'reimbursement',
+          amount: 40000,
+          description: `Reimbursement akan di-void ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Void DN Test 2',
+          paymentStatus: 'belum_dibayar',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(voidedExpense.status, 200);
+      const voidedExpenseId = voidedExpense.body.data.id;
+
+      // Selesaikan SO/job langsung lewat DB supaya memenuhi syarat billable Debit Note (status completed) -
+      // alur penyelesaian job penuh sudah diuji test lain; fokus test ini murni pada filter payment_status.
+      await query(`update container_jobs set status = 'completed' where id = $1`, [voidDnJobId]);
+      await query(`update sales_orders set status = 'completed' where id = $1`, [voidDnOrderId]);
+
+      const beforeVoid = await api(`/api/finance/debit-notes?query=${encodeURIComponent(voidDnInternalSoNumber)}`, { token: financeToken });
+      assert.equal(beforeVoid.status, 200);
+      const beforeRow = beforeVoid.body.data.rows.find((row) => row.id === voidDnOrderId);
+      assert.ok(beforeRow, 'SO dengan 2 biaya reimbursement aktif harus muncul di antrian Debit Note');
+      assert.equal(beforeRow.debitNoteAmount, 100000);
+
+      // Koreksi salah satu biaya jadi 'batal' - misalnya vendor membebaskan biaya atau salah input.
+      await query(`update container_job_expenses set payment_status = 'batal' where id = $1`, [voidedExpenseId]);
+
+      const afterVoid = await api(`/api/finance/debit-notes?query=${encodeURIComponent(voidDnInternalSoNumber)}`, { token: financeToken });
+      assert.equal(afterVoid.status, 200);
+      const afterRow = afterVoid.body.data.rows.find((row) => row.id === voidDnOrderId);
+      assert.ok(afterRow, 'SO masih harus muncul karena masih ada 1 biaya reimbursement aktif');
+      assert.equal(afterRow.debitNoteAmount, 60000, 'total Debit Note harus turun setelah biaya di-void, tidak boleh tetap menagih biaya yang sudah batal');
+
+      // Void juga biaya yang tersisa - SO seharusnya sudah tidak billable sama sekali.
+      await query(`update container_job_expenses set payment_status = 'batal' where container_job_id = $1`, [voidDnJobId]);
+
+      const allVoidedQueue = await api(`/api/finance/debit-notes?query=${encodeURIComponent(voidDnInternalSoNumber)}`, { token: financeToken });
+      assert.equal(allVoidedQueue.status, 200);
+      assert.equal(allVoidedQueue.body.data.rows.some((row) => row.id === voidDnOrderId), false, 'SO tanpa biaya reimbursement aktif tidak boleh muncul lagi di antrian Debit Note');
+
+      const voidDnNumber = `DN-${runId}-VOIDED`;
+      const savedVoidDnNumber = await api(`/api/finance/debit-notes/${voidDnOrderId}/number`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { debitNoteNumber: voidDnNumber },
+      });
+      assert.equal(savedVoidDnNumber.status, 200);
+
+      const blockedPayment = await api(`/api/finance/debit-notes/${voidDnOrderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          amount: 1000,
+          proofFile: {
+            fileName: `void-dn-blocked-${runId}.pdf`,
+            mimeType: 'application/pdf',
+            fileBase64: Buffer.from(`%PDF-1.4\n% void dn blocked ${runId}\n`).toString('base64'),
+          },
+        },
+      });
+      assert.equal(blockedPayment.status, 409);
+      assert.equal(blockedPayment.body.error.code, 'DEBIT_NOTE_PAYMENT_NOT_BILLABLE');
+    });
+
+    await t.test('finance: void pembayaran Debit Note - admin-only, alasan wajib, outstanding kebuka lagi', async () => {
+      const paymentsBeforeVoid = await api(`/api/finance/debit-notes/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(paymentsBeforeVoid.status, 200);
+      assert.equal(paymentsBeforeVoid.body.data.length, 2);
+      const finalPaymentRow = paymentsBeforeVoid.body.data.find((row) => row.referenceNumber === `TRF-DN-${runId}-2`);
+      assert.ok(finalPaymentRow);
+
+      const forbiddenNonAdmin = await api(`/api/finance/debit-notes/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { reason: 'Salah catat' },
+      });
+      // Diblok di level router (permission finance.debit_note.payment.void cuma dipegang admin),
+      // sebelum sempat sampai ke pengecekan role eksplisit di service layer.
+      assert.equal(forbiddenNonAdmin.status, 403);
+      assert.equal(forbiddenNonAdmin.body.error.code, 'FORBIDDEN');
+
+      const missingReason = await api(`/api/finance/debit-notes/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {},
+      });
+      assert.equal(missingReason.status, 400);
+      assert.equal(missingReason.body.error.code, 'FINANCE_DEBIT_NOTE_PAYMENT_VOID_REASON_REQUIRED');
+
+      const voided = await api(`/api/finance/debit-notes/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: `Pembayaran Debit Note salah catat - test ${runId}` },
+      });
+      assert.equal(voided.status, 200);
+      assert.ok(voided.body.data.payment.voidedAt);
+      assert.equal(voided.body.data.totalPaid, 25000);
+      assert.equal(voided.body.data.outstandingAmount, 50000);
+
+      const outstandingAfterVoid = await api(`/api/finance/debit-notes/outstanding?query=${encodeURIComponent(created.orderSoNumber)}`, { token: financeToken });
+      assert.equal(outstandingAfterVoid.status, 200);
+      assert.equal(outstandingAfterVoid.body.data.rows.some((row) => row.id === created.orderId), true, 'Debit Note harus muncul lagi di Outstanding setelah pembayaran pelunasannya di-void');
+
+      const alreadyVoided = await api(`/api/finance/debit-notes/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: 'Coba void lagi' },
+      });
+      assert.equal(alreadyVoided.status, 409);
+      assert.equal(alreadyVoided.body.error.code, 'DEBIT_NOTE_PAYMENT_ALREADY_VOIDED');
+
+      const voidLog = await latestActivityForEntity('FINANCE_VOID_DEBIT_NOTE_PAYMENT', created.orderId);
+      assert.equal(voidLog.action, 'FINANCE_VOID_DEBIT_NOTE_PAYMENT');
+
+      // Bayar lagi supaya lunas -- test setelah ini yang mengasumsikan Debit Note ini sudah lunas
+      // tidak terganggu.
+      const proofFile = {
+        fileName: `debit-note-proof-${runId}-void.pdf`,
+        mimeType: 'application/pdf',
+        fileBase64: Buffer.from(`%PDF-1.4\n% debit note proof void ${runId}\n`).toString('base64'),
+      };
+      const repay = await api(`/api/finance/debit-notes/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: 50000, referenceNumber: `TRF-DN-${runId}-3`, proofFile },
+      });
+      assert.equal(repay.status, 200);
+      assert.equal(repay.body.data.outstandingAmount, 0);
     });
 
     await t.test('sales order: customer_id tetap terhubung meski nama customer beda huruf besar/kecil atau ada spasi ekstra', async () => {
@@ -2009,6 +2786,80 @@ if (!hasDatabase) {
       assert.equal(alreadyPaid.body.error.code, 'SALES_ORDER_PAYMENT_ALREADY_PAID');
     });
 
+    await t.test('finance: void pembayaran invoice - admin-only, alasan wajib, outstanding kebuka lagi', async () => {
+      const proofFile = {
+        fileName: `payment-proof-${runId}-void.pdf`,
+        mimeType: 'application/pdf',
+        fileBase64: Buffer.from(`%PDF-1.4\n% payment proof void ${runId}\n`).toString('base64'),
+      };
+      const paymentsBeforeVoid = await api(`/api/finance/invoices/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(paymentsBeforeVoid.status, 200);
+      assert.equal(paymentsBeforeVoid.body.data.length, 2);
+      const finalPaymentRow = paymentsBeforeVoid.body.data.find((row) => row.referenceNumber === `TRF-${runId}-2`);
+      assert.ok(finalPaymentRow, 'pembayaran kedua (pelunasan) harus ada di riwayat');
+      const firstPaymentRow = paymentsBeforeVoid.body.data.find((row) => row.referenceNumber === `TRF-${runId}-1`);
+
+      const forbiddenNonAdmin = await api(`/api/finance/invoices/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { reason: 'Salah catat nominal' },
+      });
+      // Diblok di level router (permission finance.invoice.payment.void cuma dipegang admin),
+      // sebelum sempat sampai ke pengecekan role eksplisit di service layer.
+      assert.equal(forbiddenNonAdmin.status, 403);
+      assert.equal(forbiddenNonAdmin.body.error.code, 'FORBIDDEN');
+
+      const missingReason = await api(`/api/finance/invoices/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {},
+      });
+      assert.equal(missingReason.status, 400);
+      assert.equal(missingReason.body.error.code, 'FINANCE_INVOICE_PAYMENT_VOID_REASON_REQUIRED');
+
+      const voided = await api(`/api/finance/invoices/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: `Pembayaran kedua salah catat - test ${runId}` },
+      });
+      assert.equal(voided.status, 200);
+      assert.equal(voided.body.data.payment.id, finalPaymentRow.id);
+      assert.ok(voided.body.data.payment.voidedAt);
+      assert.equal(voided.body.data.payment.voidedByName, users.admin.name);
+      assert.equal(voided.body.data.totalPaid, firstPaymentRow.amount, 'total dibayar harus kembali ke jumlah pembayaran pertama saja');
+      assert.equal(voided.body.data.outstandingAmount, finalPaymentRow.amount);
+      assert.equal(voided.body.data.billingStatus, 'menunggu_pembayaran', 'status harus kebuka lagi dari lunas karena outstanding muncul lagi');
+
+      const paymentsAfterVoid = await api(`/api/finance/invoices/${created.orderId}/payments`, { token: financeToken });
+      assert.equal(paymentsAfterVoid.status, 200);
+      assert.equal(paymentsAfterVoid.body.data.length, 2, 'baris pembayaran yang di-void tetap tersimpan di riwayat, tidak dihapus');
+      const voidedRowInHistory = paymentsAfterVoid.body.data.find((row) => row.id === finalPaymentRow.id);
+      assert.ok(voidedRowInHistory.voidedAt);
+      assert.equal(voidedRowInHistory.voidReason, `Pembayaran kedua salah catat - test ${runId}`);
+
+      const alreadyVoided = await api(`/api/finance/invoices/${created.orderId}/payments/${finalPaymentRow.id}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: 'Coba void lagi' },
+      });
+      assert.equal(alreadyVoided.status, 409);
+      assert.equal(alreadyVoided.body.error.code, 'SALES_ORDER_PAYMENT_ALREADY_VOIDED');
+
+      const voidLog = await latestActivityForEntity('FINANCE_VOID_INVOICE_PAYMENT', created.orderId);
+      assert.equal(voidLog.action, 'FINANCE_VOID_INVOICE_PAYMENT');
+      assert.equal(voidLog.actor_role, 'admin');
+
+      // Bayar lagi supaya lunas -- test-test berikutnya yang mengasumsikan created.orderId sudah lunas
+      // (mis. outstanding dashboard) tidak terganggu oleh void ini.
+      const repay = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+        method: 'POST',
+        token: financeToken,
+        body: { amount: finalPaymentRow.amount, referenceNumber: `TRF-${runId}-3`, proofFile },
+      });
+      assert.equal(repay.status, 200);
+      assert.equal(repay.body.data.billingStatus, 'lunas');
+    });
+
     await t.test('finance: customer outstanding dashboard hanya menampilkan SO yang belum lunas', async () => {
       const forbiddenOutstanding = await api('/api/finance/outstanding', { token: salesToken });
       assert.equal(forbiddenOutstanding.status, 403);
@@ -2020,6 +2871,80 @@ if (!hasDatabase) {
       assert.equal(outstanding.body.data.rows.some((row) => row.id === created.orderId), false);
       assert.equal(typeof outstanding.body.data.summary.totalOutstandingAmount, 'number');
       assert.equal(typeof outstanding.body.data.summary.needsReview, 'number');
+    });
+
+    await t.test('finance: rollup outstanding per customer menjumlahkan invoice current dan overdue secara terpisah', async () => {
+      const rollupCustomer = `Customer Rollup ${runId}`;
+
+      async function createInvoicedOrder({ soNumber, invoiceIssuedAt }) {
+        const order = await api('/api/sales-orders', {
+          method: 'POST',
+          token: salesToken,
+          body: salesOrderPayload({ soNumber, customer: rollupCustomer }),
+        });
+        assert.equal(order.status, 201);
+        const orderId = order.body.data.id;
+        const jobId = order.body.data.containers[0].id;
+
+        await query("update container_jobs set status = 'completed', completed_at = now() where id = $1", [jobId]);
+        await query(
+          `
+            update sales_orders
+            set status = 'completed',
+                finance_verification_status = 'verified',
+                accurate_so_number = so_number,
+                invoice_number = $2,
+                payment_type = 'cash',
+                invoice_issued_at = $3::timestamptz
+            where id = $1
+          `,
+          [orderId, `INV-${soNumber}`, invoiceIssuedAt],
+        );
+        return orderId;
+      }
+
+      const currentOrderId = await createInvoicedOrder({
+        soNumber: `SO-ROLLUP-${runId}-CURRENT`,
+        invoiceIssuedAt: new Date().toISOString(),
+      });
+      const overdueOrderId = await createInvoicedOrder({
+        soNumber: `SO-ROLLUP-${runId}-OVERDUE`,
+        invoiceIssuedAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+
+      const flatRows = await api(`/api/finance/outstanding?query=${encodeURIComponent(rollupCustomer)}`, { token: financeToken });
+      assert.equal(flatRows.status, 200);
+      assert.equal(flatRows.body.data.rows.length, 2, 'drill-down (dipakai modal Detail) harus mengembalikan kedua invoice customer ini');
+      const currentRow = flatRows.body.data.rows.find((row) => row.id === currentOrderId);
+      const overdueRow = flatRows.body.data.rows.find((row) => row.id === overdueOrderId);
+      assert.equal(currentRow.agingBucket, 'current');
+      assert.ok(overdueRow.agingBucket.startsWith('overdue_'));
+      assert.equal(overdueRow.daysOverdue, 40);
+
+      const rollup = await api(`/api/finance/outstanding/by-customer?query=${encodeURIComponent(rollupCustomer)}`, { token: financeToken });
+      assert.equal(rollup.status, 200);
+      assert.equal(rollup.body.data.rows.length, 1, 'kedua invoice customer yang sama harus digabung jadi satu baris rollup');
+      const row = rollup.body.data.rows[0];
+      assert.equal(row.customer, rollupCustomer);
+      assert.equal(row.invoiceCount, 2);
+      assert.equal(row.totalOutstandingAmount, currentRow.outstandingAmount + overdueRow.outstandingAmount);
+      assert.equal(row.currentAmount, currentRow.outstandingAmount);
+      assert.equal(row.overdueAmount, overdueRow.outstandingAmount);
+      assert.equal(row.oldestOverdueDays, 40);
+
+      // Endpoint rollup ini harus membawa summary-nya sendiri, supaya CustomerOutstandingPage.jsx
+      // di frontend cukup satu kali fetch (tidak perlu panggilan kedua ke /finance/outstanding
+      // hanya untuk mengambil summary).
+      const rollupSummary = rollup.body.data.summary;
+      assert.ok(rollupSummary, 'response /finance/outstanding/by-customer harus menyertakan field summary');
+      assert.equal(typeof rollupSummary.totalOutstandingAmount, 'number');
+      assert.equal(typeof rollupSummary.totalCustomers, 'number');
+      assert.equal(typeof rollupSummary.current, 'number');
+      assert.equal(typeof rollupSummary.overdue31To60, 'number');
+      assert.ok(rollupSummary.totalOutstandingAmount >= row.totalOutstandingAmount, 'summary global harus mencakup minimal piutang customer ini');
+
+      const forbiddenRollup = await api('/api/finance/outstanding/by-customer', { token: salesToken });
+      assert.equal(forbiddenRollup.status, 403);
     });
 
     await t.test('finance: SO yang kebuka lagi setelah koreksi tetap muncul di outstanding walau billing_status masih tersimpan lunas', async () => {
@@ -2351,6 +3276,76 @@ if (!hasDatabase) {
       assert.equal(jobDocumentListAllowedForSales.status, 200);
     });
 
+    await t.test('attachments: dokumen Invoice/Faktur Pajak/Debit Note hanya bisa diakses role finance/admin', async () => {
+      const invoicePdfUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'sales_order',
+          entityId: created.orderId,
+          category: 'invoicePdf',
+          fileName: `invoice-access-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% invoice access ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(invoicePdfUpload.status, 201);
+      const invoicePdfId = invoicePdfUpload.body.data.id;
+
+      const debitNotePdfUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'sales_order',
+          entityId: created.orderId,
+          category: 'debitNotePdf',
+          fileName: `debit-note-access-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% debit note access ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Admin',
+        },
+      });
+      assert.equal(debitNotePdfUpload.status, 201);
+      const debitNotePdfId = debitNotePdfUpload.body.data.id;
+
+      const invoiceDeniedForOperational = await fetch(`${baseUrl}/api/attachments/${invoicePdfId}`, {
+        headers: { Authorization: `Bearer ${operationalToken}` },
+      });
+      assert.equal(invoiceDeniedForOperational.status, 403);
+      assert.equal((await invoiceDeniedForOperational.json()).error.code, 'ATTACHMENT_ACCESS_DENIED');
+
+      const invoiceDeniedForObserver = await fetch(`${baseUrl}/api/attachments/${invoicePdfId}`, {
+        headers: { Authorization: `Bearer ${observerToken}` },
+      });
+      assert.equal(invoiceDeniedForObserver.status, 403);
+
+      const invoiceAllowedForFinance = await fetch(`${baseUrl}/api/attachments/${invoicePdfId}`, {
+        headers: { Authorization: `Bearer ${financeToken}` },
+      });
+      assert.equal(invoiceAllowedForFinance.status, 200);
+
+      const debitNoteDeniedForOperational = await fetch(`${baseUrl}/api/attachments/${debitNotePdfId}`, {
+        headers: { Authorization: `Bearer ${operationalToken}` },
+      });
+      assert.equal(debitNoteDeniedForOperational.status, 403);
+
+      const debitNoteAllowedForAdmin = await fetch(`${baseUrl}/api/attachments/${debitNotePdfId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(debitNoteAllowedForAdmin.status, 200);
+
+      const orderDocumentListForOperational = await api(`/api/attachments?entityType=sales_order&entityId=${created.orderId}`, { token: operationalToken });
+      assert.equal(orderDocumentListForOperational.status, 200);
+      assert.equal(orderDocumentListForOperational.body.data.some((attachment) => attachment.id === invoicePdfId), false);
+      assert.equal(orderDocumentListForOperational.body.data.some((attachment) => attachment.id === debitNotePdfId), false);
+
+      const orderDocumentListForFinance = await api(`/api/attachments?entityType=sales_order&entityId=${created.orderId}`, { token: financeToken });
+      assert.equal(orderDocumentListForFinance.status, 200);
+      assert.ok(orderDocumentListForFinance.body.data.some((attachment) => attachment.id === invoicePdfId));
+      assert.ok(orderDocumentListForFinance.body.data.some((attachment) => attachment.id === debitNotePdfId));
+    });
+
     await t.test('driver commission: pembayaran wajib ada bukti transfer sebelum ditandai paid', async () => {
       const periodStart = '2099-04-02';
       const periodEnd = '2099-04-08';
@@ -2414,6 +3409,379 @@ if (!hasDatabase) {
       );
       assert.equal(paidStatusAfterProof.rows[0].status, 'paid');
       assert.ok(paidStatusAfterProof.rows[0].payment_proof_attachment_id);
+    });
+
+    await t.test('driver commission: void pembayaran - admin-only, alasan wajib, batch turun dari paid ke approved', async () => {
+      const periodStart = '2099-04-02';
+      const periodEnd = '2099-04-08';
+      const batchLookup = await query(
+        'select id, status from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+        [periodStart, periodEnd],
+      );
+      const batchId = batchLookup.rows[0].id;
+      assert.equal(batchLookup.rows[0].status, 'paid', 'batch dari test sebelumnya harus sudah paid (payment tunggalnya sudah lunas)');
+
+      const paymentLookup = await query('select id from driver_commission_payments where batch_id = $1', [batchId]);
+      const paymentId = paymentLookup.rows[0].id;
+
+      const forbiddenNonAdmin = await api(`/api/driver-commissions/payments/${paymentId}/void`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { reason: 'Salah bayar' },
+      });
+      // Diblok di level router (permission driver_commission.void cuma dipegang admin), sebelum
+      // sempat sampai ke pengecekan role eksplisit di service layer.
+      assert.equal(forbiddenNonAdmin.status, 403);
+      assert.equal(forbiddenNonAdmin.body.error.code, 'FORBIDDEN');
+
+      const missingReason = await api(`/api/driver-commissions/payments/${paymentId}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {},
+      });
+      assert.equal(missingReason.status, 400);
+      assert.equal(missingReason.body.error.code, 'DRIVER_COMMISSION_PAYMENT_VOID_REASON_REQUIRED');
+
+      const voided = await api(`/api/driver-commissions/payments/${paymentId}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: `Salah bayar sopir - test ${runId}` },
+      });
+      assert.equal(voided.status, 200);
+      const voidedPayment = voided.body.data.payments.find((payment) => payment.id === paymentId);
+      assert.equal(voidedPayment.status, 'pending', 'status pembayaran harus kembali ke pending, siap dibayar ulang');
+      assert.equal(voidedPayment.paymentProofAttachmentId, null, 'bukti transfer lama harus dilepas supaya pembayaran ulang wajib upload bukti baru');
+      assert.ok(voidedPayment.voidedAt);
+      assert.equal(voided.body.data.status, 'approved', 'batch harus turun lagi dari paid ke approved karena salah satu payment-nya di-void');
+
+      const dbStatus = await query('select status, payment_proof_attachment_id, paid_at from driver_commission_payments where id = $1', [paymentId]);
+      assert.equal(dbStatus.rows[0].status, 'pending');
+      assert.equal(dbStatus.rows[0].payment_proof_attachment_id, null);
+      assert.equal(dbStatus.rows[0].paid_at, null);
+
+      const payAfterVoidWithoutProof = await api(`/api/driver-commissions/payments/${paymentId}/pay`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { paymentNote: `Coba bayar ulang tanpa bukti baru ${runId}` },
+      });
+      assert.equal(payAfterVoidWithoutProof.status, 400);
+      assert.equal(payAfterVoidWithoutProof.body.error.code, 'DRIVER_COMMISSION_PAYMENT_PROOF_REQUIRED', 'bukti lama yang sudah dilepas tidak boleh membuat sistem menganggap payment ini sudah pernah punya bukti');
+
+      const alreadyVoided = await api(`/api/driver-commissions/payments/${paymentId}/void`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { reason: 'Coba void lagi' },
+      });
+      assert.equal(alreadyVoided.status, 400);
+      assert.equal(alreadyVoided.body.error.code, 'DRIVER_COMMISSION_PAYMENT_NOT_PAID');
+
+      const voidLog = await latestActivityForEntity('VOID_DRIVER_COMMISSION_PAYMENT', paymentId);
+      assert.equal(voidLog.action, 'VOID_DRIVER_COMMISSION_PAYMENT');
+      assert.equal(voidLog.actor_role, 'admin');
+    });
+
+    await t.test('sales order: customer_name tidak ikut berubah saat SO diedit untuk field lain setelah master customer diganti namanya', async () => {
+      const customerName = `Snapshot Customer ${runId}`;
+      const customerInsert = await query('insert into customers (name) values ($1) returning id', [customerName]);
+      const customerId = customerInsert.rows[0].id;
+
+      const soNumber = `SO-SNAPCUST-${runId}`;
+      const createdOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber, customer: customerName }),
+      });
+      assert.equal(createdOrder.status, 201);
+      const orderId = createdOrder.body.data.id;
+      assert.equal(createdOrder.body.data.customer, customerName);
+
+      const linked = await query('select customer_id from sales_orders where id = $1', [orderId]);
+      assert.equal(linked.rows[0].customer_id, customerId, 'customer_id harus ter-link ke master customer saat SO dibuat');
+
+      // Master customer diedit (rename) SETELAH SO dibuat.
+      await query('update customers set name = $1 where id = $2', [`${customerName} RENAMED`, customerId]);
+
+      // SO diedit untuk field lain; body tetap membawa nama customer LAMA (persis seperti form
+      // edit di frontend yang memuat data dari SO-nya sendiri, bukan re-fetch dari master).
+      const updated = await api(`/api/sales-orders/${orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({ soNumber, customer: customerName, destination: 'Snapshot Test Destination', updatedBy: 'Sprint2C Admin' }),
+      });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.data.destination, 'Snapshot Test Destination');
+      assert.equal(updated.body.data.customer, customerName, 'customer_name SO harus tetap nama lama, tidak diam-diam ikut berubah ke nama master yang baru');
+
+      // Kalau memang customer-nya diganti dengan sengaja, snapshot HARUS ikut update ke customer baru.
+      const otherCustomerName = `Snapshot Customer Lain ${runId}`;
+      const otherCustomerInsert = await query('insert into customers (name) values ($1) returning id', [otherCustomerName]);
+      const changedCustomer = await api(`/api/sales-orders/${orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({ soNumber, customer: otherCustomerName, destination: 'Snapshot Test Destination', updatedBy: 'Sprint2C Admin' }),
+      });
+      assert.equal(changedCustomer.status, 200);
+      assert.equal(changedCustomer.body.data.customer, otherCustomerName, 'kalau customer memang sengaja diganti, snapshot harus ikut update');
+      const relinked = await query('select customer_id from sales_orders where id = $1', [orderId]);
+      assert.equal(relinked.rows[0].customer_id, otherCustomerInsert.rows[0].id);
+    });
+
+    await t.test('container job: assignment_snapshot (rekening bank sopir) tidak ikut berubah saat status di-update tanpa reassignment sungguhan', async () => {
+      const driverName = `Driver Snapshot ${runId}`;
+      const plate = `B-${String(runId).slice(-4)}-SNP`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status, bank_name, bank_account_number, bank_account_holder)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman', 'Bank Original', '1111', 'Driver Snapshot Holder')
+          on conflict do nothing
+        `,
+        [driverName, `089${String(Date.now()).slice(-9)}`],
+      );
+      await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif')
+          on conflict (plate_number) do update set operational_status = 'Aktif', archived_at = null
+        `,
+        [`TRK-SNP-${String(runId).slice(-4)}`, plate],
+      );
+
+      const soNumber = `SO-SNAPASGN-${runId}`;
+      const containerNumber = `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`;
+      const createdOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber }),
+      });
+      assert.equal(createdOrder.status, 201);
+      const jobId = createdOrder.body.data.containers[0].id;
+
+      const received = await api(`/api/container-jobs/${jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber,
+          driver: driverName,
+          plateNumber: plate,
+          status: 'received',
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(received.status, 200);
+      assert.equal(received.body.data.driverBankName, 'Bank Original');
+      assert.equal(received.body.data.driverBankAccountNumber, '1111');
+
+      // Master driver diganti rekening banknya SETELAH assignment.
+      await query(`update drivers set bank_name = 'Bank Baru', bank_account_number = '9999' where name = $1`, [driverName]);
+
+      // Status di-update lagi; body tetap kirim driver/plateNumber yang SAMA (pola lazim dari UI
+      // status-transition), tapi ini BUKAN reassignment sungguhan.
+      const running = await api(`/api/container-jobs/${jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber,
+          driver: driverName,
+          plateNumber: plate,
+          status: 'running',
+          runningAt: new Date().toISOString(),
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(running.status, 200);
+      assert.equal(running.body.data.driverBankName, 'Bank Original', 'rekening bank sopir di snapshot job HARUS tetap yang lama, tidak ikut berubah ke data master terbaru');
+      assert.equal(running.body.data.driverBankAccountNumber, '1111');
+
+      // Kalau memang driver-nya diganti dengan sengaja (reassignment sungguhan), snapshot HARUS
+      // ikut ambil data driver baru.
+      const otherDriverName = `Driver Snapshot Lain ${runId}`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status, bank_name, bank_account_number, bank_account_holder)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman', 'Bank Driver Baru', '2222', 'Driver Baru Holder')
+          on conflict do nothing
+        `,
+        [otherDriverName, `088${String(Date.now()).slice(-9)}`],
+      );
+      const reassigned = await api(`/api/container-jobs/${jobId}/status`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          containerNumber,
+          driver: otherDriverName,
+          plateNumber: plate,
+          status: 'running',
+          runningAt: new Date().toISOString(),
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(reassigned.status, 200);
+      assert.equal(reassigned.body.data.driverBankName, 'Bank Driver Baru', 'kalau sopir memang sengaja diganti, snapshot harus ikut ambil data sopir baru');
+      assert.equal(reassigned.body.data.driverBankAccountNumber, '2222');
+    });
+
+    await t.test('container job: dua request assignment bersamaan untuk driver/truck yang sama tidak boleh lolos dua-duanya (race condition)', async () => {
+      const raceDriverName = `Driver Race ${runId}`;
+      const racePlate = `B-${String(runId).slice(-4)}-RC`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman')
+          on conflict do nothing
+        `,
+        [raceDriverName, `087${String(Date.now()).slice(-9)}`],
+      );
+      await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif')
+          on conflict (plate_number) do update set operational_status = 'Aktif', archived_at = null
+        `,
+        [`TRK-RC-${String(runId).slice(-4)}`, racePlate],
+      );
+
+      const raceSoNumberA = `SO-RACEA-${runId}`;
+      const raceSoNumberB = `SO-RACEB-${runId}`;
+      const raceOrderA = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: raceSoNumberA }),
+      });
+      const raceOrderB = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber: raceSoNumberB }),
+      });
+      assert.equal(raceOrderA.status, 201);
+      assert.equal(raceOrderB.status, 201);
+      const raceJobIdA = raceOrderA.body.data.containers[0].id;
+      const raceJobIdB = raceOrderB.body.data.containers[0].id;
+
+      const assignPayload = (soNumber) => ({
+        containerNumber: `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
+        driver: raceDriverName,
+        plateNumber: racePlate,
+        status: 'received',
+        updatedBy: 'Sprint2C Operational',
+      });
+
+      // Dua request PATCH assignment untuk driver/truck yang SAMA ditembak nyaris bersamaan
+      // (Promise.all, bukan berurutan) ke dua job berbeda — ini persis skenario TOCTOU yang
+      // sebelumnya bisa lolos dua-duanya karena SELECT check tidak mengunci apa pun.
+      const [resultA, resultB] = await Promise.all([
+        api(`/api/container-jobs/${raceJobIdA}/status`, {
+          method: 'PATCH',
+          token: adminToken,
+          body: assignPayload(raceSoNumberA),
+        }),
+        api(`/api/container-jobs/${raceJobIdB}/status`, {
+          method: 'PATCH',
+          token: adminToken,
+          body: assignPayload(raceSoNumberB),
+        }),
+      ]);
+
+      const statuses = [resultA.status, resultB.status].sort();
+      assert.deepEqual(statuses, [200, 409], 'harus tepat satu yang berhasil dan satu yang ditolak, bukan lolos dua-duanya');
+
+      const failed = resultA.status === 409 ? resultA : resultB;
+      assert.equal(failed.body.error.code, 'ASSIGNMENT_ALREADY_ACTIVE');
+
+      const driverAssignmentCount = await query(
+        `
+          select count(*)::int as count
+          from container_jobs
+          where driver_id = (select id from drivers where name = $1)
+            and status not in ('completed', 'cancelled', 'repo_stored')
+        `,
+        [raceDriverName],
+      );
+      assert.equal(driverAssignmentCount.rows[0].count, 1, 'driver hanya boleh aktif di TEPAT SATU job, tidak boleh double-booked');
+    });
+
+    await t.test('activity log: endpoint POST /api/activity-logs khusus Admin dan tidak bisa dipakai memalsukan identitas', async () => {
+      const blockedForSales = await api('/api/activity-logs', {
+        method: 'POST',
+        token: salesToken,
+        body: {
+          action: 'DELETE_USER',
+          actorName: 'Admin Palsu',
+          actorRole: 'admin',
+          target: `forged-${runId}`,
+        },
+      });
+      assert.equal(blockedForSales.status, 403);
+      assert.equal(blockedForSales.body.error.code, 'FORBIDDEN');
+
+      const blockedForFinance = await api('/api/activity-logs', {
+        method: 'POST',
+        token: financeToken,
+        body: { action: 'DELETE_USER', target: `forged-finance-${runId}` },
+      });
+      assert.equal(blockedForFinance.status, 403);
+      assert.equal(blockedForFinance.body.error.code, 'FORBIDDEN');
+
+      const forged = await api('/api/activity-logs', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          action: 'DELETE_USER',
+          actorName: 'Admin Lain Palsu',
+          actorRole: 'super_admin',
+          target: `forged-${runId}`,
+        },
+      });
+      assert.equal(forged.status, 201);
+      assert.notEqual(forged.body.data.actorName, 'Admin Lain Palsu', 'actorName harus dari token login, bukan dari body request');
+      assert.notEqual(forged.body.data.actorRole, 'super_admin', 'actorRole harus dari token login (admin), bukan dari body request');
+      assert.equal(forged.body.data.actorName, users.admin.name);
+      assert.equal(forged.body.data.actorRole, 'admin');
+
+      const dbRow = await query('select actor_name, actor_role from activity_logs where id = $1', [forged.body.data.id]);
+      assert.notEqual(dbRow.rows[0].actor_name, 'Admin Lain Palsu');
+      assert.equal(dbRow.rows[0].actor_name, users.admin.name);
+      assert.equal(dbRow.rows[0].actor_role, 'admin');
+    });
+
+    await t.test('master data: create/update/archive customers dan drivers tercatat di activity log', async () => {
+      const customerName = `Master Log Customer ${runId}`;
+      const createdCustomer = await api('/api/master/customers', {
+        method: 'POST',
+        token: adminToken,
+        body: { name: customerName },
+      });
+      assert.equal(createdCustomer.status, 201);
+      const createLog = await latestActivityForEntity('CREATE_MASTER_CUSTOMERS', createdCustomer.body.data.id);
+      assert.equal(createLog.action, 'CREATE_MASTER_CUSTOMERS');
+
+      const updatedCustomer = await api(`/api/master/customers/${createdCustomer.body.data.id}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { name: `${customerName} Updated` },
+      });
+      assert.equal(updatedCustomer.status, 200);
+      const updateLog = await latestActivityForEntity('UPDATE_MASTER_CUSTOMERS', createdCustomer.body.data.id);
+      assert.equal(updateLog.action, 'UPDATE_MASTER_CUSTOMERS');
+      assert.equal(updateLog.metadata.beforeData.name, customerName);
+      assert.equal(updateLog.metadata.afterData.name, `${customerName} Updated`);
+
+      const archivedCustomer = await api(`/api/master/customers/${createdCustomer.body.data.id}`, {
+        method: 'DELETE',
+        token: adminToken,
+      });
+      assert.equal(archivedCustomer.status, 200);
+      const archiveLog = await latestActivityForEntity('DELETE_MASTER_CUSTOMERS', createdCustomer.body.data.id);
+      assert.equal(archiveLog.action, 'DELETE_MASTER_CUSTOMERS');
+
+      const driverName = `Master Log Driver ${runId}`;
+      const createdDriver = await api('/api/master/drivers', {
+        method: 'POST',
+        token: adminToken,
+        body: { name: driverName, bankName: 'Bank Log Test', bankAccountNumber: '5555' },
+      });
+      assert.equal(createdDriver.status, 201);
+      const driverCreateLog = await latestActivityForEntity('CREATE_MASTER_DRIVERS', createdDriver.body.data.id);
+      assert.equal(driverCreateLog.action, 'CREATE_MASTER_DRIVERS');
     });
 
     await t.test('driver commission: sopir di bawah kuota mingguan ditahan, cair sekaligus begitu kumulatif tembus 7 ritasi', async () => {

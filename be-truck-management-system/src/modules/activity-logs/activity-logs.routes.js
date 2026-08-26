@@ -10,7 +10,7 @@ export const activityLogRoutes = [
   {
     method: 'POST',
     path: '/api/activity-logs',
-    authOnly: true,
+    permission: 'activity_log.create',
     handler: createActivityLogController,
   },
 ];

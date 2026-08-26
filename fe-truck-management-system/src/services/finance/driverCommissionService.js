@@ -71,6 +71,10 @@ async function readFileAsDataUrl(file) {
   return readFileWithFileReader(file);
 }
 
+export function voidDriverCommissionPayment(id, reason) {
+  return httpClient.patch(`/driver-commissions/payments/${encodeURIComponent(id)}/void`, { reason });
+}
+
 export async function uploadDriverCommissionTransferProof(id, file, payload = {}) {
   const uploadFile = file?.type?.startsWith('image/') ? await compressImageFile(file) : file;
   const validationError = validateArchiveFile(uploadFile, { label: 'Bukti transfer komisi' })

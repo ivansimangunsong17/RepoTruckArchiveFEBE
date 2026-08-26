@@ -6,6 +6,9 @@ import {
   approveRpuj,
   fetchCompletedTripDetail,
   fetchCompletedTrips,
+  fetchDebitNoteOrders,
+  fetchDebitNoteOutstanding,
+  fetchDebitNotePayments,
   fetchFinanceCorrectionHistory,
   fetchFinanceCorrections,
   fetchFinanceDashboard,
@@ -21,20 +24,25 @@ import {
   createOperationalFundRequest,
   depositOperationalFund,
   fetchInvoicePayments,
+  fetchCustomerOutstandingRollup,
   fetchSalesOrderOutstanding,
   rejectFinanceCorrection,
   approveOperationalFundRequest,
   reconcileContainerJobExpense,
+  recordDebitNotePaymentForOrder,
   recordInvoicePayment,
   rejectOperationalFundRequest,
   rejectRpuj,
+  reopenOperationalFundBatch,
   requestFinanceCorrection,
+  saveDebitNoteNumber,
   saveInvoiceNumber,
-  saveOrderVerificationLineItem,
   saveOrderVerificationSoNumber,
   uploadInvoiceDocument,
   uploadOperationalFundTransferProof,
   uploadRpujTransferProof,
+  voidDebitNotePaymentForOrder,
+  voidInvoicePayment,
 } from './finance.service.js';
 
 export async function financeDashboardController(request, response) {
@@ -68,19 +76,6 @@ export async function updateOrderVerificationSoNumberController(request, respons
   sendSuccess(response, result, 'Nomor SO Accurate berhasil disimpan.');
 }
 
-export async function addOrderVerificationLineItemController(request, response) {
-  const result = await saveOrderVerificationLineItem(request.params.id, request.body, request.user);
-  await safeRecordActivityLog(request, {
-    action: 'FINANCE_ADD_ORDER_LINE_ITEM',
-    module: 'finance',
-    entityType: 'sales_order',
-    entityId: request.params.id,
-    afterData: result,
-    metadata: { serviceName: request.body?.serviceName },
-  });
-  sendSuccess(response, result, 'Rincian revenue berhasil ditambahkan.');
-}
-
 export async function rpujRequestsController(request, response) {
   const result = await fetchRpujRequests(request.query);
   sendSuccess(response, result);
@@ -112,6 +107,25 @@ export async function closeOperationalFundBatchController(request, response) {
     metadata: { batchDate: result.batchDate, balance: result.balance },
   });
   sendSuccess(response, result, 'Batch rekening dropping berhasil ditutup.');
+}
+
+export async function reopenOperationalFundBatchController(request, response) {
+  const result = await reopenOperationalFundBatch(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_REOPEN_OPERATIONAL_FUND_BATCH',
+    module: 'finance',
+    entityType: 'operational_fund_batch',
+    entityId: request.params.id,
+    beforeData: { status: 'closed', closedAt: result.previousClosedAt, closedByName: result.previousClosedByName },
+    afterData: result.batch,
+    metadata: {
+      batchDate: result.batch.batchDate,
+      reason: request.body?.reason,
+      carryForwardVoided: result.carryForwardVoided,
+      carryForwardAmount: result.carryForwardAmount,
+    },
+  });
+  sendSuccess(response, result.batch, 'Batch rekening dropping berhasil dibuka kembali.');
 }
 
 export async function createOperationalFundRequestController(request, response) {
@@ -254,6 +268,11 @@ export async function outstandingOrdersController(request, response) {
   sendSuccess(response, result);
 }
 
+export async function outstandingByCustomerController(request, response) {
+  const result = await fetchCustomerOutstandingRollup(request.query);
+  sendSuccess(response, result);
+}
+
 export async function invoiceOrderDetailController(request, response) {
   const result = await fetchInvoiceOrderDetail(request.params.id);
   sendSuccess(response, result);
@@ -315,6 +334,92 @@ export async function recordInvoicePaymentController(request, response) {
 export async function invoicePaymentsController(request, response) {
   const result = await fetchInvoicePayments(request.params.id);
   sendSuccess(response, result);
+}
+
+export async function voidInvoicePaymentController(request, response) {
+  const before = await fetchInvoicePayments(request.params.id);
+  const result = await voidInvoicePayment(request.params.id, request.params.paymentId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_VOID_INVOICE_PAYMENT',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    beforeData: before.find((payment) => payment.id === request.params.paymentId) || null,
+    afterData: result,
+    metadata: {
+      paymentId: request.params.paymentId,
+      reason: request.body?.reason,
+      totalPaid: result?.totalPaid,
+      outstandingAmount: result?.outstandingAmount,
+      billingStatus: result?.billingStatus,
+    },
+  });
+  sendSuccess(response, result, 'Pembayaran berhasil dibatalkan.');
+}
+
+export async function debitNoteOrdersController(request, response) {
+  const result = await fetchDebitNoteOrders(request.query);
+  sendSuccess(response, result);
+}
+
+export async function debitNoteOutstandingController(request, response) {
+  const result = await fetchDebitNoteOutstanding(request.query);
+  sendSuccess(response, result);
+}
+
+export async function updateDebitNoteNumberController(request, response) {
+  const result = await saveDebitNoteNumber(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_INPUT_DEBIT_NOTE_NUMBER',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: { soNumber: result?.soNumber, debitNoteNumber: result?.debitNoteNumber },
+  });
+  sendSuccess(response, result, 'Nomor Debit Note berhasil disimpan.');
+}
+
+export async function recordDebitNotePaymentController(request, response) {
+  const result = await recordDebitNotePaymentForOrder(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_RECORD_DEBIT_NOTE_PAYMENT',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result,
+    metadata: {
+      amount: result?.payment?.amount,
+      totalPaid: result?.totalPaid,
+      outstandingAmount: result?.outstandingAmount,
+    },
+  });
+  sendSuccess(response, result, 'Pembayaran Debit Note berhasil dicatat.');
+}
+
+export async function debitNotePaymentsController(request, response) {
+  const result = await fetchDebitNotePayments(request.params.id);
+  sendSuccess(response, result);
+}
+
+export async function voidDebitNotePaymentController(request, response) {
+  const before = await fetchDebitNotePayments(request.params.id);
+  const result = await voidDebitNotePaymentForOrder(request.params.id, request.params.paymentId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_VOID_DEBIT_NOTE_PAYMENT',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    beforeData: before.find((payment) => payment.id === request.params.paymentId) || null,
+    afterData: result,
+    metadata: {
+      paymentId: request.params.paymentId,
+      reason: request.body?.reason,
+      totalPaid: result?.totalPaid,
+      outstandingAmount: result?.outstandingAmount,
+    },
+  });
+  sendSuccess(response, result, 'Pembayaran Debit Note berhasil dibatalkan.');
 }
 
 export async function financeCorrectionsController(request, response) {

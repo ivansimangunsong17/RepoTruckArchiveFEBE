@@ -10,6 +10,7 @@ import {
   fetchOperationalFundTransactions,
   rejectOperationalFundRequest,
   reconcileFinanceContainerJobExpense,
+  reopenOperationalFundBatch,
 } from '../../../services/finance/financeService';
 import {
   defaultExpenseReconciliationSummary,
@@ -55,6 +56,8 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   });
   const [operationalFundDepositValidationOpen, setOperationalFundDepositValidationOpen] = useState(false);
   const [operationalFundCloseValidationOpen, setOperationalFundCloseValidationOpen] = useState(false);
+  const [operationalFundReopenValidationOpen, setOperationalFundReopenValidationOpen] = useState(false);
+  const [operationalFundReopenReason, setOperationalFundReopenReason] = useState('');
   const [operationalFundRequestError, setOperationalFundRequestError] = useState('');
   const [operationalFundDecision, setOperationalFundDecision] = useState(null);
   const [operationalFundDecisionNote, setOperationalFundDecisionNote] = useState('');
@@ -505,6 +508,49 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     }
   }
 
+  function openOperationalFundReopenValidationModal() {
+    if (!operationalFundBatch.id || operationalFundBatchBusy) return;
+    setOperationalFundBatchError('');
+    setOperationalFundReopenReason('');
+    setOperationalFundReopenValidationOpen(true);
+  }
+
+  function closeOperationalFundReopenValidationModal() {
+    if (operationalFundBatchBusy) return;
+    setOperationalFundReopenValidationOpen(false);
+    setOperationalFundReopenReason('');
+  }
+
+  function handleOperationalFundReopenReasonChange(event) {
+    setOperationalFundReopenReason(event.target.value);
+  }
+
+  async function confirmReopenOperationalFundBatch(event) {
+    event.preventDefault();
+    if (!operationalFundBatch.id || operationalFundBatchBusy) return;
+    const reason = String(operationalFundReopenReason || '').trim();
+    if (!reason) {
+      setOperationalFundBatchError('Alasan membuka kembali batch wajib diisi.');
+      return;
+    }
+    setOperationalFundBatchBusy(true);
+    setOperationalFundBatchError('');
+    try {
+      const result = await reopenOperationalFundBatch(operationalFundBatch.id, reason);
+      setOperationalFundBatch(normalizeOperationalFundBatchRow(result));
+      setOperationalFundReopenValidationOpen(false);
+      setOperationalFundReopenReason('');
+      await loadOperationalFundBatch();
+      await loadOperationalFundTransactions();
+      await loadExpenseReconciliation();
+      await loadPendingCloseBatches();
+    } catch (error) {
+      setOperationalFundBatchError(error.message || 'Batch rekening dropping gagal dibuka kembali.');
+    } finally {
+      setOperationalFundBatchBusy(false);
+    }
+  }
+
   function reloadAll() {
     loadOperationalFundBatch();
     loadPendingCloseBatches();
@@ -548,6 +594,8 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     operationalFundRequestForm,
     operationalFundDepositValidationOpen,
     operationalFundCloseValidationOpen,
+    operationalFundReopenValidationOpen,
+    operationalFundReopenReason,
     operationalFundRequestError,
     operationalFundDecision,
     operationalFundDecisionNote,
@@ -582,6 +630,10 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     openOperationalFundCloseValidationModal,
     closeOperationalFundCloseValidationModal,
     confirmCloseOperationalFundBatch,
+    openOperationalFundReopenValidationModal,
+    closeOperationalFundReopenValidationModal,
+    handleOperationalFundReopenReasonChange,
+    confirmReopenOperationalFundBatch,
     loadOperationalFundBatch,
     loadOperationalFundRequests,
     loadOperationalFundTransactions,

@@ -31,8 +31,6 @@ import UjRecommendationCard from '../../components/operations/UjRecommendationCa
 import { parseOtherCost } from '../../utils/otherCost';
 import {
   cancelContainerJob,
-  correctContainerJobExpense,
-  createContainerJobExpense,
   fetchContainerJob,
   fetchContainerJobsPage,
   generateContainerJobSpk,
@@ -364,18 +362,6 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoadingId, setDetailLoadingId] = useState('');
-  const [expenseForm, setExpenseForm] = useState({
-    category: 'tol',
-    amount: '',
-    description: '',
-    recipientType: 'vendor',
-    recipientName: '',
-    paymentStatus: 'belum_dibayar',
-    proofFile: null,
-  });
-  const [expenseSaving, setExpenseSaving] = useState(false);
-  const [expenseError, setExpenseError] = useState('');
-  const [expenseCorrectionId, setExpenseCorrectionId] = useState('');
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelForm, setCancelForm] = useState({ cancelSource: 'customer', cancelReason: '' });
   const [cancelSaving, setCancelSaving] = useState(false);
@@ -395,7 +381,6 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const detailOtherCost = otherCostValue(detail);
   const detailDocuments = detail ? documentState(detail) : { completed: 0, total: 0, missing: [] };
   const detailRpuj = detail ? rpujDetail(detail) : { label: '-', helper: '' };
-  const expenseCorrection = (detail?.expenses || []).find((expense) => expense.id === expenseCorrectionId);
   const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
   const repoMissing = getRepoStorageMissing(repoTarget);
   const depotOptions = useMemo(() => normalizeDepotOptions(archive.masters?.depots), [archive.masters?.depots]);
@@ -582,36 +567,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  function resetExpenseForm(job = detail) {
-    setExpenseCorrectionId('');
-    setExpenseForm({
-      category: 'tol',
-      amount: '',
-      description: '',
-      recipientType: 'vendor',
-      recipientName: job?.driver || '',
-      paymentStatus: 'belum_dibayar',
-      proofFile: null,
-    });
-    setExpenseError('');
-  }
-
-  function startExpenseCorrection(expense) {
-    setExpenseCorrectionId(expense.id);
-    setExpenseForm({
-      category: expense.category || 'tol',
-      amount: expense.amount ? String(expense.amount) : '',
-      description: expense.description || '',
-      recipientType: expense.recipientType || 'vendor',
-      recipientName: expense.recipientName || detail?.driver || '',
-      paymentStatus: expense.paymentStatus || 'belum_dibayar',
-      proofFile: null,
-    });
-    setExpenseError('');
-  }
-
   async function openJobDetail(job) {
-    resetExpenseForm(job);
     if (!archive.isDatabaseMode) {
       setDetail(job);
       return;
@@ -621,7 +577,6 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     try {
       const freshJob = await fetchContainerJob(job.id);
       setDetail(freshJob);
-      resetExpenseForm(freshJob);
     } catch (requestError) {
       notify({ type: 'error', title: 'Detail gagal dimuat', message: requestError.message });
       setDetail(job);
@@ -688,50 +643,6 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     setDetail((current) => (current?.id === saved.id ? { ...current, ...saved } : current));
     if (archive.isDatabaseMode) setListVersion((value) => value + 1);
     return saved;
-  }
-
-  async function submitContainerJobExpense(event) {
-    event.preventDefault();
-    if (!detail?.id || expenseSaving) return;
-    const amount = Number(expenseForm.amount || 0);
-    if (!amount || amount <= 0) {
-      setExpenseError('Nominal biaya wajib lebih dari 0.');
-      return;
-    }
-    if (expenseForm.paymentStatus === 'sudah_dibayar' && !expenseForm.proofFile && !expenseCorrection?.proofAttachment) {
-      setExpenseError('Upload bukti pembayaran untuk biaya yang sudah dibayar.');
-      return;
-    }
-
-    setExpenseSaving(true);
-    setExpenseError('');
-    try {
-      const payload = {
-        ...expenseForm,
-        amount,
-        updatedBy: user?.fullName || user?.name || 'Operational',
-        proofAttachmentId: expenseCorrection?.proofAttachmentId || expenseCorrection?.proofAttachment?.path || expenseCorrection?.proofAttachment?.id || null,
-      };
-      const savedExpense = expenseCorrectionId
-        ? await correctContainerJobExpense(detail.id, expenseCorrectionId, payload)
-        : await createContainerJobExpense(detail.id, payload);
-      setDetail((current) => {
-        if (current?.id !== detail.id) return current;
-        const currentExpenses = current.expenses || [];
-        return expenseCorrectionId
-          ? { ...current, expenses: currentExpenses.map((expense) => (expense.id === expenseCorrectionId ? savedExpense : expense)) }
-          : { ...current, expenses: [...currentExpenses, savedExpense] };
-      });
-      resetExpenseForm(detail);
-      notify({
-        title: expenseCorrectionId ? 'Koreksi biaya dikirim' : 'Biaya Container Job dicatat',
-        message: `${optionLabel(EXPENSE_CATEGORY_OPTIONS, savedExpense.category)} ${formatCurrency(savedExpense.amount)} berhasil disimpan.`,
-      });
-    } catch (requestError) {
-      setExpenseError(requestError.message || (expenseCorrectionId ? 'Koreksi biaya Container Job gagal dikirim.' : 'Biaya Container Job gagal dicatat.'));
-    } finally {
-      setExpenseSaving(false);
-    }
   }
 
   function openCancelOperational(job) {
@@ -1165,6 +1076,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               <section className="container-detail-billing"><h3>Biaya Lainnya & SPK</h3><div><span>Biaya Lainnya<strong>{detailOtherCost.amountLabel}</strong></span><span>Catatan Biaya<strong>{detailOtherCost.notes}</strong></span><span>Status Saldo<strong>{detailRpuj.label}</strong><small>{detail.rpujRejectionNote || detailRpuj.helper}</small></span><span>No. SPK<strong>{detail.spkNumber || '-'}</strong></span><span>No. EIR<strong>{detail.eirNumber || '-'}</strong></span></div></section>
               <section className="container-detail-billing">
                 <h3>Transaksi Biaya Lapangan</h3>
+                <p className="section-helper-text">Pencatatan biaya dilakukan lewat menu Rekening Dropping.</p>
                 <div>
                   {(detail.expenses || []).length ? (detail.expenses || []).map((expense) => (
                     <span key={expense.id}>
@@ -1174,70 +1086,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                       <small>Finance: {optionLabel(EXPENSE_FINANCE_STATUS_OPTIONS, expense.financeCheckStatus || 'belum_dicek')}</small>
                       {expense.financeNote ? <small>Catatan: {expense.financeNote}</small> : null}
                       {expense.proofAttachment ? <DocumentLink file={expense.proofAttachment} label="Bukti" /> : null}
-                      {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && expense.financeCheckStatus === 'perlu_klarifikasi' ? (
-                        <button className="secondary-button mt-2" type="button" onClick={() => startExpenseCorrection(expense)}>Koreksi</button>
-                      ) : null}
                     </span>
-                  )) : <span>Belum ada transaksi biaya<strong>Rp 0</strong><small>Catat biaya setelah saldo operasional digunakan.</small></span>}
+                  )) : <span>Belum ada transaksi biaya<strong>Rp 0</strong><small>Catat biaya lewat menu Rekening Dropping.</small></span>}
                 </div>
-                {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) ? (
-                  <form className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3" onSubmit={submitContainerJobExpense}>
-                    {expenseCorrectionId ? (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-                        Mode koreksi biaya aktif. Catatan Finance: {expenseCorrection?.financeNote || '-'}
-                      </div>
-                    ) : null}
-                    <div className="grid gap-2 md:grid-cols-3">
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
-                        Kategori
-                        <select className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" value={expenseForm.category} onChange={(event) => setExpenseForm((current) => ({ ...current, category: event.target.value }))}>
-                          {EXPENSE_CATEGORY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                        </select>
-                      </label>
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
-                        Nominal
-                        <input className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" min="0" placeholder="125000" type="number" value={expenseForm.amount} onChange={(event) => setExpenseForm((current) => ({ ...current, amount: event.target.value }))} />
-                      </label>
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
-                        Status Bayar
-                        <select className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" value={expenseForm.paymentStatus} onChange={(event) => setExpenseForm((current) => ({ ...current, paymentStatus: event.target.value }))}>
-                          {EXPENSE_PAYMENT_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                        </select>
-                      </label>
-                    </div>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
-                        Penerima
-                        <input className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" placeholder="Nama sopir/vendor" value={expenseForm.recipientName} onChange={(event) => setExpenseForm((current) => ({ ...current, recipientName: event.target.value }))} />
-                      </label>
-                      <label className="grid gap-1 text-xs font-bold text-slate-600">
-                        Keterangan
-                        <input className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-800" placeholder="Contoh: Tol Cikampek" value={expenseForm.description} onChange={(event) => setExpenseForm((current) => ({ ...current, description: event.target.value }))} />
-                      </label>
-                    </div>
-                    <AttachmentUploadField
-                      helper="Wajib jika status sudah dibayar. PDF, JPG, PNG"
-                      id="expense-payment-proof"
-                      label="Bukti Pembayaran"
-                      onClear={() => setExpenseForm((current) => ({ ...current, proofFile: null }))}
-                      onSelect={(file, validationError) => {
-                        if (validationError) {
-                          setExpenseError(validationError);
-                          return;
-                        }
-                        setExpenseForm((current) => ({ ...current, proofFile: file }));
-                        setExpenseError('');
-                      }}
-                      title={expenseForm.proofFile?.name ? 'Ganti Bukti' : 'Upload Bukti'}
-                      value={expenseForm.proofFile}
-                    />
-                    {expenseError ? <p className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{expenseError}</p> : null}
-                    <div className="flex justify-end gap-2">
-                      {expenseCorrectionId ? <button className="secondary-button" disabled={expenseSaving} type="button" onClick={() => resetExpenseForm(detail)}>Batal Koreksi</button> : null}
-                      <button className="primary-button" disabled={expenseSaving} type="submit">{expenseSaving ? 'Menyimpan...' : expenseCorrectionId ? 'Kirim Koreksi' : 'Catat Biaya'}</button>
-                    </div>
-                  </form>
-                ) : null}
               </section>
               <section className="container-detail-uj"><h3>Acuan Biaya Perjalanan</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section className="container-detail-documents"><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}

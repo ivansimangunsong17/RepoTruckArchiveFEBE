@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import SalesOrderForm from './SalesOrderForm';
@@ -108,7 +108,7 @@ describe('SalesOrderForm', () => {
     );
 
     await fillBaseFields(user);
-    await fillFirstLineItem(user, { serviceName: 'Bon Muat/Bongkar', quantity: '1', price: '50000' });
+    await fillFirstLineItem(user, { serviceName: 'Handling', quantity: '1', price: '50000' });
     await openReview(user);
 
     expect(screen.queryByLabelText('No. Sales Order')).not.toBeInTheDocument();
@@ -116,6 +116,49 @@ describe('SalesOrderForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     await confirmReview(user);
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ soNumber: '' }));
+  });
+
+  it('dropdown Jenis Rincian pada rincian baru hanya menawarkan layanan revenue', () => {
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const serviceSelect = screen.getAllByLabelText('Jenis Rincian')[0];
+    const optionLabels = within(serviceSelect).getAllByRole('option').map((option) => option.value);
+    expect(optionLabels).toEqual(['Jasa Angkut D20', 'Jasa Angkut D40', 'Handling', 'Jasa Lainnya']);
+  });
+
+  it('rincian lama dengan layanan reimbursement (Bon Muat/Bongkar) tetap tampil apa adanya saat diedit', () => {
+    const order = {
+      id: 'so-legacy',
+      soNumber: 'SO-LEGACY-001',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      lineItems: [{ serviceName: 'Bon Muat/Bongkar', qty: 1, price: 50000 }],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const serviceSelect = screen.getAllByLabelText('Jenis Rincian')[0];
+    expect(serviceSelect).toHaveValue('Bon Muat/Bongkar');
+    const optionLabels = within(serviceSelect).getAllByRole('option').map((option) => option.value);
+    expect(optionLabels).toEqual(['Bon Muat/Bongkar', 'Jasa Angkut D20', 'Jasa Angkut D40', 'Handling', 'Jasa Lainnya']);
   });
 
   it('menolak rincian dengan qty nol', async () => {
@@ -133,7 +176,7 @@ describe('SalesOrderForm', () => {
 
     await fillBaseFields(user);
     await fillFirstLineItem(user, {
-      serviceName: 'Bon Muat/Bongkar',
+      serviceName: 'Handling',
       quantity: '0',
       price: '50000',
     });
@@ -243,7 +286,7 @@ describe('SalesOrderForm', () => {
     const qtyInputs = screen.getAllByLabelText('Qty');
     const priceInputs = screen.getAllByLabelText('Price');
 
-    await user.selectOptions(lineItems[1], 'Bon Muat/Bongkar');
+    await user.selectOptions(lineItems[1], 'Handling');
     fireEvent.change(qtyInputs[1], { target: { value: '1' } });
     fireEvent.change(priceInputs[1], { target: { value: '50000' } });
 
@@ -272,7 +315,7 @@ describe('SalesOrderForm', () => {
           price: 150000,
         }),
         expect.objectContaining({
-          serviceName: 'Bon Muat/Bongkar',
+          serviceName: 'Handling',
           containerType: '',
           qty: 1,
           price: 50000,
@@ -506,5 +549,91 @@ describe('SalesOrderForm', () => {
 
     await screen.findByLabelText('Customer');
     expect(screen.queryByText(/outstanding customer ini/i)).not.toBeInTheDocument();
+  });
+
+  it('mengunci edit SO yang sudah diverifikasi Finance untuk non-admin', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const order = {
+      id: 'so-locked',
+      soNumber: 'SO-LOCKED-001',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      accurateSoNumber: 'SO-LOCKED-001',
+      financeVerificationStatus: 'verified',
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 100000 }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' }],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        currentUser={{ role: 'sales' }}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByText(/Sales Order ini terkunci karena sudah diverifikasi Finance/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Mode koreksi admin/i)).not.toBeInTheDocument();
+
+    await openReview(user, true);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/Revisi hanya dapat dilakukan oleh Admin/i)).toBeInTheDocument();
+  });
+
+  it('admin wajib mengisi alasan koreksi minimal 8 karakter untuk mengedit SO yang terkunci', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const order = {
+      id: 'so-locked',
+      soNumber: 'SO-LOCKED-002',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      accurateSoNumber: 'SO-LOCKED-002',
+      financeVerificationStatus: 'verified',
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 100000 }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' }],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        currentUser={{ role: 'admin' }}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByText(/Mode koreksi admin/i)).toBeInTheDocument();
+
+    await openReview(user, true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/Aktifkan mode koreksi admin dan isi alasan/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: /Mode koreksi admin/i }));
+    await user.type(screen.getByLabelText('Alasan koreksi'), 'pendek');
+    await openReview(user, true);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/Alasan koreksi admin wajib diisi minimal 8 karakter/i)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Alasan koreksi'));
+    await user.type(screen.getByLabelText('Alasan koreksi'), 'Koreksi tujuan salah input');
+    await openReview(user, true);
+    await confirmReview(user, true);
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      adminCorrectionMode: true,
+      adminCorrectionReason: 'Koreksi tujuan salah input',
+    }));
   });
 });

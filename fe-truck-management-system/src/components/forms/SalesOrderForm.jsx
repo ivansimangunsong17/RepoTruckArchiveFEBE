@@ -16,6 +16,10 @@ const SERVICE_OPTIONS = [
   'Handling',
   'Jasa Lainnya',
 ];
+// Rincian Sales Order hanya untuk item revenue. Bon Muat/Bongkar dan Tila/Gatepass adalah
+// biaya reimbursement (dicatat lewat menu Biaya Operational), jadi tidak ditawarkan di sini —
+// tetap ada di SERVICE_OPTIONS agar rincian lama dengan layanan tersebut tidak berubah sendiri.
+const REVENUE_SERVICE_OPTIONS = ['Jasa Angkut D20', 'Jasa Angkut D40', 'Handling', 'Jasa Lainnya'];
 const SERVICE_ALIASES = {
   'Jasa Handling': 'Handling',
   'Stevedoring and Port Service': 'Handling',
@@ -222,6 +226,18 @@ function buildContainersFromLineItems(lineItems, receivedAt, existingContainers 
   });
 }
 
+const SENT_RPUJ_STATUSES = new Set(['submitted', 'approved', 'paid', 'rejected']);
+
+function isOrderLockedForCorrection(order) {
+  if (!order) return false;
+  const accurateSoNumber = String(order.accurateSoNumber || '').trim();
+  const verificationStatus = String(order.financeVerificationStatus || '').trim().toLowerCase();
+  if (accurateSoNumber || verificationStatus === 'verified') return true;
+  return (order.containers || []).some((container) => (
+    Boolean(container.rpujRequestedAt) || SENT_RPUJ_STATUSES.has(String(container.rpujStatus || '').trim().toLowerCase())
+  ));
+}
+
 function createInitialForm(order) {
   const lineItems = normalizeLineItems(order);
   const serviceName = summarizeLineItems(lineItems);
@@ -260,6 +276,8 @@ function createInitialForm(order) {
     referenceDocuments: order?.referenceDocuments?.length
       ? order.referenceDocuments.map(createDocumentDraft)
       : [createDocumentDraft()],
+    adminCorrectionMode: false,
+    adminCorrectionReason: '',
   };
 }
 
@@ -359,6 +377,7 @@ function SalesOrderForm({
   terminals: providedTerminals = [],
   destinations: providedDestinations = [],
   historicalMode = false,
+  currentUser = null,
 }) {
   const customers = useMemo(() => (
     (Array.isArray(providedCustomers) ? providedCustomers : fallbackCustomers)
@@ -387,6 +406,8 @@ function SalesOrderForm({
   const [error, setError] = useState('');
   const [reviewPayload, setReviewPayload] = useState(null);
   const editing = Boolean(order);
+  const requiresAdminCorrection = editing && !historicalMode && isOrderLockedForCorrection(order);
+  const canAccessAdminCorrection = requiresAdminCorrection && String(currentUser?.role || '').toLowerCase() === 'admin';
 
   useEffect(() => {
     setForm(createFormDraft());
@@ -458,6 +479,15 @@ function SalesOrderForm({
       [name]: value,
       ...(name === 'paymentType' && value === 'cash' ? { paymentTermDays: '0' } : {}),
       ...(name === 'paymentType' && value === 'tempo' && Number(current.paymentTermDays || 0) < 1 ? { paymentTermDays: '30' } : {}),
+    }));
+  }
+
+  function updateAdminCorrectionMode(event) {
+    const checked = event.target.checked;
+    setForm((current) => ({
+      ...current,
+      adminCorrectionMode: checked,
+      adminCorrectionReason: checked ? current.adminCorrectionReason : '',
     }));
   }
 
@@ -564,6 +594,20 @@ function SalesOrderForm({
       setReviewPayload(null);
       return setError(validationError);
     }
+    if (requiresAdminCorrection) {
+      if (!canAccessAdminCorrection) {
+        setReviewPayload(null);
+        return setError('Sales Order ini terkunci karena sudah diverifikasi Finance atau RPUJ sudah dikirim. Revisi hanya dapat dilakukan oleh Admin.');
+      }
+      if (form.adminCorrectionMode && String(form.adminCorrectionReason || '').trim().length < 8) {
+        setReviewPayload(null);
+        return setError('Alasan koreksi admin wajib diisi minimal 8 karakter.');
+      }
+      if (!form.adminCorrectionMode) {
+        setReviewPayload(null);
+        return setError('Sales Order ini terkunci. Aktifkan mode koreksi admin dan isi alasan untuk menyimpan perubahan.');
+      }
+    }
 
     setError('');
     const normalizedLineItems = lineItems.map((item) => ({
@@ -634,6 +678,38 @@ function SalesOrderForm({
         <form onSubmit={handleSubmit} onKeyDown={preventEnterSubmit} noValidate>
           <div className="sales-order-form-content">
           {error ? <div className="alert error sales-order-error">{error}</div> : null}
+
+          {requiresAdminCorrection ? (
+            canAccessAdminCorrection ? (
+              <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
+                <label className="flex items-start gap-2 font-bold">
+                  <input
+                    checked={Boolean(form.adminCorrectionMode)}
+                    className="mt-0.5 h-4 w-4 rounded border-amber-300 text-red-600 focus:ring-red-200"
+                    onChange={updateAdminCorrectionMode}
+                    type="checkbox"
+                  />
+                  <span>Mode koreksi admin (Sales Order ini terkunci karena sudah diverifikasi Finance atau RPUJ sudah dikirim)</span>
+                </label>
+                {form.adminCorrectionMode ? (
+                  <label className="mt-3 block font-bold">
+                    Alasan koreksi
+                    <textarea
+                      className="mt-1 min-h-[74px] w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                      name="adminCorrectionReason"
+                      onChange={updateField}
+                      placeholder="Contoh: koreksi salah input customer/tujuan"
+                      value={form.adminCorrectionReason}
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : (
+              <div className="alert warning">
+                Sales Order ini terkunci karena sudah diverifikasi Finance atau RPUJ sudah dikirim. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.
+              </div>
+            )
+          ) : null}
 
           <div className="form-section">
             <h3>Informasi Customer</h3>
@@ -831,7 +907,7 @@ function SalesOrderForm({
             <h3>Rincian</h3>
 
             <div className="line-item-toolbar">
-              <p>Tambahkan rincian jasa per baris. Satu SO bisa berisi campuran D20, D40, Bon Muat/Bongkar, dan Tila/Gatepass.</p>
+              <p>Tambahkan rincian jasa revenue per baris: Jasa Angkut D20/D40, Handling, atau Jasa Lainnya. Biaya reimbursement (Bon Muat/Bongkar, Tila/Gatepass) dicatat lewat menu Biaya Operational.</p>
               <button className="secondary-button" type="button" onClick={addLineItem}>
                 <Plus size={16} /> Tambah Rincian
               </button>
@@ -863,7 +939,10 @@ function SalesOrderForm({
                           value={item.serviceName}
                           onChange={(event) => updateLineItem(index, 'serviceName', event.target.value)}
                         >
-                          {SERVICE_OPTIONS.map((service) => (
+                          {(REVENUE_SERVICE_OPTIONS.includes(item.serviceName)
+                            ? REVENUE_SERVICE_OPTIONS
+                            : [item.serviceName, ...REVENUE_SERVICE_OPTIONS]
+                          ).map((service) => (
                             <option key={service} value={service}>{service}</option>
                           ))}
                         </select>

@@ -14,10 +14,10 @@ import DailyOperationalFundPanel from './dropping-account/DailyOperationalFundPa
 import ExpenseCheckConfirmModal from './dropping-account/ExpenseCheckConfirmModal';
 import ExpenseReconciliationModal from './dropping-account/ExpenseReconciliationModal';
 import OperationalFundCloseBatchModal from './dropping-account/OperationalFundCloseBatchModal';
+import OperationalFundReopenBatchModal from './dropping-account/OperationalFundReopenBatchModal';
 import OperationalFundDecisionModal from './dropping-account/OperationalFundDecisionModal';
 import OperationalFundDepositValidationModal from './dropping-account/OperationalFundDepositValidationModal';
 import OperationalFundRequestModal from './dropping-account/OperationalFundRequestModal';
-import AddLineItemModal from './order-verification/AddLineItemModal';
 import OrderDetailModal from './order-verification/OrderDetailModal';
 import OrderVerificationTable from './order-verification/OrderVerificationTable';
 import SoNumberInputModal from './order-verification/SoNumberInputModal';
@@ -347,6 +347,7 @@ function FinanceTable({
   operationalFundBusyId,
   canRequestOperationalFund,
   canDepositOperationalFund,
+  canReopenOperationalFundBatch,
   operationalFundTransactionError,
   operationalFundTransactionLoading,
   expenseReconciliationError,
@@ -448,6 +449,7 @@ function FinanceTable({
           batchLoading={operationalFundBatchLoading}
           canRequest={canRequestOperationalFund}
           canDeposit={canDepositOperationalFund}
+          canReopen={canReopenOperationalFundBatch}
           pendingCloseBatches={pendingCloseBatches}
           expenseBusyId={expenseReconciliationBusyId}
           expenseError={expenseReconciliationError}
@@ -462,6 +464,7 @@ function FinanceTable({
           onApproveFund={handlers.onApproveOperationalFund}
           onBatchDateChange={handlers.onOperationalFundBatchDateChange}
           onCloseBatch={handlers.onCloseOperationalFundBatch}
+          onReopenBatch={handlers.onReopenOperationalFundBatch}
           onOpenExpenseCheckConfirm={handlers.onOpenExpenseCheckConfirm}
           onOpenExpenseClarification={handlers.onOpenExpenseClarification}
           onOpenRequest={handlers.onOpenOperationalFundRequest}
@@ -506,6 +509,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const { user } = useAuth();
   const canRequestOperationalFund = hasPermission(user, 'finance.operational_fund.request');
   const canDepositOperationalFund = hasPermission(user, 'finance.operational_fund.deposit');
+  const canVoidDebitNotePayment = hasPermission(user, 'finance.debit_note.payment.void');
+  const canReopenOperationalFundBatch = hasPermission(user, 'finance.operational_fund.reopen');
   const [query, setQuery] = useState('');
   const activeTab = useMemo(
     () => financeTabs.find((tab) => tab.id === initialTabId) || financeTabs[0],
@@ -545,10 +550,6 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     soModalValue,
     soModalError,
     soModalOrder,
-    lineItemModalOrder,
-    lineItemForm,
-    lineItemError,
-    lineItemSaving,
     setOrderPage,
     handleActiveOrderTabChange,
     handleOrderFilterMonthChange,
@@ -558,10 +559,6 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     closeSoModal,
     handleSoModalValueChange,
     saveSoNumberFromModal,
-    onOpenLineItemModal,
-    closeLineItemModal,
-    handleLineItemFieldChange,
-    saveLineItemFromModal,
   } = orderVerification;
 
   const {
@@ -586,6 +583,18 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     invoiceConfirmId,
     invoiceConfirmError,
     invoiceConfirmRow,
+    debitNoteNumberSaving,
+    debitNoteNumberError,
+    debitNotePayments,
+    debitNotePaymentsLoading,
+    debitNotePaymentSaving,
+    debitNotePaymentError,
+    debitNotePaymentVoidBusyId,
+    debitNotePaymentVoidError,
+    submitDebitNoteNumber,
+    loadDebitNotePayments,
+    confirmDebitNotePayment,
+    voidDebitNotePayment,
     setInvoicePage,
     handleActiveInvoiceTabChange,
     handleActiveInvoiceDocumentFilterChange,
@@ -624,6 +633,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     operationalFundRequestForm,
     operationalFundDepositValidationOpen,
     operationalFundCloseValidationOpen,
+    operationalFundReopenValidationOpen,
+    operationalFundReopenReason,
     operationalFundRequestError,
     operationalFundDecision,
     operationalFundDecisionNote,
@@ -650,6 +661,10 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     confirmExpenseChecked,
     closeOperationalFundCloseValidationModal,
     confirmCloseOperationalFundBatch,
+    openOperationalFundReopenValidationModal,
+    closeOperationalFundReopenValidationModal,
+    handleOperationalFundReopenReasonChange,
+    confirmReopenOperationalFundBatch,
   } = operationalFund;
 
   const {
@@ -702,6 +717,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     onOpenOperationalFundDeposit: operationalFund.openOperationalFundDepositModal,
     onOperationalFundBatchDateChange: operationalFund.handleOperationalFundBatchDateChange,
     onCloseOperationalFundBatch: operationalFund.openOperationalFundCloseValidationModal,
+    onReopenOperationalFundBatch: operationalFund.openOperationalFundReopenValidationModal,
     onApproveOperationalFund: (id) => operationalFund.openOperationalFundDecision(id, 'approve'),
     onRejectOperationalFund: (id) => operationalFund.openOperationalFundDecision(id, 'reject'),
     onOpenExpenseCheckConfirm: operationalFund.openExpenseCheckConfirm,
@@ -737,6 +753,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         operationalFundBatchLoading={operationalFundBatchLoading}
         canRequestOperationalFund={canRequestOperationalFund}
         canDepositOperationalFund={canDepositOperationalFund}
+        canReopenOperationalFundBatch={canReopenOperationalFundBatch}
         operationalFundError={operationalFundError}
         operationalFundLoading={operationalFundLoading}
         operationalFundRows={operationalFundRows}
@@ -783,24 +800,23 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         corrections={correctionHistory}
         correctionsError={correctionHistoryError}
         correctionsLoading={correctionHistoryLoading}
-        onAddLineItem={onOpenLineItemModal}
         onClose={orderVerification.closeOrderDetail}
         onOpenCorrection={openCorrectionModal}
         order={selectedOrder}
-      />
-      <AddLineItemModal
-        busy={lineItemSaving}
-        error={lineItemError}
-        form={lineItemForm}
-        onClose={closeLineItemModal}
-        onConfirm={saveLineItemFromModal}
-        onFieldChange={handleLineItemFieldChange}
-        order={lineItemModalOrder}
       />
       <InvoiceDetailModal
         corrections={correctionHistory}
         correctionsError={correctionHistoryError}
         correctionsLoading={correctionHistoryLoading}
+        debitNoteNumberSaving={debitNoteNumberSaving}
+        debitNoteNumberError={debitNoteNumberError}
+        debitNotePayments={debitNotePayments}
+        debitNotePaymentsLoading={debitNotePaymentsLoading}
+        debitNotePaymentSaving={debitNotePaymentSaving}
+        debitNotePaymentError={debitNotePaymentError}
+        canVoidDebitNotePayment={canVoidDebitNotePayment}
+        debitNotePaymentVoidBusyId={debitNotePaymentVoidBusyId}
+        debitNotePaymentVoidError={debitNotePaymentVoidError}
         error={invoiceDetailError}
         invoice={selectedInvoice}
         invoiceDocumentBusyKey={invoiceDocumentBusyKey}
@@ -809,6 +825,10 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         onClose={invoiceWorkflow.closeInvoiceDetail}
         onOpenCorrection={openCorrectionModal}
         onUploadInvoiceDocument={handleUploadInvoiceDocument}
+        onSaveDebitNoteNumber={submitDebitNoteNumber}
+        onLoadDebitNotePayments={loadDebitNotePayments}
+        onConfirmDebitNotePayment={confirmDebitNotePayment}
+        onVoidDebitNotePayment={voidDebitNotePayment}
       />
       <SoNumberInputModal
         busy={savingSoId === soModalId}
@@ -845,6 +865,17 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
           onClose={closeOperationalFundCloseValidationModal}
           onConfirm={confirmCloseOperationalFundBatch}
           summary={operationalFundTransactionSummary}
+        />
+      ) : null}
+      {operationalFundReopenValidationOpen ? (
+        <OperationalFundReopenBatchModal
+          batch={operationalFundBatch}
+          busy={operationalFundBatchBusy}
+          error={operationalFundBatchError}
+          reason={operationalFundReopenReason}
+          onClose={closeOperationalFundReopenValidationModal}
+          onConfirm={confirmReopenOperationalFundBatch}
+          onReasonChange={handleOperationalFundReopenReasonChange}
         />
       ) : null}
       <OperationalFundDecisionModal

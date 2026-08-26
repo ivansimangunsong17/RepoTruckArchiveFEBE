@@ -18,17 +18,11 @@ import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-e
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
 import { getCustomerOutstandingSummary } from '../finance/finance.repository.js';
 
-export const SERVICE_OPTIONS = [
+const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
   'Jasa Angkut D40',
   'Bon Muat/Bongkar',
   'Tila/Gatepass',
-  'Handling',
-  'Jasa Lainnya',
-];
-export const REVENUE_SERVICE_OPTIONS = [
-  'Jasa Angkut D20',
-  'Jasa Angkut D40',
   'Handling',
   'Jasa Lainnya',
 ];
@@ -48,11 +42,11 @@ const SALES_INVOICE_DELIVERY_STATUSES = [
   'revisi_dispute',
 ];
 
-export function isContainerService(serviceName) {
+function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
 }
 
-export function isOtherService(serviceName) {
+function isOtherService(serviceName) {
   return serviceName === 'Jasa Lainnya';
 }
 
@@ -62,7 +56,7 @@ function normalizeServiceName(value) {
   return SERVICE_OPTIONS.includes(canonical) ? canonical : '';
 }
 
-export function normalizeLineItem(item = {}) {
+function normalizeLineItem(item = {}) {
   const serviceName = normalizeServiceName(item.serviceName) || 'Jasa Angkut D20';
   const qty = Math.max(1, Number(item.qty || 0));
   const price = Math.max(0, Number(item.price || 0));
@@ -260,8 +254,54 @@ function normalizeSalesOrderPayload(payload) {
   };
 }
 
+const ADMIN_CORRECTION_REASON_MIN_LENGTH = 8;
+
 function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
+}
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function normalizeRole(actor) {
+  return String(actor?.role || '').trim().toLowerCase();
+}
+
+function isAdmin(actor) {
+  return normalizeRole(actor) === 'admin';
+}
+
+export function isAdminCorrectionMode(payload = {}) {
+  return payload?.adminCorrectionMode === true || String(payload?.adminCorrectionMode || '').toLowerCase() === 'true';
+}
+
+export function adminCorrectionReason(payload = {}) {
+  return normalizeText(payload?.adminCorrectionReason);
+}
+
+export function canUseAdminCorrection(actor, payload = {}) {
+  return Boolean(
+    isAdmin(actor)
+      && isAdminCorrectionMode(payload)
+      && adminCorrectionReason(payload).length >= ADMIN_CORRECTION_REASON_MIN_LENGTH
+  );
+}
+
+function ensureAdminCorrectionContract(actor, payload = {}) {
+  if (!isAdminCorrectionMode(payload)) return;
+  if (!isAdmin(actor)) {
+    const error = new Error('Mode koreksi admin hanya dapat digunakan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'ADMIN_CORRECTION_ADMIN_ONLY';
+    throw error;
+  }
+  if (adminCorrectionReason(payload).length < ADMIN_CORRECTION_REASON_MIN_LENGTH) {
+    const error = new Error(`Alasan koreksi admin wajib diisi minimal ${ADMIN_CORRECTION_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'ADMIN_CORRECTION_REASON_REQUIRED';
+    throw error;
+  }
 }
 
 function hasSalesOrderAttachment(order, category) {
@@ -297,6 +337,39 @@ function ensureSalesOrderUnlockedForSales(actor, order) {
   const error = new Error('Sales Order terkunci karena RPUJ sudah dikirim. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.');
   error.statusCode = 403;
   error.code = 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY';
+  throw error;
+}
+
+function isHistoricalOrderContext(order = {}, payload = {}) {
+  return Boolean(
+    order?.entrySource === 'historical'
+      || order?.historicalPeriod
+      || String(payload?.entrySource || '').trim().toLowerCase() === 'historical'
+      || String(payload?.historicalPeriod || '').trim()
+  );
+}
+
+function ensureSalesOrderUnlockedForUpdate(actor, order, payload = {}) {
+  if (normalizeRole(actor) !== 'admin') {
+    ensureSalesOrderUnlockedForSales(actor, order);
+    return;
+  }
+  // Data historis sengaja dibuat dengan financeVerificationStatus 'verified' langsung saat backfill,
+  // jadi lock ini tidak relevan untuknya — koreksinya sudah dijaga oleh historical_periods.status
+  // (lihat ensureHistoricalPeriodEditable), bukan oleh lock RPUJ/nomor Finance.
+  if (isHistoricalOrderContext(order, payload)) return;
+  if (canUseAdminCorrection(actor, payload)) return;
+
+  if (isSalesOrderLockedByFinanceNumber(order)) {
+    const error = new Error('Sales Order terkunci karena Finance sudah menerbitkan nomor SO. Aktifkan mode koreksi admin dengan alasan untuk mengubah data ini.');
+    error.statusCode = 403;
+    error.code = 'SALES_ORDER_FINANCE_NUMBER_LOCKED_CORRECTION_REQUIRED';
+    throw error;
+  }
+  if (!isSalesOrderLockedByRpuj(order)) return;
+  const error = new Error('Sales Order terkunci karena RPUJ sudah dikirim. Aktifkan mode koreksi admin dengan alasan untuk mengubah data ini.');
+  error.statusCode = 403;
+  error.code = 'SALES_ORDER_RPUJ_LOCKED_CORRECTION_REQUIRED';
   throw error;
 }
 
@@ -490,7 +563,8 @@ export async function saveSalesOrder(payload, id, actor) {
   }
   if (id) {
     ensureCanAccessSalesOrder(actor, currentOrder);
-    ensureSalesOrderUnlockedForSales(actor, currentOrder);
+    ensureAdminCorrectionContract(actor, normalizedPayload);
+    ensureSalesOrderUnlockedForUpdate(actor, currentOrder, normalizedPayload);
   }
   ensureCanManageHistoricalEntry(actor, {
     payload: normalizedPayload,

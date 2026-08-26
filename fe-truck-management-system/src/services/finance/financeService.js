@@ -24,10 +24,6 @@ export function updateFinanceOrderSoNumber(id, soNumber) {
   return httpClient.patch(`/finance/order-verifications/${encodeURIComponent(id)}/so-number`, { soNumber });
 }
 
-export function addFinanceOrderLineItem(id, payload = {}) {
-  return httpClient.post(`/finance/order-verifications/${encodeURIComponent(id)}/line-items`, payload);
-}
-
 export function fetchFinanceOrderCorrections(id) {
   return httpClient.get(`/finance/order-verifications/${encodeURIComponent(id)}/corrections`);
 }
@@ -94,6 +90,10 @@ export function rejectOperationalFundRequest(id, rejectionNote = '') {
 
 export function closeOperationalFundBatch(id, payload = {}) {
   return httpClient.patch(`/finance/operational-fund-batches/${encodeURIComponent(id)}/close`, payload);
+}
+
+export function reopenOperationalFundBatch(id, reason) {
+  return httpClient.patch(`/finance/operational-fund-batches/${encodeURIComponent(id)}/reopen`, { reason });
 }
 
 export function fetchFinanceContainerJobExpenses(params = {}) {
@@ -182,7 +182,11 @@ export function updateFinanceInvoiceNumber(id, invoiceNumber) {
 }
 
 export async function uploadFinanceInvoiceDocument(id, documentType, file) {
-  const label = documentType === 'taxInvoice' ? 'Faktur Pajak' : 'Invoice';
+  const label = documentType === 'taxInvoice'
+    ? 'Faktur Pajak'
+    : documentType === 'debitNote'
+      ? 'Dokumen Debit Note'
+      : 'Invoice';
   const validationError = validateArchiveFile(file, {
     label,
     allowedTypes: ['application/pdf'],
@@ -202,6 +206,10 @@ export async function uploadFinanceInvoiceDocument(id, documentType, file) {
 
 export function fetchFinanceOutstanding(params = {}) {
   return httpClient.get(`/finance/outstanding${buildQuery(params)}`);
+}
+
+export function fetchFinanceOutstandingByCustomer(params = {}) {
+  return httpClient.get(`/finance/outstanding/by-customer${buildQuery(params)}`);
 }
 
 export function fetchFinanceInvoicePayments(id) {
@@ -224,6 +232,48 @@ export async function recordFinanceInvoicePayment(id, payload = {}, proofFile) {
       fileBase64,
     },
   });
+}
+
+export function voidFinanceInvoicePayment(id, paymentId, reason) {
+  return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}/void`, { reason });
+}
+
+export function fetchFinanceDebitNotes(params = {}) {
+  return httpClient.get(`/finance/debit-notes${buildQuery(params)}`);
+}
+
+export function fetchFinanceDebitNoteOutstanding(params = {}) {
+  return httpClient.get(`/finance/debit-notes/outstanding${buildQuery(params)}`);
+}
+
+export function updateFinanceDebitNoteNumber(id, debitNoteNumber) {
+  return httpClient.patch(`/finance/debit-notes/${encodeURIComponent(id)}/number`, { debitNoteNumber });
+}
+
+export function fetchFinanceDebitNotePayments(id) {
+  return httpClient.get(`/finance/debit-notes/${encodeURIComponent(id)}/payments`);
+}
+
+export async function recordFinanceDebitNotePayment(id, payload = {}, proofFile) {
+  const validationError = validateArchiveFile(proofFile, { label: 'Bukti transfer' })
+    || validateFinalUploadFile(proofFile, { label: 'Bukti transfer' });
+  if (validationError) throw new Error(validationError);
+
+  const uploadFile = proofFile.type?.startsWith('image/') ? await compressImageFile(proofFile) : proofFile;
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
+  return httpClient.post(`/finance/debit-notes/${encodeURIComponent(id)}/payments`, {
+    ...payload,
+    proofFile: {
+      fileName: uploadFile.name,
+      mimeType: uploadFile.type || 'application/octet-stream',
+      fileSize: uploadFile.size,
+      fileBase64,
+    },
+  });
+}
+
+export function voidFinanceDebitNotePayment(id, paymentId, reason) {
+  return httpClient.patch(`/finance/debit-notes/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}/void`, { reason });
 }
 
 export function fetchFinanceInvoiceCorrections(id) {

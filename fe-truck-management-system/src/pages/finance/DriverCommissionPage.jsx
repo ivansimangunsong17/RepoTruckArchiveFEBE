@@ -12,6 +12,7 @@ import {
   fetchDriverCommissionPeriodReport,
   rejectDriverCommissionBatch,
   uploadDriverCommissionTransferProof,
+  voidDriverCommissionPayment,
 } from '../../services/finance/driverCommissionService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
@@ -240,9 +241,11 @@ function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
 
-function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, saving, onUploadProof, open, onClose }) {
+function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, saving, onUploadProof, canVoidPayment, voidBusyId, voidError, onVoidPayment, open, onClose }) {
   const [noteDraft, setNoteDraft] = useState('');
   const [pendingFile, setPendingFile] = useState(null);
+  const [voidingOpen, setVoidingOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
 
   useEffect(() => {
     if (!open) return undefined;
@@ -263,6 +266,8 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
     if (open) {
       setNoteDraft('');
       setPendingFile(null);
+      setVoidingOpen(false);
+      setVoidReason('');
     }
   }, [open, driver?.driverKey, driver?.driverId, driver?.driverName]);
 
@@ -321,11 +326,58 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
             {payment?.paidAt ? (
               <p className="text-xs font-semibold text-emerald-700">Paid {formatDateTime(payment.paidAt)} oleh {payment.paidByName || '-'}</p>
             ) : <p className="text-xs font-semibold text-slate-500">Pembayaran belum dicatat paid.</p>}
+            {payment?.voidedAt ? (
+              <p className="mt-1 text-xs font-semibold text-rose-700">
+                Dibatalkan {formatDateTime(payment.voidedAt)} oleh {payment.voidedByName || '-'}{payment.voidReason ? ` — ${payment.voidReason}` : ''}
+              </p>
+            ) : null}
             {payment?.paymentProofAttachmentId || driver.paymentProofAttachmentId ? (
               <p className="mt-1 text-xs font-semibold text-sky-700">Bukti transfer tersimpan.</p>
             ) : null}
             {payment?.paymentNote || driver.paymentNote ? (
               <p className="mt-1 text-xs text-slate-500">{payment?.paymentNote || driver.paymentNote}</p>
+            ) : null}
+            {canVoidPayment && alreadyPaid && !payment?.voidedAt ? (
+              <div className="mt-3">
+                {voidingOpen ? (
+                  <div className="grid gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3">
+                    <label className="grid gap-1.5 text-[11px] font-black uppercase tracking-wide text-rose-600">
+                      Alasan Pembatalan
+                      <textarea
+                        autoFocus
+                        className="min-h-16 w-full resize-y rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-900 outline-none transition focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                        disabled={voidBusyId === payment?.id}
+                        onChange={(event) => setVoidReason(event.target.value)}
+                        placeholder="Contoh: Salah input nominal, batal atas permintaan driver"
+                        value={voidReason}
+                      />
+                    </label>
+                    {voidError ? <p className="text-xs font-semibold text-rose-700">{voidError}</p> : null}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className="rounded-md bg-rose-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-rose-700 disabled:opacity-60"
+                        disabled={!voidReason.trim() || voidBusyId === payment?.id}
+                        onClick={() => onVoidPayment(payment.id, voidReason.trim())}
+                        type="button"
+                      >
+                        {voidBusyId === payment?.id ? 'Membatalkan...' : 'Konfirmasi Batalkan'}
+                      </button>
+                      <button
+                        className="secondary-button"
+                        disabled={voidBusyId === payment?.id}
+                        onClick={() => { setVoidingOpen(false); setVoidReason(''); }}
+                        type="button"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="text-xs font-bold text-rose-600 hover:underline" onClick={() => setVoidingOpen(true)} type="button">
+                    Batalkan Pembayaran
+                  </button>
+                )}
+              </div>
             ) : null}
             {canUploadProof ? (
               <div className="mt-4">
@@ -554,8 +606,11 @@ function DriverCommissionPage() {
   const [batchPickerOpen, setBatchPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [voidBusyId, setVoidBusyId] = useState('');
+  const [voidError, setVoidError] = useState('');
 
   const canFinance = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
+  const canVoidPayment = user?.role === USER_ROLES.ADMIN;
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
   const dropdownBatches = useMemo(() => {
@@ -701,6 +756,23 @@ function DriverCommissionPage() {
       notify({ type: 'error', title: 'Upload bukti gagal', message: error.message });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function voidPayment(paymentId, reason) {
+    if (!paymentId) return;
+
+    setVoidBusyId(paymentId);
+    setVoidError('');
+    try {
+      const updated = await voidDriverCommissionPayment(paymentId, reason);
+      notify({ title: 'Pembayaran dibatalkan', message: 'Status komisi kembali menunggu pembayaran.' });
+      setSelectedBatch(updated);
+      await loadData(updated.id);
+    } catch (error) {
+      setVoidError(error.message || 'Pembatalan pembayaran gagal.');
+    } finally {
+      setVoidBusyId('');
     }
   }
 
@@ -852,6 +924,10 @@ function DriverCommissionPage() {
         canFinance={canFinance}
         saving={saving}
         onUploadProof={handleUploadProof}
+        canVoidPayment={canVoidPayment}
+        voidBusyId={voidBusyId}
+        voidError={voidError}
+        onVoidPayment={voidPayment}
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
       />

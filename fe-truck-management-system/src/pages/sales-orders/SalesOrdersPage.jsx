@@ -1413,6 +1413,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
           depots={archive.masters.depots}
           terminals={archive.masters.terminals}
           destinations={archive.masters.destinations}
+          currentUser={user}
           onClose={() => { setFormOpen(false); setEditingOrder(null); }}
           onSubmit={saveOrder}
         />

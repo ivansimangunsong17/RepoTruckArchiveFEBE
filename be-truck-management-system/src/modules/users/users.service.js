@@ -6,6 +6,7 @@ import {
   updateUserPassword,
   updateUserStatus,
 } from './users.repository.js';
+import { invalidateActorStatus } from '../auth/actor-status-cache.js';
 
 const allowedRoles = ['admin', 'sales', 'operational', 'pengamat', 'observer', 'finance'];
 const allowedStatuses = ['Aktif', 'Nonaktif'];
@@ -77,12 +78,14 @@ export function saveNewUser(payload) {
   return createUser(payload);
 }
 
-export function saveUser(id, payload) {
+export async function saveUser(id, payload) {
   validateUserPayload(payload);
-  return updateUser(id, payload);
+  const saved = await updateUser(id, payload);
+  invalidateActorStatus(id);
+  return saved;
 }
 
-export function saveUserStatus(id, payload) {
+export async function saveUserStatus(id, payload) {
   ensureObject(payload, 'Payload status user');
   if (!allowedStatuses.includes(payload.status)) {
     const error = new Error('Status user tidak valid.');
@@ -90,7 +93,9 @@ export function saveUserStatus(id, payload) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
-  return updateUserStatus(id, payload.status);
+  const saved = await updateUserStatus(id, payload.status);
+  invalidateActorStatus(id);
+  return saved;
 }
 
 export async function resetUserPassword(id, payload = {}) {

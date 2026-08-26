@@ -31,13 +31,20 @@ function isNavigationItemActive(item, pathname) {
   return item.children?.some((child) => matchesPath(pathname, child.to)) || false;
 }
 
+const collapsibleGroupLabels = ['System'];
+
 function Sidebar({ open, collapsed, onClose }) {
   const { user, signOut } = useAuth();
   const location = useLocation();
   const [openDropdowns, setOpenDropdowns] = useState({});
+  const [openGroups, setOpenGroups] = useState({});
 
   function toggleDropdown(label) {
     setOpenDropdowns((current) => ({ ...current, [label]: !current[label] }));
+  }
+
+  function toggleGroup(label) {
+    setOpenGroups((current) => ({ ...current, [label]: current[label] === false ? true : false }));
   }
 
   return (
@@ -55,10 +62,27 @@ function Sidebar({ open, collapsed, onClose }) {
           const visibleItems = visibleNavigationItems(group.items, user?.role);
           if (!visibleItems.length) return null;
 
+          const isCollapsibleGroup = collapsibleGroupLabels.includes(group.label);
+          const groupOpen = !isCollapsibleGroup || openGroups[group.label] !== false;
+          const GroupIcon = group.icon;
+
           return (
             <div className="nav-group" key={group.label}>
-              <p>{group.label}</p>
-              {visibleItems.map((item) => {
+              {isCollapsibleGroup && GroupIcon ? (
+                <button
+                  aria-expanded={groupOpen}
+                  className={`nav-link nav-dropdown-trigger ${groupOpen ? 'expanded' : ''}`}
+                  onClick={() => toggleGroup(group.label)}
+                  type="button"
+                >
+                  <GroupIcon size={18} />
+                  <span>{group.label}</span>
+                  <ChevronDown className={`nav-dropdown-chevron ${groupOpen ? 'open' : ''}`} size={15} />
+                </button>
+              ) : (
+                <p className="nav-group-header">{group.label}</p>
+              )}
+              {groupOpen && visibleItems.map((item) => {
                 const { to, label, icon: Icon } = item;
                 const itemActive = isNavigationItemActive(item, location.pathname);
                 const dropdownOpen = Boolean(item.children?.length && (itemActive || openDropdowns[label]));

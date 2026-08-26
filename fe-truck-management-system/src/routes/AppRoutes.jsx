@@ -9,9 +9,7 @@ import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
 
 const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
-const Dashboard = lazy(() => import('../pages/Dashboard'));
-const WeeklyOrdersPage = lazy(() => import('../pages/dashboard/WeeklyOrdersPage'));
-const OrderHistoryPage = lazy(() => import('../pages/dashboard/OrderHistoryPage'));
+const OrderDashboardPage = lazy(() => import('../pages/OrderDashboardPage'));
 const SalesOrdersPage = lazy(() => import('../pages/sales-orders/SalesOrdersPage'));
 const HistoricalEntryPage = lazy(() => import('../pages/admin/HistoricalEntryPage'));
 const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
@@ -51,7 +49,6 @@ function LazyPage({ children }) {
 }
 
 const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL];
-const overviewRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIONAL, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const orderRoles = nonFinanceRoles;
 const customerDocumentRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES];
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
@@ -85,9 +82,9 @@ export const router = createBrowserRouter([
       children: [
         { index: true, element: <Navigate to="/order-running" replace /> },
         { path: 'dashboard', element: <Navigate to="/order-running" replace /> },
-        { path: 'order-running', element: <LazyPage><Dashboard /></LazyPage> },
-        { path: 'weekly-orders', children: [guardedPage(overviewRoles, <LazyPage><WeeklyOrdersPage /></LazyPage>)] },
-        { path: 'order-history', children: [guardedPage(overviewRoles, <LazyPage><OrderHistoryPage /></LazyPage>)] },
+        { path: 'order-running', element: <LazyPage><OrderDashboardPage initialTab="running" /></LazyPage> },
+        { path: 'weekly-orders', element: <Navigate to="/order-running" replace /> },
+        { path: 'order-history', element: <Navigate to="/order-running" replace /> },
         { path: 'profile', element: <LazyPage><ProfilePage /></LazyPage> },
         { path: 'delivery-orders', element: <Navigate to="/sales-orders" replace /> },
         { path: 'sales-orders', children: [guardedPage(orderRoles, <LazyPage><SalesOrdersPage /></LazyPage>)] },

@@ -39,7 +39,7 @@
   .sidebar.collapsed { padding: 24px 15px 18px; }
   .sidebar.collapsed .brand { justify-content: flex-start; gap: 11px; padding: 0 8px 22px; }
   .sidebar.collapsed .brand > div:not(.brand-mark) { display: block; }
-  .sidebar.collapsed .nav-group > p,
+  .sidebar.collapsed .nav-group-header,
   .sidebar.collapsed .nav-link span { display: inline; }
   .sidebar.collapsed .nav-dropdown-content { display: grid; }
   .sidebar.collapsed .nav-dropdown-chevron { display: block; }

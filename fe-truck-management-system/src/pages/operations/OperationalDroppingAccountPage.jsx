@@ -60,16 +60,17 @@ const fundCategoryLabels = {
 };
 
 
+const REIMBURSEMENT_LAINNYA_PRESET = 'Reimbursement Lainnya';
 const EXPENSE_DESCRIPTION_GROUPS = [
   {
     id: 'operational',
     label: 'Biaya Operational',
-    presets: ['Uang MEL (Uang Petugas)', 'Tambal Ban'],
+    presets: ['Biaya MEL', 'Biaya Tambal Ban'],
   },
   {
     id: 'reimbursement',
     label: 'Biaya Reimbursement',
-    presets: ['Bon Muat/Bon Bongkar', 'Gatepass/TILA', 'Reimbursement Uang MEL (Uang Petugas)', 'Biaya Extend'],
+    presets: ['Reimbursement Bon Muat/Bongkar', 'Reimbursement Gatepass/TILA', 'Ekstend Closing', REIMBURSEMENT_LAINNYA_PRESET],
   },
 ];
 const EXPENSE_DESCRIPTION_PRESETS = EXPENSE_DESCRIPTION_GROUPS.flatMap((group) => group.presets);
@@ -328,6 +329,7 @@ function OperationalDroppingAccountPage() {
     expenseGroup: '',
     amount: '',
     description: '',
+    lainnyaNote: '',
     recipientType: 'vendor',
     recipientName: '',
     paymentStatus: 'sudah_dibayar',
@@ -513,16 +515,17 @@ function OperationalDroppingAccountPage() {
   const isPresetDescription = EXPENSE_DESCRIPTION_PRESETS.includes(addExpenseForm.description);
   const showManualDescription = descriptionManualMode || (addExpenseForm.description.trim() && !isPresetDescription);
   const descriptionSelectValue = showManualDescription ? CUSTOM_DESCRIPTION_VALUE : (isPresetDescription ? addExpenseForm.description : '');
+  const showReimbursementLainnyaNote = addExpenseForm.description === REIMBURSEMENT_LAINNYA_PRESET;
 
   function handleDescriptionSelectChange(event) {
     const selected = event.target.value;
     if (selected === CUSTOM_DESCRIPTION_VALUE) {
       setDescriptionManualMode(true);
-      setAddExpenseForm((current) => ({ ...current, expenseGroup: '' }));
+      setAddExpenseForm((current) => ({ ...current, expenseGroup: '', lainnyaNote: '' }));
       return;
     }
     setDescriptionManualMode(false);
-    setAddExpenseForm((current) => ({ ...current, description: selected, expenseGroup: EXPENSE_GROUP_BY_PRESET[selected] || '' }));
+    setAddExpenseForm((current) => ({ ...current, description: selected, expenseGroup: EXPENSE_GROUP_BY_PRESET[selected] || '', lainnyaNote: '' }));
     setFileError('');
   }
 
@@ -583,6 +586,7 @@ function OperationalDroppingAccountPage() {
       category: 'lainnya',
       amount: '',
       description: '',
+      lainnyaNote: '',
       recipientType: 'vendor',
       recipientName: '',
       paymentStatus: 'sudah_dibayar',
@@ -604,6 +608,10 @@ function OperationalDroppingAccountPage() {
     }
     if (!String(addExpenseForm.description || '').trim()) {
       setFileError('Keterangan biaya wajib diisi agar pencatatan jelas.');
+      return null;
+    }
+    if (addExpenseForm.description === REIMBURSEMENT_LAINNYA_PRESET && !String(addExpenseForm.lainnyaNote || '').trim()) {
+      setFileError('Isi keterangan untuk Reimbursement Lainnya agar pencatatan jelas.');
       return null;
     }
     if (!['operational', 'reimbursement'].includes(addExpenseForm.expenseGroup)) {
@@ -724,8 +732,12 @@ function OperationalDroppingAccountPage() {
     setFileError('');
     try {
       const actorName = user?.fullName || user?.name || user?.email || 'Operational';
+      const description = showReimbursementLainnyaNote
+        ? `${addExpenseForm.description} - ${addExpenseForm.lainnyaNote.trim()}`
+        : addExpenseForm.description;
       await createContainerJobExpense(selectedJob.id, {
         ...addExpenseForm,
+        description,
         amount,
         updatedBy: actorName,
       });
@@ -1108,6 +1120,20 @@ function OperationalDroppingAccountPage() {
                           </select>
                         </label>
                       </>
+                    ) : null}
+                    {showReimbursementLainnyaNote ? (
+                      <label className="master-field span-full">
+                        <span>Keterangan Reimbursement Lainnya <em>*</em></span>
+                        <input
+                          aria-label="Keterangan Reimbursement Lainnya"
+                          placeholder="Contoh: biaya admin, LOLO, seal, atau catatan lain"
+                          value={addExpenseForm.lainnyaNote}
+                          onChange={(event) => {
+                            setAddExpenseForm((current) => ({ ...current, lainnyaNote: event.target.value }));
+                            setFileError('');
+                          }}
+                        />
+                      </label>
                     ) : null}
                     <label className="master-field">
                       <span className="flex items-center justify-between gap-2">

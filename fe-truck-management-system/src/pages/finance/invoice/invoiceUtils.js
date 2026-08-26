@@ -28,6 +28,13 @@ const financeInvoiceUploadSlots = [
     uploadedAtKey: 'taxInvoiceDocumentUploadedAt',
     uploadedByKey: 'taxInvoiceDocumentUploadedBy',
   },
+  {
+    type: 'debitNote',
+    category: 'debitNotePdf',
+    label: 'Dokumen Debit Note',
+    uploadedAtKey: 'debitNoteDocumentUploadedAt',
+    uploadedByKey: 'debitNoteDocumentUploadedByName',
+  },
 ];
 
 function formatDisplayDate(value) {
@@ -88,6 +95,20 @@ function normalizeFinanceInvoiceRow(row = {}) {
     invoiceStatus: row.invoiceStatus || (row.invoiceNumber ? 'Menunggu Update Status' : 'Butuh Nomor Invoice'),
     paymentStatus: row.paymentStatus || '-',
     billingStatus: row.billingStatus || 'belum_invoice',
+    debitNoteAmount: Number(row.debitNoteAmount || 0),
+    debitNoteItems: Array.isArray(row.debitNoteItems) ? row.debitNoteItems : [],
+    containerCount: Number(row.containerCount || 0),
+    debitNoteNumber: row.debitNoteNumber || '',
+    debitNoteIssuedAt: row.debitNoteIssuedAt || '',
+    debitNoteDueDate: row.debitNoteDueDate || '',
+    debitNoteItemCount: Number(row.debitNoteItemCount || 0),
+    debitNoteTotalPaid: Number(row.debitNoteTotalPaid || 0),
+    debitNoteOutstandingAmount: Number(row.debitNoteOutstandingAmount || 0),
+    debitNoteAgingBucket: row.debitNoteAgingBucket || '',
+    debitNoteDocumentUploadedAt: row.debitNoteDocumentUploadedAt || '',
+    debitNoteDocumentUploadedByName: row.debitNoteDocumentUploadedByName || '',
+    containerBreakdown: Array.isArray(row.containerBreakdown) ? row.containerBreakdown : [],
+    containerNumbers: Array.isArray(row.containerNumbers) ? row.containerNumbers.filter(Boolean) : [],
   };
 }
 
@@ -114,8 +135,10 @@ function findInvoiceFinanceDocument(documents, category) {
 
 function mapUploadedInvoiceDocument(uploadedDocument, documentType) {
   if (!uploadedDocument) return null;
-  const category = uploadedDocument.category || (documentType === 'taxInvoice' ? 'taxInvoicePdf' : 'invoicePdf');
-  const label = category === 'taxInvoicePdf' ? 'Faktur Pajak' : 'Invoice';
+  const category = uploadedDocument.category || (
+    documentType === 'taxInvoice' ? 'taxInvoicePdf' : documentType === 'debitNote' ? 'debitNotePdf' : 'invoicePdf'
+  );
+  const label = category === 'taxInvoicePdf' ? 'Faktur Pajak' : category === 'debitNotePdf' ? 'Dokumen Debit Note' : 'Invoice';
   return {
     id: uploadedDocument.id || uploadedDocument.path || `${category}-${Date.now()}`,
     category,

@@ -10,6 +10,7 @@ import {
   rejectSubmittedDriverCommissionBatch,
   submitDriverCommissionBatch,
   uploadDriverCommissionPaymentProof,
+  voidDriverCommissionPaymentRecord,
 } from './driver-commissions.service.js';
 
 export function driverCommissionBatchAuditSnapshot(batch = {}) {
@@ -150,6 +151,23 @@ export async function payDriverCommissionPaymentController(request, response) {
     },
   });
   sendSuccess(response, result, 'Pembayaran komisi sopir dicatat.');
+}
+
+export async function voidDriverCommissionPaymentController(request, response) {
+  const result = await voidDriverCommissionPaymentRecord(request.params.id, request.body || {}, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'VOID_DRIVER_COMMISSION_PAYMENT',
+    module: 'driver_commissions',
+    entityType: 'driver_commission_payment',
+    entityId: request.params.id,
+    afterData: driverCommissionPaymentAuditSnapshot(result, request.params.id),
+    metadata: {
+      batchId: result.id,
+      paymentId: request.params.id,
+      reason: request.body?.reason,
+    },
+  });
+  sendSuccess(response, result, 'Pembayaran komisi sopir berhasil dibatalkan.');
 }
 
 export async function uploadDriverCommissionPaymentProofController(request, response) {

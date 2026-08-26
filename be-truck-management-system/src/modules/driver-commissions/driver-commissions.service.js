@@ -8,6 +8,7 @@ import {
   findEligibleDriverCommissions,
   markDriverCommissionPaymentPaid,
   rejectDriverCommissionBatch,
+  voidDriverCommissionPayment,
 } from './driver-commissions.repository.js';
 import { isCommissionWeekPeriod, normalizeCommissionPeriod } from './driver-commissions.period.js';
 import { createAttachment } from '../attachments/attachments.service.js';
@@ -99,6 +100,27 @@ export async function rejectSubmittedDriverCommissionBatch(id, payload = {}, act
 
 export async function payDriverCommissionPayment(id, payload = {}, actor = {}) {
   const batch = await markDriverCommissionPaymentPaid(id, payload, actor);
+  if (!batch) throw notFound('Payment komisi sopir tidak ditemukan.');
+  return batch;
+}
+
+// Void sengaja admin-only (bukan permission finance.transfer_proof.upload yang dipakai
+// approve/pay/upload-proof di modul ini) -- koreksi kalau Finance salah bayar sopir/nominal
+// butuh persetujuan level lebih tinggi, alasan wajib.
+export async function voidDriverCommissionPaymentRecord(id, payload = {}, actor = {}) {
+  if (!actor || actor.role !== 'admin') {
+    const error = new Error('Pembatalan pembayaran komisi sopir hanya dapat dilakukan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'DRIVER_COMMISSION_PAYMENT_VOID_FORBIDDEN';
+    throw error;
+  }
+  if (!String(payload.reason || '').trim()) {
+    const error = new Error('Alasan pembatalan wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'DRIVER_COMMISSION_PAYMENT_VOID_REASON_REQUIRED';
+    throw error;
+  }
+  const batch = await voidDriverCommissionPayment(id, payload, actor);
   if (!batch) throw notFound('Payment komisi sopir tidak ditemukan.');
   return batch;
 }
