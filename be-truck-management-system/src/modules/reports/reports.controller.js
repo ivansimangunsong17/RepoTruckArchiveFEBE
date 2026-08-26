@@ -5,6 +5,7 @@ import {
   fetchDriverPerformanceReport,
   fetchMonthlyRevenueReport,
   fetchOperationReport,
+  fetchSalesPerformanceReport,
   fetchSalesOrderReport,
 } from './reports.service.js';
 
@@ -20,6 +21,11 @@ export async function salesOrderReportController(request, response) {
 
 export async function monthlyRevenueReportController(request, response) {
   const result = await fetchMonthlyRevenueReport(request.query);
+  sendSuccess(response, result);
+}
+
+export async function salesPerformanceReportController(request, response) {
+  const result = await fetchSalesPerformanceReport(request.query);
   sendSuccess(response, result);
 }
 

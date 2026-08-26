@@ -1,5 +1,6 @@
 import {
   archiveMasterRow,
+  clearVehicleDefaultDriverByNames,
   findAllMasterRows,
   findMasterRowById,
   findMasterRows,
@@ -83,6 +84,18 @@ async function normalizePayloadForResource(resource, payload) {
   return payload;
 }
 
+export function shouldDetachDriverFromUnit(status = '') {
+  const normalized = String(status || '').trim().toLowerCase();
+  return normalized === 'cuti' || normalized === 'tidak aktif';
+}
+
+function driverIdentityNames(...drivers) {
+  return drivers.flatMap((driver) => [
+    driver?.name,
+    driver?.nickname,
+  ]);
+}
+
 export async function saveMasterRow(resource, payload, id) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload master data harus berupa object.');
@@ -90,8 +103,15 @@ export async function saveMasterRow(resource, payload, id) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
+  const currentDriver = resource === 'drivers' && id ? await findMasterRowById(resource, id) : null;
   const normalizedPayload = await normalizePayloadForResource(resource, payload);
-  return upsertMasterRow(resource, normalizedPayload, id);
+  const saved = await upsertMasterRow(resource, normalizedPayload, id);
+
+  if (resource === 'drivers' && shouldDetachDriverFromUnit(saved.status)) {
+    await clearVehicleDefaultDriverByNames(driverIdentityNames(currentDriver, saved));
+  }
+
+  return saved;
 }
 
 export function removeMasterRow(resource, id) {

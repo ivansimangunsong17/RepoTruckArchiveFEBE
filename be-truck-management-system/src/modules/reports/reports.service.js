@@ -4,6 +4,7 @@ import {
   getDriverPerformanceReport,
   getMonthlyRevenueReport,
   getOperationReport,
+  getSalesPerformanceReport,
   getSalesOrderReport,
 } from './reports.repository.js';
 
@@ -25,6 +26,15 @@ export function fetchSalesOrderReport(query) {
 
 export function fetchMonthlyRevenueReport(query) {
   return getMonthlyRevenueReport({
+    month: query.month,
+    year: query.year,
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
+  });
+}
+
+export function fetchSalesPerformanceReport(query) {
+  return getSalesPerformanceReport({
     month: query.month,
     year: query.year,
     entrySource: query.entrySource || '',

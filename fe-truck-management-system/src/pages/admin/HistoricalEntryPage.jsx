@@ -245,12 +245,11 @@ function buildExportFilename(period) {
   return `validasi-data-lama-${String(period || 'semua').replace(/[^0-9a-z-]/gi, '-')}.csv`;
 }
 
-async function fetchHistoricalOrders({ period }) {
+async function fetchPagedSalesOrders(params = {}) {
   const first = await fetchSalesOrdersPage({
     page: 1,
     pageSize: FETCH_PAGE_SIZE,
-    entrySource: 'historical',
-    historicalPeriod: period,
+    ...params,
   });
   const rows = [...(first.rows || [])];
   const total = Number(first.total || rows.length || 0);
@@ -260,13 +259,41 @@ async function fetchHistoricalOrders({ period }) {
     const next = await fetchSalesOrdersPage({
       page: nextPage,
       pageSize: FETCH_PAGE_SIZE,
-      entrySource: 'historical',
-      historicalPeriod: period,
+      ...params,
     });
     rows.push(...(next.rows || []));
   }
 
   return rows;
+}
+
+async function fetchHistoricalOrders({ period }) {
+  const [historicalRows, runningRealtimeRows, waitingRealtimeRows] = await Promise.all([
+    fetchPagedSalesOrders({
+      entrySource: 'historical',
+      historicalPeriod: period,
+    }),
+    fetchPagedSalesOrders({
+      status: 'running',
+      entrySource: 'realtime',
+    }),
+    fetchPagedSalesOrders({
+      status: 'waiting_operational',
+      entrySource: 'realtime',
+    }),
+  ]);
+  const realtimeRows = [...runningRealtimeRows, ...waitingRealtimeRows];
+  const periodRows = period
+    ? realtimeRows.filter((order) => periodFromDate(order.tripDate || order.soDate || order.plannedDate, '') === period)
+    : realtimeRows;
+  const rowsById = new Map();
+
+  [...historicalRows, ...periodRows].forEach((order) => {
+    if (!order?.id || rowsById.has(order.id)) return;
+    rowsById.set(order.id, order);
+  });
+
+  return Array.from(rowsById.values()).sort((left, right) => String(right.tripDate || '').localeCompare(String(left.tripDate || '')));
 }
 
 function getOrderStatusLabel(value) {
@@ -402,7 +429,14 @@ function HistoricalEntryPage() {
 
   const localRows = useMemo(() => (
     (archive.orders || [])
-      .filter((order) => order.entrySource === 'historical' && (!period || order.historicalPeriod === period))
+      .filter((order) => (
+        (order.entrySource === 'historical' && (!period || order.historicalPeriod === period))
+        || (
+          ['waiting_operational', 'received', 'running'].includes(order.status)
+          && (order.entrySource || 'realtime') !== 'historical'
+          && (!period || periodFromDate(order.tripDate || order.soDate || order.plannedDate, '') === period)
+        )
+      ))
       .sort((left, right) => String(right.tripDate || '').localeCompare(String(left.tripDate || '')))
   ), [archive.orders, period]);
 

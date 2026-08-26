@@ -8,7 +8,12 @@ import { useArchiveData } from '../../contexts/ArchiveDataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../hooks/useFeedback';
 import { buildHolidayMap, fetchIndonesiaPublicHolidays } from '../../services/reports/holidayService';
-import { fetchDriverPerformanceReport, fetchMonthlyRevenueReport, fetchOperationReport } from '../../services/reports/reportService';
+import {
+  fetchDriverPerformanceReport,
+  fetchMonthlyRevenueReport,
+  fetchOperationReport,
+  fetchSalesPerformanceReport,
+} from '../../services/reports/reportService';
 import { deleteUtilizationNote, fetchUtilizationNotes, saveUtilizationNote } from '../../services/reports/utilizationNoteService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
@@ -44,6 +49,18 @@ const DEFAULT_REVENUE_SUMMARY = {
   totalContainers: 0,
   totalTrucks: 0,
   totalTrips: 0,
+};
+
+const DEFAULT_SALES_PERFORMANCE_SUMMARY = {
+  totalSales: 0,
+  activeSales: 0,
+  totalCustomers: 0,
+  totalOrders: 0,
+  totalVolume: 0,
+  totalContainers: 0,
+  totalRevenue: 0,
+  averageRevenuePerSales: 0,
+  averageRevenuePerVolume: 0,
 };
 
 const DATA_SOURCE_OPTIONS = [
@@ -791,7 +808,7 @@ function DetailTable({ columns, rows, rowRenderer }) {
 
 function normalizeReportTab(tab, { revenueOnly = false } = {}) {
   if (revenueOnly) return 'revenue';
-  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'repo' || tab === 'master') return tab;
+  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'sales' || tab === 'repo' || tab === 'master') return tab;
   return 'revenue';
 }
 
@@ -807,6 +824,13 @@ function getReportHeader(selectedReport) {
     return {
       title: 'Driver Performance',
       description: 'Ringkasan performa sopir pada periode yang dipilih.',
+    };
+  }
+
+  if (selectedReport === 'sales') {
+    return {
+      title: 'Sales Performance',
+      description: 'Ringkasan customer, volume, dan revenue per sales pada periode yang dipilih.',
     };
   }
 
@@ -1522,6 +1546,10 @@ function ReportsPage() {
   const [revenueSummary, setRevenueSummary] = useState(DEFAULT_REVENUE_SUMMARY);
   const [revenueLoading, setRevenueLoading] = useState(true);
   const [revenueError, setRevenueError] = useState('');
+  const [salesPerformanceRows, setSalesPerformanceRows] = useState([]);
+  const [salesPerformanceSummary, setSalesPerformanceSummary] = useState(DEFAULT_SALES_PERFORMANCE_SUMMARY);
+  const [salesPerformanceLoading, setSalesPerformanceLoading] = useState(true);
+  const [salesPerformanceError, setSalesPerformanceError] = useState('');
   const [utilizationRows, setUtilizationRows] = useState([]);
   const [utilizationLoading, setUtilizationLoading] = useState(true);
   const [utilizationError, setUtilizationError] = useState('');
@@ -1622,10 +1650,12 @@ function ReportsPage() {
     const range = monthRange(month, year);
 
     setRevenueLoading(true);
+    setSalesPerformanceLoading(true);
     setUtilizationLoading(true);
     setDriverPerformanceLoading(true);
     setRepoLoading(true);
     setRevenueError('');
+    setSalesPerformanceError('');
     setUtilizationError('');
     setDriverPerformanceError('');
     setRepoError('');
@@ -1657,6 +1687,7 @@ function ReportsPage() {
 
     Promise.allSettled([
       fetchMonthlyRevenueReport({ month, year, ...reportSourceParams }),
+      isFinanceOnly ? Promise.resolve(null) : fetchSalesPerformanceReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve([]) : loadUtilizationRows(),
       isFinanceOnly ? Promise.resolve(null) : fetchDriverPerformanceReport({
         month: selectedDriverCommissionPeriod?.from ? 'all' : activePeriodKey,
@@ -1674,7 +1705,7 @@ function ReportsPage() {
         status: 'repo_stored',
         ...reportSourceParams,
       }),
-    ]).then(([revenueResult, utilizationResult, driverPerformanceResult, repoResult]) => {
+    ]).then(([revenueResult, salesPerformanceResult, utilizationResult, driverPerformanceResult, repoResult]) => {
       if (!active) return;
 
       if (revenueResult.status === 'fulfilled') {
@@ -1691,6 +1722,26 @@ function ReportsPage() {
         setRevenueRows([]);
         setRevenueSummary(DEFAULT_REVENUE_SUMMARY);
         setRevenueError(revenueResult.reason?.message || 'Laporan revenue gagal dimuat.');
+      }
+
+      if (salesPerformanceResult.status === 'fulfilled') {
+        const result = salesPerformanceResult.value;
+        setSalesPerformanceRows(Array.isArray(result?.rows) ? result.rows : []);
+        setSalesPerformanceSummary({
+          totalSales: Number(result?.summary?.totalSales || 0),
+          activeSales: Number(result?.summary?.activeSales || 0),
+          totalCustomers: Number(result?.summary?.totalCustomers || 0),
+          totalOrders: Number(result?.summary?.totalOrders || 0),
+          totalVolume: Number(result?.summary?.totalVolume || 0),
+          totalContainers: Number(result?.summary?.totalContainers || 0),
+          totalRevenue: Number(result?.summary?.totalRevenue || 0),
+          averageRevenuePerSales: Number(result?.summary?.averageRevenuePerSales || 0),
+          averageRevenuePerVolume: Number(result?.summary?.averageRevenuePerVolume || 0),
+        });
+      } else {
+        setSalesPerformanceRows([]);
+        setSalesPerformanceSummary(DEFAULT_SALES_PERFORMANCE_SUMMARY);
+        setSalesPerformanceError(salesPerformanceResult.reason?.message || 'Laporan performa sales gagal dimuat.');
       }
 
       if (utilizationResult.status === 'fulfilled') {
@@ -1716,6 +1767,7 @@ function ReportsPage() {
     }).finally(() => {
       if (!active) return;
       setRevenueLoading(false);
+      setSalesPerformanceLoading(false);
       setUtilizationLoading(false);
       setDriverPerformanceLoading(false);
       setRepoLoading(false);
@@ -1730,6 +1782,9 @@ function ReportsPage() {
   const masterDriverRows = archive.masters?.drivers;
   const revenueTruckRows = useMemo(() => buildRevenueTruckRows(masterTruckRows || [], revenueRows), [masterTruckRows, revenueRows]);
   const averageRevenuePerTrip = revenueSummary.totalTrips ? revenueSummary.totalRevenue / revenueSummary.totalTrips : 0;
+  const averageRevenuePerSales = salesPerformanceSummary.activeSales
+    ? salesPerformanceSummary.totalRevenue / salesPerformanceSummary.activeSales
+    : 0;
   const utilizationSourceRows = utilizationRows.length ? utilizationRows : revenueRows;
   const holidaysByDate = useMemo(() => buildHolidayMap(publicHolidays), [publicHolidays]);
   const utilizationSummary = useMemo(
@@ -1912,7 +1967,7 @@ function ReportsPage() {
       </section>
       )}
 
-      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-3'}`}>
+      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Jasa Angkut"
@@ -1926,6 +1981,19 @@ function ReportsPage() {
         />
         {!isFinanceOnly ? (
           <>
+            <SummaryToggleCard
+              icon={Users}
+              label="Sales Performance"
+              value={formatCurrency(salesPerformanceSummary.totalRevenue)}
+              helper={`${salesPerformanceSummary.totalCustomers} customer / ${salesPerformanceSummary.totalVolume} volume`}
+              secondaryLabel="AVG Revenue/Sales"
+              secondaryValue={formatCurrency(averageRevenuePerSales)}
+              tertiaryLabel="Sales Aktif"
+              tertiaryValue={`${salesPerformanceSummary.activeSales} Sales`}
+              tone="slate"
+              expanded={selectedReport === 'sales'}
+              onClick={() => selectReport('sales')}
+            />
             <SummaryToggleCard
               icon={Truck}
               label="Utilization Report"
@@ -2005,6 +2073,66 @@ function ReportsPage() {
             <div className="p-6 text-center">
               <h3 className="text-sm font-bold text-slate-900">Belum ada data truck</h3>
               <p className="mt-1 text-xs text-slate-500">Data truck belum tersedia pada {activeMonthLabel} {year}.</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {selectedReport === 'sales' ? (
+        <section className="rounded-md border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-3 py-2.5">
+            <h2 className="text-sm font-bold text-slate-950">Detail Sales Performance</h2>
+            <p className="text-xs text-slate-500">Customer unik, volume completed container, dan revenue jasa angkut per sales.</p>
+          </div>
+
+          {salesPerformanceLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan performa sales...</div> : null}
+          {!salesPerformanceLoading && salesPerformanceError ? <div className="p-4 text-sm text-red-600">{salesPerformanceError}</div> : null}
+
+          {!salesPerformanceLoading && !salesPerformanceError && salesPerformanceRows.length ? (
+            <DetailTable
+              columns={[
+                { label: 'No' },
+                { label: 'Sales' },
+                { label: 'Customer', align: 'right' },
+                { label: 'Volume', align: 'right' },
+                { label: 'SO Selesai', align: 'right' },
+                { label: 'Revenue', align: 'right' },
+                { label: 'AVG/Volume', align: 'right' },
+                { label: 'AVG/Customer', align: 'right' },
+              ]}
+              rows={salesPerformanceRows}
+              rowRenderer={(sales, index) => {
+                const topCustomers = (sales.customers || [])
+                  .slice(0, 3)
+                  .map((customer) => `${customer.customer} (${customer.volume})`)
+                  .join(', ');
+                return (
+                  <tr key={sales.salesName || index} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                    <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                    <td className="px-3 py-2" data-label="Sales">
+                      <strong className="block text-slate-950">{sales.salesName || 'Tanpa Sales'}</strong>
+                      <span className="text-[11px] text-slate-500">{topCustomers || 'Belum ada customer'}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="Customer">{sales.customerCount || 0}</td>
+                    <td className="px-3 py-2 text-right" data-label="Volume">
+                      <span className="inline-flex min-w-8 justify-center rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-800">
+                        {sales.totalVolume || 0}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="SO Selesai">{sales.completedOrders || 0}</td>
+                    <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(sales.totalRevenue)}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="AVG/Volume">{formatCurrency(sales.averageRevenuePerVolume)}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="AVG/Customer">{formatCurrency(sales.averageRevenuePerCustomer)}</td>
+                  </tr>
+                );
+              }}
+            />
+          ) : null}
+
+          {!salesPerformanceLoading && !salesPerformanceError && !salesPerformanceRows.length ? (
+            <div className="p-6 text-center">
+              <h3 className="text-sm font-bold text-slate-900">Belum ada data sales</h3>
+              <p className="mt-1 text-xs text-slate-500">Belum ada completed container untuk Sales Performance pada {activeMonthLabel} {year}.</p>
             </div>
           ) : null}
         </section>

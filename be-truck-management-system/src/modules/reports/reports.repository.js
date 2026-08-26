@@ -86,6 +86,114 @@ export function splitDriverCommissionPaymentAmount(row = {}) {
   };
 }
 
+function normalizeSalesName(row = {}) {
+  return String(row.sales_name || row.salesName || row.created_by_name || row.createdByName || 'Tanpa Sales').trim() || 'Tanpa Sales';
+}
+
+function normalizeCustomerName(row = {}) {
+  return String(row.customer_name || row.customerName || row.customer || 'Tanpa Customer').trim() || 'Tanpa Customer';
+}
+
+function normalizeSalesOrderId(row = {}) {
+  return String(row.id || row.sales_order_id || row.salesOrderId || row.so_number || row.soNumber || '').trim();
+}
+
+export function buildSalesPerformanceRows(rows = []) {
+  const salesMap = new Map();
+
+  rows.forEach((row) => {
+    const salesName = normalizeSalesName(row);
+    if (!salesMap.has(salesName)) {
+      salesMap.set(salesName, {
+        salesName,
+        customerKeys: new Set(),
+        orderKeys: new Set(),
+        customerSummaries: new Map(),
+        totalVolume: 0,
+        totalRevenue: 0,
+        container20ft: 0,
+        container40ft: 0,
+      });
+    }
+
+    const sales = salesMap.get(salesName);
+    const customer = normalizeCustomerName(row);
+    const customerKey = customer.toLowerCase();
+    const orderKey = normalizeSalesOrderId(row);
+    const revenue = calculateCompletedJobRevenue(row);
+    const size = String(row.container_size || row.containerSize || row.size || '').trim().toUpperCase().replace(/\s/g, '');
+
+    sales.customerKeys.add(customerKey);
+    if (orderKey) sales.orderKeys.add(orderKey);
+    sales.totalVolume += 1;
+    sales.totalRevenue += revenue;
+    if (size === '20FT') sales.container20ft += 1;
+    if (size === '40FT') sales.container40ft += 1;
+
+    if (!sales.customerSummaries.has(customerKey)) {
+      sales.customerSummaries.set(customerKey, {
+        customer,
+        volume: 0,
+        revenue: 0,
+      });
+    }
+    const customerSummary = sales.customerSummaries.get(customerKey);
+    customerSummary.volume += 1;
+    customerSummary.revenue += revenue;
+  });
+
+  return Array.from(salesMap.values())
+    .map((sales) => ({
+      salesName: sales.salesName,
+      customerCount: sales.customerKeys.size,
+      completedOrders: sales.orderKeys.size,
+      totalVolume: sales.totalVolume,
+      totalTrips: sales.totalVolume,
+      totalContainers: sales.totalVolume,
+      totalRevenue: sales.totalRevenue,
+      averageRevenuePerCustomer: sales.customerKeys.size ? sales.totalRevenue / sales.customerKeys.size : 0,
+      averageRevenuePerVolume: sales.totalVolume ? sales.totalRevenue / sales.totalVolume : 0,
+      container20ft: sales.container20ft,
+      container40ft: sales.container40ft,
+      customers: Array.from(sales.customerSummaries.values()).sort((left, right) => {
+        if (right.revenue !== left.revenue) return right.revenue - left.revenue;
+        if (right.volume !== left.volume) return right.volume - left.volume;
+        return left.customer.localeCompare(right.customer);
+      }),
+    }))
+    .sort((left, right) => {
+      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+      if (right.totalVolume !== left.totalVolume) return right.totalVolume - left.totalVolume;
+      return left.salesName.localeCompare(right.salesName);
+    });
+}
+
+export function summarizeSalesPerformanceRows(rows = []) {
+  const customerKeys = new Set();
+
+  rows.forEach((row) => {
+    (row.customers || []).forEach((customer) => {
+      const key = String(customer.customer || '').trim().toLowerCase();
+      if (key) customerKeys.add(key);
+    });
+  });
+
+  const totalRevenue = rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
+  const totalVolume = rows.reduce((total, row) => total + Number(row.totalVolume || 0), 0);
+
+  return {
+    totalSales: rows.length,
+    activeSales: rows.filter((row) => Number(row.totalVolume || 0) > 0).length,
+    totalCustomers: customerKeys.size,
+    totalOrders: rows.reduce((total, row) => total + Number(row.completedOrders || 0), 0),
+    totalVolume,
+    totalContainers: rows.reduce((total, row) => total + Number(row.totalContainers || row.totalVolume || 0), 0),
+    totalRevenue,
+    averageRevenuePerSales: rows.length ? totalRevenue / rows.length : 0,
+    averageRevenuePerVolume: totalVolume ? totalRevenue / totalVolume : 0,
+  };
+}
+
 export async function getDashboardReport() {
   const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs] = await Promise.all([
     query(`
@@ -494,6 +602,64 @@ export async function getMonthlyRevenueReport(options = {}) {
       totalTrucks: new Set(rows.map((row) => row.plateNumber).filter(Boolean)).size,
       totalTrips: rows.length,
     },
+  };
+}
+
+export async function getSalesPerformanceReport(options = {}) {
+  const period = parseRevenuePeriod(options);
+  const clauses = [];
+  const params = [period.dateFrom, period.dateToExclusive];
+  appendEntrySourceFilters(clauses, params, options, 'cj');
+  const sourceWhereSql = clauses.length ? `and ${clauses.join(' and ')}` : '';
+  const result = await query(
+    `
+      with order_job_totals as (
+        select sales_order_id, count(*)::int as total_jobs
+        from container_jobs
+        group by sales_order_id
+      ),
+      completed_jobs as (
+        select
+          cj.id as job_id,
+          so.id,
+          so.so_number,
+          so.customer_name,
+          so.sales_name,
+          so.created_by_name,
+          so.price,
+          so.total_amount,
+          to_jsonb(so)->'line_items' as line_items,
+          cj.container_size,
+          ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
+          coalesce(cj.entry_source, 'realtime') as entry_source,
+          cj.historical_period,
+          greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
+        from sales_orders so
+        join container_jobs cj on cj.sales_order_id = so.id
+        left join order_job_totals ojt on ojt.sales_order_id = so.id
+        where so.status <> 'cancelled'
+          and cj.status = 'completed'
+          ${sourceWhereSql}
+      )
+      select *
+      from completed_jobs
+      where completed_date >= $1::date
+        and completed_date < $2::date
+      order by completed_date desc, sales_name asc nulls last, so_number asc, job_id asc
+    `,
+    params,
+  );
+
+  const rows = buildSalesPerformanceRows(result.rows);
+
+  return {
+    period: {
+      month: period.month,
+      year: period.year,
+    },
+    rows,
+    total: rows.length,
+    summary: summarizeSalesPerformanceRows(rows),
   };
 }
 

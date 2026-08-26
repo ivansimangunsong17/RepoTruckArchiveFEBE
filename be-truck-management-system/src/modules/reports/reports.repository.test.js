@@ -4,8 +4,10 @@ import test from 'node:test';
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
 const {
+  buildSalesPerformanceRows,
   calculateCompletedJobRevenue,
   calculateDriverCommissionAmount,
+  summarizeSalesPerformanceRows,
   splitDriverCommissionPaymentAmount,
 } = await import('./reports.repository.js');
 
@@ -86,4 +88,56 @@ test('driver commission payment dipisah paid dan unpaid', () => {
     driver_commission_amount: '75000',
     commission_payment_status: 'pending',
   }), { paid: 0, unpaid: 75000 });
+});
+
+test('sales performance menggabungkan customer unik, volume, dan revenue per sales', () => {
+  const rows = buildSalesPerformanceRows([
+    {
+      id: 'so-1',
+      so_number: 'SO-001',
+      sales_name: 'Sales A',
+      customer_name: 'Customer Alpha',
+      price: 1500000,
+      total_containers: 2,
+      container_size: '20FT',
+    },
+    {
+      id: 'so-1',
+      so_number: 'SO-001',
+      sales_name: 'Sales A',
+      customer_name: 'Customer Alpha',
+      price: 1500000,
+      total_containers: 2,
+      container_size: '20FT',
+    },
+    {
+      id: 'so-2',
+      so_number: 'SO-002',
+      sales_name: 'Sales B',
+      customer_name: 'Customer Beta',
+      price: 2500000,
+      total_containers: 1,
+      container_size: '40FT',
+    },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].salesName, 'Sales A');
+  assert.equal(rows[0].customerCount, 1);
+  assert.equal(rows[0].completedOrders, 1);
+  assert.equal(rows[0].totalVolume, 2);
+  assert.equal(rows[0].totalRevenue, 3000000);
+  assert.equal(rows[0].averageRevenuePerVolume, 1500000);
+
+  assert.deepEqual(summarizeSalesPerformanceRows(rows), {
+    totalSales: 2,
+    activeSales: 2,
+    totalCustomers: 2,
+    totalOrders: 2,
+    totalVolume: 3,
+    totalContainers: 3,
+    totalRevenue: 5500000,
+    averageRevenuePerSales: 2750000,
+    averageRevenuePerVolume: 1833333.3333333333,
+  });
 });

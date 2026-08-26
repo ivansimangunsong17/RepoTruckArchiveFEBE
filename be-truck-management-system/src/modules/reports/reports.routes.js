@@ -4,6 +4,7 @@ import {
   driverPerformanceReportController,
   monthlyRevenueReportController,
   operationReportController,
+  salesPerformanceReportController,
   salesOrderReportController,
 } from './reports.controller.js';
 
@@ -25,6 +26,12 @@ export const reportRoutes = [
     path: '/api/reports/monthly-revenue',
     permission: 'report.read',
     handler: monthlyRevenueReportController,
+  },
+  {
+    method: 'GET',
+    path: '/api/reports/sales-performance',
+    permission: 'report.read',
+    handler: salesPerformanceReportController,
   },
   {
     method: 'GET',

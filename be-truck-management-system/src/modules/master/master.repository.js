@@ -131,6 +131,28 @@ export async function upsertMasterRow(resource, payload, id) {
   return config.toApi(result.rows[0]);
 }
 
+export async function clearVehicleDefaultDriverByNames(names = []) {
+  const normalizedNames = Array.from(new Set(
+    names
+      .map((name) => String(name || '').trim().toLowerCase())
+      .filter(Boolean),
+  ));
+  if (!normalizedNames.length) return 0;
+
+  const result = await query(
+    `
+      update vehicles
+      set default_driver_name = null,
+          updated_at = now()
+      where default_driver_name is not null
+        and lower(trim(default_driver_name)) = any($1::text[])
+      returning id
+    `,
+    [normalizedNames],
+  );
+  return result.rowCount || 0;
+}
+
 export async function archiveMasterRow(resource, id) {
   const config = getResourceConfig(resource);
   const result = await query(

@@ -747,8 +747,9 @@ async function voidAutoJourneyMoneyExpense(client, jobId, actorName = 'Operation
   );
 }
 
-async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus) {
+async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing = {}) {
   if (isAssignmentReleasedStatus(nextStatus)) return;
+  if (isHistoricalBackfill(form, existing)) return;
   const driverName = String(form.driver || driver?.name || '').trim();
   const plateNumber = String(form.plateNumber || vehicle?.plate_number || '').trim();
   const driverId = driver?.id || form.driverId || null;
@@ -831,7 +832,8 @@ async function releaseVehicleIfIdle(client, vehicleId) {
   );
 }
 
-async function syncResourceAssignmentStatus(client, existing, nextAssignment = {}, nextStatus) {
+async function syncResourceAssignmentStatus(client, existing, nextAssignment = {}, nextStatus, nextEntrySource = 'realtime') {
+  if (normalizeEntrySource(nextEntrySource) === 'historical') return;
   const nextDriverId = nextAssignment.driverId || null;
   const nextVehicleId = nextAssignment.vehicleId || null;
   const previousDriverId = existing?.driver_id || null;
@@ -1825,7 +1827,7 @@ async function updateContainerJobTransaction(id, form) {
         'Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus);
+    await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
     if (nextStatus === 'completed') {
       await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill, allowAdminCorrection });
     }
@@ -2078,7 +2080,7 @@ async function updateContainerJobTransaction(id, form) {
     await syncResourceAssignmentStatus(client, existing.rows[0], {
       driverId: nextDriverId,
       vehicleId: nextVehicleId,
-    }, nextStatus);
+    }, nextStatus, nextEntrySource);
     await refreshOrderStatus(client, existing.rows[0].sales_order_id);
     const updated = await client.query(
       `
