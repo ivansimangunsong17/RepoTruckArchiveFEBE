@@ -1075,7 +1075,7 @@ function HistoricalEntryPage() {
       ) : null}
 
       {selectedOrder ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={closeRealization}>
+        <div className="modal-backdrop historical-realization-backdrop" role="presentation" onMouseDown={closeRealization}>
           <section className="order-modal historical-realization-modal" role="dialog" aria-modal="true" aria-labelledby="historical-realization-title" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div>
@@ -1120,9 +1120,17 @@ function HistoricalEntryPage() {
                 </table>
               </div>
 
-              <form className="historical-job-form" onSubmit={saveJobRealization} onKeyDown={preventEnterSubmit}>
-                {editingJob && jobForm ? (
-                  <>
+              {editingJob && jobForm ? (
+                <>
+                  <button
+                    className="historical-job-edit-scrim"
+                    type="button"
+                    aria-label="Tutup form realisasi"
+                    disabled={jobSaving}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={() => { setEditingJob(null); setJobForm(null); }}
+                  />
+                  <form className="historical-job-form historical-job-edit-modal" onSubmit={saveJobRealization} onKeyDown={preventEnterSubmit}>
                     <div className="historical-job-form-head">
                       <span>Container Dipilih</span>
                       <strong>{getJobLabel(editingJob, (selectedOrder.containers || []).findIndex((item) => item.id === editingJob.id))}</strong>
@@ -1209,15 +1217,9 @@ function HistoricalEntryPage() {
                       <button className="secondary-button" type="button" disabled={jobSaving} onClick={() => { setEditingJob(null); setJobForm(null); }}>Batal</button>
                       <button className="primary-button" type="submit" disabled={jobSaving}><Save size={16} /> {jobSaving ? 'Menyimpan...' : 'Simpan Realisasi'}</button>
                     </footer>
-                  </>
-                ) : (
-                  <div className="historical-job-empty">
-                    <ClipboardCheck size={26} />
-                    <strong>Pilih container</strong>
-                    <p>Klik Isi/Edit pada salah satu container untuk melengkapi realisasi data lama.</p>
-                  </div>
-                )}
-              </form>
+                  </form>
+                </>
+              ) : null}
             </div>
           </section>
         </div>

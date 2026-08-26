@@ -2128,6 +2128,18 @@
     align-items: stretch;
     flex-direction: column-reverse;
   }
+
+  .historical-job-edit-modal {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: min(88vh, calc(100dvh - 18px));
+    transform: none;
+    border-radius: 14px 14px 0 0;
+    overflow-y: auto;
+  }
 }
 
 @media (max-width: 380px) {
