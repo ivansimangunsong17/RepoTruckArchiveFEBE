@@ -334,6 +334,72 @@ describe('SalesOrderForm', () => {
     }));
   });
 
+  it('menampilkan dan memilih saran dari master data lewat dropdown kustom (bukan datalist bawaan browser)', async () => {
+    const user = userEvent.setup();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const destinationInput = screen.getByLabelText('Lokasi Tujuan');
+    await user.click(destinationInput);
+    const option = await screen.findByRole('option', { name: 'Bandung' });
+    await user.click(option);
+
+    expect(destinationInput).toHaveValue('Bandung');
+    expect(screen.queryByRole('option', { name: 'Bandung' })).not.toBeInTheDocument();
+  });
+
+  it('mengirim tujuan per baris rincian - baris yang diisi pakai tujuannya sendiri, baris kosong pakai Tujuan Utama SO', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await fillBaseFields(user, { soNumber: 'SO-DEST-001', destination: 'Bandung' });
+    await fillFirstLineItem(user, {
+      serviceName: 'Jasa Angkut D20',
+      containerType: 'Dry',
+      quantity: '1',
+      price: '150000',
+    });
+    fireEvent.change(screen.getAllByLabelText('Tujuan Container Ini')[0], {
+      target: { value: 'Cikarang' },
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Tambah Rincian' }));
+    const qtyInputs = screen.getAllByLabelText('Qty');
+    const priceInputs = screen.getAllByLabelText('Price');
+    await user.selectOptions(screen.getAllByLabelText('Jenis Rincian')[1], 'Jasa Angkut D20');
+    await user.selectOptions(screen.getAllByLabelText('Jenis Container')[1], 'Dry');
+    fireEvent.change(qtyInputs[1], { target: { value: '1' } });
+    fireEvent.change(priceInputs[1], { target: { value: '150000' } });
+    // Baris kedua sengaja TIDAK diisi tujuannya sendiri -- harus fallback ke Tujuan Utama SO.
+
+    await openReview(user);
+    await confirmReview(user);
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      containers: [
+        expect.objectContaining({ destination: 'Cikarang' }),
+        expect.objectContaining({ destination: 'Bandung' }),
+      ],
+    }));
+  });
+
   it('mengisi PIC, kontak, dan alamat dari Master Customer', async () => {
     render(
       <SalesOrderForm

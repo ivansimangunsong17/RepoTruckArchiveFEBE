@@ -1,4 +1,4 @@
-import { BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, FileText, Hourglass, RefreshCw, Send, UserRound, X } from 'lucide-react';
+import { BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, FileText, RefreshCw, Send, UserRound, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -30,7 +30,6 @@ const emptyReport = {
     unpaidAmount: 0,
   },
   drivers: [],
-  withheld: [],
 };
 
 const statusLabels = {
@@ -519,7 +518,6 @@ function DriverCommissionOperationalPage() {
   const canSubmit = hasPermission(user, 'operations.update');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
-  const withheldDrivers = report.withheld || [];
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const activeBatch = report.activeBatch || null;
   const hasActiveBatch = Boolean(activeBatch?.id);
@@ -635,39 +633,6 @@ function DriverCommissionOperationalPage() {
         <MetricCard icon={CircleDollarSign} label="Total Komisi" tone="amber" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.unpaidAmount || 0)} belum dibayar`} />
         <MetricCard icon={BadgeCheck} label="Status" tone="emerald" pill value={<StatusPill status={report.status} />} helper={activeBatch ? `Diajukan ${formatDateTime(activeBatch.submittedAt)}` : 'Belum masuk batch Finance.'} />
       </section>
-
-      {withheldDrivers.length ? (
-        <section className="rounded-lg border border-amber-200 bg-amber-50 shadow-sm">
-          <div className="border-b border-amber-200 p-4">
-            <div className="flex items-center gap-2">
-              <Hourglass className="text-amber-600" size={18} />
-              <h2 className="text-base font-black text-amber-900">Sopir Tertahan (Belum Capai Kuota Mingguan)</h2>
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-amber-700">
-              Komisi sopir berikut belum diajukan ke Finance karena ritasinya masih di bawah kuota. Tunggakannya tidak hilang — otomatis ikut diajukan begitu kumulatif ritasinya tembus target di minggu berikutnya.
-            </p>
-          </div>
-          <div className="divide-y divide-amber-100">
-            {withheldDrivers.map((driver) => {
-              const progressPercent = Math.min(100, Math.round((driver.pendingItems / driver.target) * 100));
-              return (
-                <div key={driver.driverKey} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <strong className="block text-sm text-amber-950">{driver.driverName}</strong>
-                    <small className="block text-xs font-semibold text-amber-700">{formatCurrency(driver.pendingAmount)} tertahan, butuh {driver.remaining} ritasi lagi</small>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-32 overflow-hidden rounded-full bg-amber-200">
-                      <div className="h-full rounded-full bg-amber-500" style={{ width: `${progressPercent}%` }} />
-                    </div>
-                    <span className="text-xs font-black text-amber-800">{driver.pendingItems}/{driver.target} ritasi</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
 
       <section>
         <div className="rounded-lg border border-slate-200 bg-white shadow-sm">

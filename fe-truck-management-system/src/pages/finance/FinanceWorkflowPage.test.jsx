@@ -787,9 +787,9 @@ describe('FinanceWorkflowPage validation modals', () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await screen.findByRole('tab', { name: /Menunggu Sales/i });
+    await screen.findByRole('tab', { name: /Menunggu Pembayaran/i });
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
+      expect(screen.getByRole('tab', { name: /Menunggu Pembayaran/i })).toHaveTextContent('1');
       expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
     });
 
@@ -798,7 +798,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     await waitFor(() => {
       expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'paid' }));
     });
-    expect(screen.getByRole('tab', { name: /Menunggu Sales/i })).toHaveTextContent('1');
+    expect(screen.getByRole('tab', { name: /Menunggu Pembayaran/i })).toHaveTextContent('1');
     expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
   });
 
@@ -835,18 +835,26 @@ describe('FinanceWorkflowPage validation modals', () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await screen.findByRole('tab', { name: /Belum Nomor \/ Dokumen/i });
-    await user.click(await screen.findByRole('button', { name: /Belum Upload Invoice & Faktur Pajak/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
+    await user.click(await screen.findByRole('button', { name: /Sudah Dikirim ke Customer/i }));
 
     await waitFor(() => {
       expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
-        status: 'need-number',
-        invoiceDocumentFilter: 'missing-documents',
+        status: 'in-progress',
+        invoiceDocumentFilter: 'sent',
       }));
     });
   });
 
-  it('menampilkan kolom Jumlah Container dan Total Debit Note, serta pencarian berdasarkan nomor container', async () => {
+  it('tidak menampilkan sub-filter dokumen di tab Belum Lengkap', async () => {
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await screen.findByRole('tab', { name: /Belum Lengkap/i });
+    expect(screen.queryByRole('button', { name: /Sudah Dikirim ke Customer/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Belum Dikirim ke Customer/i })).not.toBeInTheDocument();
+  });
+
+  it('menampilkan kolom Total Debit Note dan Status Pelunasan, serta pencarian berdasarkan nomor container', async () => {
     const user = userEvent.setup();
     fetchFinanceInvoices.mockResolvedValue({
       rows: [{
@@ -857,13 +865,12 @@ describe('FinanceWorkflowPage validation modals', () => {
       }],
       summary: invoiceSummary,
     });
-    const { container } = render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     expect(await screen.findByText('SO-TEST-001')).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Container' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Total Debit Note' })).toBeInTheDocument();
-    expect(container.querySelector('td[data-label="Container"]')).toHaveTextContent('2');
+    expect(screen.getByRole('columnheader', { name: 'Status Pelunasan' })).toBeInTheDocument();
     expect(screen.getByText(/Rp\s*75\.000/i)).toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText(/Cari No\. SO/i), 'CONT-TEST-002');
@@ -874,7 +881,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
 
     const dialog = screen.getByRole('dialog');
@@ -914,7 +921,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
 
     const dialog = await screen.findByRole('dialog');
@@ -940,7 +947,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     updateFinanceDebitNoteNumber.mockResolvedValue({ ...invoiceRow, debitNoteAmount: 75000, debitNoteNumber: 'DN-202608-001' });
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
 
     const dialog = await screen.findByRole('dialog');
@@ -972,7 +979,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     recordFinanceDebitNotePayment.mockResolvedValue({});
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
 
     const dialog = await screen.findByRole('dialog');
@@ -1039,7 +1046,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
     const file = new File(['%PDF-1.4'], 'invoice-accurate.pdf', { type: 'application/pdf' });
     await user.upload(await screen.findByLabelText('Upload Invoice PDF'), file);
@@ -1068,7 +1075,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     uploadFinanceInvoiceDocument.mockRejectedValueOnce(new Error('Upload PDF gagal.'));
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
     const file = new File(['%PDF-1.4'], 'invoice-error.pdf', { type: 'application/pdf' });
     await user.upload(await screen.findByLabelText('Upload Invoice PDF'), file);
@@ -1082,7 +1089,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.click(await screen.findByRole('tab', { name: /Menunggu Sales/i }));
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
     await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
     await user.click(await screen.findByRole('button', { name: /Ajukan Koreksi/i }));
     await user.clear(screen.getByLabelText(/Nomor Invoice Baru/i));
@@ -1140,7 +1147,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(dialog).toHaveTextContent('Admin Test');
   });
 
-  it('meminta validasi sebelum mengirim nomor invoice', async () => {
+  it('meminta validasi sebelum mengirim nomor invoice - input dilakukan lewat modal Detail', async () => {
     const user = userEvent.setup();
     fetchFinanceInvoices.mockResolvedValue({
       rows: [{
@@ -1149,6 +1156,11 @@ describe('FinanceWorkflowPage validation modals', () => {
         invoiceNumber: '',
       }],
     });
+    fetchFinanceInvoiceDetail.mockResolvedValue({
+      ...invoiceRow,
+      invoiceStatus: 'Butuh Nomor Invoice',
+      invoiceNumber: '',
+    });
     updateFinanceInvoiceNumber.mockResolvedValue({
       ...invoiceRow,
       invoiceStatus: 'Menunggu Update Status',
@@ -1156,14 +1168,19 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 
-    await user.type(await screen.findByPlaceholderText('INV-...'), 'inv-202607-001');
-    await user.click(screen.getByRole('button', { name: 'Simpan' }));
+    await user.click(await screen.findByRole('button', { name: /Detail Dokumen SO-TEST-001/i }));
+    const detailModal = await screen.findByRole('dialog');
+    expect(detailModal).toHaveTextContent('SO-TEST-001');
 
-    expect(screen.getByRole('dialog')).toHaveTextContent('Validasi Nomor Invoice');
-    expect(screen.getByRole('dialog')).toHaveTextContent('INV-202607-001');
+    await user.type(within(detailModal).getByPlaceholderText('INV-...'), 'inv-202607-001');
+    await user.click(within(detailModal).getByRole('button', { name: 'Simpan' }));
+
+    const confirmModal = (await screen.findAllByRole('dialog')).find((dialog) => dialog.textContent.includes('Validasi Nomor Invoice'));
+    expect(confirmModal).toHaveTextContent('Validasi Nomor Invoice');
+    expect(confirmModal).toHaveTextContent('INV-202607-001');
     expect(updateFinanceInvoiceNumber).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Ya, Kirim Nomor Invoice' }));
+    await user.click(within(confirmModal).getByRole('button', { name: 'Ya, Kirim Nomor Invoice' }));
     expect(updateFinanceInvoiceNumber).toHaveBeenCalledWith('invoice-1', 'INV-202607-001');
   });
 });

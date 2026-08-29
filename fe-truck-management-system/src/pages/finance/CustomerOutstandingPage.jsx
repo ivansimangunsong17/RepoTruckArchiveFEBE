@@ -35,18 +35,33 @@ const emptySummary = {
 
 const AGING_OPTIONS = [
   { value: '', label: 'Semua Umur Piutang' },
-  { value: 'current', label: 'Belum Jatuh Tempo' },
-  { value: 'overdue_1_30', label: 'Terlambat 1-30 Hari' },
-  { value: 'overdue_31_60', label: 'Terlambat 31-60 Hari' },
-  { value: 'overdue_61_90', label: 'Terlambat 61-90 Hari' },
-  { value: 'overdue_90_plus', label: 'Terlambat >90 Hari' },
-  { value: 'unknown', label: 'Tanggal Jatuh Tempo Belum Ada' },
+  { value: 'current', label: 'Current / Belum Jatuh Tempo' },
+  { value: 'overdue_1_30', label: 'Overdue 1-30 Hari' },
+  { value: 'overdue_31_60', label: 'Overdue 31-60 Hari' },
+  { value: 'overdue_61_90', label: 'Overdue 61-90 Hari' },
+  { value: 'overdue_90_plus', label: 'Overdue >90 Hari' },
+  { value: 'overdue_all', label: 'Semua Overdue' },
 ];
 
-const AGING_LABELS = AGING_OPTIONS.reduce((acc, option) => {
-  if (option.value) acc[option.value] = option.label;
-  return acc;
-}, {});
+// Terpisah dari AGING_OPTIONS (bukan hasil reduce dari situ) karena label ini juga dipakai untuk
+// menampilkan badge per-invoice di modal detail (row.agingBucket bisa bernilai 'unknown' untuk
+// invoice tanpa tanggal jatuh tempo), sementara dropdown filter "Umur Piutang" sengaja tidak lagi
+// menawarkan opsi 'unknown' sebagai pilihan filter.
+const AGING_LABELS = {
+  current: 'Belum Jatuh Tempo',
+  overdue_1_30: 'Terlambat 1-30 Hari',
+  overdue_31_60: 'Terlambat 31-60 Hari',
+  overdue_61_90: 'Terlambat 61-90 Hari',
+  overdue_90_plus: 'Terlambat >90 Hari',
+  unknown: 'Tanggal Jatuh Tempo Belum Ada',
+};
+
+const SORT_OPTIONS = [
+  { value: 'outstanding_desc', label: 'Outstanding Terbesar' },
+  { value: 'oldest_overdue_desc', label: 'Umur Piutang Terlama' },
+  { value: 'overdue_desc', label: 'Overdue Terbesar' },
+  { value: 'customer_asc', label: 'Nama Customer A-Z' },
+];
 
 const AGING_TONE = {
   current: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -377,6 +392,7 @@ function CustomerOutstandingPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [query, setQuery] = useState('');
   const [agingBucket, setAgingBucket] = useState('');
+  const [sortBy, setSortBy] = useState('outstanding_desc');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -401,7 +417,7 @@ function CustomerOutstandingPage() {
       // Satu fetch saja: /finance/outstanding/by-customer sudah mengembalikan data tabel rollup
       // DAN summary sekaligus, supaya query outstanding yang berat tidak dijalankan dua kali
       // (dulu ada panggilan kedua ke fetchFinanceOutstanding({ pageSize: 1 }) hanya untuk summary).
-      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, agingBucket });
+      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, agingBucket, sortBy });
       setCustomerRows(rollup?.rows || []);
       setTotal(Number(rollup?.total || 0));
       setTotalPages(Math.max(1, Number(rollup?.totalPages || 1)));
@@ -411,7 +427,7 @@ function CustomerOutstandingPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, query, agingBucket]);
+  }, [page, query, agingBucket, sortBy]);
 
   function exportCustomerRows() {
     downloadCsv(
@@ -572,7 +588,7 @@ function CustomerOutstandingPage() {
           <div>
             <span>Piutang</span>
             <h2>Piutang per Customer</h2>
-            <p>Diurutkan dari total outstanding terbesar. Klik Detail untuk melihat rincian invoice.</p>
+            <p>Filter berdasarkan umur piutang dan urutkan sesuai prioritas penagihan. Klik Detail untuk melihat rincian invoice.</p>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <label className="search-field md:w-72">
@@ -591,6 +607,18 @@ function CustomerOutstandingPage() {
                 value={agingBucket}
               >
                 {AGING_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+              Urutkan
+              <select
+                className="master-filter-select"
+                onChange={(event) => { setPage(1); setSortBy(event.target.value); }}
+                value={sortBy}
+              >
+                {SORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>

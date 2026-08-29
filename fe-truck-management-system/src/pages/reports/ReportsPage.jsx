@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BarChart3, Maximize2, Save, Trash2, Truck, Users, X } from 'lucide-react';
+import { BarChart3, Eye, Maximize2, Save, Trash2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useArchiveData } from '../../contexts/ArchiveDataContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../hooks/useFeedback';
+import { fetchFinanceOutstanding } from '../../services/finance/financeService';
 import { buildHolidayMap, fetchIndonesiaPublicHolidays } from '../../services/reports/holidayService';
 import {
+  fetchCustomerPerformanceReport,
   fetchDriverPerformanceReport,
   fetchMonthlyRevenueReport,
   fetchOperationReport,
@@ -61,6 +63,23 @@ const DEFAULT_SALES_PERFORMANCE_SUMMARY = {
   totalRevenue: 0,
   averageRevenuePerSales: 0,
   averageRevenuePerVolume: 0,
+};
+
+const DEFAULT_CUSTOMER_PERFORMANCE_SUMMARY = {
+  totalCustomers: 0,
+  activeCustomers: 0,
+  outstandingCustomers: 0,
+  overdueCustomers: 0,
+  healthyCustomers: 0,
+  totalOrders: 0,
+  totalVolume: 0,
+  totalContainers: 0,
+  totalRevenue: 0,
+  totalOutstandingAmount: 0,
+  overdueAmount: 0,
+  averageRevenuePerCustomer: 0,
+  averageRevenuePerVolume: 0,
+  collectionRate: 0,
 };
 
 const DATA_SOURCE_OPTIONS = [
@@ -744,12 +763,14 @@ function SummaryToggleCard({
     emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     amber: 'border-amber-200 bg-amber-50 text-amber-700',
     sky: 'border-sky-200 bg-sky-50 text-sky-700',
+    rose: 'border-rose-200 bg-rose-50 text-rose-700',
   }[tone] || 'border-slate-200 bg-slate-50 text-slate-600';
   const activeClass = {
     slate: 'border-slate-300 bg-slate-100 text-slate-800',
     emerald: 'border-emerald-300 bg-emerald-100 text-emerald-900',
     amber: 'border-amber-300 bg-amber-100 text-amber-900',
     sky: 'border-sky-300 bg-sky-100 text-sky-900',
+    rose: 'border-rose-300 bg-rose-100 text-rose-900',
   }[tone] || 'border-slate-300 bg-slate-100 text-slate-800';
 
   return (
@@ -766,15 +787,15 @@ function SummaryToggleCard({
         <strong className="mt-1 block text-2xl font-semibold leading-tight text-slate-900">{value}</strong>
         <small className="mt-1 block text-xs text-slate-500">{helper}</small>
         {secondaryLabel ? (
-          <span className="mt-3 grid max-w-md gap-1 border-t border-white/70 pt-3 sm:grid-cols-[auto_1fr] sm:items-baseline sm:gap-x-3">
+          <span className="mt-3 flex flex-col gap-0.5 border-t border-white/70 pt-3">
             <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{secondaryLabel}</span>
-            <strong className="text-base font-semibold text-slate-900">{secondaryValue}</strong>
+            <strong className="text-base font-semibold leading-snug text-slate-900">{secondaryValue}</strong>
           </span>
         ) : null}
         {tertiaryLabel ? (
-          <span className="mt-1 grid max-w-md gap-1 sm:grid-cols-[auto_1fr] sm:items-baseline sm:gap-x-3">
+          <span className="mt-2 flex flex-col gap-0.5">
             <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{tertiaryLabel}</span>
-            <strong className="text-base font-semibold text-slate-900">{tertiaryValue}</strong>
+            <strong className="text-base font-semibold leading-snug text-slate-900">{tertiaryValue}</strong>
           </span>
         ) : null}
       </div>
@@ -806,9 +827,106 @@ function DetailTable({ columns, rows, rowRenderer }) {
   );
 }
 
+function OutstandingBucketCell({ amount, label, agingBucket, toneClassName, customer, onOpenDetail }) {
+  if (!(amount > 0)) {
+    return <td className={`px-3 py-2 text-right font-semibold ${toneClassName}`} data-label={label}>-</td>;
+  }
+  return (
+    <td className={`px-3 py-2 text-right font-semibold ${toneClassName}`} data-label={label}>
+      <span className="inline-flex items-center justify-end gap-1.5">
+        {formatCurrency(amount)}
+        <button
+          type="button"
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-current text-current opacity-60 hover:opacity-100"
+          onClick={() => onOpenDetail(customer, label, agingBucket)}
+          title={`Lihat rincian SO ${customer} - ${label}`}
+          aria-label={`Detail outstanding ${label} ${customer}`}
+        >
+          <Eye size={9} />
+        </button>
+      </span>
+    </td>
+  );
+}
+
+function OutstandingBucketDetailModal({ detail, rows, loading, error, onClose }) {
+  if (!detail) return null;
+
+  const totalAmount = rows.reduce((total, row) => total + Number(row.outstandingAmount || 0), 0);
+
+  const modal = (
+    <div className="fixed inset-0 z-[220] flex items-start justify-center overflow-hidden bg-slate-950/45 px-3 py-6" role="presentation" onMouseDown={onClose}>
+      <section
+        className="flex max-h-[calc(100vh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="outstanding-bucket-detail-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="min-w-0">
+            <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Rincian SO Outstanding &middot; {detail.bucketLabel}</span>
+            <h2 id="outstanding-bucket-detail-title" className="mt-0.5 truncate text-sm font-black text-slate-950">{detail.customer}</h2>
+          </div>
+          <button className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-100" type="button" onClick={onClose} aria-label="Tutup rincian outstanding">
+            <X size={16} />
+          </button>
+        </header>
+
+        <div className="border-b border-slate-100 bg-white px-4 py-2.5">
+          <span className="text-[10px] font-black uppercase tracking-wide text-slate-400">Total {detail.bucketLabel}</span>
+          <strong className="ml-2 text-base font-black text-slate-950">{formatCurrency(totalAmount)}</strong>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {loading ? <p className="text-sm font-semibold text-slate-500">Memuat rincian SO...</p> : null}
+          {!loading && error ? <p className="text-sm font-semibold text-red-600">{error}</p> : null}
+          {!loading && !error && !rows.length ? (
+            <p className="text-sm font-semibold text-slate-500">Tidak ada SO outstanding pada klasifikasi ini.</p>
+          ) : null}
+          {!loading && !error && rows.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] divide-y divide-slate-200 text-left text-xs">
+                <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">No. SO</th>
+                    <th className="px-3 py-2">No. Invoice</th>
+                    <th className="px-3 py-2 text-right">Tagihan</th>
+                    <th className="px-3 py-2 text-right">Dibayar</th>
+                    <th className="px-3 py-2 text-right">Outstanding</th>
+                    <th className="px-3 py-2">Jatuh Tempo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {rows.map((row) => (
+                    <tr key={row.id} className="text-slate-700 hover:bg-slate-50/70">
+                      <td className="px-3 py-2 font-black text-slate-950">{row.soNumber}</td>
+                      <td className="px-3 py-2 font-medium text-slate-700">{row.invoiceNumber || '-'}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-700">{formatCurrency(row.billingAmount)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-700">{formatCurrency(row.totalPaid)}</td>
+                      <td className="px-3 py-2 text-right font-black text-amber-700">{formatCurrency(row.outstandingAmount)}</td>
+                      <td className="px-3 py-2 font-medium text-slate-700">{row.dueDate ? formatDate(row.dueDate) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex justify-end border-t border-slate-200 bg-slate-50 px-4 py-2.5">
+          <button className="secondary-button" type="button" onClick={onClose}>Tutup</button>
+        </div>
+      </section>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
+}
+
 function normalizeReportTab(tab, { revenueOnly = false } = {}) {
   if (revenueOnly) return 'revenue';
-  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'sales' || tab === 'repo' || tab === 'master') return tab;
+  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'sales' || tab === 'customer' || tab === 'repo' || tab === 'master') return tab;
   return 'revenue';
 }
 
@@ -831,6 +949,13 @@ function getReportHeader(selectedReport) {
     return {
       title: 'Sales Performance',
       description: 'Ringkasan customer, volume, dan revenue per sales pada periode yang dipilih.',
+    };
+  }
+
+  if (selectedReport === 'customer') {
+    return {
+      title: 'Customer Performance',
+      description: 'Ringkasan volume, revenue, outstanding, dan kesehatan pembayaran per customer.',
     };
   }
 
@@ -888,13 +1013,11 @@ function buildMasterReportSections(masters = {}) {
     },
     {
       key: 'end-users',
-      title: 'End User',
+      title: 'Lokasi',
       rows: masters['end-users'] || [],
       columns: [
-        { label: 'End User', value: (row) => row.name },
-        { label: 'Kode', value: (row) => row.code },
-        { label: 'PIC', value: (row) => row.pic },
-        { label: 'Kontak', value: (row) => row.phone },
+        { label: 'Nama Lokasi', value: (row) => row.name },
+        { label: 'Alamat', value: (row) => row.address },
         { label: 'Status', value: (row) => row.status },
       ],
     },
@@ -1550,6 +1673,10 @@ function ReportsPage() {
   const [salesPerformanceSummary, setSalesPerformanceSummary] = useState(DEFAULT_SALES_PERFORMANCE_SUMMARY);
   const [salesPerformanceLoading, setSalesPerformanceLoading] = useState(true);
   const [salesPerformanceError, setSalesPerformanceError] = useState('');
+  const [customerPerformanceRows, setCustomerPerformanceRows] = useState([]);
+  const [customerPerformanceSummary, setCustomerPerformanceSummary] = useState(DEFAULT_CUSTOMER_PERFORMANCE_SUMMARY);
+  const [customerPerformanceLoading, setCustomerPerformanceLoading] = useState(true);
+  const [customerPerformanceError, setCustomerPerformanceError] = useState('');
   const [utilizationRows, setUtilizationRows] = useState([]);
   const [utilizationLoading, setUtilizationLoading] = useState(true);
   const [utilizationError, setUtilizationError] = useState('');
@@ -1561,6 +1688,21 @@ function ReportsPage() {
   const [repoError, setRepoError] = useState('');
   const [publicHolidays, setPublicHolidays] = useState([]);
   const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab'), { revenueOnly: isFinanceOnly }));
+  // Revenue di tabel Customer Performance selalu mengikuti bulan/periode yang sedang dipilih,
+  // sedangkan Outstanding menampilkan sisa piutang riil saat ini yang bisa berasal dari invoice
+  // beberapa bulan sebelumnya -- keduanya dipisah jadi tampilan sendiri-sendiri supaya tidak
+  // tercampur seolah-olah satu periode yang sama.
+  const [customerDetailView, setCustomerDetailView] = useState('revenue');
+  // Tab Outstanding punya filter umur piutang sendiri (customer yang piutangnya sudah menunggak
+  // MINIMAL N hari) -- terpisah dari filter Bulan/Tahun di atas karena Outstanding memang bukan
+  // konsep per-bulan. null = tampilkan semua umur piutang, tanpa ambang batas.
+  const [outstandingMinOverdueDays, setOutstandingMinOverdueDays] = useState(null);
+  // Drill-down SO per bucket umur piutang: dibuka lewat tombol kecil di samping nominal tiap
+  // kolom bucket pada tab Outstanding.
+  const [outstandingBucketDetail, setOutstandingBucketDetail] = useState(null);
+  const [outstandingBucketRows, setOutstandingBucketRows] = useState([]);
+  const [outstandingBucketLoading, setOutstandingBucketLoading] = useState(false);
+  const [outstandingBucketError, setOutstandingBucketError] = useState('');
   const [dataSource, setDataSource] = useState('all');
   const [driverCommissionFilter, setDriverCommissionFilter] = useState('all');
   const [driverCommissionPaymentFilter, setDriverCommissionPaymentFilter] = useState('all');
@@ -1651,11 +1793,13 @@ function ReportsPage() {
 
     setRevenueLoading(true);
     setSalesPerformanceLoading(true);
+    setCustomerPerformanceLoading(true);
     setUtilizationLoading(true);
     setDriverPerformanceLoading(true);
     setRepoLoading(true);
     setRevenueError('');
     setSalesPerformanceError('');
+    setCustomerPerformanceError('');
     setUtilizationError('');
     setDriverPerformanceError('');
     setRepoError('');
@@ -1688,6 +1832,7 @@ function ReportsPage() {
     Promise.allSettled([
       fetchMonthlyRevenueReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve(null) : fetchSalesPerformanceReport({ month, year, ...reportSourceParams }),
+      isFinanceOnly ? Promise.resolve(null) : fetchCustomerPerformanceReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve([]) : loadUtilizationRows(),
       isFinanceOnly ? Promise.resolve(null) : fetchDriverPerformanceReport({
         month: selectedDriverCommissionPeriod?.from ? 'all' : activePeriodKey,
@@ -1705,7 +1850,7 @@ function ReportsPage() {
         status: 'repo_stored',
         ...reportSourceParams,
       }),
-    ]).then(([revenueResult, salesPerformanceResult, utilizationResult, driverPerformanceResult, repoResult]) => {
+    ]).then(([revenueResult, salesPerformanceResult, customerPerformanceResult, utilizationResult, driverPerformanceResult, repoResult]) => {
       if (!active) return;
 
       if (revenueResult.status === 'fulfilled') {
@@ -1744,6 +1889,31 @@ function ReportsPage() {
         setSalesPerformanceError(salesPerformanceResult.reason?.message || 'Laporan performa sales gagal dimuat.');
       }
 
+      if (customerPerformanceResult.status === 'fulfilled') {
+        const result = customerPerformanceResult.value;
+        setCustomerPerformanceRows(Array.isArray(result?.rows) ? result.rows : []);
+        setCustomerPerformanceSummary({
+          totalCustomers: Number(result?.summary?.totalCustomers || 0),
+          activeCustomers: Number(result?.summary?.activeCustomers || 0),
+          outstandingCustomers: Number(result?.summary?.outstandingCustomers || 0),
+          overdueCustomers: Number(result?.summary?.overdueCustomers || 0),
+          healthyCustomers: Number(result?.summary?.healthyCustomers || 0),
+          totalOrders: Number(result?.summary?.totalOrders || 0),
+          totalVolume: Number(result?.summary?.totalVolume || 0),
+          totalContainers: Number(result?.summary?.totalContainers || 0),
+          totalRevenue: Number(result?.summary?.totalRevenue || 0),
+          totalOutstandingAmount: Number(result?.summary?.totalOutstandingAmount || 0),
+          overdueAmount: Number(result?.summary?.overdueAmount || 0),
+          averageRevenuePerCustomer: Number(result?.summary?.averageRevenuePerCustomer || 0),
+          averageRevenuePerVolume: Number(result?.summary?.averageRevenuePerVolume || 0),
+          collectionRate: Number(result?.summary?.collectionRate || 0),
+        });
+      } else {
+        setCustomerPerformanceRows([]);
+        setCustomerPerformanceSummary(DEFAULT_CUSTOMER_PERFORMANCE_SUMMARY);
+        setCustomerPerformanceError(customerPerformanceResult.reason?.message || 'Laporan performa customer gagal dimuat.');
+      }
+
       if (utilizationResult.status === 'fulfilled') {
         setUtilizationRows(Array.isArray(utilizationResult.value) ? utilizationResult.value : []);
       } else {
@@ -1768,6 +1938,7 @@ function ReportsPage() {
       if (!active) return;
       setRevenueLoading(false);
       setSalesPerformanceLoading(false);
+      setCustomerPerformanceLoading(false);
       setUtilizationLoading(false);
       setDriverPerformanceLoading(false);
       setRepoLoading(false);
@@ -1785,6 +1956,10 @@ function ReportsPage() {
   const averageRevenuePerSales = salesPerformanceSummary.activeSales
     ? salesPerformanceSummary.totalRevenue / salesPerformanceSummary.activeSales
     : 0;
+  const averageRevenuePerCustomer = customerPerformanceSummary.activeCustomers
+    ? customerPerformanceSummary.totalRevenue / customerPerformanceSummary.activeCustomers
+    : 0;
+  const customerCollectionPercent = Number(customerPerformanceSummary.collectionRate || 0) * 100;
   const utilizationSourceRows = utilizationRows.length ? utilizationRows : revenueRows;
   const holidaysByDate = useMemo(() => buildHolidayMap(publicHolidays), [publicHolidays]);
   const utilizationSummary = useMemo(
@@ -1879,6 +2054,30 @@ function ReportsPage() {
     }
   }
 
+  // Filter umur piutang di tab Outstanding dilakukan di sisi frontend -- datanya sudah lengkap
+  // sekali fetch (tidak dipaginasi backend), jadi tidak perlu bolak-balik ke server tiap ganti
+  // ambang batas.
+  const visibleCustomerPerformanceRows = customerDetailView === 'outstanding' && outstandingMinOverdueDays
+    ? customerPerformanceRows.filter((row) => Number(row.oldestOverdueDays || 0) >= outstandingMinOverdueDays)
+    : customerPerformanceRows;
+
+  function openOutstandingBucketDetail(customer, bucketLabel, agingBucket) {
+    setOutstandingBucketDetail({ customer, bucketLabel, agingBucket });
+    setOutstandingBucketRows([]);
+    setOutstandingBucketError('');
+    setOutstandingBucketLoading(true);
+    fetchFinanceOutstanding({ query: customer, agingBucket, pageSize: 100 })
+      .then((result) => setOutstandingBucketRows((result?.rows || []).filter((row) => row.customer === customer)))
+      .catch((err) => setOutstandingBucketError(err.message || 'Rincian SO gagal dimuat.'))
+      .finally(() => setOutstandingBucketLoading(false));
+  }
+
+  function closeOutstandingBucketDetail() {
+    setOutstandingBucketDetail(null);
+    setOutstandingBucketRows([]);
+    setOutstandingBucketError('');
+  }
+
   return (
     <div className="page reports-page">
       <PageHeader
@@ -1967,7 +2166,7 @@ function ReportsPage() {
       </section>
       )}
 
-      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-5'}`}>
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Jasa Angkut"
@@ -1982,25 +2181,12 @@ function ReportsPage() {
         {!isFinanceOnly ? (
           <>
             <SummaryToggleCard
-              icon={Users}
-              label="Sales Performance"
-              value={formatCurrency(salesPerformanceSummary.totalRevenue)}
-              helper={`${salesPerformanceSummary.totalCustomers} customer / ${salesPerformanceSummary.totalVolume} volume`}
-              secondaryLabel="AVG Revenue/Sales"
-              secondaryValue={formatCurrency(averageRevenuePerSales)}
-              tertiaryLabel="Sales Aktif"
-              tertiaryValue={`${salesPerformanceSummary.activeSales} Sales`}
-              tone="slate"
-              expanded={selectedReport === 'sales'}
-              onClick={() => selectReport('sales')}
-            />
-            <SummaryToggleCard
               icon={Truck}
               label="Utilization Report"
               value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
               helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
-              secondaryLabel="AVG Terpakai"
-              secondaryValue={`${formatDecimal(averageUsedTrucksPerDay)} / ${utilizationSummary.activeTruckCount} truck per hari`}
+              secondaryLabel="AVG Truck Terpakai/Hari"
+              secondaryValue={`${formatDecimal(averageUsedTrucksPerDay)} / ${utilizationSummary.activeTruckCount} truck`}
               tertiaryLabel="Truck Aktif"
               tertiaryValue={`${utilizationSummary.activeTruckCount} Unit`}
               tone="sky"
@@ -2019,6 +2205,32 @@ function ReportsPage() {
               tone="amber"
               expanded={selectedReport === 'driver'}
               onClick={() => selectReport('driver')}
+            />
+            <SummaryToggleCard
+              icon={Users}
+              label="Customer Performance"
+              value={formatCurrency(customerPerformanceSummary.totalRevenue)}
+              helper={`${customerPerformanceSummary.activeCustomers} aktif / ${customerPerformanceSummary.outstandingCustomers} outstanding`}
+              secondaryLabel="AVG Revenue/Customer"
+              secondaryValue={formatCurrency(averageRevenuePerCustomer)}
+              tertiaryLabel="Collection"
+              tertiaryValue={`${customerCollectionPercent.toFixed(1)}%`}
+              tone="rose"
+              expanded={selectedReport === 'customer'}
+              onClick={() => selectReport('customer')}
+            />
+            <SummaryToggleCard
+              icon={Users}
+              label="Sales Performance"
+              value={formatCurrency(salesPerformanceSummary.totalRevenue)}
+              helper={`${salesPerformanceSummary.totalCustomers} customer / ${salesPerformanceSummary.totalVolume} volume`}
+              secondaryLabel="AVG Revenue/Sales"
+              secondaryValue={formatCurrency(averageRevenuePerSales)}
+              tertiaryLabel="Sales Aktif"
+              tertiaryValue={`${salesPerformanceSummary.activeSales} Sales`}
+              tone="slate"
+              expanded={selectedReport === 'sales'}
+              onClick={() => selectReport('sales')}
             />
           </>
         ) : null}
@@ -2137,6 +2349,197 @@ function ReportsPage() {
           ) : null}
         </section>
       ) : null}
+
+      {selectedReport === 'customer' ? (
+        <section className="rounded-md border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-3 py-2.5">
+            <h2 className="text-sm font-bold text-slate-950">Detail Customer Performance</h2>
+            <p className="text-xs text-slate-500">
+              {customerDetailView === 'revenue'
+                ? `Volume dan revenue customer pada periode ${activeMonthLabel} ${year}.`
+                : outstandingMinOverdueDays
+                  ? `Customer dengan piutang yang sudah menunggak minimal ${outstandingMinOverdueDays} hari -- bisa berasal dari invoice beberapa bulan sebelumnya, bukan cuma periode yang sedang dipilih.`
+                  : 'Sisa outstanding customer saat ini -- bisa berasal dari invoice beberapa bulan sebelumnya, bukan cuma periode yang sedang dipilih.'}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+                <button
+                  type="button"
+                  className={`rounded px-3 py-1.5 text-xs font-bold transition ${customerDetailView === 'revenue' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  onClick={() => setCustomerDetailView('revenue')}
+                >
+                  Revenue
+                </button>
+                <button
+                  type="button"
+                  className={`rounded px-3 py-1.5 text-xs font-bold transition ${customerDetailView === 'outstanding' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  onClick={() => setCustomerDetailView('outstanding')}
+                >
+                  Outstanding
+                </button>
+              </div>
+              {customerDetailView === 'outstanding' ? (
+                <div className="inline-flex items-center gap-2 border-l border-slate-200 pl-2.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Umur Piutang</span>
+                  <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+                    <button
+                      type="button"
+                      className={`rounded px-2.5 py-1.5 text-xs font-bold transition ${outstandingMinOverdueDays === null ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      onClick={() => setOutstandingMinOverdueDays(null)}
+                    >
+                      Semua
+                    </button>
+                    {[14, 30, 60].map((days) => (
+                      <button
+                        key={days}
+                        type="button"
+                        className={`rounded px-2.5 py-1.5 text-xs font-bold transition ${outstandingMinOverdueDays === days ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        onClick={() => setOutstandingMinOverdueDays(days)}
+                        title={`Minimal menunggak ${days} hari`}
+                      >
+                        {days}+ Hari
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {customerPerformanceLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan performa customer...</div> : null}
+          {!customerPerformanceLoading && customerPerformanceError ? <div className="p-4 text-sm text-red-600">{customerPerformanceError}</div> : null}
+
+          {!customerPerformanceLoading && !customerPerformanceError && visibleCustomerPerformanceRows.length ? (
+            <DetailTable
+              columns={
+                customerDetailView === 'revenue'
+                  ? [
+                      { label: 'No' },
+                      { label: 'Customer' },
+                      { label: 'Volume', align: 'right' },
+                      { label: 'SO Selesai', align: 'right' },
+                      { label: 'Revenue', align: 'right' },
+                      { label: 'Last Order' },
+                    ]
+                  : [
+                      { label: 'No' },
+                      { label: 'Customer' },
+                      { label: 'Current', align: 'right' },
+                      { label: '1-30 Hari', align: 'right' },
+                      { label: '31-60 Hari', align: 'right' },
+                      { label: '61-90 Hari', align: 'right' },
+                      { label: '>90 Hari', align: 'right' },
+                      { label: 'Collection', align: 'right' },
+                      { label: 'Status' },
+                    ]
+              }
+              rows={visibleCustomerPerformanceRows}
+              rowRenderer={(customer, index) => {
+                const salesNames = Array.isArray(customer.salesNames) && customer.salesNames.length
+                  ? customer.salesNames.slice(0, 3).join(', ')
+                  : 'Tanpa sales periode ini';
+                const collectionPercent = Number(customer.collectionPercent || 0);
+                const statusTone = Number(customer.overdueAmount || 0) > 0
+                  ? 'bg-amber-50 text-amber-700'
+                  : Number(customer.totalOutstandingAmount || 0) > 0
+                    ? 'bg-rose-50 text-rose-700'
+                    : 'bg-emerald-50 text-emerald-700';
+                return (
+                  <tr key={customer.customer || index} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                    <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                    <td className="px-3 py-2" data-label="Customer">
+                      <strong className="block text-slate-950">{customer.customer || 'Tanpa Customer'}</strong>
+                      <span className="text-[11px] text-slate-500">{salesNames}</span>
+                    </td>
+                    {customerDetailView === 'revenue' ? (
+                      <>
+                        <td className="px-3 py-2 text-right" data-label="Volume">
+                          <span className="inline-flex min-w-8 justify-center rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-800">
+                            {customer.totalVolume || 0}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="SO Selesai">{customer.completedOrders || 0}</td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(customer.totalRevenue)}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-700" data-label="Last Order">{formatDate(customer.lastOrderDate)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <OutstandingBucketCell
+                          amount={customer.currentAmount}
+                          label="Current"
+                          agingBucket="current"
+                          toneClassName="text-emerald-700"
+                          customer={customer.customer}
+                          onOpenDetail={openOutstandingBucketDetail}
+                        />
+                        <OutstandingBucketCell
+                          amount={customer.overdue1To30Amount}
+                          label="1-30 Hari"
+                          agingBucket="overdue_1_30"
+                          toneClassName="text-amber-700"
+                          customer={customer.customer}
+                          onOpenDetail={openOutstandingBucketDetail}
+                        />
+                        <OutstandingBucketCell
+                          amount={customer.overdue31To60Amount}
+                          label="31-60 Hari"
+                          agingBucket="overdue_31_60"
+                          toneClassName="text-orange-700"
+                          customer={customer.customer}
+                          onOpenDetail={openOutstandingBucketDetail}
+                        />
+                        <OutstandingBucketCell
+                          amount={customer.overdue61To90Amount}
+                          label="61-90 Hari"
+                          agingBucket="overdue_61_90"
+                          toneClassName="text-rose-700"
+                          customer={customer.customer}
+                          onOpenDetail={openOutstandingBucketDetail}
+                        />
+                        <OutstandingBucketCell
+                          amount={customer.overdue90PlusAmount}
+                          label=">90 Hari"
+                          agingBucket="overdue_90_plus"
+                          toneClassName="font-bold text-rose-800"
+                          customer={customer.customer}
+                          onOpenDetail={openOutstandingBucketDetail}
+                        />
+                        <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="Collection">{collectionPercent.toFixed(1)}%</td>
+                        <td className="px-3 py-2" data-label="Status">
+                          <span className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-black ${statusTone}`}>
+                            {customer.status || '-'}
+                          </span>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                );
+              }}
+            />
+          ) : null}
+
+          {!customerPerformanceLoading && !customerPerformanceError && !visibleCustomerPerformanceRows.length ? (
+            <div className="p-6 text-center">
+              <h3 className="text-sm font-bold text-slate-900">Belum ada data customer</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {customerDetailView === 'revenue'
+                  ? `Belum ada completed container atau outstanding customer pada ${activeMonthLabel} ${year}.`
+                  : outstandingMinOverdueDays
+                    ? `Tidak ada customer dengan piutang menunggak minimal ${outstandingMinOverdueDays} hari.`
+                    : 'Belum ada customer dengan outstanding saat ini.'}
+              </p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      <OutstandingBucketDetailModal
+        detail={outstandingBucketDetail}
+        rows={outstandingBucketRows}
+        loading={outstandingBucketLoading}
+        error={outstandingBucketError}
+        onClose={closeOutstandingBucketDetail}
+      />
 
       {selectedReport === 'utilization' ? (
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">

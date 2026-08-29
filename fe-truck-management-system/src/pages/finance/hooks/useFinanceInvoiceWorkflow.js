@@ -285,6 +285,7 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
       const saved = await updateFinanceInvoiceNumber(invoiceConfirmId, invoiceNumber);
       const normalized = normalizeFinanceInvoiceRow(saved);
       setInvoiceRows((rows) => rows.map((item) => (item.id === invoiceConfirmId ? normalized : item)));
+      setInvoiceDetail((detail) => (detail?.id === invoiceConfirmId ? { ...detail, ...normalized } : detail));
       setInvoiceConfirmId('');
     } catch (error) {
       setInvoiceConfirmError(error.message || 'Nomor invoice gagal disimpan.');
@@ -323,13 +324,8 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     }
   }
 
-  function onInvoiceChange(id, value) {
-    setInvoiceRows((rows) => rows.map((row) => (row.id === id ? { ...row, invoiceNumber: value } : row)));
-  }
-
-  function onSaveInvoice(id) {
-    const row = invoiceRows.find((item) => item.id === id);
-    const invoiceNumber = String(row?.invoiceNumber || '').trim().toUpperCase();
+  function onSaveInvoice(id, invoiceNumberInput) {
+    const invoiceNumber = String(invoiceNumberInput || '').trim().toUpperCase();
     setInvoiceError('');
     setInvoiceConfirmError('');
     if (!invoiceNumber) {
@@ -403,7 +399,6 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     closeInvoiceConfirmModal,
     submitInvoiceNumber,
     handleUploadInvoiceDocument,
-    onInvoiceChange,
     onSaveInvoice,
     loadInvoiceOrders,
     applyInvoiceNumberCorrection,

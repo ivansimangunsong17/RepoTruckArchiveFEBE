@@ -109,7 +109,7 @@ async function filterSalesOrderPayload(payload, executor = query) {
 }
 
 const jobColumns = `
-  id, sales_order_id, container_number, container_size, container_type, container_notes,
+  id, sales_order_id, container_number, container_size, container_type, container_notes, destination,
   rpuj_status, rpuj_notes, rpuj_requested_by_name, rpuj_requested_at,
   rpuj_reviewed_by_name, rpuj_reviewed_at, rpuj_rejection_note,
   rpuj_transfer_uploaded_by_name, rpuj_transfer_uploaded_at,

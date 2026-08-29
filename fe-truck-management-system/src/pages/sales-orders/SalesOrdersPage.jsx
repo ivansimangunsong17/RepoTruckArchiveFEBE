@@ -147,6 +147,11 @@ function getSalesGroupName(order) {
   return String(order?.salesName || order?.createdBy || 'Tanpa Nama Sales').trim() || 'Tanpa Nama Sales';
 }
 
+function getUniqueContainerDestinations(order) {
+  const values = (order?.containers || []).map((container) => String(container?.destination || '').trim()).filter(Boolean);
+  return [...new Set(values)];
+}
+
 function isInvoiced(order) {
   return Boolean(String(order?.invoiceNumber || '').trim());
 }
@@ -381,8 +386,9 @@ function hasSentRpuj(order) {
 }
 
 function isNumberedByFinance(order) {
+  const accurateSoNumber = String(order?.accurateSoNumber || order?.accurate_so_number || '').trim();
   const verificationStatus = String(order?.financeVerificationStatus || order?.finance_verification_status || '').trim().toLowerCase();
-  return Boolean(String(order?.soNumber || order?.so_number || '').trim() || verificationStatus === 'verified');
+  return Boolean(accurateSoNumber || verificationStatus === 'verified');
 }
 
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '', customerDocumentsOnly = false) {
@@ -1102,7 +1108,18 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
 
             <div className="sales-order-detail-body">
               <div className="order-meta">
-                <div><PackageCheck size={17} /><p>Rute<strong>{selectedOrder.origin} - {selectedOrder.destination}</strong></p></div>
+                <div>
+                  <PackageCheck size={17} />
+                  <p>
+                    Rute
+                    <strong>{selectedOrder.origin} - {selectedOrder.destination}</strong>
+                    {getUniqueContainerDestinations(selectedOrder).length > 1 ? (
+                      <span className="multi-destination-badge" title={getUniqueContainerDestinations(selectedOrder).join(', ')}>
+                        Multi-tujuan ({getUniqueContainerDestinations(selectedOrder).length})
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
                 <div><Clock3 size={17} /><p>Waktu Input Sistem<strong>{formatDateTime(selectedOrder.receivedAt)}</strong></p></div>
                 <div><Eye size={17} /><p>Sales Pembuat<strong>{getSalesGroupName(selectedOrder)}</strong></p></div>
                 <div><Clock3 size={17} /><p>Terakhir diperbarui<strong>{selectedOrder.updatedBy || '-'} - {formatDateTime(selectedOrder.updatedAt)}</strong></p></div>

@@ -27,6 +27,7 @@ function mapEligibleRow(row = {}) {
     emoneyProvider: row.emoney_provider || '',
     emoneyNumber: row.emoney_number || '',
     emoneyAccountHolder: row.emoney_account_holder || '',
+    truckPlateNumber: row.truck_plate_number || '',
     amount: toNumber(row.amount),
     sourceDestinationId: row.source_destination_id || null,
     commissionNote: row.commission_note || '',
@@ -116,65 +117,6 @@ function reportDriverKey(row = {}) {
   return row.driverId || `name:${String(row.driverName || '').trim().toLowerCase()}`;
 }
 
-// Kuota ritasi mingguan: mendorong sopir tetap aktif jalan. Sopir yang baru pertama kali (tidak
-// punya tunggakan dari minggu sebelumnya) perlu minimal 6 ritasi berkomisi minggu itu supaya
-// langsung cair minggu itu juga. Kalau kurang dari 6, seluruh komisi minggu itu ditahan dan
-// digabung (bukan hangus) dengan ritasi minggu-minggu berikutnya; begitu totalnya tembus 7,
-// seluruh tunggakan cair sekaligus. Tidak ada batas waktu penahanan.
-export const DRIVER_COMMISSION_QUOTA_FRESH_WEEK_MINIMUM = 6;
-export const DRIVER_COMMISSION_QUOTA_RELEASE_THRESHOLD = 7;
-
-// Fungsi murni (tanpa akses DB) supaya mudah diuji: menerima SEMUA ritasi berkomisi milik sopir
-// yang belum pernah masuk batch mana pun (completed_date sampai dengan periodEnd, tidak dibatasi
-// periodStart, karena tunggakan bisa berasal dari berminggu-minggu sebelumnya), lalu memutuskan
-// per sopir mana yang lolos kuota (released, ikut diajukan periode ini) dan mana yang masih
-// ditahan (withheld, informasi untuk ditampilkan ke Operational).
-export function applyDriverCommissionQuota(rows = [], period) {
-  const byDriver = new Map();
-  for (const row of rows) {
-    const key = reportDriverKey(row);
-    if (!byDriver.has(key)) byDriver.set(key, []);
-    byDriver.get(key).push(row);
-  }
-
-  const released = [];
-  const withheld = [];
-
-  for (const driverRows of byDriver.values()) {
-    const backlog = driverRows.filter((row) => String(row.completedDate || '') < period.periodStart);
-    const thisWeek = driverRows.filter((row) => (
-      String(row.completedDate || '') >= period.periodStart && String(row.completedDate || '') <= period.periodEnd
-    ));
-    const isCarryingBacklog = backlog.length > 0;
-    const total = backlog.length + thisWeek.length;
-    const target = isCarryingBacklog ? DRIVER_COMMISSION_QUOTA_RELEASE_THRESHOLD : DRIVER_COMMISSION_QUOTA_FRESH_WEEK_MINIMUM;
-    const passes = total >= target;
-
-    if (passes) {
-      released.push(...backlog, ...thisWeek);
-    } else if (total > 0) {
-      const sample = driverRows[0];
-      withheld.push({
-        driverKey: reportDriverKey(sample),
-        driverId: sample.driverId || null,
-        driverName: sample.driverName || '',
-        pendingItems: total,
-        pendingAmount: driverRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
-        target,
-        remaining: Math.max(target - total, 0),
-      });
-    }
-  }
-
-  released.sort((left, right) => (
-    String(left.completedDate || '').localeCompare(String(right.completedDate || ''))
-      || String(left.driverName || '').localeCompare(String(right.driverName || ''), 'id-ID', { numeric: true })
-  ));
-  withheld.sort((left, right) => left.driverName.localeCompare(right.driverName, 'id-ID', { numeric: true }));
-
-  return { released, withheld };
-}
-
 function pickBatchStatus(current, next) {
   const rank = { unsubmitted: 0, submitted: 1, approved: 2, paid: 3 };
   const currentStatus = current || 'unsubmitted';
@@ -189,16 +131,19 @@ function pickPaymentStatus(current, next) {
   return (rank[nextStatus] || 0) > (rank[currentStatus] || 0) ? nextStatus : currentStatus;
 }
 
+// row di sini sudah dalam bentuk hasil mapEligibleRow (camelCase), BUKAN raw row dari DB --
+// pemanggilnya (findDriverCommissionPeriodReport) selalu mengambil eligibleRows lewat
+// findEligibleRows yang sudah memetakannya. Jangan panggil mapEligibleRow lagi di sini, nanti
+// field snake_case yang dicarinya (row.driver_name, dst) tidak ketemu dan hasilnya kosong semua.
 function mapReportEligibleRow(row = {}) {
   return {
-    ...mapEligibleRow(row),
+    ...row,
     batchId: null,
     batchStatus: null,
     paymentId: null,
     paymentStatus: 'unsubmitted',
     paidAt: null,
     paidByName: '',
-    truckPlateNumber: row.truck_plate_number || '',
     source: 'eligible',
   };
 }
@@ -406,8 +351,10 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
 }
 
 // Diambil semua ritasi berkomisi yang belum pernah masuk batch mana pun dengan completed_date
-// SAMPAI DENGAN periodEnd (tanpa batas bawah periodStart) — supaya tunggakan kuota dari
-// minggu-minggu sebelumnya ikut terbawa dan bisa dievaluasi bersama oleh applyDriverCommissionQuota.
+// SAMPAI DENGAN periodEnd (tanpa batas bawah periodStart) — supaya ritasi lama yang entah kenapa
+// belum pernah masuk batch mana pun tetap ikut muncul sebagai eligible, bukan hilang begitu saja.
+// Tidak ada syarat jumlah ritasi minimum: berapa pun jumlahnya (termasuk 1) langsung eligible
+// untuk diajukan ke Finance.
 async function findEligibleRows(period, db = { query }) {
   const result = await db.query(
     `
@@ -419,7 +366,7 @@ async function findEligibleRows(period, db = { query }) {
         cj.container_number,
         cj.container_size,
         so.customer_name,
-        so.destination,
+        cj.destination,
         (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
         cj.completed_at,
         cj.driver_id,
@@ -464,25 +411,19 @@ async function findEligibleRows(period, db = { query }) {
   return result.rows.map(mapEligibleRow);
 }
 
-async function findEligibleRowsWithQuota(period, db = { query }) {
-  const rows = await findEligibleRows(period, db);
-  return applyDriverCommissionQuota(rows, period);
-}
-
 export async function findEligibleDriverCommissions(period) {
-  const { released, withheld } = await findEligibleRowsWithQuota(period);
+  const rows = await findEligibleRows(period);
   return {
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
-    summary: summarizeEligibleRows(released),
-    rows: released,
-    withheld,
+    summary: summarizeEligibleRows(rows),
+    rows,
   };
 }
 
 export async function findDriverCommissionPeriodReport(period) {
-  const [{ released: eligibleRows, withheld }, submittedResult, batchesResult] = await Promise.all([
-    findEligibleRowsWithQuota(period),
+  const [eligibleRows, submittedResult, batchesResult] = await Promise.all([
+    findEligibleRows(period),
     query(
       `
         select
@@ -544,7 +485,6 @@ export async function findDriverCommissionPeriodReport(period) {
     periodEnd: period.periodEnd,
     status: activeBatch?.status || (rows.length ? 'draft' : 'empty'),
     activeBatch,
-    withheld,
     ...grouped,
   };
 }
@@ -659,9 +599,9 @@ export async function createDriverCommissionBatch(period, actor = {}) {
       throw error;
     }
 
-    const { released: eligibleRows } = await findEligibleRowsWithQuota(period, client);
+    const eligibleRows = await findEligibleRows(period, client);
     if (!eligibleRows.length) {
-      const error = new Error('Tidak ada komisi sopir yang eligible untuk periode ini (kemungkinan semua sopir masih di bawah kuota ritasi mingguan).');
+      const error = new Error('Tidak ada komisi sopir yang eligible untuk periode ini.');
       error.statusCode = 400;
       error.code = 'NO_ELIGIBLE_DRIVER_COMMISSION';
       throw error;

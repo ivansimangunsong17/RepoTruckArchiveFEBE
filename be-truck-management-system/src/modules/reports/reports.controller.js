@@ -1,5 +1,6 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import {
+  fetchCustomerPerformanceReport,
   fetchDashboardReport,
   fetchDocumentReport,
   fetchDriverPerformanceReport,
@@ -26,6 +27,11 @@ export async function monthlyRevenueReportController(request, response) {
 
 export async function salesPerformanceReportController(request, response) {
   const result = await fetchSalesPerformanceReport(request.query);
+  sendSuccess(response, result);
+}
+
+export async function customerPerformanceReportController(request, response) {
+  const result = await fetchCustomerPerformanceReport(request.query);
   sendSuccess(response, result);
 }
 

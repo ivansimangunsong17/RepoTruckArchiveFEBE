@@ -2947,6 +2947,172 @@ if (!hasDatabase) {
       assert.equal(forbiddenRollup.status, 403);
     });
 
+    await t.test('finance: rollup outstanding per customer mendukung sortBy dan agingBucket=overdue_all', async () => {
+      const prefix = `ZSort-${runId}`;
+      const customerA = `${prefix}-A`; // current, outstanding paling besar, tidak overdue
+      const customerB = `${prefix}-B`; // overdue 10 hari, outstanding menengah
+      const customerC = `${prefix}-C`; // overdue 95 hari, outstanding paling kecil tapi paling tua
+
+      async function createInvoicedOrder({ soNumber, customer, price, invoiceIssuedAt }) {
+        const order = await api('/api/sales-orders', {
+          method: 'POST',
+          token: salesToken,
+          body: salesOrderPayload({
+            soNumber,
+            customer,
+            // tripDate sengaja dibuat lebih lama dari default helper ini (2026-07-11) -- laporan
+            // sales-orders lain di file ini mengurutkan "order by trip_date desc, created_at desc"
+            // dengan pagination, jadi kalau dibiarkan pakai tripDate default, baris-baris SO baru
+            // ini bisa menggeser baris test lain (yang dibuat lebih awal tapi trip_date-nya sama)
+            // keluar dari halaman pertama.
+            tripDate: '2025-01-01',
+            lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price }],
+          }),
+        });
+        assert.equal(order.status, 201);
+        const orderId = order.body.data.id;
+        const jobId = order.body.data.containers[0].id;
+
+        await query("update container_jobs set status = 'completed', completed_at = now() where id = $1", [jobId]);
+        await query(
+          `
+            update sales_orders
+            set status = 'completed',
+                finance_verification_status = 'verified',
+                accurate_so_number = so_number,
+                invoice_number = $2,
+                payment_type = 'cash',
+                invoice_issued_at = $3::timestamptz
+            where id = $1
+          `,
+          [orderId, `INV-${soNumber}`, invoiceIssuedAt],
+        );
+      }
+
+      await createInvoicedOrder({
+        soNumber: `SO-${prefix}-A`,
+        customer: customerA,
+        price: 5000000,
+        invoiceIssuedAt: new Date().toISOString(),
+      });
+      await createInvoicedOrder({
+        soNumber: `SO-${prefix}-B`,
+        customer: customerB,
+        price: 2000000,
+        invoiceIssuedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      await createInvoicedOrder({
+        soNumber: `SO-${prefix}-C`,
+        customer: customerC,
+        price: 1000000,
+        invoiceIssuedAt: new Date(Date.now() - 95 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+
+      async function fetchSortedCustomers(sortBy) {
+        const search = `?query=${encodeURIComponent(prefix)}${sortBy ? `&sortBy=${sortBy}` : ''}`;
+        const response = await api(`/api/finance/outstanding/by-customer${search}`, { token: financeToken });
+        assert.equal(response.status, 200);
+        return response.body.data.rows.map((row) => row.customer);
+      }
+
+      assert.deepEqual(
+        await fetchSortedCustomers('outstanding_desc'),
+        [customerA, customerB, customerC],
+        'outstanding_desc: customer dengan total outstanding terbesar harus di atas',
+      );
+      assert.deepEqual(
+        await fetchSortedCustomers(''),
+        [customerA, customerB, customerC],
+        'default sort (tanpa sortBy) harus sama dengan outstanding_desc',
+      );
+      assert.deepEqual(
+        await fetchSortedCustomers('oldest_overdue_desc'),
+        [customerC, customerB, customerA],
+        'oldest_overdue_desc: customer dengan umur piutang paling lama harus di atas',
+      );
+      assert.deepEqual(
+        await fetchSortedCustomers('overdue_desc'),
+        [customerB, customerC, customerA],
+        'overdue_desc: customer dengan overdueAmount terbesar harus di atas (bukan total outstanding)',
+      );
+      assert.deepEqual(
+        await fetchSortedCustomers('customer_asc'),
+        [customerA, customerB, customerC],
+        'customer_asc: urut abjad nama customer',
+      );
+
+      const overdueAllResponse = await api(`/api/finance/outstanding/by-customer?query=${encodeURIComponent(prefix)}&agingBucket=overdue_all`, { token: financeToken });
+      assert.equal(overdueAllResponse.status, 200);
+      const overdueAllCustomers = overdueAllResponse.body.data.rows.map((row) => row.customer);
+      assert.deepEqual(
+        overdueAllCustomers.sort(),
+        [customerB, customerC].sort(),
+        'agingBucket=overdue_all hanya boleh mengembalikan customer yang punya overdueAmount > 0 (bukan yang masih current)',
+      );
+      overdueAllResponse.body.data.rows.forEach((row) => {
+        assert.ok(row.overdueAmount > 0, `row ${row.customer} yang muncul di filter overdue_all harus punya overdueAmount > 0`);
+      });
+    });
+
+    await t.test('reports: customer performance memecah outstanding jadi kolom bucket umur piutang (current/1-30/31-60/61-90/90+)', async () => {
+      const customerName = `Customer Bucket ${runId}`;
+
+      async function createInvoicedOrder({ soNumber, price, daysOverdue }) {
+        const order = await api('/api/sales-orders', {
+          method: 'POST',
+          token: salesToken,
+          body: salesOrderPayload({
+            soNumber,
+            customer: customerName,
+            tripDate: '2025-01-01',
+            lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price }],
+          }),
+        });
+        assert.equal(order.status, 201);
+        const orderId = order.body.data.id;
+        const jobId = order.body.data.containers[0].id;
+        await query("update container_jobs set status = 'completed', completed_at = now() where id = $1", [jobId]);
+        await query(
+          `
+            update sales_orders
+            set status = 'completed',
+                finance_verification_status = 'verified',
+                accurate_so_number = so_number,
+                invoice_number = $2,
+                payment_type = 'cash',
+                invoice_issued_at = now() - ($3 || ' days')::interval
+            where id = $1
+          `,
+          [orderId, `INV-${soNumber}`, String(daysOverdue)],
+        );
+      }
+
+      await createInvoicedOrder({ soNumber: `SO-BUCKET-${runId}-CURRENT`, price: 1000000, daysOverdue: 0 });
+      await createInvoicedOrder({ soNumber: `SO-BUCKET-${runId}-1TO30`, price: 2000000, daysOverdue: 10 });
+      await createInvoicedOrder({ soNumber: `SO-BUCKET-${runId}-31TO60`, price: 3000000, daysOverdue: 45 });
+      await createInvoicedOrder({ soNumber: `SO-BUCKET-${runId}-61TO90`, price: 4000000, daysOverdue: 75 });
+      await createInvoicedOrder({ soNumber: `SO-BUCKET-${runId}-90PLUS`, price: 5000000, daysOverdue: 100 });
+
+      const now = new Date();
+      const response = await api(
+        `/api/reports/customer-performance?month=${now.getMonth() + 1}&year=${now.getFullYear()}`,
+        { token: observerToken },
+      );
+      assert.equal(response.status, 200);
+      const row = response.body.data.rows.find((item) => item.customer === customerName);
+      assert.ok(row, 'customer harus muncul di laporan customer performance');
+      assert.equal(row.currentAmount, 1000000, 'kolom Current harus hanya berisi invoice yang belum jatuh tempo');
+      assert.equal(row.overdue1To30Amount, 2000000, 'kolom 1-30 Hari harus hanya berisi invoice yang menunggak 1-30 hari');
+      assert.equal(row.overdue31To60Amount, 3000000, 'kolom 31-60 Hari harus hanya berisi invoice yang menunggak 31-60 hari');
+      assert.equal(row.overdue61To90Amount, 4000000, 'kolom 61-90 Hari harus hanya berisi invoice yang menunggak 61-90 hari');
+      assert.equal(row.overdue90PlusAmount, 5000000, 'kolom >90 Hari harus hanya berisi invoice yang menunggak lebih dari 90 hari');
+      assert.equal(
+        row.currentAmount + row.overdue1To30Amount + row.overdue31To60Amount + row.overdue61To90Amount + row.overdue90PlusAmount,
+        row.totalOutstandingAmount,
+        'jumlah semua bucket harus sama dengan totalOutstandingAmount, tidak ada yang hilang atau dobel dihitung',
+      );
+    });
+
     await t.test('finance: SO yang kebuka lagi setelah koreksi tetap muncul di outstanding walau billing_status masih tersimpan lunas', async () => {
       // Simulasikan koreksi (pembayaran dihapus/dibatalkan lewat perbaikan data) sehingga sisa
       // outstanding riil kembali positif, tapi kolom billing_status di sales_orders belum
@@ -3784,116 +3950,284 @@ if (!hasDatabase) {
       assert.equal(driverCreateLog.action, 'CREATE_MASTER_DRIVERS');
     });
 
-    await t.test('driver commission: sopir di bawah kuota mingguan ditahan, cair sekaligus begitu kumulatif tembus 7 ritasi', async () => {
-      const quotaDriverName = `Kuota Test ${runId}`;
-      const quotaSoNumber = `SO-${runId}-QUOTA`.toUpperCase();
+    await t.test('driver commission: sopir dengan sedikit ritasi (tanpa batas minimum) tetap bisa langsung diajukan ke Finance', async () => {
+      const fewTripsDriverName = `Sedikit Ritasi Test ${runId}`;
+      const fewTripsSoNumber = `SO-${runId}-FEWTRIPS`.toUpperCase();
       const periodA = { periodStart: '2099-04-09', periodEnd: '2099-04-15' };
-      const periodB = { periodStart: '2099-04-16', periodEnd: '2099-04-22' };
 
-      for (const period of [periodA, periodB]) {
-        await query(
-          `
-            delete from driver_commission_items
-            where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
-          `,
-          [period.periodStart, period.periodEnd],
-        );
-        await query(
-          `
-            delete from driver_commission_payments
-            where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
-          `,
-          [period.periodStart, period.periodEnd],
-        );
-        await query(
-          'delete from driver_commission_batches where period_start = $1::date and period_end = $2::date',
-          [period.periodStart, period.periodEnd],
-        );
-      }
+      await query(
+        `
+          delete from driver_commission_items
+          where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
+        `,
+        [periodA.periodStart, periodA.periodEnd],
+      );
+      await query(
+        `
+          delete from driver_commission_payments
+          where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)
+        `,
+        [periodA.periodStart, periodA.periodEnd],
+      );
+      await query(
+        'delete from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+        [periodA.periodStart, periodA.periodEnd],
+      );
 
-      const quotaSo = await query(
+      const fewTripsSo = await query(
         `
           insert into sales_orders (so_number, customer_name, shipment_type, origin, destination, status)
           values ($1, $2, 'import', 'Tanjung Priok', 'Cikarang', 'completed')
           returning id
         `,
-        [quotaSoNumber, `Customer Kuota ${runId}`],
+        [fewTripsSoNumber, `Customer Sedikit Ritasi ${runId}`],
       );
-      const quotaSalesOrderId = quotaSo.rows[0].id;
+      const fewTripsSalesOrderId = fewTripsSo.rows[0].id;
 
-      async function insertQuotaJob(containerSuffix, completedDate) {
+      // Sopir ini cuma jalan 3 ritasi minggu ini -- tidak ada lagi syarat jumlah ritasi minimum,
+      // jadi komisinya harus tetap bisa langsung diajukan ke Finance tanpa ditahan.
+      for (let index = 1; index <= 3; index += 1) {
         await query(
           `
             insert into container_jobs (
               sales_order_id, container_number, container_size, status, completed_at,
-              has_driver_commission, driver_commission_amount, assignment_snapshot
+              has_driver_commission, driver_commission_amount, assignment_snapshot, destination
             )
-            values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 50000, $4::jsonb)
+            values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 50000, $4::jsonb, $5)
           `,
           [
-            quotaSalesOrderId,
-            `${quotaSoNumber}QUOTA${containerSuffix}`,
-            `${completedDate}T08:00:00+07:00`,
-            JSON.stringify({ driver: quotaDriverName }),
+            fewTripsSalesOrderId,
+            `${fewTripsSoNumber}TRIP${index}`,
+            `${periodA.periodStart}T08:00:00+07:00`,
+            JSON.stringify({ driver: fewTripsDriverName }),
+            'Cikarang',
           ],
         );
       }
 
-      for (let index = 1; index <= 3; index += 1) {
-        await insertQuotaJob(`A${index}`, periodA.periodStart);
+      const eligible = await api(`/api/driver-commissions/eligible?periodStart=${periodA.periodStart}&periodEnd=${periodA.periodEnd}`, { token: adminToken });
+      assert.equal(eligible.status, 200);
+      const eligibleRows = eligible.body.data.rows.filter((row) => row.driverName === fewTripsDriverName);
+      assert.equal(eligibleRows.length, 3, '3 ritasi harus langsung muncul sebagai eligible, tidak ditahan menunggu kuota');
+
+      // Sebelum diajukan (masih status draft), detail per sopir di period-report harus terisi
+      // lengkap -- bukan cuma total nominal doang seperti bug yang pernah terjadi.
+      const draftReport = await api(`/api/driver-commissions/period-report?periodStart=${periodA.periodStart}&periodEnd=${periodA.periodEnd}`, { token: financeToken });
+      assert.equal(draftReport.status, 200);
+      const draftDriver = draftReport.body.data.drivers.find((driver) => driver.driverName === fewTripsDriverName);
+      assert.ok(draftDriver, 'sopir dengan komisi draft harus muncul di period-report sebelum diajukan');
+      assert.equal(draftDriver.totalItems, 3);
+      assert.equal(draftDriver.totalAmount, 150000);
+      assert.equal(draftDriver.items.length, 3);
+      for (const item of draftDriver.items) {
+        assert.ok(item.completedDate, 'tanggal selesai di detail item tidak boleh kosong');
+        assert.equal(item.customerName, `Customer Sedikit Ritasi ${runId}`, 'nama customer di detail item tidak boleh kosong');
+        assert.equal(item.destination, 'Cikarang');
+        assert.ok(item.containerNumber?.startsWith(fewTripsSoNumber), 'nomor container di detail item tidak boleh kosong');
+        assert.equal(item.paymentStatus, 'unsubmitted');
       }
 
-      const belowQuota = await api('/api/driver-commissions/batches', {
+      const submission = await api('/api/driver-commissions/batches', {
         method: 'POST',
         token: adminToken,
         body: periodA,
       });
-      assert.equal(belowQuota.status, 400, 'sopir baru jalan 3 kali, di bawah kuota minimum 6, batch minggu ini seharusnya kosong');
-      assert.equal(belowQuota.body.error.code, 'NO_ELIGIBLE_DRIVER_COMMISSION');
+      assert.equal(submission.status, 201, 'sopir dengan 3 ritasi tetap harus bisa langsung diajukan ke Finance tanpa syarat jumlah ritasi minimum');
+
+      const fewTripsPayment = submission.body.data.payments.find((payment) => payment.driverName === fewTripsDriverName);
+      assert.ok(fewTripsPayment);
+      assert.equal(fewTripsPayment.totalItems, 3);
+      assert.equal(fewTripsPayment.totalAmount, 150000);
 
       const reportPeriodA = await api(`/api/driver-commissions/period-report?periodStart=${periodA.periodStart}&periodEnd=${periodA.periodEnd}`, { token: financeToken });
       assert.equal(reportPeriodA.status, 200);
-      const withheldA = reportPeriodA.body.data.withheld.find((row) => row.driverName === quotaDriverName);
-      assert.ok(withheldA, 'sopir yang ditahan harus muncul di daftar withheld periode ini');
-      assert.equal(withheldA.pendingItems, 3);
-      assert.equal(withheldA.target, 6);
-      assert.equal(withheldA.remaining, 3);
+      assert.equal(reportPeriodA.body.data.withheld, undefined, 'konsep sopir tertahan karena kuota sudah dihapus dari response');
+    });
 
-      for (let index = 1; index <= 4; index += 1) {
-        await insertQuotaJob(`B${index}`, periodB.periodStart);
+    await t.test('sales order & container job: destination per container - ditulis sekali saat dibuat, beku setelah itu, hanya bisa dikoreksi lewat mode admin', async () => {
+      const soNumber = `SO-DEST-${runId}`;
+      const cntrANumber = `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTRA`;
+      const cntrBNumber = `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTRB`;
+
+      const createdOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({
+          soNumber,
+          destination: 'Tujuan Default SO',
+          lineItems: [
+            { serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 1500000 },
+            { serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 1500000 },
+          ],
+          containers: [
+            { containerNumber: cntrANumber, size: '20FT', type: 'Dry', status: 'received', destination: 'Tujuan A' },
+            { containerNumber: cntrBNumber, size: '20FT', type: 'Dry', status: 'received', destination: 'Tujuan B' },
+          ],
+        }),
+      });
+      assert.equal(createdOrder.status, 201);
+      const orderId = createdOrder.body.data.id;
+      assert.equal(createdOrder.body.data.containers.length, 2);
+      const containerA = createdOrder.body.data.containers.find((row) => row.containerNumber === cntrANumber);
+      const containerB = createdOrder.body.data.containers.find((row) => row.containerNumber === cntrBNumber);
+      assert.equal(containerA.destination, 'Tujuan A', 'container A harus pakai tujuan dari baris rinciannya sendiri, bukan default SO');
+      assert.equal(containerB.destination, 'Tujuan B', 'container B harus pakai tujuan dari baris rinciannya sendiri, bukan default SO');
+
+      // Edit SO (destination default SO ikut diubah, dan body membawa "destination" baru untuk
+      // container yang SUDAH ADA) -- destination container lama harus tetap beku, tidak ikut
+      // tertulis ulang lewat update biasa (bukan mode koreksi admin).
+      const updatedOrder = await api(`/api/sales-orders/${orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          soNumber,
+          destination: 'Tujuan Default SO Baru',
+          updatedBy: 'Sprint2C Admin',
+          containers: [
+            { id: containerA.id, containerNumber: cntrANumber, size: '20FT', type: 'Dry', status: 'received', destination: 'Tujuan A Diam-Diam Diubah' },
+            { id: containerB.id, containerNumber: cntrBNumber, size: '20FT', type: 'Dry', status: 'received', destination: 'Tujuan B Diam-Diam Diubah' },
+          ],
+        }),
+      });
+      assert.equal(updatedOrder.status, 200);
+      assert.equal(updatedOrder.body.data.destination, 'Tujuan Default SO Baru');
+      assert.equal(
+        updatedOrder.body.data.containers.find((row) => row.id === containerA.id).destination,
+        'Tujuan A',
+        'destination container A harus tetap beku walau body edit SO membawa nilai baru',
+      );
+      assert.equal(
+        updatedOrder.body.data.containers.find((row) => row.id === containerB.id).destination,
+        'Tujuan B',
+        'destination container B harus tetap beku walau body edit SO membawa nilai baru',
+      );
+
+      // Tambah baris rincian baru (container baru) ke SO yang sudah ada -- container baru ini
+      // harus pakai default SO TERKINI saat itu, bukan retroaktif memakai tujuan lama container lain.
+      const cntrCNumber = `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTRC`;
+      const addedContainer = await api(`/api/sales-orders/${orderId}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: salesOrderPayload({
+          soNumber,
+          destination: 'Tujuan Default SO Baru',
+          updatedBy: 'Sprint2C Admin',
+          containers: [
+            { id: containerA.id, containerNumber: cntrANumber, size: '20FT', type: 'Dry', status: 'received' },
+            { id: containerB.id, containerNumber: cntrBNumber, size: '20FT', type: 'Dry', status: 'received' },
+            { containerNumber: cntrCNumber, size: '20FT', type: 'Dry', status: 'received' },
+          ],
+        }),
+      });
+      assert.equal(addedContainer.status, 200);
+      const containerC = addedContainer.body.data.containers.find((row) => row.containerNumber === cntrCNumber);
+      assert.ok(containerC, 'container baru harus tercipta saat baris rincian baru ditambahkan');
+      assert.equal(containerC.destination, 'Tujuan Default SO Baru', 'container baru tanpa tujuan sendiri harus pakai default SO terkini');
+      assert.equal(
+        addedContainer.body.data.containers.find((row) => row.id === containerA.id).destination,
+        'Tujuan A',
+        'container lama tidak boleh ikut berubah setelah baris rincian baru ditambahkan',
+      );
+
+      // Koreksi lewat PATCH /api/container-jobs/:id TANPA mode koreksi admin -- destination diabaikan.
+      const rejectedPlainUpdate = await api(`/api/container-jobs/${containerA.id}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { destination: 'Tujuan A Coba Ubah Tanpa Koreksi', updatedBy: 'Sprint2C Admin' },
+      });
+      assert.equal(rejectedPlainUpdate.status, 200);
+      assert.equal(rejectedPlainUpdate.body.data.destination, 'Tujuan A', 'tanpa mode koreksi admin, destination container harus tetap beku (field diabaikan)');
+
+      // Dengan mode koreksi admin + alasan yang valid -- destination berhasil dikoreksi.
+      const correctedUpdate = await api(`/api/container-jobs/${containerA.id}`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: {
+          destination: 'Tujuan A Terkoreksi',
+          updatedBy: 'Sprint2C Admin',
+          adminCorrectionMode: true,
+          adminCorrectionReason: `Koreksi tujuan container ${runId} salah input saat pembuatan`,
+        },
+      });
+      assert.equal(correctedUpdate.status, 200);
+      assert.equal(correctedUpdate.body.data.destination, 'Tujuan A Terkoreksi');
+
+      const correctionLog = await latestActivityForEntity('ADMIN_CORRECTION_CONTAINER_JOB', containerA.id);
+      assert.equal(correctionLog.action, 'ADMIN_CORRECTION_CONTAINER_JOB');
+      assert.ok((correctionLog.metadata.changedFields || []).includes('Tujuan'), 'perubahan tujuan harus tercatat di log koreksi admin');
+
+      // Selesaikan container B & C supaya bisa ditagihkan, lalu pastikan invoice detail
+      // menampilkan destinations unik per-container (Multi-tujuan), bukan cuma tujuan SO.
+      await query(
+        `update container_jobs set status = 'completed', completed_at = now() where id = any($1::uuid[])`,
+        [[containerA.id, containerB.id, containerC.id]],
+      );
+      const invoiceNumber = `INV-DEST-${runId}`;
+      await query(
+        `
+          update sales_orders
+          set status = 'completed',
+              invoice_number = $2,
+              billing_status = 'belum_dikirim',
+              finance_verification_status = 'verified',
+              accurate_so_number = $2
+          where id = $1
+        `,
+        [orderId, invoiceNumber],
+      );
+      const invoiceDetail = await api(`/api/finance/invoices/${orderId}`, { token: financeToken });
+      assert.equal(invoiceDetail.status, 200);
+      const destinations = invoiceDetail.body.data.destinations || [];
+      assert.ok(destinations.includes('Tujuan A Terkoreksi'), 'daftar tujuan invoice harus memuat tujuan container A yang sudah dikoreksi');
+      assert.ok(destinations.includes('Tujuan B'), 'daftar tujuan invoice harus memuat tujuan container B');
+      assert.ok(destinations.includes('Tujuan Default SO Baru'), 'daftar tujuan invoice harus memuat tujuan container C (default SO terkini)');
+      const breakdownB = invoiceDetail.body.data.containerBreakdown.find((row) => row.containerJobId === containerB.id);
+      assert.equal(breakdownB.destination, 'Tujuan B', 'rincian per container pada invoice harus menampilkan tujuan container itu sendiri');
+    });
+
+    await t.test('finance: summary sub-filter dokumen invoice (Sudah/Belum Dikirim ke Customer) tidak ikut menghitung SO yang sudah lunas', async () => {
+      async function createInvoiceOrder(soNumber, billingStatus) {
+        const soInsert = await query(
+          `
+            insert into sales_orders (
+              so_number, accurate_so_number, customer_name, shipment_type, origin, destination, status,
+              finance_verification_status, invoice_number, invoice_document_uploaded_at, tax_invoice_document_uploaded_at,
+              invoice_document_status, billing_status
+            )
+            values ($1, $1, $2, 'import', 'Tanjung Priok', 'Cikarang', 'completed', 'verified', $1, now(), now(), 'terkirim', $3)
+            returning id
+          `,
+          [soNumber, `Customer ${runId}`, billingStatus],
+        );
+        await query(
+          `
+            insert into container_jobs (sales_order_id, container_number, container_size, status, completed_at)
+            values ($1, $2, '20FT', 'completed', now())
+          `,
+          [soInsert.rows[0].id, `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`],
+        );
       }
 
-      const stillBelowIfCheckedAlone = await api(`/api/driver-commissions/period-report?periodStart=${periodB.periodStart}&periodEnd=${periodB.periodEnd}`, { token: financeToken });
-      assert.equal(stillBelowIfCheckedAlone.status, 200);
-      assert.equal(
-        stillBelowIfCheckedAlone.body.data.withheld.find((row) => row.driverName === quotaDriverName),
-        undefined,
-        'begitu kumulatif (3 tunggakan + 4 minggu ini = 7) tembus target, sopir ini seharusnya sudah lolos (released), bukan withheld lagi',
-      );
+      const before = await api('/api/finance/invoices?status=in-progress&invoiceDocumentFilter=sent', { token: financeToken });
+      assert.equal(before.status, 200);
+      const sentCountBefore = before.body.data.summary.sentInvoiceDocuments;
 
-      const releaseSubmission = await api('/api/driver-commissions/batches', {
-        method: 'POST',
-        token: adminToken,
-        body: periodB,
-      });
-      assert.equal(releaseSubmission.status, 201, 'begitu kumulatif tembus 7, submit periode ini harus berhasil membawa serta tunggakan minggu lalu');
+      const soNumberSentUnpaid = `SO-SENTUNPAID-${runId}`;
+      const soNumberSentLunas = `SO-SENTLUNAS-${runId}`;
+      await createInvoiceOrder(soNumberSentUnpaid, 'belum_dikirim');
+      await createInvoiceOrder(soNumberSentLunas, 'lunas');
 
-      const quotaDriverPayment = releaseSubmission.body.data.payments.find((payment) => payment.driverName === quotaDriverName);
-      assert.ok(quotaDriverPayment);
-      assert.equal(quotaDriverPayment.totalItems, 7, 'batch yang cair harus berisi 3 ritasi tunggakan minggu lalu + 4 ritasi minggu ini');
-      assert.equal(quotaDriverPayment.totalAmount, 350000);
-      assert.ok(
-        quotaDriverPayment.items.some((item) => item.completedDate === periodA.periodStart),
-        'ritasi minggu lama yang sempat tertahan harus ikut masuk batch yang cair ini',
-      );
+      const after = await api('/api/finance/invoices?status=in-progress&invoiceDocumentFilter=sent', { token: financeToken });
+      assert.equal(after.status, 200);
 
-      const reportPeriodAAfterRelease = await api(`/api/driver-commissions/period-report?periodStart=${periodA.periodStart}&periodEnd=${periodA.periodEnd}`, { token: financeToken });
-      assert.equal(reportPeriodAAfterRelease.status, 200);
-      assert.equal(
-        reportPeriodAAfterRelease.body.data.withheld.find((row) => row.driverName === quotaDriverName),
-        undefined,
-        'setelah cair, sopir ini tidak lagi berstatus tertahan',
-      );
+      // Cuma SO yang belum lunas yang boleh menambah hitungan "Sudah Dikirim ke Customer" milik
+      // tab Menunggu Pembayaran -- SO yang sudah lunas TIDAK boleh ikut menaikkan angkanya, walau
+      // dokumennya juga berstatus terkirim (itu bug yang dilaporkan: badge menghitung nomor yang
+      // berbeda dari isi tabel yang benar-benar tersaring lewat status=in-progress).
+      assert.equal(after.body.data.summary.sentInvoiceDocuments, sentCountBefore + 1, 'summary sentInvoiceDocuments harus naik tepat 1, bukan 2 -- SO yang lunas tidak ikut dihitung');
+      const rowSoNumbers = after.body.data.rows.map((row) => row.soNumber);
+      assert.ok(rowSoNumbers.includes(soNumberSentUnpaid), 'SO yang sudah dikirim dan belum lunas harus muncul di daftar');
+      assert.ok(!rowSoNumbers.includes(soNumberSentLunas), 'SO yang sudah lunas tidak boleh muncul di filter Menunggu Pembayaran');
     });
 
     await t.test('vehicle documents: create vehicles, upload KIR, list, download, safe path', async () => {

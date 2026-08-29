@@ -8,7 +8,7 @@ const archiveColumns = `
   cj.assignment_snapshot,
   cj.status, cj.received_at, cj.running_at, cj.completed_at, cj.updated_by_name,
   so.so_number, so.do_number, so.customer_name, so.shipment_type, so.origin,
-  so.destination, so.trip_date
+  cj.destination, so.trip_date
 `;
 
 function parsePage(options = {}) {

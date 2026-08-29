@@ -435,6 +435,15 @@
   line-height: 1.05;
   white-space: normal;
 }
+/* .data-table th memaksa text-align: left dengan spesifisitas lebih tinggi dari utility Tailwind
+   biasa (element + class > class saja), jadi kelas text-right/text-center di header InvoiceTable
+   butuh selector setara di sini supaya benar-benar menang dan sejajar dengan datanya. */
+.finance-invoice-table th.text-right {
+  text-align: right;
+}
+.finance-invoice-table th.text-center {
+  text-align: center;
+}
 .finance-invoice-table-wrap {
   overflow-x: hidden;
 }

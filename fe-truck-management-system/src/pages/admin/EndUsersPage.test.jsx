@@ -44,11 +44,11 @@ describe('EndUsersPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    upsertMaster.mockResolvedValue({ id: 'end-user-2', name: 'PT Penerima Akhir' });
+    upsertMaster.mockResolvedValue({ id: 'end-user-2', name: 'Gudang Penerima Akhir' });
     removeMaster.mockResolvedValue(undefined);
     confirmAction.mockResolvedValue(true);
     fetchMasterPage.mockResolvedValue({
-      rows: [{ id: 'end-user-1', name: 'PT Bekasi Plant', code: 'EU-001', status: 'Aktif' }],
+      rows: [{ id: 'end-user-1', name: 'Gudang Bekasi Plant', address: 'Jl. Industri No. 1, Bekasi', status: 'Aktif' }],
       total: 1,
     });
     fetchMasterViewerNote.mockResolvedValue([]);
@@ -56,7 +56,7 @@ describe('EndUsersPage', () => {
     useArchiveData.mockReturnValue({
       isDatabaseMode: true,
       masters: {
-        'end-users': [{ id: 'end-user-1', name: 'PT Bekasi Plant', code: 'EU-001', status: 'Aktif' }],
+        'end-users': [{ id: 'end-user-1', name: 'Gudang Bekasi Plant', address: 'Jl. Industri No. 1, Bekasi', status: 'Aktif' }],
       },
       upsertMaster,
       removeMaster,
@@ -65,24 +65,20 @@ describe('EndUsersPage', () => {
     useFeedback.mockReturnValue({ notify, confirmAction });
   });
 
-  it('menyimpan master end user baru', async () => {
+  it('menyimpan master lokasi baru', async () => {
     const user = userEvent.setup();
     render(<EndUsersPage />);
 
-    await user.click(screen.getByRole('button', { name: /Input End User Baru/i }));
-    await user.type(screen.getByPlaceholderText('Contoh: PT Customer Akhir Indonesia'), 'PT Penerima Akhir');
-    await user.type(screen.getByPlaceholderText('Contoh: EUI-001'), 'EU-002');
-    await user.type(screen.getByPlaceholderText('Nama penanggung jawab'), 'Andi');
-    await user.type(screen.getByPlaceholderText('021 / 08xx'), '08123456789');
-    await user.click(screen.getByRole('button', { name: 'Simpan End User' }));
+    await user.click(screen.getByRole('button', { name: /Input Lokasi Baru/i }));
+    await user.type(screen.getByPlaceholderText('Contoh: Gudang Customer Akhir'), 'Gudang Penerima Akhir');
+    await user.type(screen.getByPlaceholderText('Masukkan alamat lengkap lokasi'), 'Jl. Penerima No. 2, Karawang');
+    await user.click(screen.getByRole('button', { name: 'Simpan Lokasi' }));
 
     await waitFor(() => expect(upsertMaster).toHaveBeenCalledWith(
       'end-users',
       expect.objectContaining({
-        name: 'PT Penerima Akhir',
-        code: 'EU-002',
-        pic: 'Andi',
-        phone: '08123456789',
+        name: 'Gudang Penerima Akhir',
+        address: 'Jl. Penerima No. 2, Karawang',
       }),
       null,
     ));

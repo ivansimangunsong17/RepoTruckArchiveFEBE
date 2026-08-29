@@ -162,6 +162,7 @@ export function mapContainerJob(row, attachments = []) {
     size: row.container_size,
     type: row.container_type,
     notes: row.container_notes,
+    destination: row.destination || '',
     driverId: row.driver_id,
     vehicleId: row.vehicle_id,
     driver: assignment.driver || null,
@@ -404,6 +405,10 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
     sales_order_id: order.id,
     container_number: String(container.containerNumber || '').trim().toUpperCase() || null,
     container_size: normalizeContainerSize(container.size || container.containerSize),
+    // Snapshot yang HANYA diisi sekali saat container ini dibuat (baris rincian bisa override,
+    // kalau kosong pakai tujuan SO saat itu sebagai default) -- lihat sales-orders.repository.js
+    // untuk kepastian kolom ini tidak pernah ditulis ulang lewat edit SO biasa setelah container ada.
+    destination: String(container.destination || order.destination || '').trim(),
     container_type: container.type || 'Dry',
     container_notes: container.notes || null,
     rpuj_status: container.rpujStatus || 'pending',

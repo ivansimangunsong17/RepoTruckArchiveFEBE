@@ -126,6 +126,38 @@ describe('CustomerOutstandingPage finance', () => {
     expect(fetchFinanceOutstanding).not.toHaveBeenCalled();
   });
 
+  it('mengirim sortBy default saat pertama kali dimuat, lalu memuat ulang dengan sortBy baru saat dropdown Urutkan diubah', async () => {
+    const user = userEvent.setup();
+    render(<CustomerOutstandingPage />);
+
+    await screen.findByText('PT Mitra Kimia');
+    expect(fetchFinanceOutstandingByCustomer).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, sortBy: 'outstanding_desc' }),
+    );
+
+    await user.selectOptions(screen.getByLabelText('Urutkan'), 'oldest_overdue_desc');
+
+    await waitFor(() => {
+      expect(fetchFinanceOutstandingByCustomer).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, sortBy: 'oldest_overdue_desc' }),
+      );
+    });
+  });
+
+  it('mengirim agingBucket=overdue_all saat opsi Semua Overdue dipilih di dropdown Umur Piutang', async () => {
+    const user = userEvent.setup();
+    render(<CustomerOutstandingPage />);
+
+    await screen.findByText('PT Mitra Kimia');
+    await user.selectOptions(screen.getByLabelText('Umur Piutang'), 'overdue_all');
+
+    await waitFor(() => {
+      expect(fetchFinanceOutstandingByCustomer).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, agingBucket: 'overdue_all' }),
+      );
+    });
+  });
+
   it('mengekspor daftar piutang per customer ke CSV', async () => {
     const user = userEvent.setup();
     render(<CustomerOutstandingPage />);

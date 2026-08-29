@@ -403,6 +403,7 @@ export function fetchCustomerOutstandingRollup(query = {}) {
     pageSize: query.pageSize,
     query: query.query || query.search || '',
     agingBucket: query.agingBucket || '',
+    sortBy: query.sortBy || '',
   });
 }
 

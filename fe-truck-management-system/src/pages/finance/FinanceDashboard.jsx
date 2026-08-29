@@ -542,9 +542,9 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                 <small className="mt-1 block text-xs text-slate-500">Dropping disetujui, bukti transfer belum upload.</small>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Menunggu Sales</span>
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Menunggu Pembayaran</span>
                 <strong className="mt-1 block text-lg text-slate-950">{queues.invoiceWaitingSales || 0}</strong>
-                <small className="mt-1 block text-xs text-slate-500">Invoice sudah ada, follow up di Sales.</small>
+                <small className="mt-1 block text-xs text-slate-500">Invoice sudah lengkap, tinggal menunggu pelunasan dari customer.</small>
               </div>
             </div>
           </section>

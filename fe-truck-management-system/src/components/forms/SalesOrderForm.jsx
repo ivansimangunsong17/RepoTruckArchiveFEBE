@@ -98,6 +98,7 @@ function createLineItemDraft(item = {}) {
     qty: item.qty == null ? '1' : String(item.qty),
     price: item.price == null ? '0' : String(item.price),
     notes: item.notes || '',
+    destination: item.destination || '',
   };
 }
 
@@ -191,7 +192,7 @@ function findExistingContainer(plannedContainer, existingContainers, usedIndexes
     || null;
 }
 
-function buildContainersFromLineItems(lineItems, receivedAt, existingContainers = []) {
+function buildContainersFromLineItems(lineItems, receivedAt, existingContainers = [], formDestination = '') {
   const containers = [];
 
   lineItems.forEach((item) => {
@@ -207,6 +208,10 @@ function buildContainersFromLineItems(lineItems, receivedAt, existingContainers 
         rpujStatus: 'pending',
         status: 'received',
         receivedAt: receivedAt || new Date().toISOString(),
+        // Tujuan container baru hanya ditulis SEKALI saat dibuat -- kalau baris rinciannya sendiri
+        // tidak diisi, pakai Tujuan Utama SO saat ini. Container yang sudah ada (matched di bawah)
+        // sengaja TIDAK ikut memakai nilai ini, backend juga tidak akan menulis ulang destination-nya.
+        destination: item.destination || formDestination || '',
       });
     }
   });
@@ -289,6 +294,8 @@ function normalizeMasterOptions(rows = []) {
     .sort((left, right) => left.localeCompare(right, 'id'));
 }
 
+const SEARCHABLE_INPUT_MAX_RESULTS = 8;
+
 function SearchableInput({
   name,
   value,
@@ -296,27 +303,42 @@ function SearchableInput({
   options,
   placeholder,
   required = false,
+  ariaLabel,
 }) {
-  const datalistId = `sales-order-${name}-options`;
-  const normalizedOptions = [...new Set([
-    ...(value && !options.includes(value) ? [value] : []),
-    ...options,
-  ])];
+  const [open, setOpen] = useState(false);
+  const query = String(value || '').trim().toLowerCase();
+  const matches = (query ? options.filter((option) => option.toLowerCase().includes(query)) : options)
+    .slice(0, SEARCHABLE_INPUT_MAX_RESULTS);
+
+  function selectOption(option) {
+    onChange({ target: { name, value: option } });
+    setOpen(false);
+  }
+
   return (
-    <>
+    <div className="searchable-input">
       <input
         name={name}
         value={value}
-        onChange={onChange}
-        list={datalistId}
+        onChange={(event) => { onChange(event); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false); }}
         placeholder={placeholder}
         required={required}
         autoComplete="off"
+        aria-label={ariaLabel}
       />
-      <datalist id={datalistId}>
-        {normalizedOptions.map((option) => <option key={option} value={option} />)}
-      </datalist>
-    </>
+      {open && matches.length ? (
+        <div className="searchable-input-results" role="listbox">
+          {matches.map((option) => (
+            <button key={option} type="button" role="option" onMouseDown={() => selectOption(option)}>
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -620,7 +642,7 @@ function SalesOrderForm({
     const price = normalizedLineItems.length === 1 ? Number(normalizedLineItems[0].price || 0) : 0;
     const serviceSummary = summarizeLineItems(normalizedLineItems);
     const containerSummary = normalizedLineItems.map(formatLineItemLabel).join(' + ');
-    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt, order?.containers || []);
+    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt, order?.containers || [], form.destination.trim());
     setReviewPayload({
       ...form,
       soNumber,
@@ -1005,6 +1027,19 @@ function SalesOrderForm({
                           value={item.notes}
                           onChange={(event) => updateLineItem(index, 'notes', event.target.value)}
                           placeholder="Contoh: biaya admin, LOLO, seal, atau catatan lain"
+                        />
+                      </label>
+                    ) : null}
+                    {showContainerType ? (
+                      <label className="line-item-note-field">
+                        Tujuan Container Ini (opsional)
+                        <SearchableInput
+                          name={`lineItemDestination-${index}`}
+                          ariaLabel="Tujuan Container Ini"
+                          value={item.destination}
+                          onChange={(event) => updateLineItem(index, 'destination', event.target.value)}
+                          options={destinationOptions}
+                          placeholder="Kosongkan untuk pakai Tujuan Utama SO"
                         />
                       </label>
                     ) : null}

@@ -1,4 +1,5 @@
 import { query } from '../../db/client.js';
+import { getCustomerOutstandingRollupPage } from '../finance/finance.repository.js';
 import {
   getTransportLineItemForSize,
   splitFinancialLineItems,
@@ -194,6 +195,165 @@ export function summarizeSalesPerformanceRows(rows = []) {
   };
 }
 
+function normalizeCustomerKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveCustomerPerformanceStatus(row = {}) {
+  const revenue = Number(row.totalRevenue || 0);
+  const volume = Number(row.totalVolume || 0);
+  const outstanding = Number(row.totalOutstandingAmount || 0);
+  const overdue = Number(row.overdueAmount || 0);
+  const collectionRate = Number(row.collectionRate || 0);
+
+  if (overdue > 0) return 'Perlu Ditagih';
+  if (revenue <= 0 && outstanding > 0) return 'Outstanding';
+  if (outstanding > 0) return 'Piutang Berjalan';
+  if (volume <= 0) return 'Belum Aktif';
+  if (collectionRate >= 0.95) return 'Sehat';
+  return 'Perlu Dipantau';
+}
+
+function createEmptyCustomerPerformanceSummary(customer) {
+  return {
+    customer,
+    salesKeys: new Set(),
+    salesNames: new Set(),
+    orderKeys: new Set(),
+    totalVolume: 0,
+    totalRevenue: 0,
+    container20ft: 0,
+    container40ft: 0,
+    lastOrderDate: null,
+    totalOutstandingAmount: 0,
+    currentAmount: 0,
+    overdueAmount: 0,
+    overdue1To30Amount: 0,
+    overdue31To60Amount: 0,
+    overdue61To90Amount: 0,
+    overdue90PlusAmount: 0,
+    invoiceCount: 0,
+    oldestOverdueDays: 0,
+    needsReview: false,
+  };
+}
+
+export function buildCustomerPerformanceRows(rows = [], outstandingRows = []) {
+  const customerMap = new Map();
+
+  rows.forEach((row) => {
+    const customer = normalizeCustomerName(row);
+    const customerKey = normalizeCustomerKey(customer);
+    if (!customerMap.has(customerKey)) {
+      customerMap.set(customerKey, createEmptyCustomerPerformanceSummary(customer));
+    }
+
+    const customerSummary = customerMap.get(customerKey);
+    const salesName = normalizeSalesName(row);
+    const salesKey = normalizeCustomerKey(salesName);
+    const orderKey = normalizeSalesOrderId(row);
+    const revenue = calculateCompletedJobRevenue(row);
+    const size = String(row.container_size || row.containerSize || row.size || '').trim().toUpperCase().replace(/\s/g, '');
+    const completedDate = row.completed_date || row.completedDate || row.trip_date || row.tripDate || null;
+
+    if (salesKey) customerSummary.salesKeys.add(salesKey);
+    if (salesName) customerSummary.salesNames.add(salesName);
+    if (orderKey) customerSummary.orderKeys.add(orderKey);
+    customerSummary.totalVolume += 1;
+    customerSummary.totalRevenue += revenue;
+    if (size === '20FT') customerSummary.container20ft += 1;
+    if (size === '40FT') customerSummary.container40ft += 1;
+    if (completedDate && (!customerSummary.lastOrderDate || new Date(completedDate) > new Date(customerSummary.lastOrderDate))) {
+      customerSummary.lastOrderDate = completedDate;
+    }
+  });
+
+  outstandingRows.forEach((row) => {
+    const customer = normalizeCustomerName(row);
+    const customerKey = normalizeCustomerKey(customer);
+    if (!customerMap.has(customerKey)) {
+      customerMap.set(customerKey, createEmptyCustomerPerformanceSummary(customer));
+    }
+
+    const customerSummary = customerMap.get(customerKey);
+    customerSummary.totalOutstandingAmount += Number(row.totalOutstandingAmount || 0);
+    customerSummary.currentAmount += Number(row.currentAmount || 0);
+    customerSummary.overdueAmount += Number(row.overdueAmount || 0);
+    customerSummary.overdue1To30Amount += Number(row.overdue1To30Amount || 0);
+    customerSummary.overdue31To60Amount += Number(row.overdue31To60Amount || 0);
+    customerSummary.overdue61To90Amount += Number(row.overdue61To90Amount || 0);
+    customerSummary.overdue90PlusAmount += Number(row.overdue90PlusAmount || 0);
+    customerSummary.invoiceCount += Number(row.invoiceCount || 0);
+    customerSummary.oldestOverdueDays = Math.max(customerSummary.oldestOverdueDays, Number(row.oldestOverdueDays || 0));
+    customerSummary.needsReview = customerSummary.needsReview || Boolean(row.needsReview);
+  });
+
+  return Array.from(customerMap.values())
+    .map((customer) => {
+      const paidEstimate = Math.max(Number(customer.totalRevenue || 0) - Number(customer.totalOutstandingAmount || 0), 0);
+      const collectionRate = customer.totalRevenue > 0 ? paidEstimate / customer.totalRevenue : 0;
+      const row = {
+        customer: customer.customer,
+        salesCount: customer.salesKeys.size,
+        salesNames: Array.from(customer.salesNames).sort((left, right) => left.localeCompare(right)),
+        completedOrders: customer.orderKeys.size,
+        totalVolume: customer.totalVolume,
+        totalTrips: customer.totalVolume,
+        totalContainers: customer.totalVolume,
+        totalRevenue: customer.totalRevenue,
+        averageRevenuePerVolume: customer.totalVolume ? customer.totalRevenue / customer.totalVolume : 0,
+        container20ft: customer.container20ft,
+        container40ft: customer.container40ft,
+        totalOutstandingAmount: customer.totalOutstandingAmount,
+        currentAmount: customer.currentAmount,
+        overdueAmount: customer.overdueAmount,
+        overdue1To30Amount: customer.overdue1To30Amount,
+        overdue31To60Amount: customer.overdue31To60Amount,
+        overdue61To90Amount: customer.overdue61To90Amount,
+        overdue90PlusAmount: customer.overdue90PlusAmount,
+        invoiceCount: customer.invoiceCount,
+        oldestOverdueDays: customer.oldestOverdueDays,
+        needsReview: customer.needsReview,
+        paidEstimate,
+        collectionRate,
+        collectionPercent: collectionRate * 100,
+        lastOrderDate: customer.lastOrderDate,
+      };
+      return { ...row, status: resolveCustomerPerformanceStatus(row) };
+    })
+    .sort((left, right) => {
+      if (right.totalOutstandingAmount !== left.totalOutstandingAmount) return right.totalOutstandingAmount - left.totalOutstandingAmount;
+      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+      if (right.totalVolume !== left.totalVolume) return right.totalVolume - left.totalVolume;
+      return left.customer.localeCompare(right.customer);
+    });
+}
+
+export function summarizeCustomerPerformanceRows(rows = []) {
+  const totalRevenue = rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
+  const totalVolume = rows.reduce((total, row) => total + Number(row.totalVolume || 0), 0);
+  const totalOutstandingAmount = rows.reduce((total, row) => total + Number(row.totalOutstandingAmount || 0), 0);
+  const overdueAmount = rows.reduce((total, row) => total + Number(row.overdueAmount || 0), 0);
+  const activeCustomers = rows.filter((row) => Number(row.totalVolume || 0) > 0).length;
+
+  return {
+    totalCustomers: rows.length,
+    activeCustomers,
+    outstandingCustomers: rows.filter((row) => Number(row.totalOutstandingAmount || 0) > 0).length,
+    overdueCustomers: rows.filter((row) => Number(row.overdueAmount || 0) > 0).length,
+    healthyCustomers: rows.filter((row) => row.status === 'Sehat').length,
+    totalOrders: rows.reduce((total, row) => total + Number(row.completedOrders || 0), 0),
+    totalVolume,
+    totalContainers: rows.reduce((total, row) => total + Number(row.totalContainers || row.totalVolume || 0), 0),
+    totalRevenue,
+    totalOutstandingAmount,
+    overdueAmount,
+    averageRevenuePerCustomer: activeCustomers ? totalRevenue / activeCustomers : 0,
+    averageRevenuePerVolume: totalVolume ? totalRevenue / totalVolume : 0,
+    collectionRate: totalRevenue > 0 ? Math.max(totalRevenue - totalOutstandingAmount, 0) / totalRevenue : 0,
+  };
+}
+
 export async function getDashboardReport() {
   const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs] = await Promise.all([
     query(`
@@ -246,7 +406,7 @@ export async function getDashboardReport() {
              cj.repo_location, cj.repo_stored_at, cj.repo_reason,
              cj.repo_notes, cj.repo_container_condition,
              so.id as sales_order_id, so.so_number, so.customer_name,
-             so.shipment_type, so.origin, so.destination, so.trip_date,
+             so.shipment_type, so.origin, cj.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
@@ -263,7 +423,7 @@ export async function getDashboardReport() {
              cj.received_at, cj.running_at,
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
              so.id as sales_order_id, so.so_number, so.customer_name,
-             so.shipment_type, so.origin, so.destination, so.trip_date,
+             so.shipment_type, so.origin, cj.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
@@ -539,7 +699,7 @@ export async function getMonthlyRevenueReport(options = {}) {
           so.id,
           so.so_number,
           so.customer_name,
-          so.destination,
+          cj.destination,
           so.price,
           so.total_amount,
           to_jsonb(so)->'line_items' as line_items,
@@ -663,6 +823,83 @@ export async function getSalesPerformanceReport(options = {}) {
   };
 }
 
+async function getAllCustomerOutstandingRollupRows() {
+  const pageSize = 100;
+  const firstPage = await getCustomerOutstandingRollupPage({ page: 1, pageSize });
+  const rows = Array.isArray(firstPage.rows) ? [...firstPage.rows] : [];
+  const totalPages = Number(firstPage.totalPages || 1);
+
+  for (let page = 2; page <= totalPages; page += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await getCustomerOutstandingRollupPage({ page, pageSize });
+    if (Array.isArray(result.rows)) rows.push(...result.rows);
+  }
+
+  return rows;
+}
+
+export async function getCustomerPerformanceReport(options = {}) {
+  const period = parseRevenuePeriod(options);
+  const clauses = [];
+  const params = [period.dateFrom, period.dateToExclusive];
+  appendEntrySourceFilters(clauses, params, options, 'cj');
+  const sourceWhereSql = clauses.length ? `and ${clauses.join(' and ')}` : '';
+
+  const [completedResult, outstandingRows] = await Promise.all([
+    query(
+      `
+        with order_job_totals as (
+          select sales_order_id, count(*)::int as total_jobs
+          from container_jobs
+          group by sales_order_id
+        ),
+        completed_jobs as (
+          select
+            cj.id as job_id,
+            so.id,
+            so.so_number,
+            so.customer_name,
+            so.sales_name,
+            so.created_by_name,
+            so.price,
+            so.total_amount,
+            to_jsonb(so)->'line_items' as line_items,
+            cj.container_size,
+            ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
+            coalesce(cj.entry_source, 'realtime') as entry_source,
+            cj.historical_period,
+            greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
+          from sales_orders so
+          join container_jobs cj on cj.sales_order_id = so.id
+          left join order_job_totals ojt on ojt.sales_order_id = so.id
+          where so.status <> 'cancelled'
+            and cj.status = 'completed'
+            ${sourceWhereSql}
+        )
+        select *
+        from completed_jobs
+        where completed_date >= $1::date
+          and completed_date < $2::date
+        order by completed_date desc, customer_name asc, so_number asc, job_id asc
+      `,
+      params,
+    ),
+    getAllCustomerOutstandingRollupRows(),
+  ]);
+
+  const rows = buildCustomerPerformanceRows(completedResult.rows, outstandingRows);
+
+  return {
+    period: {
+      month: period.month,
+      year: period.year,
+    },
+    rows,
+    total: rows.length,
+    summary: summarizeCustomerPerformanceRows(rows),
+  };
+}
+
 export async function getOperationReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const status = String(options.status || '');
@@ -691,7 +928,7 @@ export async function getOperationReport(options = {}) {
       or so.do_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or so.origin ilike $${params.length}
-      or so.destination ilike $${params.length}
+      or cj.destination ilike $${params.length}
       or cj.container_number ilike $${params.length}
       or cj.assignment_snapshot::text ilike $${params.length}
     )`);
@@ -720,7 +957,7 @@ export async function getOperationReport(options = {}) {
                coalesce(cj.entry_source, 'realtime') as entry_source, cj.historical_period, cj.historical_notes,
                so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
                so.sales_name, so.created_by_name,
-               so.origin, so.destination,
+               so.origin, cj.destination,
                coalesce(v.unit_code, snapshot_vehicle.unit_code, nullif(cj.assignment_snapshot->>'unitCode', '')) as unit_code
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id

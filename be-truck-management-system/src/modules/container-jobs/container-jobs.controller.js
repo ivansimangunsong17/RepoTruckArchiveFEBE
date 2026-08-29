@@ -33,6 +33,7 @@ function historicalMetadata(job = {}) {
 const adminCorrectionAuditFields = {
   status: 'Status',
   containerNumber: 'No. Container',
+  destination: 'Tujuan',
   plateNumber: 'Truck',
   driver: 'Sopir',
   runningAt: 'Waktu Mulai',

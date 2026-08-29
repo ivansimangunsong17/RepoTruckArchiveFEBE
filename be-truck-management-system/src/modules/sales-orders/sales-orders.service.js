@@ -68,6 +68,7 @@ function normalizeLineItem(item = {}) {
     price,
     total: Number(item.total || qty * price),
     notes: isOtherService(serviceName) ? (item.notes || '') : '',
+    destination: String(item.destination || '').trim(),
   };
 }
 
@@ -178,6 +179,7 @@ function normalizeContainers(payload) {
           notes: item.serviceName,
           rpujStatus: 'pending',
           status: 'received',
+          destination: item.destination || payload.destination || '',
         });
       }
     });

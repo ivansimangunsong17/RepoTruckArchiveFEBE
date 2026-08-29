@@ -4,9 +4,11 @@ import test from 'node:test';
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
 const {
+  buildCustomerPerformanceRows,
   buildSalesPerformanceRows,
   calculateCompletedJobRevenue,
   calculateDriverCommissionAmount,
+  summarizeCustomerPerformanceRows,
   summarizeSalesPerformanceRows,
   splitDriverCommissionPaymentAmount,
 } = await import('./reports.repository.js');
@@ -140,4 +142,116 @@ test('sales performance menggabungkan customer unik, volume, dan revenue per sal
     averageRevenuePerSales: 2750000,
     averageRevenuePerVolume: 1833333.3333333333,
   });
+});
+
+test('customer performance menggabungkan revenue periode dan outstanding aktif', () => {
+  const rows = buildCustomerPerformanceRows([
+    {
+      id: 'so-1',
+      so_number: 'SO-001',
+      sales_name: 'Sales A',
+      customer_name: 'Customer Alpha',
+      price: 1500000,
+      total_containers: 2,
+      container_size: '20FT',
+      completed_date: '2026-08-05',
+    },
+    {
+      id: 'so-1',
+      so_number: 'SO-001',
+      sales_name: 'Sales A',
+      customer_name: 'Customer Alpha',
+      price: 1500000,
+      total_containers: 2,
+      container_size: '20FT',
+      completed_date: '2026-08-06',
+    },
+    {
+      id: 'so-2',
+      so_number: 'SO-002',
+      sales_name: 'Sales B',
+      customer_name: 'Customer Beta',
+      price: 2500000,
+      total_containers: 1,
+      container_size: '40FT',
+      completed_date: '2026-08-07',
+    },
+  ], [
+    {
+      customer: 'Customer Alpha',
+      invoiceCount: 1,
+      totalOutstandingAmount: 1000000,
+      currentAmount: 1000000,
+      overdueAmount: 0,
+      oldestOverdueDays: 0,
+    },
+    {
+      customer: 'Customer Lama',
+      invoiceCount: 2,
+      totalOutstandingAmount: 3000000,
+      currentAmount: 0,
+      overdueAmount: 3000000,
+      oldestOverdueDays: 45,
+    },
+  ]);
+
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].customer, 'Customer Lama');
+  assert.equal(rows[0].totalVolume, 0);
+  assert.equal(rows[0].totalOutstandingAmount, 3000000);
+  assert.equal(rows[0].status, 'Perlu Ditagih');
+
+  const alpha = rows.find((row) => row.customer === 'Customer Alpha');
+  assert.equal(alpha.completedOrders, 1);
+  assert.equal(alpha.totalVolume, 2);
+  assert.equal(alpha.totalRevenue, 3000000);
+  assert.equal(alpha.totalOutstandingAmount, 1000000);
+  assert.equal(alpha.status, 'Piutang Berjalan');
+
+  assert.deepEqual(summarizeCustomerPerformanceRows(rows), {
+    totalCustomers: 3,
+    activeCustomers: 2,
+    outstandingCustomers: 2,
+    overdueCustomers: 1,
+    healthyCustomers: 1,
+    totalOrders: 2,
+    totalVolume: 3,
+    totalContainers: 3,
+    totalRevenue: 5500000,
+    totalOutstandingAmount: 4000000,
+    overdueAmount: 3000000,
+    averageRevenuePerCustomer: 2750000,
+    averageRevenuePerVolume: 1833333.3333333333,
+    collectionRate: 0.2727272727272727,
+  });
+});
+
+test('customer performance memecah outstanding jadi klasifikasi bucket umur piutang (current/1-30/31-60/61-90/90+)', () => {
+  const rows = buildCustomerPerformanceRows([], [
+    {
+      customer: 'Customer Bucket',
+      invoiceCount: 4,
+      totalOutstandingAmount: 10000000,
+      currentAmount: 1000000,
+      overdueAmount: 9000000,
+      overdue1To30Amount: 2000000,
+      overdue31To60Amount: 3000000,
+      overdue61To90Amount: 4000000,
+      overdue90PlusAmount: 0,
+      oldestOverdueDays: 75,
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  const customer = rows[0];
+  assert.equal(customer.currentAmount, 1000000);
+  assert.equal(customer.overdue1To30Amount, 2000000);
+  assert.equal(customer.overdue31To60Amount, 3000000);
+  assert.equal(customer.overdue61To90Amount, 4000000);
+  assert.equal(customer.overdue90PlusAmount, 0);
+  // Total tiap bucket harus konsisten dengan totalOutstandingAmount (tidak ada yang hilang/dobel).
+  assert.equal(
+    customer.currentAmount + customer.overdue1To30Amount + customer.overdue31To60Amount + customer.overdue61To90Amount + customer.overdue90PlusAmount,
+    customer.totalOutstandingAmount,
+  );
 });

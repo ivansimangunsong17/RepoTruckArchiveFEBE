@@ -25,7 +25,7 @@ const joinedJobColumns = `
   so.so_number, so.accurate_so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
-  so.terminal, so.service_name, so.origin, so.destination, so.trip_date,
+  so.terminal, so.service_name, so.origin, cj.destination, so.trip_date,
   so.created_by_name as order_created_by_name,
   (
     select count(*)::int
@@ -1181,7 +1181,7 @@ export async function findContainerJobExpenseLedger(options = {}) {
       so.so_number ilike $${params.length}
       or cj.container_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
-      or so.destination ilike $${params.length}
+      or cj.destination ilike $${params.length}
       or expense.description ilike $${params.length}
       or expense.recipient_name ilike $${params.length}
       or cj.assignment_snapshot->>'driver' ilike $${params.length}
@@ -1201,7 +1201,7 @@ export async function findContainerJobExpenseLedger(options = {}) {
         cj.assignment_snapshot as ledger_assignment_snapshot,
         so.so_number as ledger_so_number,
         so.customer_name as ledger_customer_name,
-        so.destination as ledger_destination,
+        cj.destination as ledger_destination,
         so.trip_date as ledger_trip_date
       from container_job_expenses expense
       join container_jobs cj on cj.id = expense.container_job_id
@@ -1296,7 +1296,7 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
       `
         select cj.id, cj.sales_order_id, cj.driver_id, cj.status, cj.container_number,
                cj.assignment_snapshot,
-               so.so_number, so.do_number, so.customer_name, so.destination
+               so.so_number, so.do_number, so.customer_name, cj.destination
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         where cj.id = $1
@@ -1452,7 +1452,7 @@ export async function correctContainerJobExpenseRecord(id, expenseId, payload = 
     const existingResult = await client.query(
       `
         select expense.*, cj.container_number, cj.assignment_snapshot,
-               so.so_number, so.do_number, so.customer_name, so.destination
+               so.so_number, so.do_number, so.customer_name, cj.destination
         from container_job_expenses expense
         join container_jobs cj on cj.id = expense.container_job_id
         join sales_orders so on so.id = cj.sales_order_id
@@ -1607,7 +1607,7 @@ export async function updateContainerJobExpenseProofRecord(id, expenseId, payloa
     const existingResult = await client.query(
       `
         select expense.*, cj.container_number, cj.assignment_snapshot,
-               so.so_number, so.do_number, so.customer_name, so.destination
+               so.so_number, so.do_number, so.customer_name, cj.destination
         from container_job_expenses expense
         join container_jobs cj on cj.id = expense.container_job_id
         join sales_orders so on so.id = cj.sales_order_id
@@ -1756,7 +1756,7 @@ async function updateContainerJobTransaction(id, form) {
                cj.entry_source, cj.historical_period, cj.historical_notes,
                cj.has_driver_commission, cj.driver_commission_amount,
                cj.driver_commission_source_destination_id, cj.driver_commission_note,
-               so.so_number, so.do_number, so.customer_name, so.destination,
+               so.so_number, so.do_number, so.customer_name, cj.destination,
                so.trip_date, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -1837,6 +1837,12 @@ async function updateContainerJobTransaction(id, form) {
     const nextContainerNumber = hasOwnInput(form, 'containerNumber')
       ? String(form.containerNumber || existing.rows[0].container_number || '').trim().toUpperCase() || null
       : existing.rows[0].container_number || null;
+    // Tujuan (destination) sengaja dibekukan begitu container dibuat -- hanya boleh dikoreksi lewat
+    // mode koreksi admin (sudah divalidasi di service layer via ensureAdminCorrectionContract), bukan
+    // lewat update biasa (mis. edit SO), supaya tidak diam-diam berubah tiap kali job diperbarui.
+    const nextDestination = allowAdminCorrection && hasOwnInput(form, 'destination')
+      ? String(form.destination || existing.rows[0].destination || '').trim()
+      : existing.rows[0].destination || '';
     const runningAt = nextStatus === 'cancelled'
       ? existing.rows[0].running_at
       : nextStatus === 'repo_stored'
@@ -2015,9 +2021,10 @@ async function updateContainerJobTransaction(id, form) {
             driver_commission_amount = $36,
             driver_commission_source_destination_id = $37::uuid,
             driver_commission_note = $38,
-            updated_by_name = $39,
+            destination = $39,
+            updated_by_name = $40,
             updated_at = now()
-        where id = $40
+        where id = $41
       `,
       [
         nextContainerNumber,
@@ -2058,6 +2065,7 @@ async function updateContainerJobTransaction(id, form) {
         nextDriverCommissionAmount,
         nextDriverCommissionSourceDestinationId,
         nextDriverCommissionNote,
+        nextDestination,
         actorName,
         id,
       ],

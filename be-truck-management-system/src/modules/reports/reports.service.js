@@ -1,5 +1,6 @@
 import {
   getDashboardReport,
+  getCustomerPerformanceReport,
   getDocumentReport,
   getDriverPerformanceReport,
   getMonthlyRevenueReport,
@@ -35,6 +36,15 @@ export function fetchMonthlyRevenueReport(query) {
 
 export function fetchSalesPerformanceReport(query) {
   return getSalesPerformanceReport({
+    month: query.month,
+    year: query.year,
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
+  });
+}
+
+export function fetchCustomerPerformanceReport(query) {
+  return getCustomerPerformanceReport({
     month: query.month,
     year: query.year,
     entrySource: query.entrySource || '',

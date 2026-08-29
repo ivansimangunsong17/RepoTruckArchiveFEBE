@@ -117,6 +117,12 @@ export const navigationGroups = [
     ],
   },
   {
+    label: 'Laporan',
+    items: [
+      { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
+    ],
+  },
+  {
     label: 'Master Data',
     items: [
       {
@@ -126,8 +132,8 @@ export const navigationGroups = [
         children: [
           { to: '/clients', label: 'Data Customer', icon: Building2, roles: adminOnly },
           { to: '/viewer/clients', label: 'Data Customer', icon: Building2, roles: viewerOnly },
-          { to: '/end-users', label: 'Data End User', icon: Building2, roles: adminOnly },
-          { to: '/viewer/end-users', label: 'Data End User', icon: Building2, roles: viewerOnly },
+          { to: '/end-users', label: 'Data Lokasi', icon: Building2, roles: adminOnly },
+          { to: '/viewer/end-users', label: 'Data Lokasi', icon: Building2, roles: viewerOnly },
           { to: '/drivers', label: 'Data Supir', icon: IdCard, roles: adminOnly },
           { to: '/viewer/drivers', label: 'Data Supir', icon: IdCard, roles: viewerOnly },
           { to: '/trucks', label: 'Data Truck', icon: Truck, roles: adminOnly },
@@ -152,7 +158,6 @@ export const navigationGroups = [
         icon: Landmark,
         roles: [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE],
         children: [
-          { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
           { to: '/finance/order-verification', label: 'Verifikasi Order', icon: CheckCircle2, roles: financeRoles },
           { to: '/finance/rpuj-approval', label: 'Rekening Dropping', icon: ReceiptText, roles: financeRoles },
           { to: '/finance/driver-commissions', label: 'Pembayaran Komisi', icon: CircleDollarSign, roles: financeRoles },

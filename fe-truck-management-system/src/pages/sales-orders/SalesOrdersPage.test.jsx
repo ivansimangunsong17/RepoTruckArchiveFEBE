@@ -155,6 +155,48 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(await screen.findByLabelText('Truck')).toBeInTheDocument();
   });
 
+  it('menampilkan badge Multi-tujuan di detail Sales Order saat container punya tujuan berbeda-beda', async () => {
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-multi-dest',
+        soNumber: 'SO-MULTI-DEST',
+        customer: 'PT Multi Tujuan',
+        shipment: 'import',
+        status: 'completed',
+        origin: 'Tanjung Priok',
+        destination: 'Cikarang',
+        soDate: '2026-07-19',
+        receivedAt: '2026-07-20T10:21:00.000Z',
+        quantity: 2,
+        containers: [
+          { id: 'job-multi-1', size: '20FT', type: 'Dry', status: 'received', destination: 'Cikarang' },
+          { id: 'job-multi-2', size: '20FT', type: 'Dry', status: 'received', destination: 'Karawang' },
+        ],
+      }],
+      total: 1,
+      summary: {
+        orders: 1, waitingOrders: 1, runningOrders: 0, completedOrders: 0, invoicedOrders: 0,
+        readyInvoiceDocuments: 0, sentInvoiceDocuments: 0, cancelledOrders: 0,
+        activeContainers: 2, completedContainers: 0, cancelledContainers: 0,
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    expect(await screen.findByText('Multi-tujuan (2)')).toBeInTheDocument();
+  });
+
+  it('tidak menampilkan badge Multi-tujuan saat semua container satu tujuan yang sama', async () => {
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    await screen.findByText('Pembayaran: Tempo 14 hari');
+    expect(screen.queryByText(/Multi-tujuan/)).not.toBeInTheDocument();
+  });
+
   it('memfilter Sales Order yang dokumen Accurate-nya siap dikirim', async () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage customerDocumentsOnly />);
@@ -296,6 +338,50 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(screen.queryByRole('button', { name: /Edit Sales Order/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Hapus Sales Order/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Ajukan Batal/i })).not.toBeInTheDocument();
+  });
+
+  it('tetap mengizinkan Sales mengedit order meski nomor SO internal sudah otomatis dibuat sistem', async () => {
+    const user = userEvent.setup();
+    useAuth.mockReturnValue({
+      user: { id: 'user-1', role: 'sales', fullName: 'Sales A' },
+    });
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-auto-numbered',
+        soNumber: 'SO-260829-001',
+        financeVerificationStatus: 'pending_so',
+        customer: 'PT Baru Dibuat',
+        shipment: 'import',
+        status: 'waiting_operational',
+        createdByUserId: 'user-1',
+        createdBy: 'Sales A',
+        salesName: 'Sales A',
+        quantity: 1,
+        containers: [{
+          id: 'job-auto-numbered',
+          size: '20FT',
+          type: 'Dry',
+          status: 'waiting',
+          rpujStatus: 'pending',
+        }],
+      }],
+      total: 1,
+      summary: {
+        orders: 1,
+        waitingOrders: 1,
+        runningOrders: 0,
+        completedOrders: 0,
+        invoicedOrders: 0,
+        cancelledOrders: 0,
+      },
+    });
+
+    render(<SalesOrdersPage />);
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+
+    expect(screen.queryByText(/SO terkunci karena Finance sudah menerbitkan nomor SO/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/SO terkunci karena RPUJ sudah dikirim/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Edit Sales Order/i })).toBeInTheDocument();
   });
 
   it('tetap memberikan akses revisi dan pembatalan kepada Admin setelah RPUJ dikirim', async () => {

@@ -287,6 +287,7 @@ function InvoiceDetailModal({
   canVoidDebitNotePayment = false,
   debitNotePaymentVoidBusyId = '',
   debitNotePaymentVoidError = '',
+  invoiceNumberSaving = false,
   onClose,
   onOpenCorrection,
   onUploadInvoiceDocument,
@@ -294,6 +295,7 @@ function InvoiceDetailModal({
   onLoadDebitNotePayments,
   onConfirmDebitNotePayment,
   onVoidDebitNotePayment,
+  onSaveInvoiceNumber,
 }) {
   const [dragUploadKey, setDragUploadKey] = useState('');
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState({});
@@ -302,6 +304,10 @@ function InvoiceDetailModal({
   const [debitNotePaymentOpen, setDebitNotePaymentOpen] = useState(false);
   const [debitNotePaymentForm, setDebitNotePaymentForm] = useState({ paymentDate: '', referenceNumber: '', note: '', proofFile: null, idempotencyKey: '' });
   const [activeSection, setActiveSection] = useState('ringkasan');
+  // Draft lokal, TERPISAH dari invoice.invoiceNumber -- supaya panel input tidak diam-diam
+  // tertutup di tengah mengetik (invoice.invoiceNumber cuma berubah setelah nomor BENAR-BENAR
+  // tersimpan di server, bukan tiap keystroke).
+  const [invoiceNumberDraft, setInvoiceNumberDraft] = useState('');
 
   useEffect(() => {
     setDragUploadKey('');
@@ -310,6 +316,7 @@ function InvoiceDetailModal({
     setDebitNoteNumberDraft('');
     setDebitNotePaymentOpen(false);
     setActiveSection('ringkasan');
+    setInvoiceNumberDraft('');
   }, [invoice?.id]);
 
   if (!invoice) return null;
@@ -461,7 +468,6 @@ function InvoiceDetailModal({
     { id: 'ringkasan', label: 'Ringkasan' },
     { id: 'debit-note', label: 'Debit Note', needsAttention: debitNoteNeedsAttention },
     { id: 'dokumen', label: 'Dokumen' },
-    { id: 'container', label: 'Per Container' },
     { id: 'file-operational', label: 'File Operational' },
     { id: 'koreksi', label: 'Koreksi' },
   ];
@@ -476,7 +482,17 @@ function InvoiceDetailModal({
               <h3 className="text-lg font-black text-slate-950">{invoice.soNumber}</h3>
               <StatusPill value={invoice.invoiceStatus} />
             </div>
-            <p className="mt-0.5 text-xs text-slate-500">{invoice.destination} - {invoice.customer}</p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <span>{invoice.destination} - {invoice.customer}</span>
+              {invoice.destinations?.length > 1 ? (
+                <span
+                  className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700"
+                  title={invoice.destinations.join(', ')}
+                >
+                  Multi-tujuan ({invoice.destinations.length})
+                </span>
+              ) : null}
+            </p>
           </div>
           <button className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" onClick={onClose} type="button">
             Tutup
@@ -515,6 +531,36 @@ function InvoiceDetailModal({
                 </div>
               ))}
             </section>
+
+            {!invoice.invoiceNumber ? (
+              <section className={`rounded-lg border px-3 py-2.5 ${invoiceNumberDraft.trim() ? 'border-sky-200 bg-sky-50' : 'border-amber-200 bg-amber-50'}`}>
+                <div className="flex flex-wrap items-end gap-2.5">
+                  <label className={`grid min-w-[220px] flex-1 gap-1 text-[10px] font-black uppercase tracking-wide ${invoiceNumberDraft.trim() ? 'text-sky-800' : 'text-amber-800'}`}>
+                    {invoiceNumberDraft.trim() ? 'Nomor Invoice (belum dikirim)' : 'Input Nomor Invoice'}
+                    <input
+                      aria-label="Nomor Invoice"
+                      className={`h-9 w-full rounded-md border bg-white px-2.5 text-sm font-semibold normal-case text-slate-900 outline-none ${invoiceNumberDraft.trim() ? 'border-sky-300 focus:border-sky-500' : 'border-amber-300 focus:border-amber-500'}`}
+                      onChange={(event) => setInvoiceNumberDraft(event.target.value)}
+                      placeholder="INV-..."
+                      value={invoiceNumberDraft}
+                    />
+                  </label>
+                  <button
+                    className="h-9 shrink-0 rounded-md bg-slate-900 px-4 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!invoiceNumberDraft.trim() || invoiceNumberSaving}
+                    onClick={() => onSaveInvoiceNumber(invoice.id, invoiceNumberDraft)}
+                    type="button"
+                  >
+                    {invoiceNumberSaving ? 'Menyimpan' : 'Simpan'}
+                  </button>
+                </div>
+                <p className={`mt-1.5 text-[11px] font-medium ${invoiceNumberDraft.trim() ? 'text-sky-700' : 'text-amber-700'}`}>
+                  {invoiceNumberDraft.trim()
+                    ? 'Nomor sudah diketik tapi BELUM tersimpan. Klik Simpan untuk mengirim ke Sales.'
+                    : 'SO ini sudah selesai dan siap ditagih, tapi belum punya nomor invoice. Masukkan nomor dari dokumen invoice.'}
+                </p>
+              </section>
+            ) : null}
 
             <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 p-1.5" role="tablist" aria-label="Bagian detail invoice">
               {detailSections.map((section) => {
@@ -802,72 +848,6 @@ function InvoiceDetailModal({
                   );
                 })}
               </div>
-            </section>
-
-            <section className={`finance-invoice-detail-card ${activeSection === 'container' ? '' : 'hidden'}`}>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h4 className="text-xs font-black text-slate-950">Rincian per Container</h4>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">{invoice.containerBreakdown?.length || 0} container</span>
-              </div>
-              {invoice.containerBreakdown?.length ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[860px] divide-y divide-slate-200 text-left text-xs">
-                    <thead className="bg-slate-50 text-[9px] font-black uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-2.5 py-2">No. Container</th>
-                        <th className="px-2.5 py-2">No. Invoice</th>
-                        <th className="px-2.5 py-2 text-right">Nilai Invoice</th>
-                        <th className="px-2.5 py-2">No. Debit Note</th>
-                        <th className="px-2.5 py-2 text-right">Nilai Debit Note</th>
-                        <th className="px-2.5 py-2 text-center">Dokumen</th>
-                        <th className="px-2.5 py-2 text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {invoice.containerBreakdown.map((container) => (
-                        <tr key={container.containerJobId}>
-                          <td className="px-2.5 py-2 font-black text-slate-900">{container.containerNumber || '-'}</td>
-                          <td className="px-2.5 py-2 font-semibold text-slate-700">{invoice.invoiceNumber || 'Belum ada'}</td>
-                          <td className="px-2.5 py-2 text-right font-bold text-slate-900">{formatCurrency(container.invoiceAmount)}</td>
-                          <td className="px-2.5 py-2 font-semibold text-slate-700">{container.debitNoteAmount > 0 ? (invoice.debitNoteNumber || 'Belum ada') : '-'}</td>
-                          <td className="px-2.5 py-2 text-right font-bold text-slate-900">{container.debitNoteAmount > 0 ? formatCurrency(container.debitNoteAmount) : '-'}</td>
-                          <td className="px-2.5 py-2">
-                            <div className="flex items-center justify-center gap-1">
-                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${invoice.invoiceDocumentUploadedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} title="Dokumen Invoice">INV</span>
-                              <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${invoice.taxInvoiceDocumentUploadedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} title="Faktur Pajak">FP</span>
-                              {container.debitNoteAmount > 0 ? (
-                                <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${invoice.debitNoteDocumentUploadedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-400'}`} title="Dokumen Debit Note">DN</span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-2.5 py-2 text-right">
-                            <div className="flex justify-end gap-1">
-                              {findInvoiceFinanceDocument(documents, 'invoicePdf') ? (
-                                <DocumentLink
-                                  className="inline-flex h-6 items-center justify-center rounded-md border border-slate-300 bg-white px-1.5 text-[9px] font-bold text-slate-700 hover:bg-slate-50"
-                                  file={findInvoiceFinanceDocument(documents, 'invoicePdf').file}
-                                  label="Invoice"
-                                />
-                              ) : null}
-                              {container.debitNoteAmount > 0 && findInvoiceFinanceDocument(documents, 'debitNotePdf') ? (
-                                <DocumentLink
-                                  className="inline-flex h-6 items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-1.5 text-[9px] font-bold text-sky-700 hover:bg-sky-100"
-                                  file={findInvoiceFinanceDocument(documents, 'debitNotePdf').file}
-                                  label="Debit Note"
-                                />
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-center text-xs font-medium text-slate-500">
-                  Belum ada data container pada SO ini.
-                </p>
-              )}
             </section>
 
             <section className={`finance-invoice-detail-card ${activeSection === 'file-operational' ? '' : 'hidden'}`}>

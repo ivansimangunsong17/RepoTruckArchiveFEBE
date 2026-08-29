@@ -70,9 +70,11 @@ describe('navigationGroups', () => {
     expect(historicalEntryItem?.roles).toEqual([USER_ROLES.ADMIN]);
   });
 
-  it('menambahkan menu laporan untuk finance', () => {
-    const reportsItem = groupItems('Finance').find((item) => item.to === '/reports');
+  it('menampilkan menu Laporan berdiri sendiri di atas Master Data', () => {
+    const groupLabels = navigationGroups.map((group) => group.label);
+    const reportsItem = groupItems('Laporan').find((item) => item.to === '/reports');
 
+    expect(groupLabels.indexOf('Laporan')).toBeLessThan(groupLabels.indexOf('Master Data'));
     expect(reportsItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
   });
 
@@ -82,6 +84,7 @@ describe('navigationGroups', () => {
 
     expect(viewerItems.map((item) => item.to)).toEqual([
       '/order-running',
+      '/reports',
       '/viewer/clients',
       '/viewer/end-users',
       '/viewer/drivers',
@@ -90,7 +93,6 @@ describe('navigationGroups', () => {
       '/viewer/depots',
       '/viewer/terminals',
       '/viewer/destinations',
-      '/reports',
     ]);
     expect(viewerItems.map((item) => item.to)).not.toContain('/document-monitoring');
   });

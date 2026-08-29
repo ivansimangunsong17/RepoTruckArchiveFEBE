@@ -245,7 +245,7 @@ export function ArchiveDataProvider({ children }) {
 
         setMasters({
           customers: readSettledValue(customersResult, [], 'Customer'),
-          'end-users': readSettledValue(endUsersResult, [], 'End User'),
+          'end-users': readSettledValue(endUsersResult, [], 'Lokasi'),
           trucks: readSettledValue(trucksResult, [], 'Truck'),
           drivers: readSettledValue(driversResult, [], 'Driver'),
           users: readSettledValue(usersResult, [], 'User'),

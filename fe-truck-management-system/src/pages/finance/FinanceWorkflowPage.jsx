@@ -53,8 +53,8 @@ const financeTabs = [
     label: 'Input Nomor Invoice',
     icon: FileText,
     badge: 'Billing',
-    description: 'Menampilkan SO selesai yang butuh nomor invoice, sudah ada invoice namun menunggu update dari Sales, dan yang sudah lunas.',
-    statusFlow: ['Butuh Nomor Invoice', 'Menunggu Sales', 'Lunas'],
+    description: 'Menampilkan SO selesai yang datanya belum lengkap, yang sudah lengkap tapi menunggu pelunasan, dan yang sudah lunas.',
+    statusFlow: ['Belum Lengkap', 'Menunggu Pembayaran', 'Lunas'],
   },
 ];
 
@@ -168,7 +168,7 @@ const initialInvoiceRows = [
     activityLogs: ['14 Jul 2026 14:40 - Job selesai', '15 Jul 2026 09:15 - Finance input nomor invoice', '15 Jul 2026 10:05 - Menunggu update pengiriman invoice dari Sales'],
     invoiceNumber: 'INV-202607-009',
     invoiceStatus: 'Menunggu Update Status',
-    paymentStatus: 'Menunggu Sales',
+    paymentStatus: 'Menunggu Pembayaran',
   },
   {
     id: 'inv-003',
@@ -355,7 +355,6 @@ function FinanceTable({
   expenseReconciliationBusyId,
   invoiceError,
   invoiceLoading,
-  invoiceBusyId,
   onInvoicePageChange,
   onOrderPageChange,
   savingSoId,
@@ -481,7 +480,6 @@ function FinanceTable({
           activeInvoiceDocumentFilter={activeInvoiceDocumentFilter}
           activeInvoiceTab={activeInvoiceTab}
           currentPage={invoicePage}
-          invoiceBusyId={invoiceBusyId}
           onInvoicePageChange={onInvoicePageChange}
           onActiveInvoiceDocumentFilterChange={onActiveInvoiceDocumentFilterChange}
           onActiveInvoiceTabChange={onActiveInvoiceTabChange}
@@ -722,8 +720,6 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     onRejectOperationalFund: (id) => operationalFund.openOperationalFundDecision(id, 'reject'),
     onOpenExpenseCheckConfirm: operationalFund.openExpenseCheckConfirm,
     onOpenExpenseClarification: operationalFund.openExpenseClarification,
-    onInvoiceChange: invoiceWorkflow.onInvoiceChange,
-    onSaveInvoice: invoiceWorkflow.onSaveInvoice,
   };
   return (
     <main className="finance-workflow-page min-h-screen bg-slate-50 px-3 py-3 text-slate-900">
@@ -733,7 +729,6 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         activeOrderTab={activeOrderTab}
         activeTab={activeTab}
         handlers={handlers}
-        invoiceBusyId={invoiceBusyId}
         invoiceDateFrom={invoiceDateFrom}
         invoiceDateTo={invoiceDateTo}
         invoiceError={invoiceError}
@@ -821,6 +816,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoice={selectedInvoice}
         invoiceDocumentBusyKey={invoiceDocumentBusyKey}
         invoiceDocumentUploadError={invoiceDocumentUploadError}
+        invoiceNumberSaving={Boolean(selectedInvoice) && invoiceBusyId === selectedInvoice.id}
         loading={invoiceDetailLoading}
         onClose={invoiceWorkflow.closeInvoiceDetail}
         onOpenCorrection={openCorrectionModal}
@@ -829,6 +825,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         onLoadDebitNotePayments={loadDebitNotePayments}
         onConfirmDebitNotePayment={confirmDebitNotePayment}
         onVoidDebitNotePayment={voidDebitNotePayment}
+        onSaveInvoiceNumber={invoiceWorkflow.onSaveInvoice}
       />
       <SoNumberInputModal
         busy={savingSoId === soModalId}

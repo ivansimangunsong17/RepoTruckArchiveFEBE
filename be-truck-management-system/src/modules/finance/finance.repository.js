@@ -313,7 +313,7 @@ function financeRowsCte() {
         so.shipment_type,
         coalesce(nullif(so.service_name, ''), nullif(so.job_type, ''), 'Jasa Angkut') as service_name,
         so.origin,
-        so.destination,
+        cj.destination,
         so.trip_date,
         so.price,
         so.total_amount,
@@ -478,7 +478,7 @@ function financeRowsCte() {
         on tup.sales_order_id = cj.sales_order_id
        and tup.finance_size_key = cj.finance_size_key
        and tup.finance_size_sequence = cj.finance_size_sequence
-      left join destination_locations dl on lower(trim(dl.name)) = lower(trim(so.destination)) and dl.archived_at is null
+      left join destination_locations dl on lower(trim(dl.name)) = lower(trim(cj.destination)) and dl.archived_at is null
       left join attachment_flags af on af.entity_id = cj.id
       where cj.status = 'completed'
         and so.status <> 'cancelled'
@@ -614,7 +614,7 @@ function buildRpujFilters(options = {}) {
       so.so_number ilike $${params.length}
       or so.accurate_so_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
-      or so.destination ilike $${params.length}
+      or cj.destination ilike $${params.length}
       or cj.container_number ilike $${params.length}
       or cj.assignment_snapshot::text ilike $${params.length}
     )`);
@@ -761,7 +761,7 @@ function rpujRowsSelect() {
       so.customer_name,
       so.shipment_type,
       so.origin,
-      so.destination,
+      cj.destination,
       so.trip_date,
       so.terminal,
       case
@@ -776,7 +776,7 @@ function rpujRowsSelect() {
     from container_jobs cj
     join sales_orders so on so.id = cj.sales_order_id
     left join drivers d on d.id = cj.driver_id and d.archived_at is null
-    left join destination_locations dl on lower(trim(dl.name)) = lower(trim(so.destination)) and dl.archived_at is null
+    left join destination_locations dl on lower(trim(dl.name)) = lower(trim(cj.destination)) and dl.archived_at is null
     left join lateral (
       select id, file_name, storage_path, mime_type, file_size
       from attachments
@@ -1163,6 +1163,7 @@ function mapInvoiceOrderRow(row) {
     invoiceAging: mapInvoiceAging(row),
     customer: row.customer_name || '-',
     destination: row.destination || '-',
+    destinations: Array.isArray(row.destinations) ? row.destinations.filter(Boolean) : [],
     completedAt: row.completed_at,
     documentStatus,
     billingAmount: row.billing_amount == null ? 0 : Number(row.billing_amount),
@@ -1421,6 +1422,10 @@ function invoiceOrdersCte() {
           array_agg(distinct fr.container_number) filter (where fr.container_number is not null),
           array[]::text[]
         ) as container_numbers,
+        coalesce(
+          array_agg(distinct fr.destination) filter (where fr.destination is not null and fr.destination <> ''),
+          array[]::text[]
+        ) as destinations,
         so.customer_name,
         so.destination,
         so.updated_at,
@@ -1601,6 +1606,7 @@ export async function getFinanceDashboard(options = {}) {
               and invoice_document_uploaded_at is not null
               and tax_invoice_document_uploaded_at is not null
               and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
+              and billing_status <> 'lunas'
           ) as complete_invoice_documents,
           (
             select count(*)::int
@@ -3186,9 +3192,9 @@ function operationalFundTransactionSelect() {
       coalesce(so.accurate_so_number, so.so_number) as so_number,
       coalesce(oft.top_name, oft.created_by_name, '') as top_name,
       coalesce(oft.driver_name, expense.recipient_name, cj.assignment_snapshot->>'driver', '') as driver_name,
-      coalesce(oft.do_number, so.do_number, so.destination, '') as do_number,
+      coalesce(oft.do_number, so.do_number, cj.destination, '') as do_number,
       coalesce(oft.customer_name, so.customer_name, '') as customer_name,
-      so.destination,
+      cj.destination,
       cj.container_number,
       expense.category as expense_category,
       expense.payment_status as expense_payment_status,
@@ -3283,7 +3289,7 @@ function buildOperationalFundTransactionFilters(options = {}) {
       or so.accurate_so_number ilike $${params.length}
       or so.do_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
-      or so.destination ilike $${params.length}
+      or cj.destination ilike $${params.length}
       or cj.container_number ilike $${params.length}
       or expense.description ilike $${params.length}
     )`);
@@ -3421,7 +3427,7 @@ function containerJobExpenseReconciliationSelect() {
       so.so_number as internal_so_number,
       so.accurate_so_number,
       so.customer_name,
-      so.destination,
+      cj.destination,
       so.trip_date,
       cj.container_number,
       cj.container_size,
@@ -3466,7 +3472,7 @@ function buildContainerJobExpenseFilters(options = {}) {
       so.so_number ilike $${params.length}
       or so.accurate_so_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
-      or so.destination ilike $${params.length}
+      or cj.destination ilike $${params.length}
       or cj.container_number ilike $${params.length}
       or cj.assignment_snapshot::text ilike $${params.length}
       or expense.description ilike $${params.length}
@@ -3767,8 +3773,12 @@ export async function getInvoiceOrdersPage(options = {}) {
               and invoice_document_uploaded_at is not null
               and tax_invoice_document_uploaded_at is not null
               and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
+              and billing_status <> 'lunas'
           )::int as complete_invoice_documents,
-          count(*) filter (where coalesce(invoice_document_status, 'belum_upload') = 'terkirim')::int as sent_invoice_documents
+          count(*) filter (
+            where coalesce(invoice_document_status, 'belum_upload') = 'terkirim'
+              and billing_status <> 'lunas'
+          )::int as sent_invoice_documents
         from invoice_orders
         ${summaryWhereSql}
       `,
@@ -3874,6 +3884,7 @@ function mapOutstandingOrderRow(row) {
     invoiceNumber: row.invoice_number || '',
     customer: row.customer_name || '-',
     destination: row.destination || '-',
+    destinations: Array.isArray(row.destinations) ? row.destinations.filter(Boolean) : [],
     billingStatus: row.billing_status,
     billingAmount: Number(row.billing_amount || 0),
     totalPaid: Number(row.total_paid || 0),
@@ -3952,7 +3963,9 @@ function buildCustomerOutstandingFilters(options = {}) {
   const clauses = [];
   const params = [];
 
-  if (options.agingBucket) {
+  if (options.agingBucket === 'overdue_all') {
+    clauses.push(`aging_bucket in ('overdue_1_30', 'overdue_31_60', 'overdue_61_90', 'overdue_90_plus')`);
+  } else if (options.agingBucket) {
     params.push(options.agingBucket);
     clauses.push(`aging_bucket = $${params.length}`);
   }
@@ -3967,6 +3980,17 @@ function buildCustomerOutstandingFilters(options = {}) {
   };
 }
 
+const CUSTOMER_OUTSTANDING_SORT_OPTIONS = {
+  outstanding_desc: 'total_outstanding_amount desc, customer_name asc',
+  oldest_overdue_desc: 'oldest_overdue_days desc, total_outstanding_amount desc, customer_name asc',
+  overdue_desc: 'overdue_amount desc, customer_name asc',
+  customer_asc: 'customer_name asc',
+};
+
+function resolveCustomerOutstandingSort(sortBy) {
+  return CUSTOMER_OUTSTANDING_SORT_OPTIONS[sortBy] || CUSTOMER_OUTSTANDING_SORT_OPTIONS.outstanding_desc;
+}
+
 function mapCustomerOutstandingRollupRow(row) {
   return {
     customer: row.customer_name || '-',
@@ -3974,6 +3998,10 @@ function mapCustomerOutstandingRollupRow(row) {
     totalOutstandingAmount: Number(row.total_outstanding_amount || 0),
     currentAmount: Number(row.current_amount || 0),
     overdueAmount: Number(row.overdue_amount || 0),
+    overdue1To30Amount: Number(row.overdue_1_30_amount || 0),
+    overdue31To60Amount: Number(row.overdue_31_60_amount || 0),
+    overdue61To90Amount: Number(row.overdue_61_90_amount || 0),
+    overdue90PlusAmount: Number(row.overdue_90_plus_amount || 0),
     oldestOverdueDays: Number(row.oldest_overdue_days || 0),
     needsReview: Boolean(row.needs_review),
   };
@@ -3982,6 +4010,7 @@ function mapCustomerOutstandingRollupRow(row) {
 export async function getCustomerOutstandingRollupPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildCustomerOutstandingFilters(options);
+  const orderBySql = resolveCustomerOutstandingSort(options.sortBy);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
@@ -3995,12 +4024,16 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
           coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
           coalesce(sum(outstanding_amount) filter (where aging_bucket = 'current'), 0)::numeric as current_amount,
           coalesce(sum(outstanding_amount) filter (where aging_bucket not in ('current', 'unknown')), 0)::numeric as overdue_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_1_30'), 0)::numeric as overdue_1_30_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_31_60'), 0)::numeric as overdue_31_60_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_61_90'), 0)::numeric as overdue_61_90_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_90_plus'), 0)::numeric as overdue_90_plus_amount,
           coalesce(max(days_overdue), 0)::int as oldest_overdue_days,
           bool_or(ots_data_review_status = 'perlu_dicek') as needs_review
         from outstanding_orders
         ${whereSql}
         group by customer_name
-        order by total_outstanding_amount desc, customer_name asc
+        order by ${orderBySql}
         limit $${limitIndex} offset $${offsetIndex}
       `,
       [...params, pageSize, offset],
@@ -4122,6 +4155,7 @@ function mapContainerBreakdownRow(row) {
   return {
     containerJobId: row.container_job_id,
     containerNumber: row.container_number || '',
+    destination: row.destination || '',
     invoiceAmount: row.invoice_amount == null ? 0 : Number(row.invoice_amount),
     debitNoteAmount: row.debit_note_amount == null ? 0 : Number(row.debit_note_amount),
   };
@@ -4200,6 +4234,7 @@ export async function getInvoiceOrderDetail(id) {
         select
           fr.id as container_job_id,
           fr.container_number,
+          fr.destination,
           fr.total_revenue as invoice_amount,
           coalesce(cje.debit_note_amount, 0)::numeric as debit_note_amount
         from finance_rows fr
@@ -4811,6 +4846,14 @@ function debitNoteOrdersCte() {
         coalesce(so.accurate_so_number, so.so_number) as so_number,
         so.customer_name,
         so.destination,
+        coalesce(
+          (
+            select array_agg(distinct cj.destination) filter (where cj.destination is not null and cj.destination <> '')
+            from container_jobs cj
+            where cj.sales_order_id = so.id
+          ),
+          array[]::text[]
+        ) as destinations,
         so.debit_note_number,
         so.debit_note_issued_at,
         so.debit_note_input_by_name,
@@ -4861,6 +4904,7 @@ function mapDebitNoteOrderRow(row) {
     soNumber: row.so_number || '-',
     customer: row.customer_name || '-',
     destination: row.destination || '-',
+    destinations: Array.isArray(row.destinations) ? row.destinations.filter(Boolean) : [],
     debitNoteNumber: row.debit_note_number || '',
     debitNoteIssuedAt: row.debit_note_issued_at,
     debitNoteInputBy: row.debit_note_input_by_name || '',

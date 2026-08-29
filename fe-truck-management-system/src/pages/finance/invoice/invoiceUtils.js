@@ -107,7 +107,6 @@ function normalizeFinanceInvoiceRow(row = {}) {
     debitNoteAgingBucket: row.debitNoteAgingBucket || '',
     debitNoteDocumentUploadedAt: row.debitNoteDocumentUploadedAt || '',
     debitNoteDocumentUploadedByName: row.debitNoteDocumentUploadedByName || '',
-    containerBreakdown: Array.isArray(row.containerBreakdown) ? row.containerBreakdown : [],
     containerNumbers: Array.isArray(row.containerNumbers) ? row.containerNumbers.filter(Boolean) : [],
   };
 }

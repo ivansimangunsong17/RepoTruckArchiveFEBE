@@ -1346,6 +1346,41 @@
 .order-meta p { margin: 0; color: #8a94a5; font-size: .61rem; }
 .order-meta strong { display: block; overflow: hidden; color: #263044; font-size: .67rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .order-meta > div:last-child { grid-column: span 2; }
+.multi-destination-badge { display: inline-flex; align-items: center; margin-top: 3px; padding: 2px 7px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: .56rem; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; white-space: nowrap; }
+
+.searchable-input { position: relative; display: block; width: 100%; }
+.searchable-input-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  overflow: hidden auto;
+  max-height: 232px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+.searchable-input-results button {
+  display: block;
+  width: 100%;
+  padding: 8px 11px;
+  border: 0;
+  border-bottom: 1px solid #f0f1f3;
+  color: var(--text);
+  background: var(--surface);
+  font-size: .74rem;
+  font-weight: 600;
+  text-align: left;
+}
+.searchable-input-results button:last-child { border-bottom: 0; }
+.searchable-input-results button:hover,
+.searchable-input-results button:focus-visible {
+  color: var(--primary-dark);
+  background: var(--primary-soft);
+  outline: 0;
+}
 .order-detail-sections {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));

@@ -321,34 +321,4 @@ describe('DriverCommissionOperationalPage', () => {
     expect(screen.getByText(/otomatis kamis sampai rabu/i)).toBeInTheDocument();
   });
 
-  it('menampilkan panel sopir tertahan beserta progres kuota ritasinya', async () => {
-    fetchDriverCommissionPeriodReport.mockResolvedValue({
-      ...reportFixture,
-      withheld: [
-        {
-          driverKey: 'driver-4',
-          driverId: 'driver-4',
-          driverName: 'Dedi',
-          pendingItems: 4,
-          pendingAmount: 200000,
-          target: 6,
-          remaining: 2,
-        },
-      ],
-    });
-
-    render(<DriverCommissionOperationalPage />);
-
-    expect(await screen.findByText('Sopir Tertahan (Belum Capai Kuota Mingguan)')).toBeInTheDocument();
-    expect(screen.getByText('Dedi')).toBeInTheDocument();
-    expect(screen.getByText('4/6 ritasi')).toBeInTheDocument();
-    expect(screen.getByText(/Rp\s*200\.000 tertahan, butuh 2 ritasi lagi/i)).toBeInTheDocument();
-  });
-
-  it('tidak menampilkan panel sopir tertahan kalau semua sopir sudah lolos kuota', async () => {
-    render(<DriverCommissionOperationalPage />);
-
-    await screen.findAllByText('Rahmat');
-    expect(screen.queryByText('Sopir Tertahan (Belum Capai Kuota Mingguan)')).not.toBeInTheDocument();
-  });
 });
