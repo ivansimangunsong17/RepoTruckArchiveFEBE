@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, Upload, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, PlusCircle, Upload, X } from 'lucide-react';
 import DocumentLink from '../../../components/common/DocumentLink';
 import AttachmentUploadField from '../../../components/common/AttachmentUploadField';
 import { formatCurrency } from '../../../utils/formatCurrency';
@@ -35,6 +35,14 @@ const REVENUE_LINE_CHARGE_TYPE_OPTIONS = [
   { value: 'storage', label: 'Storage' },
   { value: 'other', label: 'Lainnya' },
 ];
+
+const REVENUE_LINE_DEFAULT_UNIT_BY_CHARGE_TYPE = {
+  inap: 'malam',
+  waiting_charge: 'jam',
+  extra_trip: 'rit',
+  storage: 'hari',
+  other: 'item',
+};
 
 const EMPTY_REVENUE_LINE_DRAFT = { chargeType: 'inap', description: '', quantity: '1', unit: 'malam', unitPrice: '', note: '' };
 
@@ -93,21 +101,21 @@ function DebitNotePaymentModal({ invoice, busy, error, payments, paymentsLoading
   const outstandingAmount = Number(invoice.debitNoteOutstandingAmount || 0);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="w-full max-w-lg rounded-lg border border-slate-200 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="debit-note-payment-title" onMouseDown={(event) => event.stopPropagation()}>
-        <form onSubmit={(event) => { event.preventDefault(); onConfirm(); }}>
-          <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+    <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="master-modal w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="debit-note-payment-title" onMouseDown={(event) => event.stopPropagation()}>
+        <form className="master-form" onSubmit={(event) => { event.preventDefault(); onConfirm(); }}>
+          <div className="master-form-heading">
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Catat Pembayaran Debit Note</p>
-              <h3 className="mt-0.5 text-sm font-black text-slate-950" id="debit-note-payment-title">{invoice.soNumber}</h3>
-              <p className="mt-0.5 text-xs text-slate-500">{invoice.debitNoteNumber} - {invoice.customer}</p>
+              <span>Catat Pembayaran Debit Note</span>
+              <h2 id="debit-note-payment-title">{invoice.soNumber}</h2>
+              <p>{invoice.debitNoteNumber} - {invoice.customer}</p>
             </div>
-            <button className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-50" onClick={onClose} type="button" aria-label="Tutup catat pembayaran Debit Note">
-              <X size={15} />
+            <button className="modal-close-button" onClick={onClose} type="button" aria-label="Tutup catat pembayaran Debit Note">
+              <X size={17} />
             </button>
-          </header>
+          </div>
 
-          <div className="grid gap-3 px-4 py-3">
+          <div className="grid flex-1 gap-3 overflow-y-auto bg-white px-5 py-4">
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5">
                 <span className="block text-[10px] font-bold uppercase text-slate-500">Total Debit Note</span>
@@ -237,16 +245,111 @@ function DebitNotePaymentModal({ invoice, busy, error, payments, paymentsLoading
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-slate-100 px-4 py-3">
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" disabled={busy} onClick={onClose} type="button">
+          <div className="master-form-actions">
+            <button className="secondary-button" disabled={busy} onClick={onClose} type="button">
               Batal
             </button>
             <button
-              className="rounded-md border border-red-200 bg-red-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+              className="primary-button"
               disabled={busy || outstandingAmount <= 0 || !form.proofFile}
               type="submit"
             >
               {busy ? 'Menyimpan...' : 'Catat Pembayaran'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function getDefaultRevenueLineUnit(chargeType) {
+  return REVENUE_LINE_DEFAULT_UNIT_BY_CHARGE_TYPE[chargeType] || REVENUE_LINE_DEFAULT_UNIT_BY_CHARGE_TYPE.other;
+}
+
+function RevenueLineModal({ draft, saving, error, onChange, onClose, onSave }) {
+  const unitPrice = Number(draft.unitPrice || 0);
+  const total = unitPrice > 0 ? unitPrice : 0;
+
+  return (
+    <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
+      <section className="master-modal w-full max-w-xl" role="dialog" aria-modal="true" aria-labelledby="revenue-line-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <form className="master-form" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+          <div className="master-form-heading">
+            <div className="min-w-0">
+              <span>Invoice / Revenue</span>
+              <h2 id="revenue-line-modal-title">Tambah Biaya ke Invoice</h2>
+              <p>Biaya ini masuk revenue invoice, bukan Debit Note.</p>
+            </div>
+            <button className="modal-close-button" disabled={saving} onClick={onClose} type="button" aria-label="Tutup tambah biaya invoice">
+              <X size={17} />
+            </button>
+          </div>
+
+          <div className="grid flex-1 gap-2.5 overflow-y-auto bg-white px-5 py-4">
+            <label className="grid gap-1 text-xs font-bold text-slate-700">
+              Jenis
+              <select
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                onChange={(event) => {
+                  const chargeType = event.target.value;
+                  onChange({ ...draft, chargeType, unit: getDefaultRevenueLineUnit(chargeType) });
+                }}
+                value={draft.chargeType}
+              >
+                {REVENUE_LINE_CHARGE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+
+            <label className="grid gap-1 text-xs font-bold text-slate-700">
+              Deskripsi
+              <input
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                onChange={(event) => onChange({ ...draft, description: event.target.value })}
+                placeholder="Contoh: Inap 1 malam di rest area KM 57"
+                value={draft.description}
+              />
+            </label>
+
+            <label className="grid gap-1 text-xs font-bold text-slate-700">
+              Harga
+              <input
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                min="0"
+                onChange={(event) => onChange({ ...draft, unitPrice: event.target.value })}
+                type="number"
+                value={draft.unitPrice}
+              />
+            </label>
+
+            <label className="grid gap-1 text-xs font-bold text-slate-700">
+              Catatan
+              <input
+                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                onChange={(event) => onChange({ ...draft, note: event.target.value })}
+                placeholder="Opsional"
+                value={draft.note}
+              />
+            </label>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Total Ditambahkan ke Invoice</span>
+              <strong className="mt-1 block text-lg font-black text-slate-950">{formatCurrency(total)}</strong>
+            </div>
+
+            {error ? <p className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs font-semibold text-rose-700">{error}</p> : null}
+          </div>
+
+          <div className="master-form-actions">
+            <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
+              Batal
+            </button>
+            <button
+              className="primary-button"
+              disabled={saving || !draft.description.trim() || !draft.unit.trim() || unitPrice <= 0}
+              type="submit"
+            >
+              {saving ? 'Menyimpan...' : 'Simpan'}
             </button>
           </div>
         </form>
@@ -502,7 +605,12 @@ function InvoiceDetailModal({
   }
 
   function openRevenueLineForm(chargeType) {
-    setRevenueLineDraft({ ...EMPTY_REVENUE_LINE_DRAFT, chargeType: chargeType || 'inap' });
+    const selectedChargeType = chargeType || 'inap';
+    setRevenueLineDraft({
+      ...EMPTY_REVENUE_LINE_DRAFT,
+      chargeType: selectedChargeType,
+      unit: getDefaultRevenueLineUnit(selectedChargeType),
+    });
     setRevenueLineFormOpen(true);
   }
 
@@ -512,7 +620,7 @@ function InvoiceDetailModal({
         chargeType: revenueLineDraft.chargeType,
         description: revenueLineDraft.description.trim(),
         quantity: Number(revenueLineDraft.quantity),
-        unit: revenueLineDraft.unit.trim(),
+        unit: (revenueLineDraft.unit || getDefaultRevenueLineUnit(revenueLineDraft.chargeType)).trim(),
         unitPrice: Number(revenueLineDraft.unitPrice),
         note: revenueLineDraft.note.trim() || undefined,
       });
@@ -841,100 +949,16 @@ function InvoiceDetailModal({
                     </div>
                   ) : null}
 
-                  {revenueLineFormOpen ? (
-                    <div className="mt-2.5 grid gap-1.5 rounded-md border border-slate-200 bg-slate-50 p-2.5">
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
-                          Jenis
-                          <select
-                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, chargeType: event.target.value }))}
-                            value={revenueLineDraft.chargeType}
-                          >
-                            {REVENUE_LINE_CHARGE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                          </select>
-                        </label>
-                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
-                          Satuan
-                          <input
-                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, unit: event.target.value }))}
-                            placeholder="malam, hari, rit"
-                            value={revenueLineDraft.unit}
-                          />
-                        </label>
-                      </div>
-                      <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
-                        Deskripsi
-                        <input
-                          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                          onChange={(event) => setRevenueLineDraft((current) => ({ ...current, description: event.target.value }))}
-                          placeholder="Contoh: Inap 1 malam di rest area KM 57"
-                          value={revenueLineDraft.description}
-                        />
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
-                          Qty
-                          <input
-                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                            min="0"
-                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, quantity: event.target.value }))}
-                            type="number"
-                            value={revenueLineDraft.quantity}
-                          />
-                        </label>
-                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
-                          Harga Satuan
-                          <input
-                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                            min="0"
-                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, unitPrice: event.target.value }))}
-                            type="number"
-                            value={revenueLineDraft.unitPrice}
-                          />
-                        </label>
-                      </div>
-                      <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
-                        Catatan
-                        <input
-                          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                          onChange={(event) => setRevenueLineDraft((current) => ({ ...current, note: event.target.value }))}
-                          placeholder="Opsional"
-                          value={revenueLineDraft.note}
-                        />
-                      </label>
-                      {revenueLineError ? <p className="text-[10px] font-semibold text-rose-700">{revenueLineError}</p> : null}
-                      <div className="flex justify-end gap-2">
-                        <button className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50" disabled={revenueLineSaving} onClick={() => setRevenueLineFormOpen(false)} type="button">Batal</button>
-                        <button
-                          className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                          disabled={revenueLineSaving || !revenueLineDraft.description.trim() || !revenueLineDraft.unit.trim() || Number(revenueLineDraft.quantity) <= 0 || Number(revenueLineDraft.unitPrice) <= 0}
-                          onClick={saveRevenueLine}
-                          type="button"
-                        >
-                          {revenueLineSaving ? 'Menyimpan...' : 'Simpan'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      <button
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-[10px] font-black uppercase text-slate-700 hover:bg-slate-50"
-                        onClick={() => openRevenueLineForm('inap')}
-                        type="button"
-                      >
-                        Tambah Biaya Inap
-                      </button>
-                      <button
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-[10px] font-black uppercase text-slate-700 hover:bg-slate-50"
-                        onClick={() => openRevenueLineForm('other')}
-                        type="button"
-                      >
-                        Tambah Revenue Manual
-                      </button>
-                    </div>
-                  )}
+                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5">
+                    <button
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-2.5 text-[10px] font-black uppercase tracking-wide text-white shadow-sm hover:bg-slate-800"
+                      onClick={() => openRevenueLineForm('inap')}
+                      type="button"
+                    >
+                      <PlusCircle size={13} />
+                      Tambah Revenue Manual
+                    </button>
+                  </div>
                 </div>
 
                 <div className="finance-invoice-detail-card">
@@ -1357,6 +1381,16 @@ function InvoiceDetailModal({
           onVoidPayment={(paymentId, reason) => onVoidDebitNotePayment?.(invoice.id, paymentId, reason)}
           payments={debitNotePayments}
           paymentsLoading={debitNotePaymentsLoading}
+        />
+      ) : null}
+      {revenueLineFormOpen ? (
+        <RevenueLineModal
+          draft={revenueLineDraft}
+          error={revenueLineError}
+          onChange={setRevenueLineDraft}
+          onClose={() => setRevenueLineFormOpen(false)}
+          onSave={saveRevenueLine}
+          saving={revenueLineSaving}
         />
       ) : null}
     </div>

@@ -116,7 +116,7 @@ function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment,
   return (
     <ModalPortal>
       <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
-        <section className="master-modal customer-outstanding-detail-modal" role="dialog" aria-modal="true" aria-labelledby="customer-outstanding-detail-title" onMouseDown={(event) => event.stopPropagation()}>
+        <section className="master-modal customer-outstanding-detail-modal flex flex-col" role="dialog" aria-modal="true" aria-labelledby="customer-outstanding-detail-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="master-form-heading">
             <div className="min-w-0">
               <span>Detail Piutang</span>
@@ -128,7 +128,7 @@ function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment,
             </button>
           </div>
 
-          <div className="master-form-sections">
+          <div className="master-form-sections min-h-0 flex-1 overflow-y-auto">
             <div className="master-fieldset">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Total Piutang Belum Lunas</span>

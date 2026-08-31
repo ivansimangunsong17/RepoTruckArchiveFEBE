@@ -116,12 +116,9 @@ function isDriverBlacklisted(driver) {
 function isTruckBusyForAnotherJob(truck, activeJobs = [], currentJobId) {
   if (!truck) return false;
   const truckPlate = String(truck.plateNumber || '').trim();
-  const defaultDriver = normalizeName(truck.defaultDriver);
   return (activeJobs || []).some((job) => {
     if (!isActiveAssignmentJob(job) || String(job.id) === String(currentJobId)) return false;
-    const sameTruck = truckPlate && String(job.plateNumber || '').trim() === truckPlate;
-    const sameDriver = defaultDriver && normalizeName(job.driver) === defaultDriver;
-    return sameTruck || sameDriver;
+    return truckPlate && String(job.plateNumber || '').trim() === truckPlate;
   });
 }
 

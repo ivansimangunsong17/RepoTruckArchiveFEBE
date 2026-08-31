@@ -371,7 +371,7 @@ describe('OperationalForm', () => {
     }));
   });
 
-  it('tidak menampilkan truck jika driver atau truck masih aktif di job lain', () => {
+  it('tetap menampilkan truck jika hanya default sopirnya yang aktif di job lain', () => {
     render(
       <OperationalForm
         container={container}
@@ -389,7 +389,7 @@ describe('OperationalForm', () => {
       />,
     );
 
-    expect(screen.queryByRole('option', { name: /B 1000 AA/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /B 1000 AA/i })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /B 2000 BB/i })).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: /B 3000 CC/i })).toBeInTheDocument();
   });

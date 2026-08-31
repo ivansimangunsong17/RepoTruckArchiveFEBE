@@ -229,15 +229,17 @@ function DailyOperationalFundPanel({
             <div className="overflow-x-auto rounded-md border border-slate-200">
               <table className="w-full min-w-[920px] divide-y divide-slate-200 text-left text-sm">
                 <colgroup>
-                  <col className="w-[13%]" />
-                  <col className="w-[37%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[13%]" />
-                  <col className="w-[13%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[35%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[12%]" />
                   <col className="w-[11%]" />
                 </colgroup>
                 <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
                   <tr>
+                    <th className="whitespace-nowrap px-4 py-3 text-center">No</th>
                     <th className="whitespace-nowrap px-4 py-3">Tanggal</th>
                     <th className="px-4 py-3">Keterangan</th>
                     <th className="px-4 py-3 text-right">Uang Masuk</th>
@@ -247,8 +249,9 @@ function DailyOperationalFundPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {transactionRows.map((row) => (
+                  {transactionRows.map((row, index) => (
                     <tr className="align-middle hover:bg-slate-50/70" key={row.id}>
+                      <td className="whitespace-nowrap px-4 py-3 text-center text-xs font-black text-slate-600">{index + 1}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-xs font-medium text-slate-700">{row.transactionDate}</td>
                       <td className="px-4 py-3">
                         <span className="line-clamp-2 block text-xs font-bold text-slate-900">{row.description}</span>
@@ -294,26 +297,28 @@ function DailyOperationalFundPanel({
             <div className="table-wrap rounded-md border border-slate-200">
               <table className="data-table master-table finance-master-table min-w-[1060px] table-fixed">
                 <colgroup>
-                  <col className="w-[20%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[24%]" />
-                  <col className="w-[14%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[12%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[19%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[23%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[11%]" />
                 </colgroup>
                 <thead>
                   <tr>
-                    {['SO / Container', 'Driver', 'Biaya', 'Pembayaran', 'Status', 'Aksi'].map((column) => (
-                      <th key={column}>{column}</th>
+                    {['No', 'SO / Container', 'Driver', 'Biaya', 'Pembayaran', 'Status', 'Aksi'].map((column) => (
+                      <th className={column === 'No' || column === 'Aksi' ? 'text-center' : ''} key={column}>{column}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {expenseRows.map((row) => {
+                  {expenseRows.map((row, index) => {
                     const busy = expenseBusyId === row.id;
                     const alreadyChecked = row.financeCheckStatus === 'sudah_dicek';
                     return (
                       <tr className="align-middle hover:bg-slate-50" key={row.id}>
+                        <td className="px-3 py-2 text-center text-xs font-black text-slate-600">{index + 1}</td>
                         <td className="px-3 py-2">
                           <span className="block text-xs font-black text-slate-950">{row.soNumber}</span>
                           <span className="mt-0.5 block text-[10px] font-semibold text-slate-500">{row.containerNumber} - {row.destination}</span>

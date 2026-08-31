@@ -65,7 +65,7 @@ const EXPENSE_DESCRIPTION_GROUPS = [
   {
     id: 'operational',
     label: 'Biaya Operational',
-    presets: ['Biaya MEL', 'Biaya Tambal Ban'],
+    presets: ['Biaya MEL', 'Biaya Tambal Ban', 'Biaya Ganti Ban Dalam', 'Biaya BAN Kurang Angin'],
   },
   {
     id: 'reimbursement',

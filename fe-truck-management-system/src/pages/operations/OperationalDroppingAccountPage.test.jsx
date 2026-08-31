@@ -275,6 +275,21 @@ describe('OperationalDroppingAccountPage', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Biaya tersimpan' }));
   });
 
+  it('menyediakan preset biaya ban di rekening dropping operational', async () => {
+    const user = userEvent.setup();
+    render(<OperationalDroppingAccountPage />);
+
+    await user.click(await screen.findByRole('button', { name: /catat biaya/i }));
+    await screen.findByRole('dialog', { name: /catat biaya penggunaan saldo/i });
+
+    const descriptionSelect = screen.getByLabelText(/^keterangan$/i);
+    expect(descriptionSelect).toHaveTextContent('Biaya Ganti Ban Dalam');
+    expect(descriptionSelect).toHaveTextContent('Biaya BAN Kurang Angin');
+
+    await user.selectOptions(descriptionSelect, 'Biaya Ganti Ban Dalam');
+    expect(screen.queryByLabelText(/jenis biaya/i)).not.toBeInTheDocument();
+  });
+
   it('mencatat Reimbursement Lainnya dengan keterangan tambahan wajib diisi', async () => {
     const user = userEvent.setup();
     render(<OperationalDroppingAccountPage />);

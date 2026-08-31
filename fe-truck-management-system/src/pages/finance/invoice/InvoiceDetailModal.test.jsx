@@ -224,17 +224,19 @@ describe('InvoiceDetailModal biaya inap / revenue manual (milik Finance, masuk I
     expect(screen.queryByText('Snapshot')).not.toBeInTheDocument();
   });
 
-  it('tombol Tambah Biaya Inap membuka form dengan jenis inap terpilih, dan submit memanggil onSaveRevenueLine ke Invoice bukan Debit Note', async () => {
+  it('tombol Tambah Revenue Manual membuka form dengan jenis inap terpilih, dan submit memanggil onSaveRevenueLine ke Invoice bukan Debit Note', async () => {
     const user = userEvent.setup();
     const onSaveRevenueLine = vi.fn().mockResolvedValue();
     renderModal(baseInvoice({}), { onSaveRevenueLine });
 
-    await user.click(screen.getByRole('button', { name: 'Tambah Biaya Inap' }));
+    await user.click(screen.getByRole('button', { name: 'Tambah Revenue Manual' }));
+    expect(screen.getByRole('dialog', { name: 'Tambah Biaya ke Invoice' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Jenis' })).toHaveValue('inap');
+    expect(screen.queryByLabelText('Satuan')).not.toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText(/Inap 1 malam/i), 'Inap 1 malam di rest area KM 57');
-    await user.clear(screen.getByRole('spinbutton', { name: 'Harga Satuan' }));
-    await user.type(screen.getByRole('spinbutton', { name: 'Harga Satuan' }), '500000');
+    await user.clear(screen.getByRole('spinbutton', { name: 'Harga' }));
+    await user.type(screen.getByRole('spinbutton', { name: 'Harga' }), '500000');
     await user.click(screen.getByRole('button', { name: 'Simpan' }));
 
     expect(onSaveRevenueLine).toHaveBeenCalledWith('order-1', expect.objectContaining({
