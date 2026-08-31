@@ -144,11 +144,43 @@ test('sales performance menggabungkan customer unik, volume, dan revenue per sal
   });
 });
 
+test('sales performance memakai sales dari master customer sebagai prioritas', () => {
+  const rows = buildSalesPerformanceRows([
+    {
+      id: 'so-1',
+      so_number: 'SO-001',
+      customer_sales_name: 'Sales Master Customer',
+      sales_name: 'Sales Pembuat SO',
+      created_by_name: 'Admin Input',
+      customer_name: 'Customer Alpha',
+      price: 1500000,
+      total_containers: 1,
+      container_size: '20FT',
+    },
+    {
+      id: 'so-2',
+      so_number: 'SO-002',
+      sales_name: 'Sales Pembuat SO',
+      created_by_name: 'Admin Input',
+      customer_name: 'Customer Beta',
+      price: 2500000,
+      total_containers: 1,
+      container_size: '40FT',
+    },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].salesName, 'Sales Pembuat SO');
+  assert.equal(rows[1].salesName, 'Sales Master Customer');
+  assert.equal(rows[1].totalRevenue, 1500000);
+});
+
 test('customer performance menggabungkan revenue periode dan outstanding aktif', () => {
   const rows = buildCustomerPerformanceRows([
     {
       id: 'so-1',
       so_number: 'SO-001',
+      customer_sales_name: 'Sales Master Alpha',
       sales_name: 'Sales A',
       customer_name: 'Customer Alpha',
       price: 1500000,
@@ -159,6 +191,7 @@ test('customer performance menggabungkan revenue periode dan outstanding aktif',
     {
       id: 'so-1',
       so_number: 'SO-001',
+      customer_sales_name: 'Sales Master Alpha',
       sales_name: 'Sales A',
       customer_name: 'Customer Alpha',
       price: 1500000,
@@ -203,6 +236,7 @@ test('customer performance menggabungkan revenue periode dan outstanding aktif',
 
   const alpha = rows.find((row) => row.customer === 'Customer Alpha');
   assert.equal(alpha.completedOrders, 1);
+  assert.deepEqual(alpha.salesNames, ['Sales Master Alpha']);
   assert.equal(alpha.totalVolume, 2);
   assert.equal(alpha.totalRevenue, 3000000);
   assert.equal(alpha.totalOutstandingAmount, 1000000);
@@ -226,7 +260,7 @@ test('customer performance menggabungkan revenue periode dan outstanding aktif',
   });
 });
 
-test('customer performance memecah outstanding jadi klasifikasi bucket umur piutang (current/1-30/31-60/61-90/90+)', () => {
+test('customer performance memecah outstanding jadi klasifikasi bucket umur piutang (current/1-15/16-30/31-60/60+)', () => {
   const rows = buildCustomerPerformanceRows([], [
     {
       customer: 'Customer Bucket',
@@ -234,10 +268,11 @@ test('customer performance memecah outstanding jadi klasifikasi bucket umur piut
       totalOutstandingAmount: 10000000,
       currentAmount: 1000000,
       overdueAmount: 9000000,
-      overdue1To30Amount: 2000000,
+      overdue1To15Amount: 2000000,
+      overdue16To30Amount: 1000000,
+      overdue1To30Amount: 3000000,
       overdue31To60Amount: 3000000,
-      overdue61To90Amount: 4000000,
-      overdue90PlusAmount: 0,
+      overdue60PlusAmount: 3000000,
       oldestOverdueDays: 75,
     },
   ]);
@@ -245,13 +280,14 @@ test('customer performance memecah outstanding jadi klasifikasi bucket umur piut
   assert.equal(rows.length, 1);
   const customer = rows[0];
   assert.equal(customer.currentAmount, 1000000);
-  assert.equal(customer.overdue1To30Amount, 2000000);
+  assert.equal(customer.overdue1To15Amount, 2000000);
+  assert.equal(customer.overdue16To30Amount, 1000000);
+  assert.equal(customer.overdue1To30Amount, 3000000);
   assert.equal(customer.overdue31To60Amount, 3000000);
-  assert.equal(customer.overdue61To90Amount, 4000000);
-  assert.equal(customer.overdue90PlusAmount, 0);
+  assert.equal(customer.overdue60PlusAmount, 3000000);
   // Total tiap bucket harus konsisten dengan totalOutstandingAmount (tidak ada yang hilang/dobel).
   assert.equal(
-    customer.currentAmount + customer.overdue1To30Amount + customer.overdue31To60Amount + customer.overdue61To90Amount + customer.overdue90PlusAmount,
+    customer.currentAmount + customer.overdue1To15Amount + customer.overdue16To30Amount + customer.overdue31To60Amount + customer.overdue60PlusAmount,
     customer.totalOutstandingAmount,
   );
 });

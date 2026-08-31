@@ -69,6 +69,7 @@ export function listContainerJobs(query, actor = null) {
     rpujStage: query.rpujStage || '',
     documentStatus: query.documentStatus || '',
     tripDate: query.tripDate || '',
+    completedDate: query.completedDate || '',
     groupByOrder: query.groupByOrder || '',
     entrySource: canManageHistoricalEntry ? query.entrySource || '' : 'realtime',
     historicalPeriod: canManageHistoricalEntry ? query.historicalPeriod || '' : '',

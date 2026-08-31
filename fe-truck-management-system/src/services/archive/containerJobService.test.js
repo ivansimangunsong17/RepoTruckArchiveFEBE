@@ -40,10 +40,11 @@ describe('containerJobService', () => {
       query: 'CONT',
       status: 'running',
       tripDate: '2026-07-11',
+      completedDate: '2026-07-12',
       entrySource: 'realtime',
     });
 
-    expect(httpClient.get).toHaveBeenCalledWith('/container-jobs?page=3&pageSize=8&query=CONT&status=running&tripDate=2026-07-11&entrySource=realtime');
+    expect(httpClient.get).toHaveBeenCalledWith('/container-jobs?page=3&pageSize=8&query=CONT&status=running&tripDate=2026-07-11&completedDate=2026-07-12&entrySource=realtime');
     expect(result.counts).toEqual({ received: 0, running: 0, completed: 0 });
   });
 

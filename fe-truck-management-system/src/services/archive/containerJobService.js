@@ -20,6 +20,7 @@ export function fetchContainerJobsPage({
   rpujStage = '',
   documentStatus = '',
   tripDate = '',
+  completedDate = '',
   groupByOrder = false,
   entrySource = '',
   historicalPeriod = '',
@@ -34,6 +35,7 @@ export function fetchContainerJobsPage({
   if (rpujStage) params.set('rpujStage', rpujStage);
   if (documentStatus) params.set('documentStatus', documentStatus);
   if (tripDate) params.set('tripDate', tripDate);
+  if (completedDate) params.set('completedDate', completedDate);
   if (groupByOrder) params.set('groupByOrder', 'true');
   if (entrySource) params.set('entrySource', entrySource);
   if (historicalPeriod) params.set('historicalPeriod', historicalPeriod);

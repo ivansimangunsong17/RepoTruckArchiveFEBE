@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BarChart3, Eye, Maximize2, Save, Trash2, Truck, Users, X } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, Eye, Maximize2, Save, Trash2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
@@ -102,6 +102,8 @@ const DRIVER_COMMISSION_PAYMENT_FILTER_OPTIONS = [
   { value: 'paid', label: 'Sudah Dibayar' },
   { value: 'unpaid', label: 'Belum Dibayar' },
 ];
+
+const CUSTOMER_PERFORMANCE_PAGE_SIZE = 10;
 
 function utilizationNoteKey(resourceId, date) {
   return `${String(resourceId || '').trim()}|${String(date || '').trim().slice(0, 10)}`;
@@ -1697,6 +1699,7 @@ function ReportsPage() {
   // MINIMAL N hari) -- terpisah dari filter Bulan/Tahun di atas karena Outstanding memang bukan
   // konsep per-bulan. null = tampilkan semua umur piutang, tanpa ambang batas.
   const [outstandingMinOverdueDays, setOutstandingMinOverdueDays] = useState(null);
+  const [customerPerformancePage, setCustomerPerformancePage] = useState(1);
   // Drill-down SO per bucket umur piutang: dibuka lewat tombol kecil di samping nominal tiap
   // kolom bucket pada tab Outstanding.
   const [outstandingBucketDetail, setOutstandingBucketDetail] = useState(null);
@@ -1735,6 +1738,10 @@ function ReportsPage() {
     if (selectedReport !== 'utilization') setUtilizationModalOpen(false);
     if (selectedReport !== 'driver') setDriverUtilizationModalOpen(false);
   }, [selectedReport]);
+
+  useEffect(() => {
+    setCustomerPerformancePage(1);
+  }, [activePeriodKey, customerDetailView, dataSource, outstandingMinOverdueDays, selectedReport]);
 
   useEffect(() => {
     if (!driverCommissionPeriodOptions.some((option) => option.value === driverCommissionPeriod)) {
@@ -2060,6 +2067,13 @@ function ReportsPage() {
   const visibleCustomerPerformanceRows = customerDetailView === 'outstanding' && outstandingMinOverdueDays
     ? customerPerformanceRows.filter((row) => Number(row.oldestOverdueDays || 0) >= outstandingMinOverdueDays)
     : customerPerformanceRows;
+  const customerPerformanceTotalPages = Math.max(1, Math.ceil(visibleCustomerPerformanceRows.length / CUSTOMER_PERFORMANCE_PAGE_SIZE));
+  const safeCustomerPerformancePage = Math.min(customerPerformancePage, customerPerformanceTotalPages);
+  const customerPerformanceStartIndex = visibleCustomerPerformanceRows.length
+    ? (safeCustomerPerformancePage - 1) * CUSTOMER_PERFORMANCE_PAGE_SIZE
+    : 0;
+  const customerPerformanceEndIndex = Math.min(customerPerformanceStartIndex + CUSTOMER_PERFORMANCE_PAGE_SIZE, visibleCustomerPerformanceRows.length);
+  const paginatedCustomerPerformanceRows = visibleCustomerPerformanceRows.slice(customerPerformanceStartIndex, customerPerformanceEndIndex);
 
   function openOutstandingBucketDetail(customer, bucketLabel, agingBucket) {
     setOutstandingBucketDetail({ customer, bucketLabel, agingBucket });
@@ -2294,7 +2308,7 @@ function ReportsPage() {
         <section className="rounded-md border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-3 py-2.5">
             <h2 className="text-sm font-bold text-slate-950">Detail Sales Performance</h2>
-            <p className="text-xs text-slate-500">Customer unik, volume completed container, dan revenue jasa angkut per sales.</p>
+            <p className="text-xs text-slate-500">Customer unik, volume completed container, dan revenue jasa angkut berdasarkan Sales di master customer.</p>
           </div>
 
           {salesPerformanceLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan performa sales...</div> : null}
@@ -2307,10 +2321,9 @@ function ReportsPage() {
                 { label: 'Sales' },
                 { label: 'Customer', align: 'right' },
                 { label: 'Volume', align: 'right' },
-                { label: 'SO Selesai', align: 'right' },
+                { label: '40FT', align: 'right' },
+                { label: '20FT', align: 'right' },
                 { label: 'Revenue', align: 'right' },
-                { label: 'AVG/Volume', align: 'right' },
-                { label: 'AVG/Customer', align: 'right' },
               ]}
               rows={salesPerformanceRows}
               rowRenderer={(sales, index) => {
@@ -2331,10 +2344,9 @@ function ReportsPage() {
                         {sales.totalVolume || 0}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="SO Selesai">{sales.completedOrders || 0}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="40FT">{sales.container40ft || 0}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="20FT">{sales.container20ft || 0}</td>
                     <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(sales.totalRevenue)}</td>
-                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="AVG/Volume">{formatCurrency(sales.averageRevenuePerVolume)}</td>
-                    <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="AVG/Customer">{formatCurrency(sales.averageRevenuePerCustomer)}</td>
                   </tr>
                 );
               }}
@@ -2410,112 +2422,145 @@ function ReportsPage() {
           {!customerPerformanceLoading && customerPerformanceError ? <div className="p-4 text-sm text-red-600">{customerPerformanceError}</div> : null}
 
           {!customerPerformanceLoading && !customerPerformanceError && visibleCustomerPerformanceRows.length ? (
-            <DetailTable
-              columns={
-                customerDetailView === 'revenue'
-                  ? [
-                      { label: 'No' },
-                      { label: 'Customer' },
-                      { label: 'Volume', align: 'right' },
-                      { label: 'SO Selesai', align: 'right' },
-                      { label: 'Revenue', align: 'right' },
-                      { label: 'Last Order' },
-                    ]
-                  : [
-                      { label: 'No' },
-                      { label: 'Customer' },
-                      { label: 'Current', align: 'right' },
-                      { label: '1-30 Hari', align: 'right' },
-                      { label: '31-60 Hari', align: 'right' },
-                      { label: '61-90 Hari', align: 'right' },
-                      { label: '>90 Hari', align: 'right' },
-                      { label: 'Collection', align: 'right' },
-                      { label: 'Status' },
-                    ]
-              }
-              rows={visibleCustomerPerformanceRows}
-              rowRenderer={(customer, index) => {
-                const salesNames = Array.isArray(customer.salesNames) && customer.salesNames.length
-                  ? customer.salesNames.slice(0, 3).join(', ')
-                  : 'Tanpa sales periode ini';
-                const collectionPercent = Number(customer.collectionPercent || 0);
-                const statusTone = Number(customer.overdueAmount || 0) > 0
-                  ? 'bg-amber-50 text-amber-700'
-                  : Number(customer.totalOutstandingAmount || 0) > 0
-                    ? 'bg-rose-50 text-rose-700'
-                    : 'bg-emerald-50 text-emerald-700';
-                return (
-                  <tr key={customer.customer || index} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
-                    <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
-                    <td className="px-3 py-2" data-label="Customer">
-                      <strong className="block text-slate-950">{customer.customer || 'Tanpa Customer'}</strong>
-                      <span className="text-[11px] text-slate-500">{salesNames}</span>
-                    </td>
-                    {customerDetailView === 'revenue' ? (
-                      <>
-                        <td className="px-3 py-2 text-right" data-label="Volume">
-                          <span className="inline-flex min-w-8 justify-center rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-800">
-                            {customer.totalVolume || 0}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="SO Selesai">{customer.completedOrders || 0}</td>
-                        <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(customer.totalRevenue)}</td>
-                        <td className="px-3 py-2 font-semibold text-slate-700" data-label="Last Order">{formatDate(customer.lastOrderDate)}</td>
-                      </>
-                    ) : (
-                      <>
-                        <OutstandingBucketCell
-                          amount={customer.currentAmount}
-                          label="Current"
-                          agingBucket="current"
-                          toneClassName="text-emerald-700"
-                          customer={customer.customer}
-                          onOpenDetail={openOutstandingBucketDetail}
-                        />
-                        <OutstandingBucketCell
-                          amount={customer.overdue1To30Amount}
-                          label="1-30 Hari"
-                          agingBucket="overdue_1_30"
-                          toneClassName="text-amber-700"
-                          customer={customer.customer}
-                          onOpenDetail={openOutstandingBucketDetail}
-                        />
-                        <OutstandingBucketCell
-                          amount={customer.overdue31To60Amount}
-                          label="31-60 Hari"
-                          agingBucket="overdue_31_60"
-                          toneClassName="text-orange-700"
-                          customer={customer.customer}
-                          onOpenDetail={openOutstandingBucketDetail}
-                        />
-                        <OutstandingBucketCell
-                          amount={customer.overdue61To90Amount}
-                          label="61-90 Hari"
-                          agingBucket="overdue_61_90"
-                          toneClassName="text-rose-700"
-                          customer={customer.customer}
-                          onOpenDetail={openOutstandingBucketDetail}
-                        />
-                        <OutstandingBucketCell
-                          amount={customer.overdue90PlusAmount}
-                          label=">90 Hari"
-                          agingBucket="overdue_90_plus"
-                          toneClassName="font-bold text-rose-800"
-                          customer={customer.customer}
-                          onOpenDetail={openOutstandingBucketDetail}
-                        />
-                        <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="Collection">{collectionPercent.toFixed(1)}%</td>
-                        <td className="px-3 py-2" data-label="Status">
-                          <span className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-black ${statusTone}`}>
-                            {customer.status || '-'}
-                          </span>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                );
-              }}
-            />
+            <>
+              <DetailTable
+                columns={
+                  customerDetailView === 'revenue'
+                    ? [
+                        { label: 'No' },
+                        { label: 'Customer' },
+                        { label: 'Volume', align: 'right' },
+                        { label: 'SO Selesai', align: 'right' },
+                        { label: 'Revenue', align: 'right' },
+                        { label: 'Last Order' },
+                      ]
+                    : [
+                        { label: 'No' },
+                        { label: 'Customer' },
+                        { label: 'Total Outstanding', align: 'right' },
+                        { label: 'Current', align: 'right' },
+                        { label: '1-15 Hari', align: 'right' },
+                        { label: '16-30 Hari', align: 'right' },
+                        { label: '31-60 Hari', align: 'right' },
+                        { label: '>60 Hari', align: 'right' },
+                        { label: 'Collection', align: 'right' },
+                      ]
+                }
+                rows={paginatedCustomerPerformanceRows}
+                rowRenderer={(customer, index) => {
+                  const salesNames = Array.isArray(customer.salesNames) && customer.salesNames.length
+                    ? customer.salesNames.slice(0, 3).join(', ')
+                    : 'Tanpa sales periode ini';
+                  const rowNumber = customerPerformanceStartIndex + index + 1;
+                  const collectionPercent = Number(customer.collectionPercent || 0);
+                  const overdue1To15Amount = Number(customer.overdue1To15Amount || 0);
+                  const overdue16To30Amount = Number(customer.overdue16To30Amount || Math.max(Number(customer.overdue1To30Amount || 0) - overdue1To15Amount, 0));
+                  const legacy60PlusAmount = Number(customer.overdue61To90Amount || 0) + Number(customer.overdue90PlusAmount || 0);
+                  const overdue60PlusAmount = Number(customer.overdue60PlusAmount || 0) || legacy60PlusAmount;
+                  return (
+                    <tr key={customer.customer || index} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                      <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{rowNumber}</td>
+                      <td className="px-3 py-2" data-label="Customer">
+                        <strong className="block text-slate-950">{customer.customer || 'Tanpa Customer'}</strong>
+                        <span className="text-[11px] text-slate-500">{salesNames}</span>
+                      </td>
+                      {customerDetailView === 'revenue' ? (
+                        <>
+                          <td className="px-3 py-2 text-right" data-label="Volume">
+                            <span className="inline-flex min-w-8 justify-center rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-800">
+                              {customer.totalVolume || 0}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="SO Selesai">{customer.completedOrders || 0}</td>
+                          <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(customer.totalRevenue)}</td>
+                          <td className="px-3 py-2 font-semibold text-slate-700" data-label="Last Order">{formatDate(customer.lastOrderDate)}</td>
+                        </>
+                      ) : (
+                        <>
+                          <OutstandingBucketCell
+                            amount={customer.totalOutstandingAmount}
+                            label="Total Outstanding"
+                            agingBucket=""
+                            toneClassName="font-bold text-slate-950"
+                            customer={customer.customer}
+                            onOpenDetail={openOutstandingBucketDetail}
+                          />
+                          <OutstandingBucketCell
+                            amount={customer.currentAmount}
+                            label="Current"
+                            agingBucket="current"
+                            toneClassName="text-emerald-700"
+                            customer={customer.customer}
+                            onOpenDetail={openOutstandingBucketDetail}
+                          />
+                          <OutstandingBucketCell
+                            amount={overdue1To15Amount}
+                            label="1-15 Hari"
+                            agingBucket="overdue_1_15"
+                            toneClassName="text-amber-700"
+                            customer={customer.customer}
+                            onOpenDetail={openOutstandingBucketDetail}
+                          />
+                          <OutstandingBucketCell
+                            amount={overdue16To30Amount}
+                            label="16-30 Hari"
+                            agingBucket="overdue_16_30"
+                            toneClassName="text-orange-700"
+                            customer={customer.customer}
+                            onOpenDetail={openOutstandingBucketDetail}
+                          />
+                          <OutstandingBucketCell
+                            amount={customer.overdue31To60Amount}
+                            label="31-60 Hari"
+                            agingBucket="overdue_31_60"
+                            toneClassName="text-orange-700"
+                            customer={customer.customer}
+                            onOpenDetail={openOutstandingBucketDetail}
+                          />
+                          <OutstandingBucketCell
+                            amount={overdue60PlusAmount}
+                            label=">60 Hari"
+                            agingBucket="overdue_60_plus"
+                            toneClassName="font-bold text-rose-800"
+                            customer={customer.customer}
+                            onOpenDetail={openOutstandingBucketDetail}
+                          />
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="Collection">{collectionPercent.toFixed(1)}%</td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                }}
+              />
+              <div className="flex flex-col gap-2 border-t border-slate-100 px-3 py-3 text-xs text-slate-500 md:flex-row md:items-center md:justify-between">
+                <span>
+                  Menampilkan {customerPerformanceStartIndex + 1}-{customerPerformanceEndIndex} dari {visibleCustomerPerformanceRows.length} customer
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setCustomerPerformancePage((current) => Math.max(1, current - 1))}
+                    disabled={safeCustomerPerformancePage <= 1}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Sebelumnya
+                  </button>
+                  <span className="min-w-24 text-center font-semibold text-slate-600">
+                    {safeCustomerPerformancePage} / {customerPerformanceTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setCustomerPerformancePage((current) => Math.min(customerPerformanceTotalPages, current + 1))}
+                    disabled={safeCustomerPerformancePage >= customerPerformanceTotalPages}
+                  >
+                    Berikutnya
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </>
           ) : null}
 
           {!customerPerformanceLoading && !customerPerformanceError && !visibleCustomerPerformanceRows.length ? (

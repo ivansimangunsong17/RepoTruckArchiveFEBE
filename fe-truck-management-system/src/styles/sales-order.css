@@ -1460,11 +1460,12 @@
 .order-container-progress-panel .has-cancelled strong { color: #991b1b; }
 .container-detail { display: grid; grid-template-columns: minmax(170px, 1.05fr) minmax(230px, 1.4fr) minmax(300px, 1.55fr); align-items: center; gap: 12px; position: relative; overflow: hidden; min-height: 68px; padding: 10px 12px; border: 1px solid #e2e4e8; border-left: 3px solid var(--primary); border-radius: 8px; background: white; }
 .container-detail:hover { border-color: #d6b8ba; background: #fffafa; }
-.container-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; margin: 0; }
+.container-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; margin: 0; }
 .container-detail-head strong, .container-detail-head span { display: block; }
 .container-detail-head strong { overflow: hidden; color: #9f141a; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
-.container-detail-head > div { min-width: 0; }
+.container-detail-head > div { min-width: 0; flex: 1; }
 .container-detail-head > div > span { overflow: hidden; color: #8a94a5; font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }
+.container-detail-sequence { display: inline-flex !important; align-items: center; justify-content: center; width: 24px; height: 24px; flex: 0 0 24px; border-radius: 999px; color: white !important; background: #cf111b; font-size: .68rem !important; font-weight: 900; line-height: 1; box-shadow: 0 4px 10px rgba(207, 17, 27, .18); }
 .operational-edit-button { position: absolute; top: 49px; right: 14px; border: 0; color: var(--primary); background: transparent; font-size: .62rem; font-weight: 700; }
 .operational-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding-top: 10px; border-top: 1px solid #edf0f4; }
 .operational-fields > div > span { display: block; color: #8a94a5; font-size: .58rem; }

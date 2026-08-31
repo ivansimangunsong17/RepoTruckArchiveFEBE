@@ -213,6 +213,7 @@ function buildJobWhere({
   rpujStage = '',
   documentStatus = '',
   tripDate = '',
+  completedDate = '',
   entrySource = '',
   historicalPeriod = '',
   includeRpujStage = true,
@@ -225,6 +226,7 @@ function buildJobWhere({
   const params = [];
   const cleanKeyword = keyword.trim();
   const cleanTripDate = normalizeDateOnly(tripDate);
+  const cleanCompletedDate = normalizeDateOnly(completedDate);
 
   if (cleanKeyword) {
     params.push(`%${cleanKeyword}%`);
@@ -246,6 +248,11 @@ function buildJobWhere({
   if (cleanTripDate) {
     params.push(cleanTripDate);
     clauses.push(`so.trip_date = $${params.length}::date`);
+  }
+
+  if (cleanCompletedDate) {
+    params.push(cleanCompletedDate);
+    clauses.push(`(cj.completed_at at time zone 'Asia/Jakarta')::date = $${params.length}::date`);
   }
 
   if (entrySource) {

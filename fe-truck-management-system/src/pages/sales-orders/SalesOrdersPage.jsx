@@ -385,7 +385,7 @@ function getServerFilter(selectedStatus, customerDocumentsOnly = false) {
   return { status: selectedStatus, invoiced: false };
 }
 
-function ContainerDetail({ container, onRequestCancel, canRequestCancel, onEdit, canEdit }) {
+function ContainerDetail({ container, index, onRequestCancel, canRequestCancel, onEdit, canEdit }) {
   const allowRequestCancel = canRequestCancel && container.status === 'received' && container.cancelRequestStatus !== 'submitted';
   const allowEdit = canEdit && !['cancelled'].includes(container.status);
   return (
@@ -401,6 +401,7 @@ function ContainerDetail({ container, onRequestCancel, canRequestCancel, onEdit,
         </button>
       ) : null}
       <div className="container-detail-head">
+        <span className="container-detail-sequence" title={`Container ${index + 1}`}>{index + 1}</span>
         <div><strong>{container.containerNumber || 'Container belum diisi'}</strong><span>Container {container.size} - {valueOrDash(container.type)}</span></div>
         <StatusBadge status={container.status} />
       </div>
@@ -1147,10 +1148,11 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
 
               <div className="container-grid">
                 {selectedOrderContainers.length ? (
-                  selectedOrderContainers.map((container) => (
+                  selectedOrderContainers.map((container, index) => (
                     <ContainerDetail
                       key={container.id}
                       container={container}
+                      index={index}
                       canRequestCancel={canRequestCancelContainer}
                       onRequestCancel={openRequestCancelContainer}
                       canEdit={canUpdateContainerJob}

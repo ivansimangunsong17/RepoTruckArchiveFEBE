@@ -88,7 +88,7 @@ export function splitDriverCommissionPaymentAmount(row = {}) {
 }
 
 function normalizeSalesName(row = {}) {
-  return String(row.sales_name || row.salesName || row.created_by_name || row.createdByName || 'Tanpa Sales').trim() || 'Tanpa Sales';
+  return String(row.customer_sales_name || row.customerSalesName || row.sales_name || row.salesName || row.created_by_name || row.createdByName || 'Tanpa Sales').trim() || 'Tanpa Sales';
 }
 
 function normalizeCustomerName(row = {}) {
@@ -228,8 +228,11 @@ function createEmptyCustomerPerformanceSummary(customer) {
     totalOutstandingAmount: 0,
     currentAmount: 0,
     overdueAmount: 0,
+    overdue1To15Amount: 0,
+    overdue16To30Amount: 0,
     overdue1To30Amount: 0,
     overdue31To60Amount: 0,
+    overdue60PlusAmount: 0,
     overdue61To90Amount: 0,
     overdue90PlusAmount: 0,
     invoiceCount: 0,
@@ -276,11 +279,20 @@ export function buildCustomerPerformanceRows(rows = [], outstandingRows = []) {
     }
 
     const customerSummary = customerMap.get(customerKey);
+    const rowOverdue1To15Amount = Number(row.overdue1To15Amount || 0);
+    const rowOverdue16To30Amount = Number(row.overdue16To30Amount || 0)
+      || Math.max(Number(row.overdue1To30Amount || 0) - rowOverdue1To15Amount, 0);
+    const rowLegacy60PlusAmount = Number(row.overdue61To90Amount || 0) + Number(row.overdue90PlusAmount || 0);
+    const rowOverdue60PlusAmount = Number(row.overdue60PlusAmount || 0) || rowLegacy60PlusAmount;
+
     customerSummary.totalOutstandingAmount += Number(row.totalOutstandingAmount || 0);
     customerSummary.currentAmount += Number(row.currentAmount || 0);
     customerSummary.overdueAmount += Number(row.overdueAmount || 0);
-    customerSummary.overdue1To30Amount += Number(row.overdue1To30Amount || 0);
+    customerSummary.overdue1To15Amount += rowOverdue1To15Amount;
+    customerSummary.overdue16To30Amount += rowOverdue16To30Amount;
+    customerSummary.overdue1To30Amount += rowOverdue1To15Amount + rowOverdue16To30Amount;
     customerSummary.overdue31To60Amount += Number(row.overdue31To60Amount || 0);
+    customerSummary.overdue60PlusAmount += rowOverdue60PlusAmount;
     customerSummary.overdue61To90Amount += Number(row.overdue61To90Amount || 0);
     customerSummary.overdue90PlusAmount += Number(row.overdue90PlusAmount || 0);
     customerSummary.invoiceCount += Number(row.invoiceCount || 0);
@@ -307,8 +319,11 @@ export function buildCustomerPerformanceRows(rows = [], outstandingRows = []) {
         totalOutstandingAmount: customer.totalOutstandingAmount,
         currentAmount: customer.currentAmount,
         overdueAmount: customer.overdueAmount,
+        overdue1To15Amount: customer.overdue1To15Amount,
+        overdue16To30Amount: customer.overdue16To30Amount,
         overdue1To30Amount: customer.overdue1To30Amount,
         overdue31To60Amount: customer.overdue31To60Amount,
+        overdue60PlusAmount: customer.overdue60PlusAmount,
         overdue61To90Amount: customer.overdue61To90Amount,
         overdue90PlusAmount: customer.overdue90PlusAmount,
         invoiceCount: customer.invoiceCount,
@@ -784,6 +799,7 @@ export async function getSalesPerformanceReport(options = {}) {
           so.id,
           so.so_number,
           so.customer_name,
+          c.sales_name as customer_sales_name,
           so.sales_name,
           so.created_by_name,
           so.price,
@@ -796,6 +812,14 @@ export async function getSalesPerformanceReport(options = {}) {
           greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
+        left join customers c on c.archived_at is null
+          and (
+            c.id = so.customer_id
+            or (
+              so.customer_id is null
+              and lower(btrim(c.name)) = lower(btrim(so.customer_name))
+            )
+          )
         left join order_job_totals ojt on ojt.sales_order_id = so.id
         where so.status <> 'cancelled'
           and cj.status = 'completed'
@@ -805,7 +829,7 @@ export async function getSalesPerformanceReport(options = {}) {
       from completed_jobs
       where completed_date >= $1::date
         and completed_date < $2::date
-      order by completed_date desc, sales_name asc nulls last, so_number asc, job_id asc
+      order by completed_date desc, customer_sales_name asc nulls last, sales_name asc nulls last, so_number asc, job_id asc
     `,
     params,
   );
@@ -859,6 +883,7 @@ export async function getCustomerPerformanceReport(options = {}) {
             so.id,
             so.so_number,
             so.customer_name,
+            c.sales_name as customer_sales_name,
             so.sales_name,
             so.created_by_name,
             so.price,
@@ -871,6 +896,14 @@ export async function getCustomerPerformanceReport(options = {}) {
             greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
           from sales_orders so
           join container_jobs cj on cj.sales_order_id = so.id
+          left join customers c on c.archived_at is null
+            and (
+              c.id = so.customer_id
+              or (
+                so.customer_id is null
+                and lower(btrim(c.name)) = lower(btrim(so.customer_name))
+              )
+            )
           left join order_job_totals ojt on ojt.sales_order_id = so.id
           where so.status <> 'cancelled'
             and cj.status = 'completed'

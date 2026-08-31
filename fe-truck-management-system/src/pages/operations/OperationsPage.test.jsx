@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OperationsPage from './OperationsPage';
@@ -119,5 +119,16 @@ describe('OperationsPage status inap', () => {
     await user.click(screen.getByRole('button', { name: /Selesai Inap/i }));
 
     await waitFor(() => expect(updateJob).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: 'running' })));
+  });
+
+  it('mengirim filter tanggal selesai ke API Container Job', async () => {
+    render(<OperationsPage />);
+
+    const completedDateInput = await screen.findByLabelText(/filter tanggal selesai/i);
+    fireEvent.change(completedDateInput, { target: { value: '2026-07-12' } });
+
+    await waitFor(() => expect(fetchContainerJobsPage).toHaveBeenCalledWith(expect.objectContaining({
+      completedDate: '2026-07-12',
+    })));
   });
 });

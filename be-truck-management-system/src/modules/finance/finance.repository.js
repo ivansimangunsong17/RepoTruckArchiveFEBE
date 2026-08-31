@@ -3894,10 +3894,10 @@ function outstandingOrdersCte() {
         case
           when io.due_date is null then 'unknown'
           when (io.due_date at time zone 'Asia/Jakarta')::date >= (now() at time zone 'Asia/Jakarta')::date then 'current'
-          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 30 then 'overdue_1_30'
+          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 15 then 'overdue_1_15'
+          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 30 then 'overdue_16_30'
           when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 60 then 'overdue_31_60'
-          when (now() at time zone 'Asia/Jakarta')::date - (io.due_date at time zone 'Asia/Jakarta')::date <= 90 then 'overdue_61_90'
-          else 'overdue_90_plus'
+          else 'overdue_60_plus'
         end as aging_bucket,
         case
           when io.due_date is null then 0
@@ -3924,8 +3924,7 @@ function buildOutstandingFilters(options = {}) {
   const params = [];
 
   if (options.agingBucket) {
-    params.push(options.agingBucket);
-    clauses.push(`aging_bucket = $${params.length}`);
+    appendOutstandingAgingBucketFilter(clauses, params, options.agingBucket);
   }
   if (options.dataReviewStatus) {
     params.push(options.dataReviewStatus);
@@ -3946,6 +3945,25 @@ function buildOutstandingFilters(options = {}) {
     whereSql: clauses.length ? `where ${clauses.join(' and ')}` : '',
     params,
   };
+}
+
+function appendOutstandingAgingBucketFilter(clauses, params, agingBucket) {
+  const normalizedBucket = String(agingBucket || '').trim();
+  if (!normalizedBucket) return;
+
+  if (normalizedBucket === 'overdue_all') {
+    clauses.push(`aging_bucket in ('overdue_1_15', 'overdue_16_30', 'overdue_31_60', 'overdue_60_plus')`);
+    return;
+  }
+
+  const bucketAliases = {
+    overdue_1_30: ['overdue_1_15', 'overdue_16_30'],
+    overdue_61_90: ['overdue_60_plus'],
+    overdue_90_plus: ['overdue_60_plus'],
+  };
+  const buckets = bucketAliases[normalizedBucket] || [normalizedBucket];
+  params.push(buckets);
+  clauses.push(`aging_bucket = any($${params.length}::text[])`);
 }
 
 function mapOutstandingOrderRow(row) {
@@ -3996,10 +4014,11 @@ export async function getSalesOrderOutstandingPage(options = {}) {
           coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
           count(*)::int as total_orders,
           count(*) filter (where aging_bucket = 'current')::int as current_count,
-          count(*) filter (where aging_bucket = 'overdue_1_30')::int as overdue_1_30_count,
+          count(*) filter (where aging_bucket = 'overdue_1_15')::int as overdue_1_15_count,
+          count(*) filter (where aging_bucket = 'overdue_16_30')::int as overdue_16_30_count,
+          count(*) filter (where aging_bucket in ('overdue_1_15', 'overdue_16_30'))::int as overdue_1_30_count,
           count(*) filter (where aging_bucket = 'overdue_31_60')::int as overdue_31_60_count,
-          count(*) filter (where aging_bucket = 'overdue_61_90')::int as overdue_61_90_count,
-          count(*) filter (where aging_bucket = 'overdue_90_plus')::int as overdue_90_plus_count,
+          count(*) filter (where aging_bucket = 'overdue_60_plus')::int as overdue_60_plus_count,
           count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count,
           count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
         from outstanding_orders
@@ -4020,10 +4039,13 @@ export async function getSalesOrderOutstandingPage(options = {}) {
       totalOutstandingAmount: Number(summary.rows[0]?.total_outstanding_amount || 0),
       totalOrders: Number(summary.rows[0]?.total_orders || 0),
       current: Number(summary.rows[0]?.current_count || 0),
+      overdue1To15: Number(summary.rows[0]?.overdue_1_15_count || 0),
+      overdue16To30: Number(summary.rows[0]?.overdue_16_30_count || 0),
       overdue1To30: Number(summary.rows[0]?.overdue_1_30_count || 0),
       overdue31To60: Number(summary.rows[0]?.overdue_31_60_count || 0),
-      overdue61To90: Number(summary.rows[0]?.overdue_61_90_count || 0),
-      overdue90Plus: Number(summary.rows[0]?.overdue_90_plus_count || 0),
+      overdue60Plus: Number(summary.rows[0]?.overdue_60_plus_count || 0),
+      overdue61To90: 0,
+      overdue90Plus: Number(summary.rows[0]?.overdue_60_plus_count || 0),
       unknownDueDate: Number(summary.rows[0]?.unknown_due_date_count || 0),
       needsReview: Number(summary.rows[0]?.needs_review_count || 0),
     },
@@ -4034,12 +4056,7 @@ function buildCustomerOutstandingFilters(options = {}) {
   const clauses = [];
   const params = [];
 
-  if (options.agingBucket === 'overdue_all') {
-    clauses.push(`aging_bucket in ('overdue_1_30', 'overdue_31_60', 'overdue_61_90', 'overdue_90_plus')`);
-  } else if (options.agingBucket) {
-    params.push(options.agingBucket);
-    clauses.push(`aging_bucket = $${params.length}`);
-  }
+  appendOutstandingAgingBucketFilter(clauses, params, options.agingBucket);
   if (options.query) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`customer_name ilike $${params.length}`);
@@ -4069,10 +4086,13 @@ function mapCustomerOutstandingRollupRow(row) {
     totalOutstandingAmount: Number(row.total_outstanding_amount || 0),
     currentAmount: Number(row.current_amount || 0),
     overdueAmount: Number(row.overdue_amount || 0),
+    overdue1To15Amount: Number(row.overdue_1_15_amount || 0),
+    overdue16To30Amount: Number(row.overdue_16_30_amount || 0),
     overdue1To30Amount: Number(row.overdue_1_30_amount || 0),
     overdue31To60Amount: Number(row.overdue_31_60_amount || 0),
-    overdue61To90Amount: Number(row.overdue_61_90_amount || 0),
-    overdue90PlusAmount: Number(row.overdue_90_plus_amount || 0),
+    overdue60PlusAmount: Number(row.overdue_60_plus_amount || 0),
+    overdue61To90Amount: 0,
+    overdue90PlusAmount: Number(row.overdue_60_plus_amount || 0),
     oldestOverdueDays: Number(row.oldest_overdue_days || 0),
     needsReview: Boolean(row.needs_review),
   };
@@ -4095,10 +4115,11 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
           coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
           coalesce(sum(outstanding_amount) filter (where aging_bucket = 'current'), 0)::numeric as current_amount,
           coalesce(sum(outstanding_amount) filter (where aging_bucket not in ('current', 'unknown')), 0)::numeric as overdue_amount,
-          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_1_30'), 0)::numeric as overdue_1_30_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_1_15'), 0)::numeric as overdue_1_15_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_16_30'), 0)::numeric as overdue_16_30_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket in ('overdue_1_15', 'overdue_16_30')), 0)::numeric as overdue_1_30_amount,
           coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_31_60'), 0)::numeric as overdue_31_60_amount,
-          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_61_90'), 0)::numeric as overdue_61_90_amount,
-          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_90_plus'), 0)::numeric as overdue_90_plus_amount,
+          coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_60_plus'), 0)::numeric as overdue_60_plus_amount,
           coalesce(max(days_overdue), 0)::int as oldest_overdue_days,
           bool_or(ots_data_review_status = 'perlu_dicek') as needs_review
         from outstanding_orders
@@ -4134,10 +4155,11 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
           count(*)::int as total_orders,
           count(distinct customer_name)::int as total_customers,
           count(*) filter (where aging_bucket = 'current')::int as current_count,
-          count(*) filter (where aging_bucket = 'overdue_1_30')::int as overdue_1_30_count,
+          count(*) filter (where aging_bucket = 'overdue_1_15')::int as overdue_1_15_count,
+          count(*) filter (where aging_bucket = 'overdue_16_30')::int as overdue_16_30_count,
+          count(*) filter (where aging_bucket in ('overdue_1_15', 'overdue_16_30'))::int as overdue_1_30_count,
           count(*) filter (where aging_bucket = 'overdue_31_60')::int as overdue_31_60_count,
-          count(*) filter (where aging_bucket = 'overdue_61_90')::int as overdue_61_90_count,
-          count(*) filter (where aging_bucket = 'overdue_90_plus')::int as overdue_90_plus_count,
+          count(*) filter (where aging_bucket = 'overdue_60_plus')::int as overdue_60_plus_count,
           count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count,
           count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
         from outstanding_orders
@@ -4159,10 +4181,13 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
       totalOrders: Number(summary.rows[0]?.total_orders || 0),
       totalCustomers: Number(summary.rows[0]?.total_customers || 0),
       current: Number(summary.rows[0]?.current_count || 0),
+      overdue1To15: Number(summary.rows[0]?.overdue_1_15_count || 0),
+      overdue16To30: Number(summary.rows[0]?.overdue_16_30_count || 0),
       overdue1To30: Number(summary.rows[0]?.overdue_1_30_count || 0),
       overdue31To60: Number(summary.rows[0]?.overdue_31_60_count || 0),
-      overdue61To90: Number(summary.rows[0]?.overdue_61_90_count || 0),
-      overdue90Plus: Number(summary.rows[0]?.overdue_90_plus_count || 0),
+      overdue60Plus: Number(summary.rows[0]?.overdue_60_plus_count || 0),
+      overdue61To90: 0,
+      overdue90Plus: Number(summary.rows[0]?.overdue_60_plus_count || 0),
       unknownDueDate: Number(summary.rows[0]?.unknown_due_date_count || 0),
       needsReview: Number(summary.rows[0]?.needs_review_count || 0),
     },

@@ -25,8 +25,11 @@ const emptySummary = {
   totalOutstandingAmount: 0,
   totalOrders: 0,
   current: 0,
+  overdue1To15: 0,
+  overdue16To30: 0,
   overdue1To30: 0,
   overdue31To60: 0,
+  overdue60Plus: 0,
   overdue61To90: 0,
   overdue90Plus: 0,
   unknownDueDate: 0,
@@ -36,10 +39,10 @@ const emptySummary = {
 const AGING_OPTIONS = [
   { value: '', label: 'Semua Umur Piutang' },
   { value: 'current', label: 'Current / Belum Jatuh Tempo' },
-  { value: 'overdue_1_30', label: 'Overdue 1-30 Hari' },
+  { value: 'overdue_1_15', label: 'Overdue 1-15 Hari' },
+  { value: 'overdue_16_30', label: 'Overdue 16-30 Hari' },
   { value: 'overdue_31_60', label: 'Overdue 31-60 Hari' },
-  { value: 'overdue_61_90', label: 'Overdue 61-90 Hari' },
-  { value: 'overdue_90_plus', label: 'Overdue >90 Hari' },
+  { value: 'overdue_60_plus', label: 'Overdue >60 Hari' },
   { value: 'overdue_all', label: 'Semua Overdue' },
 ];
 
@@ -49,10 +52,13 @@ const AGING_OPTIONS = [
 // menawarkan opsi 'unknown' sebagai pilihan filter.
 const AGING_LABELS = {
   current: 'Belum Jatuh Tempo',
+  overdue_1_15: 'Terlambat 1-15 Hari',
+  overdue_16_30: 'Terlambat 16-30 Hari',
   overdue_1_30: 'Terlambat 1-30 Hari',
   overdue_31_60: 'Terlambat 31-60 Hari',
-  overdue_61_90: 'Terlambat 61-90 Hari',
-  overdue_90_plus: 'Terlambat >90 Hari',
+  overdue_60_plus: 'Terlambat >60 Hari',
+  overdue_61_90: 'Terlambat >60 Hari',
+  overdue_90_plus: 'Terlambat >60 Hari',
   unknown: 'Tanggal Jatuh Tempo Belum Ada',
 };
 
@@ -65,9 +71,12 @@ const SORT_OPTIONS = [
 
 const AGING_TONE = {
   current: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  overdue_1_15: 'border-amber-200 bg-amber-50 text-amber-700',
+  overdue_16_30: 'border-orange-200 bg-orange-50 text-orange-700',
   overdue_1_30: 'border-amber-200 bg-amber-50 text-amber-700',
   overdue_31_60: 'border-orange-200 bg-orange-50 text-orange-700',
-  overdue_61_90: 'border-rose-200 bg-rose-50 text-rose-700',
+  overdue_60_plus: 'border-rose-300 bg-rose-100 text-rose-800',
+  overdue_61_90: 'border-rose-300 bg-rose-100 text-rose-800',
   overdue_90_plus: 'border-rose-300 bg-rose-100 text-rose-800',
   unknown: 'border-slate-200 bg-slate-50 text-slate-500',
 };
@@ -541,33 +550,38 @@ function CustomerOutstandingPage() {
     }
   }
 
-  const summaryCards = useMemo(() => ([
-    {
-      icon: Wallet,
-      label: 'Total Outstanding',
-      value: formatCurrency(summary.totalOutstandingAmount),
-      helper: `${summary.totalOrders || 0} sales order belum lunas`,
-    },
-    {
-      icon: Clock3,
-      label: 'Belum Jatuh Tempo',
-      value: `${summary.current || 0} SO`,
-      helper: 'Aging: current',
-    },
-    {
-      icon: CircleDollarSign,
-      label: 'Terlambat Bayar',
-      value: `${(summary.overdue1To30 || 0) + (summary.overdue31To60 || 0) + (summary.overdue61To90 || 0) + (summary.overdue90Plus || 0)} SO`,
-      helper: `>90 hari: ${summary.overdue90Plus || 0} SO`,
-    },
-    {
-      icon: AlertTriangle,
-      label: 'Perlu Ditinjau',
-      value: `${summary.needsReview || 0} SO`,
-      helper: 'Data invoice lama/tidak lengkap',
-      tone: 'text-amber-700',
-    },
-  ]), [summary]);
+  const summaryCards = useMemo(() => {
+    const overdue1To30 = (summary.overdue1To15 || 0) + (summary.overdue16To30 || 0) || (summary.overdue1To30 || 0);
+    const legacy60Plus = (summary.overdue61To90 || 0) + (summary.overdue90Plus || 0);
+    const overdue60Plus = (summary.overdue60Plus || 0) || legacy60Plus;
+    return [
+      {
+        icon: Wallet,
+        label: 'Total Outstanding',
+        value: formatCurrency(summary.totalOutstandingAmount),
+        helper: `${summary.totalOrders || 0} sales order belum lunas`,
+      },
+      {
+        icon: Clock3,
+        label: 'Belum Jatuh Tempo',
+        value: `${summary.current || 0} SO`,
+        helper: 'Aging: current',
+      },
+      {
+        icon: CircleDollarSign,
+        label: 'Terlambat Bayar',
+        value: `${overdue1To30 + (summary.overdue31To60 || 0) + overdue60Plus} SO`,
+        helper: `>60 hari: ${overdue60Plus} SO`,
+      },
+      {
+        icon: AlertTriangle,
+        label: 'Perlu Ditinjau',
+        value: `${summary.needsReview || 0} SO`,
+        helper: 'Data invoice lama/tidak lengkap',
+        tone: 'text-amber-700',
+      },
+    ];
+  }, [summary]);
 
   return (
     <div className="space-y-5">
