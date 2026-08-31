@@ -108,6 +108,12 @@ export function resetMasterUserPassword(row) {
   return httpClient.post(`/users/${row.id}/reset-password`, {});
 }
 
+export function updateTruckDefaultDriver(truckId, payload = {}) {
+  if (!truckId) throw new Error('Truck belum dipilih.');
+  if (!payload.defaultDriverId) throw new Error('Sopir default wajib dipilih.');
+  return httpClient.patch(`/master/trucks/${truckId}/default-driver`, payload);
+}
+
 export function calculateDestinationUj(destinationId, { qty20 = 0, qty40 = 0 } = {}) {
   const params = new URLSearchParams({
     qty20: String(qty20),

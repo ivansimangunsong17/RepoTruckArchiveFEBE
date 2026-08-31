@@ -383,7 +383,7 @@ function CustomerOutstandingPage() {
   const { user } = useAuth();
   const { notify } = useFeedback();
   const canRecordPayment = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
-  const canVoidPayment = user?.role === USER_ROLES.ADMIN;
+  const canVoidPayment = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
 
   const [customerRows, setCustomerRows] = useState([]);
   const [summary, setSummary] = useState(emptySummary);

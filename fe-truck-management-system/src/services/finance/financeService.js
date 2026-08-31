@@ -181,6 +181,22 @@ export function updateFinanceInvoiceNumber(id, invoiceNumber) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/number`, { invoiceNumber });
 }
 
+export function updateFinanceInvoiceDeliveryStatus(id, payload) {
+  return httpClient.patch(`/sales-orders/${encodeURIComponent(id)}/invoice-delivery-status`, payload);
+}
+
+export function createFinanceRevenueLine(id, payload) {
+  return httpClient.post(`/finance/invoices/${encodeURIComponent(id)}/revenue-lines`, payload);
+}
+
+export function updateFinanceRevenueLine(id, lineId, payload) {
+  return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/revenue-lines/${encodeURIComponent(lineId)}`, payload);
+}
+
+export function voidFinanceRevenueLine(id, lineId, reason) {
+  return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/revenue-lines/${encodeURIComponent(lineId)}/void`, { reason });
+}
+
 export async function uploadFinanceInvoiceDocument(id, documentType, file) {
   const label = documentType === 'taxInvoice'
     ? 'Faktur Pajak'

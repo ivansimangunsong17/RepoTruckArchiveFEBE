@@ -2,6 +2,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import OperationalForm from './OperationalForm';
+import { fetchContainerJobAssignmentHistory } from '../../services/archive/containerJobService';
+
+vi.mock('../../services/archive/containerJobService', () => ({
+  fetchContainerJobAssignmentHistory: vi.fn().mockResolvedValue([]),
+}));
 
 const container = {
   id: 'job-1',
@@ -246,7 +251,7 @@ describe('OperationalForm', () => {
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
 
-    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Driver Aktif');
+    expect(screen.getByLabelText('Sopir Aktual Ritasi')).toHaveValue('Driver Aktif');
   });
 
   it('tidak otomatis memulai perjalanan ketika truck baru di-assign', async () => {
@@ -545,7 +550,7 @@ describe('OperationalForm', () => {
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
 
-    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Driver E Money');
+    expect(screen.getByLabelText('Sopir Aktual Ritasi')).toHaveValue('Driver E Money');
     expect(screen.getByLabelText('Pembayaran UJ Driver')).toHaveValue('DANA 081299990000');
 
     await openOperationalPhase(user, /biaya perjalanan & spk/i);
@@ -869,7 +874,7 @@ describe('OperationalForm', () => {
 
     expect(screen.getByLabelText('Truck')).toBeDisabled();
     expect(screen.getByText(/Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('IQBAL');
+    expect(screen.getByLabelText('Sopir Aktual Ritasi')).toHaveValue('IQBAL');
   });
 
   it('tetap mengizinkan nomor container diisi pertama kali setelah UJ ditransfer', async () => {
@@ -940,7 +945,7 @@ describe('OperationalForm', () => {
 
     expect(screen.getByLabelText('Truck')).toBeDisabled();
     expect(screen.getByText(/Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('Driver Otomatis')).toHaveValue('Tono Wibowo');
+    expect(screen.getByLabelText('Sopir Aktual Ritasi')).toHaveValue('Tono Wibowo');
   });
 
   it('mengizinkan admin merevisi data terkunci setelah mode koreksi aktif', async () => {
@@ -1030,5 +1035,331 @@ describe('OperationalForm', () => {
 
     expect(screen.getByLabelText(/ada komisi sopir/i)).toBeDisabled();
     expect(screen.getByText(/Komisi sopir terkunci setelah pekerjaan selesai/i)).toBeInTheDocument();
+  });
+
+  it('menampilkan info "hanya berlaku untuk ritasi ini" di section Assignment Aktual', () => {
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Assignment Aktual')).toBeInTheDocument();
+    expect(screen.getByText('Perubahan ini hanya berlaku untuk ritasi ini dan tidak mengubah master.')).toBeInTheDocument();
+  });
+
+  it('mengizinkan mengganti sopir tanpa mengganti truck, mengirim driverId dan vehicleId terpisah', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
+        ]}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' },
+          { id: 'driver-2', name: 'Driver Cadangan', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    expect(screen.getByLabelText('Sopir Aktual Ritasi')).toHaveValue('Driver Aktif');
+
+    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    expect(screen.getByLabelText('Truck')).toHaveValue('B 1000 AA');
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      driver: 'Driver Cadangan',
+      driverId: 'driver-2',
+      plateNumber: 'B 1000 AA',
+      vehicleId: 'truck-1',
+    }));
+  });
+
+  it('mewajibkan alasan perubahan saat mengganti sopir pada ritasi yang sudah jalan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          driver: 'Driver Lama',
+          plateNumber: 'B 1000 AA',
+          chassis: 'TRK-001 - Hino FG',
+          status: 'running',
+          runningAt: '2026-07-19T08:00:00.000Z',
+        }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Lama' },
+        ]}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver Lama', status: 'Aktif' },
+          { id: 'driver-2', name: 'Driver Baru', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Baru');
+    expect(screen.getByText(/alasan perubahan sopir\/truck wajib diisi/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('Ritasi sudah berjalan -- alasan perubahan sopir/truck wajib diisi.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/alasan perubahan/i), 'Sopir lama sakit mendadak');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      driver: 'Driver Baru',
+      assignmentChangeReason: 'Sopir lama sakit mendadak',
+    }));
+  });
+
+  it('tidak mewajibkan alasan saat mengganti truck sementara status masih Belum Jalan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{ ...container, driver: 'Driver Lama', plateNumber: 'B 1000 AA' }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Lama' },
+          { id: 'truck-2', plateNumber: 'B 2000 BB', unitCode: 'TRK-002', capacity: '20FT', brand: 'Fuso', type: 'FN', status: 'Aktif', defaultDriver: 'Driver Lain' },
+        ]}
+        masterDrivers={[{ id: 'driver-1', name: 'Driver Lama', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 2000 BB');
+    expect(screen.queryByText(/alasan perubahan sopir\/truck wajib diisi/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ plateNumber: 'B 2000 BB' }));
+  });
+
+  it('menampilkan Riwayat Assignment kosong ketika belum ada perubahan', async () => {
+    fetchContainerJobAssignmentHistory.mockResolvedValueOnce([]);
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Riwayat Assignment')).toBeInTheDocument();
+    expect(await screen.findByText('Belum ada riwayat perubahan.')).toBeInTheDocument();
+  });
+
+  it('menampilkan daftar Riwayat Assignment dari data yang di-fetch', async () => {
+    fetchContainerJobAssignmentHistory.mockResolvedValueOnce([
+      {
+        id: 'hist-1',
+        changeSource: 'operational',
+        previousDriverName: 'Driver Lama',
+        nextDriverName: 'Driver Baru',
+        previousPlateNumber: 'B 1000 AA',
+        nextPlateNumber: 'B 1000 AA',
+        reason: 'Sopir lama sakit',
+        note: '',
+        changedByName: 'Budi Operational',
+        createdAt: '2026-07-20T08:00:00.000Z',
+      },
+    ]);
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText(/Sopir lama sakit/)).toBeInTheDocument();
+    expect(screen.getByText(/Driver Lama/)).toBeInTheDocument();
+    expect(screen.getByText(/Driver Baru/)).toBeInTheDocument();
+    expect(screen.getByText('Operational')).toBeInTheDocument();
+  });
+
+  it('menampilkan tombol "Jadikan sopir ini default truck" untuk Operational dan Admin', () => {
+    const truckAndDriverProps = {
+      masterTrucks: [{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }],
+      masterDrivers: [{ id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' }],
+    };
+    const { unmount } = render(
+      <OperationalForm container={container} currentUser={{ role: 'operational' }} onClose={vi.fn()} onSubmit={vi.fn()} {...truckAndDriverProps} />,
+    );
+    expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeInTheDocument();
+    unmount();
+
+    render(
+      <OperationalForm container={container} currentUser={{ role: 'admin' }} onClose={vi.fn()} onSubmit={vi.fn()} {...truckAndDriverProps} />,
+    );
+    expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeInTheDocument();
+  });
+
+  it('tidak menampilkan tombol "Jadikan sopir ini default truck" untuk Sales/Finance', () => {
+    const truckAndDriverProps = {
+      masterTrucks: [{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }],
+      masterDrivers: [{ id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' }],
+    };
+    const { unmount } = render(
+      <OperationalForm container={container} currentUser={{ role: 'sales' }} onClose={vi.fn()} onSubmit={vi.fn()} {...truckAndDriverProps} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Jadikan sopir ini default truck' })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <OperationalForm container={container} currentUser={{ role: 'finance' }} onClose={vi.fn()} onSubmit={vi.fn()} {...truckAndDriverProps} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Jadikan sopir ini default truck' })).not.toBeInTheDocument();
+  });
+
+  it('tombol default truck nonaktif sampai truck+sopir terisi dan sopir beda dari default saat ini', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={container}
+        currentUser={{ role: 'operational' }}
+        masterTrucks={[{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }]}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' },
+          { id: 'driver-2', name: 'Driver Cadangan', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onSetTruckDefaultDriver={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeEnabled();
+  });
+
+  it('memunculkan blok konfirmasi dengan teks yang benar, dan menolak submit tanpa alasan', async () => {
+    const user = userEvent.setup();
+    const onSetTruckDefaultDriver = vi.fn().mockResolvedValue({});
+    render(
+      <OperationalForm
+        container={container}
+        currentUser={{ role: 'operational' }}
+        masterTrucks={[{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }]}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' },
+          { id: 'driver-2', name: 'Driver Cadangan', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onSetTruckDefaultDriver={onSetTruckDefaultDriver}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await user.click(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' }));
+
+    expect(screen.getByText(/Ini akan mengubah default sopir untuk B 1000 AA menjadi Driver Cadangan/)).toBeInTheDocument();
+    expect(screen.getByText(/Perubahan hanya berlaku untuk ritasi baru berikutnya dan tidak mengubah ritasi lama/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Konfirmasi' }));
+    expect(screen.getByText(/Alasan wajib diisi minimal 8 karakter/i)).toBeInTheDocument();
+    expect(onSetTruckDefaultDriver).not.toHaveBeenCalled();
+  });
+
+  it('memanggil onSetTruckDefaultDriver dengan payload benar dan menampilkan notifikasi sukses', async () => {
+    const user = userEvent.setup();
+    const onSetTruckDefaultDriver = vi.fn().mockResolvedValue({});
+    render(
+      <OperationalForm
+        container={container}
+        currentUser={{ role: 'operational' }}
+        masterTrucks={[{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }]}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' },
+          { id: 'driver-2', name: 'Driver Cadangan', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onSetTruckDefaultDriver={onSetTruckDefaultDriver}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await user.click(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' }));
+    await user.type(screen.getByPlaceholderText(/sopir tetap truck ini memang diganti/i), 'Sopir tetap truck ini resmi diganti sesuai kesepakatan baru');
+    await user.click(screen.getByRole('button', { name: 'Konfirmasi' }));
+
+    await waitFor(() => {
+      expect(onSetTruckDefaultDriver).toHaveBeenCalledWith('truck-1', {
+        defaultDriverId: 'driver-2',
+        reason: 'Sopir tetap truck ini resmi diganti sesuai kesepakatan baru',
+      });
+    });
+    expect(await screen.findByText('Default sopir truck diperbarui. Berlaku untuk ritasi baru berikutnya.')).toBeInTheDocument();
+  });
+
+  it('menampilkan label "Sopir Aktual Ritasi" dan info "Default sopir truck saat ini" secara terpisah', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={container}
+        currentUser={{ role: 'operational' }}
+        masterTrucks={[{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }]}
+        masterDrivers={[{ id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Sopir Aktual Ritasi')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    expect(screen.getByText(/Default sopir truck saat ini: Driver Aktif/)).toBeInTheDocument();
+  });
+
+  it('mengganti sopir ritasi biasa tanpa klik aksi default tidak memanggil onSetTruckDefaultDriver', async () => {
+    const user = userEvent.setup();
+    const onSetTruckDefaultDriver = vi.fn();
+    render(
+      <OperationalForm
+        container={container}
+        currentUser={{ role: 'operational' }}
+        masterTrucks={[{ id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' }]}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Driver Aktif', status: 'Aktif' },
+          { id: 'driver-2', name: 'Driver Cadangan', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+        onSetTruckDefaultDriver={onSetTruckDefaultDriver}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
+    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSetTruckDefaultDriver).not.toHaveBeenCalled();
   });
 });

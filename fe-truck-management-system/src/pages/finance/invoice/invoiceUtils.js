@@ -108,6 +108,17 @@ function normalizeFinanceInvoiceRow(row = {}) {
     debitNoteDocumentUploadedAt: row.debitNoteDocumentUploadedAt || '',
     debitNoteDocumentUploadedByName: row.debitNoteDocumentUploadedByName || '',
     containerNumbers: Array.isArray(row.containerNumbers) ? row.containerNumbers.filter(Boolean) : [],
+    manualRevenueAmount: Number(row.manualRevenueAmount || 0),
+    manualRevenueLines: Array.isArray(row.manualRevenueLines) ? row.manualRevenueLines : [],
+    internalCost: row.internalCost || {
+      journeyMoney: 0,
+      journeyMoneySource: 'snapshot',
+      journeyMoneyNeedsReview: false,
+      additionalCost: 0,
+      driverCommissionCost: 0,
+      operationalExpenseTotal: 0,
+      total: 0,
+    },
   };
 }
 

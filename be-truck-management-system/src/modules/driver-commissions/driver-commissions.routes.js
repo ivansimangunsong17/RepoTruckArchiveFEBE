@@ -1,5 +1,6 @@
 import {
   approveDriverCommissionBatchController,
+  createDriverCommissionDeductionController,
   driverCommissionBatchDetailController,
   driverCommissionBatchesController,
   driverCommissionPeriodReportController,
@@ -7,7 +8,9 @@ import {
   payDriverCommissionPaymentController,
   rejectDriverCommissionBatchController,
   submitDriverCommissionBatchController,
+  updateDriverCommissionDeductionController,
   uploadDriverCommissionPaymentProofController,
+  voidDriverCommissionDeductionController,
   voidDriverCommissionPaymentController,
 } from './driver-commissions.controller.js';
 
@@ -71,5 +74,23 @@ export const driverCommissionRoutes = [
     path: '/api/driver-commissions/payments/:id/transfer-proof',
     permission: 'finance.transfer_proof.upload',
     handler: uploadDriverCommissionPaymentProofController,
+  },
+  {
+    method: 'POST',
+    path: '/api/driver-commissions/payments/:id/deductions',
+    permission: 'finance.driver_commission.deduction.manage',
+    handler: createDriverCommissionDeductionController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/driver-commissions/deductions/:id',
+    permission: 'finance.driver_commission.deduction.manage',
+    handler: updateDriverCommissionDeductionController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/driver-commissions/deductions/:id/void',
+    permission: 'finance.driver_commission.deduction.manage',
+    handler: voidDriverCommissionDeductionController,
   },
 ];

@@ -1,6 +1,7 @@
 import {
   approveDriverCommissionBatch,
   createDriverCommissionBatch,
+  createDriverCommissionDeduction,
   findDriverCommissionBatchById,
   findDriverCommissionBatches,
   findDriverCommissionPeriodReport,
@@ -8,12 +9,16 @@ import {
   findEligibleDriverCommissions,
   markDriverCommissionPaymentPaid,
   rejectDriverCommissionBatch,
+  updateDriverCommissionDeduction,
+  voidDriverCommissionDeduction,
   voidDriverCommissionPayment,
 } from './driver-commissions.repository.js';
 import { isCommissionWeekPeriod, normalizeCommissionPeriod } from './driver-commissions.period.js';
 import { createAttachment } from '../attachments/attachments.service.js';
 
 const VALID_BATCH_STATUSES = new Set(['draft', 'submitted', 'approved', 'rejected', 'paid']);
+const DEDUCTION_TYPES = new Set(['hutang_sopir', 'kasbon', 'penalti', 'lainnya']);
+const DEDUCTION_REASON_MIN_LENGTH = 8;
 
 function normalizeBatchStatus(value) {
   const status = String(value || '').trim().toLowerCase();
@@ -151,4 +156,61 @@ export async function uploadDriverCommissionPaymentProof(id, payload = {}, actor
   }, actor);
   if (!batch) throw notFound('Payment komisi sopir tidak ditemukan.');
   return { ...batch, uploadedProof: attachment };
+}
+
+// Potongan komisi (hutang/kasbon/penalti/lainnya) cuma boleh dikelola Finance/Admin -- Operational
+// cuma baca lewat report/batch detail yang sudah menyertakan gross/deduction/net & daftar potongan.
+// Dicek eksplisit di sini sebagai lapis kedua (permission route jadi gerbang utama), mengikuti pola
+// voidDriverCommissionPaymentRecord di atas.
+function ensureCanManageDeduction(actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Potongan komisi sopir hanya dapat dikelola oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'DRIVER_COMMISSION_DEDUCTION_FORBIDDEN';
+    throw error;
+  }
+}
+
+function normalizeDeductionPayload(payload = {}) {
+  const amount = Number(payload.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error('Nominal potongan wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'DRIVER_COMMISSION_DEDUCTION_AMOUNT_INVALID';
+    throw error;
+  }
+  const reason = String(payload.reason || '').trim();
+  if (reason.length < DEDUCTION_REASON_MIN_LENGTH) {
+    const error = new Error(`Alasan potongan wajib diisi minimal ${DEDUCTION_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'DRIVER_COMMISSION_DEDUCTION_REASON_REQUIRED';
+    throw error;
+  }
+  const deductionType = DEDUCTION_TYPES.has(payload.deductionType) ? payload.deductionType : 'lainnya';
+  const operationalNote = String(payload.operationalNote || '').trim() || null;
+  return { amount, reason, deductionType, operationalNote };
+}
+
+export async function recordDriverCommissionDeduction(paymentId, payload = {}, actor = {}) {
+  ensureCanManageDeduction(actor);
+  const normalized = normalizeDeductionPayload(payload);
+  return createDriverCommissionDeduction(paymentId, normalized, actor);
+}
+
+export async function updateDriverCommissionDeductionRecord(deductionId, payload = {}, actor = {}) {
+  ensureCanManageDeduction(actor);
+  const normalized = normalizeDeductionPayload(payload);
+  return updateDriverCommissionDeduction(deductionId, normalized, actor);
+}
+
+export async function voidDriverCommissionDeductionRecord(deductionId, payload = {}, actor = {}) {
+  ensureCanManageDeduction(actor);
+  const reason = String(payload.reason || '').trim();
+  if (!reason) {
+    const error = new Error('Alasan pembatalan potongan wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'DRIVER_COMMISSION_DEDUCTION_VOID_REASON_REQUIRED';
+    throw error;
+  }
+  return voidDriverCommissionDeduction(deductionId, { reason }, actor);
 }

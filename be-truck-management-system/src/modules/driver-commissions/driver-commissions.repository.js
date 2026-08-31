@@ -86,6 +86,70 @@ function mapPaymentRow(row = {}) {
   };
 }
 
+function mapDeductionRow(row = {}) {
+  return {
+    id: row.id,
+    paymentId: row.payment_id,
+    deductionType: row.deduction_type || 'lainnya',
+    amount: toNumber(row.amount),
+    reason: row.reason || '',
+    operationalNote: row.operational_note || '',
+    status: row.status,
+    createdByUserId: row.created_by_user_id || null,
+    createdByName: row.created_by_name || '',
+    createdAt: row.created_at,
+    updatedByUserId: row.updated_by_user_id || null,
+    updatedByName: row.updated_by_name || '',
+    updatedAt: row.updated_at,
+    voidedByUserId: row.voided_by_user_id || null,
+    voidedByName: row.voided_by_name || '',
+    voidedAt: row.voided_at || null,
+    voidReason: row.void_reason || '',
+  };
+}
+
+// Potongan komisi (hutang/kasbon/penalti/lainnya) disimpan di tabel terpisah, bukan sebagai field
+// mutable di driver_commission_payments -- gross_amount TIDAK PERNAH ditulis ulang, cuma dibaca
+// dari total_amount yang sudah ada. deduction_amount/net_amount dihitung live dari baris deduction
+// yang berstatus 'active' setiap kali payment/report dibaca, supaya tidak ada state ganda yang bisa
+// tidak sinkron -- satu-satunya sumber kebenaran untuk "berapa potongannya" adalah baris deduction
+// itu sendiri.
+async function findDeductionsByPaymentIds(db, paymentIds = []) {
+  const ids = [...new Set((paymentIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const result = await db.query(
+    'select * from driver_commission_payment_deductions where payment_id = any($1::uuid[]) order by created_at asc',
+    [ids],
+  );
+  const byPayment = new Map();
+  for (const row of result.rows) {
+    const deduction = mapDeductionRow(row);
+    const list = byPayment.get(deduction.paymentId) || [];
+    list.push(deduction);
+    byPayment.set(deduction.paymentId, list);
+  }
+  return byPayment;
+}
+
+function attachGrossDeductionNet(target, deductions = []) {
+  const grossAmount = toNumber(target.totalAmount);
+  const deductionAmount = deductions
+    .filter((deduction) => deduction.status === 'active')
+    .reduce((sum, deduction) => sum + deduction.amount, 0);
+  return {
+    ...target,
+    grossAmount,
+    deductionAmount,
+    netAmount: Math.max(0, grossAmount - deductionAmount),
+    deductions,
+  };
+}
+
+async function attachDeductionsToPayments(db, payments = []) {
+  const deductionsByPayment = await findDeductionsByPaymentIds(db, payments.map((payment) => payment.id));
+  return payments.map((payment) => attachGrossDeductionNet(payment, deductionsByPayment.get(payment.id) || []));
+}
+
 function mapItemRow(row = {}) {
   return {
     id: row.id,
@@ -370,17 +434,17 @@ async function findEligibleRows(period, db = { query }) {
         (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
         cj.completed_at,
         cj.driver_id,
-        coalesce(nullif(d.name, ''), nullif(cj.assignment_snapshot->>'driver', '')) as driver_name,
+        coalesce(nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
         case
-          when coalesce(nullif(d.payment_method, ''), nullif(cj.assignment_snapshot->>'driverPaymentMethod', ''), 'bank') = 'emoney' then 'emoney'
+          when coalesce(nullif(cj.assignment_snapshot->>'driverPaymentMethod', ''), nullif(d.payment_method, ''), 'bank') = 'emoney' then 'emoney'
           else 'bank'
         end as payment_method,
-        coalesce(nullif(d.bank_name, ''), nullif(cj.assignment_snapshot->>'driverBankName', '')) as bank_name,
-        coalesce(nullif(d.bank_account_number, ''), nullif(cj.assignment_snapshot->>'driverBankAccountNumber', '')) as bank_account_number,
-        coalesce(nullif(d.bank_account_holder, ''), nullif(cj.assignment_snapshot->>'driverBankAccountHolder', '')) as bank_account_holder,
-        coalesce(nullif(d.emoney_provider, ''), nullif(cj.assignment_snapshot->>'driverEmoneyProvider', '')) as emoney_provider,
-        coalesce(nullif(d.emoney_number, ''), nullif(cj.assignment_snapshot->>'driverEmoneyNumber', '')) as emoney_number,
-        coalesce(nullif(d.emoney_account_holder, ''), nullif(cj.assignment_snapshot->>'driverEmoneyAccountHolder', '')) as emoney_account_holder,
+        coalesce(nullif(cj.assignment_snapshot->>'driverBankName', ''), nullif(d.bank_name, '')) as bank_name,
+        coalesce(nullif(cj.assignment_snapshot->>'driverBankAccountNumber', ''), nullif(d.bank_account_number, '')) as bank_account_number,
+        coalesce(nullif(cj.assignment_snapshot->>'driverBankAccountHolder', ''), nullif(d.bank_account_holder, '')) as bank_account_holder,
+        coalesce(nullif(cj.assignment_snapshot->>'driverEmoneyProvider', ''), nullif(d.emoney_provider, '')) as emoney_provider,
+        coalesce(nullif(cj.assignment_snapshot->>'driverEmoneyNumber', ''), nullif(d.emoney_number, '')) as emoney_number,
+        coalesce(nullif(cj.assignment_snapshot->>'driverEmoneyAccountHolder', ''), nullif(d.emoney_account_holder, '')) as emoney_account_holder,
         cj.assignment_snapshot->>'plateNumber' as truck_plate_number,
         cj.driver_commission_amount as amount,
         cj.driver_commission_source_destination_id as source_destination_id,
@@ -478,6 +542,13 @@ export async function findDriverCommissionPeriodReport(period) {
     ...submittedResult.rows.map(mapReportSubmittedRow),
   ];
   const grouped = summarizeDriverCommissionPeriodRows(rows);
+  const deductionsByPayment = await findDeductionsByPaymentIds(
+    { query },
+    grouped.drivers.map((driver) => driver.paymentId),
+  );
+  grouped.drivers = grouped.drivers.map((driver) => (
+    attachGrossDeductionNet(driver, deductionsByPayment.get(driver.paymentId) || [])
+  ));
   const activeBatch = batchesResult.rows[0] ? mapBatchRow(batchesResult.rows[0]) : null;
 
   return {
@@ -545,7 +616,7 @@ export async function findDriverCommissionBatchById(id, db = { query }) {
     [id],
   );
 
-  const payments = paymentsResult.rows.map(mapPaymentRow);
+  const paymentsWithDeductions = await attachDeductionsToPayments(db, paymentsResult.rows.map(mapPaymentRow));
   const items = itemsResult.rows.map(mapItemRow);
   const itemsByPayment = items.reduce((result, item) => {
     const current = result.get(item.paymentId) || [];
@@ -556,7 +627,7 @@ export async function findDriverCommissionBatchById(id, db = { query }) {
 
   return {
     ...batch,
-    payments: payments.map((payment) => ({
+    payments: paymentsWithDeductions.map((payment) => ({
       ...payment,
       items: itemsByPayment.get(payment.id) || [],
     })),
@@ -574,7 +645,9 @@ export async function findDriverCommissionPaymentById(id, db = { query }) {
     `,
     [id],
   );
-  return result.rows[0] ? mapPaymentRow(result.rows[0]) : null;
+  if (!result.rows[0]) return null;
+  const [payment] = await attachDeductionsToPayments(db, [mapPaymentRow(result.rows[0])]);
+  return payment;
 }
 
 export async function createDriverCommissionBatch(period, actor = {}) {
@@ -934,5 +1007,199 @@ export async function voidDriverCommissionPayment(id, payload = {}, actor = {}) 
     }
 
     return findDriverCommissionBatchById(current.batch_id, client);
+  });
+}
+
+async function sumActiveDeductions(client, paymentId, excludeDeductionId = null) {
+  const result = await client.query(
+    excludeDeductionId
+      ? "select coalesce(sum(amount), 0) as total from driver_commission_payment_deductions where payment_id = $1 and status = 'active' and id <> $2"
+      : "select coalesce(sum(amount), 0) as total from driver_commission_payment_deductions where payment_id = $1 and status = 'active'",
+    excludeDeductionId ? [paymentId, excludeDeductionId] : [paymentId],
+  );
+  return toNumber(result.rows[0]?.total);
+}
+
+function ensureDeductionWithinGross(nextTotal, grossAmount) {
+  if (nextTotal > grossAmount) {
+    const error = new Error(
+      `Total potongan (Rp ${nextTotal.toLocaleString('id-ID')}) tidak boleh melebihi komisi bruto (Rp ${grossAmount.toLocaleString('id-ID')}).`,
+    );
+    error.statusCode = 400;
+    error.code = 'DRIVER_COMMISSION_DEDUCTION_EXCEEDS_GROSS';
+    throw error;
+  }
+}
+
+// Potongan komisi cuma boleh ditambah/diubah/dibatalkan selama payment induknya belum 'paid' --
+// begitu paid, satu-satunya jalur koreksi adalah void payment (mengembalikan status ke 'pending',
+// lihat voidDriverCommissionPayment di atas) baru potongan bisa disentuh lagi. Ini sengaja
+// menggunakan gate yang sama dengan payment sendiri, bukan admin-correction-mode terpisah, supaya
+// alurnya konsisten dengan pola void/re-pay yang sudah ada di modul ini.
+export async function createDriverCommissionDeduction(paymentId, payload = {}, actor = {}) {
+  return withTransaction(async (client) => {
+    const paymentResult = await client.query(
+      'select id, batch_id, status, total_amount from driver_commission_payments where id = $1 for update',
+      [paymentId],
+    );
+    const payment = paymentResult.rows[0];
+    if (!payment) {
+      const error = new Error('Pembayaran komisi sopir tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'DRIVER_COMMISSION_PAYMENT_NOT_FOUND';
+      throw error;
+    }
+    if (payment.status === 'paid') {
+      const error = new Error('Potongan tidak bisa ditambahkan setelah pembayaran ini paid. Batalkan pembayaran terlebih dahulu.');
+      error.statusCode = 409;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_PAYMENT_LOCKED';
+      throw error;
+    }
+
+    const grossAmount = toNumber(payment.total_amount);
+    const existingTotal = await sumActiveDeductions(client, paymentId);
+    ensureDeductionWithinGross(existingTotal + payload.amount, grossAmount);
+
+    const inserted = await client.query(
+      `
+        insert into driver_commission_payment_deductions (
+          payment_id, deduction_type, amount, reason, operational_note,
+          status, created_by_user_id, created_by_name
+        ) values ($1, $2, $3, $4, $5, 'active', $6, $7)
+        returning *
+      `,
+      [
+        paymentId,
+        payload.deductionType,
+        payload.amount,
+        payload.reason,
+        payload.operationalNote,
+        actor.sub || actor.id || null,
+        actor.name || 'Finance',
+      ],
+    );
+    const deduction = mapDeductionRow(inserted.rows[0]);
+    const batch = await findDriverCommissionBatchById(payment.batch_id, client);
+    return { batch, deduction, previousDeduction: null };
+  });
+}
+
+export async function updateDriverCommissionDeduction(deductionId, payload = {}, actor = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select dpd.*, dcp.batch_id as payment_batch_id, dcp.status as payment_status, dcp.total_amount as gross_amount
+        from driver_commission_payment_deductions dpd
+        join driver_commission_payments dcp on dcp.id = dpd.payment_id
+        where dpd.id = $1
+        for update of dpd, dcp
+      `,
+      [deductionId],
+    );
+    const current = existing.rows[0];
+    if (!current) {
+      const error = new Error('Potongan komisi tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_NOT_FOUND';
+      throw error;
+    }
+    if (current.status !== 'active') {
+      const error = new Error('Potongan yang sudah dibatalkan tidak bisa diubah.');
+      error.statusCode = 400;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_ALREADY_VOID';
+      throw error;
+    }
+    if (current.payment_status === 'paid') {
+      const error = new Error('Potongan tidak bisa diubah setelah pembayaran ini paid. Batalkan pembayaran terlebih dahulu.');
+      error.statusCode = 409;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_PAYMENT_LOCKED';
+      throw error;
+    }
+
+    const grossAmount = toNumber(current.gross_amount);
+    const otherActiveTotal = await sumActiveDeductions(client, current.payment_id, deductionId);
+    ensureDeductionWithinGross(otherActiveTotal + payload.amount, grossAmount);
+
+    const previousDeduction = mapDeductionRow(current);
+    const updated = await client.query(
+      `
+        update driver_commission_payment_deductions
+        set deduction_type = $2,
+            amount = $3,
+            reason = $4,
+            operational_note = $5,
+            updated_by_user_id = $6,
+            updated_by_name = $7,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [
+        deductionId,
+        payload.deductionType,
+        payload.amount,
+        payload.reason,
+        payload.operationalNote,
+        actor.sub || actor.id || null,
+        actor.name || 'Finance',
+      ],
+    );
+    const deduction = mapDeductionRow(updated.rows[0]);
+    const batch = await findDriverCommissionBatchById(current.payment_batch_id, client);
+    return { batch, deduction, previousDeduction };
+  });
+}
+
+export async function voidDriverCommissionDeduction(deductionId, payload = {}, actor = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select dpd.*, dcp.batch_id as payment_batch_id, dcp.status as payment_status
+        from driver_commission_payment_deductions dpd
+        join driver_commission_payments dcp on dcp.id = dpd.payment_id
+        where dpd.id = $1
+        for update of dpd, dcp
+      `,
+      [deductionId],
+    );
+    const current = existing.rows[0];
+    if (!current) {
+      const error = new Error('Potongan komisi tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_NOT_FOUND';
+      throw error;
+    }
+    if (current.status !== 'active') {
+      const error = new Error('Potongan ini sudah dibatalkan sebelumnya.');
+      error.statusCode = 400;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_ALREADY_VOID';
+      throw error;
+    }
+    if (current.payment_status === 'paid') {
+      const error = new Error('Potongan tidak bisa dibatalkan setelah pembayaran ini paid. Batalkan pembayaran terlebih dahulu.');
+      error.statusCode = 409;
+      error.code = 'DRIVER_COMMISSION_DEDUCTION_PAYMENT_LOCKED';
+      throw error;
+    }
+
+    const reason = payload.reason;
+    const previousDeduction = mapDeductionRow(current);
+    const updated = await client.query(
+      `
+        update driver_commission_payment_deductions
+        set status = 'void',
+            voided_by_user_id = $2,
+            voided_by_name = $3,
+            voided_at = now(),
+            void_reason = $4,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [deductionId, actor.sub || actor.id || null, actor.name || 'Finance', reason],
+    );
+    const deduction = mapDeductionRow(updated.rows[0]);
+    const batch = await findDriverCommissionBatchById(current.payment_batch_id, client);
+    return { batch, deduction, previousDeduction };
   });
 }

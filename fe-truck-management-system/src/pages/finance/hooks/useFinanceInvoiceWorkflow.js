@@ -8,14 +8,18 @@ import {
   normalizeFinanceInvoiceRow,
 } from '../invoice/invoiceUtils';
 import {
+  createFinanceRevenueLine,
   fetchFinanceDebitNotePayments,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
   recordFinanceDebitNotePayment,
   updateFinanceDebitNoteNumber,
+  updateFinanceInvoiceDeliveryStatus,
   updateFinanceInvoiceNumber,
+  updateFinanceRevenueLine,
   uploadFinanceInvoiceDocument,
   voidFinanceDebitNotePayment,
+  voidFinanceRevenueLine,
 } from '../../../services/finance/financeService';
 
 function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
@@ -48,6 +52,12 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
   const [debitNotePaymentError, setDebitNotePaymentError] = useState('');
   const [debitNotePaymentVoidBusyId, setDebitNotePaymentVoidBusyId] = useState('');
   const [debitNotePaymentVoidError, setDebitNotePaymentVoidError] = useState('');
+  const [deliveryStatusSaving, setDeliveryStatusSaving] = useState(false);
+  const [deliveryStatusError, setDeliveryStatusError] = useState('');
+  const [revenueLineSaving, setRevenueLineSaving] = useState(false);
+  const [revenueLineError, setRevenueLineError] = useState('');
+  const [revenueLineVoidBusyId, setRevenueLineVoidBusyId] = useState('');
+  const [revenueLineVoidError, setRevenueLineVoidError] = useState('');
 
   const selectedInvoiceSummary = invoiceRows.find((row) => row.id === selectedInvoiceId);
   const selectedInvoice = invoiceDetail || selectedInvoiceSummary;
@@ -259,6 +269,61 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     }
   }
 
+  async function submitInvoiceDeliveryStatus(id, payload) {
+    setDeliveryStatusSaving(true);
+    setDeliveryStatusError('');
+    try {
+      await updateFinanceInvoiceDeliveryStatus(id, payload);
+      const detail = await fetchFinanceInvoiceDetail(id);
+      const normalized = normalizeFinanceInvoiceRow(detail);
+      setInvoiceDetail(normalized);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, ...normalized } : item)));
+    } catch (error) {
+      setDeliveryStatusError(error.message || 'Status pengiriman invoice gagal disimpan.');
+      throw error;
+    } finally {
+      setDeliveryStatusSaving(false);
+    }
+  }
+
+  async function refreshInvoiceDetail(id) {
+    const detail = await fetchFinanceInvoiceDetail(id);
+    const normalized = normalizeFinanceInvoiceRow(detail);
+    setInvoiceDetail(normalized);
+    setInvoiceRows((rows) => rows.map((item) => (item.id === id ? { ...item, ...normalized } : item)));
+  }
+
+  async function submitRevenueLine(id, payload, lineId) {
+    setRevenueLineSaving(true);
+    setRevenueLineError('');
+    try {
+      if (lineId) {
+        await updateFinanceRevenueLine(id, lineId, payload);
+      } else {
+        await createFinanceRevenueLine(id, payload);
+      }
+      await refreshInvoiceDetail(id);
+    } catch (error) {
+      setRevenueLineError(error.message || 'Revenue line gagal disimpan.');
+      throw error;
+    } finally {
+      setRevenueLineSaving(false);
+    }
+  }
+
+  async function voidRevenueLineAction(id, lineId, reason) {
+    setRevenueLineVoidBusyId(lineId);
+    setRevenueLineVoidError('');
+    try {
+      await voidFinanceRevenueLine(id, lineId, reason);
+      await refreshInvoiceDetail(id);
+    } catch (error) {
+      setRevenueLineVoidError(error.message || 'Revenue line gagal dibatalkan.');
+    } finally {
+      setRevenueLineVoidBusyId('');
+    }
+  }
+
   function closeInvoiceConfirmModal() {
     if (invoiceBusyId) return;
     setInvoiceConfirmId('');
@@ -383,6 +448,15 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     debitNotePaymentError,
     debitNotePaymentVoidBusyId,
     debitNotePaymentVoidError,
+    deliveryStatusSaving,
+    deliveryStatusError,
+    submitInvoiceDeliveryStatus,
+    revenueLineSaving,
+    revenueLineError,
+    revenueLineVoidBusyId,
+    revenueLineVoidError,
+    submitRevenueLine,
+    voidRevenueLineAction,
     submitDebitNoteNumber,
     loadDebitNotePayments,
     confirmDebitNotePayment,

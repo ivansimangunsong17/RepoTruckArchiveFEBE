@@ -263,6 +263,8 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     invoiceNumber: row.invoice_number,
     invoiceIssuedAt: row.invoice_issued_at,
     invoiceInputBy: row.invoice_input_by_name || '',
+    dueDate: row.due_date || null,
+    outstandingAmount: row.outstanding_amount == null ? null : Number(row.outstanding_amount),
     billingStatus: normalizeSalesOrderBillingStatus(row.billing_status),
     invoiceDocumentStatus: normalizeInvoiceDocumentStatus(row.invoice_document_status),
     invoiceDocumentUploadedAt: row.invoice_document_uploaded_at,

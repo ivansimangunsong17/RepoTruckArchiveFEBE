@@ -2169,7 +2169,7 @@ function ReportsPage() {
       <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-5'}`}>
         <SummaryToggleCard
           icon={BarChart3}
-          label="Revenue Jasa Angkut"
+          label="Revenue Performance"
           value={formatCurrency(revenueSummary.totalRevenue)}
           helper="Tidak termasuk reimbursement / jasa lainnya"
           secondaryLabel="AVG Revenue/Trip"
@@ -2182,7 +2182,7 @@ function ReportsPage() {
           <>
             <SummaryToggleCard
               icon={Truck}
-              label="Utilization Report"
+              label="Utilization Performance"
               value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
               helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
               secondaryLabel="AVG Truck Terpakai/Hari"

@@ -4,14 +4,16 @@ import { createPortal } from 'react-dom';
 import DocumentLink from '../../components/common/DocumentLink';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../contexts/FeedbackContext';
-import { USER_ROLES } from '../../constants/roles';
+import { hasPermission, USER_ROLES } from '../../constants/roles';
 import {
   approveDriverCommissionBatch,
   fetchDriverCommissionBatchDetail,
   fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
+  recordDriverCommissionDeduction,
   rejectDriverCommissionBatch,
   uploadDriverCommissionTransferProof,
+  voidDriverCommissionDeduction,
   voidDriverCommissionPayment,
 } from '../../services/finance/driverCommissionService';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -41,6 +43,13 @@ const statusLabels = {
   rejected: 'Ditolak',
   paid: 'Sudah Dibayar',
   pending: 'Belum Dibayar',
+};
+
+const deductionTypeLabels = {
+  hutang_sopir: 'Hutang Sopir',
+  kasbon: 'Kasbon',
+  penalti: 'Penalti',
+  lainnya: 'Lainnya',
 };
 
 function pad2(value) {
@@ -241,7 +250,208 @@ function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
 
-function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, saving, onUploadProof, canVoidPayment, voidBusyId, voidError, onVoidPayment, open, onClose }) {
+const emptyDeductionDraft = { deductionType: 'hutang_sopir', amount: '', reason: '', operationalNote: '' };
+
+function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount, netAmount, canManage, paymentPaid, saving, onAddDeduction, onVoidDeduction }) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [draft, setDraft] = useState(emptyDeductionDraft);
+  const [formError, setFormError] = useState('');
+  const [voidingId, setVoidingId] = useState('');
+  const [voidReason, setVoidReason] = useState('');
+  const [voidFormError, setVoidFormError] = useState('');
+
+  const activeDeductions = (deductions || []).filter((item) => item.status === 'active');
+  const voidedDeductions = (deductions || []).filter((item) => item.status !== 'active');
+
+  async function submitDraft(event) {
+    event.preventDefault();
+    if (!paymentId) {
+      setFormError('Komisi ini belum diajukan ke Finance (belum masuk batch), jadi belum ada payment untuk dilekati potongan.');
+      return;
+    }
+    const amount = Number(draft.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError('Nominal potongan wajib lebih dari 0.');
+      return;
+    }
+    if (draft.reason.trim().length < 8) {
+      setFormError('Alasan potongan wajib diisi minimal 8 karakter.');
+      return;
+    }
+    setFormError('');
+    try {
+      await onAddDeduction(paymentId, {
+        deductionType: draft.deductionType,
+        amount,
+        reason: draft.reason.trim(),
+        operationalNote: draft.operationalNote.trim(),
+      });
+      setDraft(emptyDeductionDraft);
+      setFormOpen(false);
+    } catch (error) {
+      setFormError(error.message || 'Potongan gagal disimpan.');
+    }
+  }
+
+  async function confirmVoid(deductionId) {
+    if (voidReason.trim().length < 1) {
+      setVoidFormError('Alasan pembatalan wajib diisi.');
+      return;
+    }
+    setVoidFormError('');
+    try {
+      await onVoidDeduction(deductionId, voidReason.trim());
+      setVoidingId('');
+      setVoidReason('');
+    } catch (error) {
+      setVoidFormError(error.message || 'Potongan gagal dibatalkan.');
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-slate-200 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-black text-slate-950">Potongan Komisi</h3>
+        {canManage && !paymentPaid && !formOpen && paymentId ? (
+          <button className="text-xs font-bold text-red-600 hover:underline" onClick={() => { setFormOpen(true); setFormError(''); }} type="button">
+            + Tambah Potongan
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+          <span className="block text-[10px] font-black uppercase text-slate-400">Komisi Bruto</span>
+          <strong className="mt-0.5 block text-sm text-slate-800">{formatCurrency(grossAmount)}</strong>
+        </div>
+        <div className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2">
+          <span className="block text-[10px] font-black uppercase text-rose-500">Potongan Finance</span>
+          <strong className="mt-0.5 block text-sm text-rose-700">{formatCurrency(deductionAmount)}</strong>
+        </div>
+        <div className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2">
+          <span className="block text-[10px] font-black uppercase text-emerald-600">Net Dibayar</span>
+          <strong className="mt-0.5 block text-sm text-emerald-700">{formatCurrency(netAmount)}</strong>
+        </div>
+      </div>
+
+      {paymentPaid ? (
+        <p className="mt-2 text-[11px] font-medium text-slate-500">Potongan terkunci karena pembayaran sudah paid. Batalkan pembayaran terlebih dahulu untuk mengubah potongan.</p>
+      ) : !paymentId ? (
+        <p className="mt-2 text-[11px] font-medium text-slate-500">Potongan bisa ditambahkan setelah komisi sopir ini diajukan Operational ke Finance (masuk batch).</p>
+      ) : null}
+
+      {formOpen ? (
+        <form className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-2.5" onSubmit={submitDraft}>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="grid gap-1 text-[11px] font-bold text-slate-700">
+              Jenis Potongan
+              <select
+                className="h-9 rounded-md border border-slate-300 px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                onChange={(event) => setDraft((current) => ({ ...current, deductionType: event.target.value }))}
+                value={draft.deductionType}
+              >
+                {Object.entries(deductionTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-[11px] font-bold text-slate-700">
+              Nominal Potongan
+              <input
+                className="h-9 rounded-md border border-slate-300 px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                min="0"
+                onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))}
+                placeholder="100000"
+                type="number"
+                value={draft.amount}
+              />
+            </label>
+          </div>
+          <label className="grid gap-1 text-[11px] font-bold text-slate-700">
+            Alasan Potongan
+            <textarea
+              className="min-h-14 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
+              onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))}
+              placeholder="Contoh: Potongan hutang sopir sesuai catatan Finance"
+              value={draft.reason}
+            />
+          </label>
+          <label className="grid gap-1 text-[11px] font-bold text-slate-700">
+            Catatan untuk Operational (opsional)
+            <textarea
+              className="min-h-14 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
+              onChange={(event) => setDraft((current) => ({ ...current, operationalNote: event.target.value }))}
+              placeholder="Contoh: Komisi dipotong Rp100.000 karena ada hutang aktif. Detail ada di Finance."
+              value={draft.operationalNote}
+            />
+          </label>
+          {formError ? <p className="text-xs font-semibold text-rose-700">{formError}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <button className="primary-button" disabled={saving} type="submit">{saving ? 'Menyimpan...' : 'Simpan Potongan'}</button>
+            <button className="secondary-button" disabled={saving} onClick={() => { setFormOpen(false); setDraft(emptyDeductionDraft); setFormError(''); }} type="button">Batal</button>
+          </div>
+        </form>
+      ) : null}
+
+      <div className="mt-3 grid gap-1.5">
+        {!activeDeductions.length && !voidedDeductions.length ? (
+          <p className="text-xs font-semibold text-slate-400">Belum ada potongan untuk sopir ini.</p>
+        ) : null}
+        {[...activeDeductions, ...voidedDeductions].map((item) => (
+          <div className={`rounded-md border px-3 py-2 ${item.status === 'active' ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50 opacity-70'}`} key={item.id}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong className={`text-xs text-slate-800 ${item.status !== 'active' ? 'line-through' : ''}`}>
+                {deductionTypeLabels[item.deductionType] || item.deductionType} - {formatCurrency(item.amount)}
+              </strong>
+              {item.status === 'active' ? (
+                canManage && !paymentPaid ? (
+                  <button
+                    className="text-[10px] font-black uppercase text-rose-600 hover:underline"
+                    onClick={() => { setVoidingId(voidingId === item.id ? '' : item.id); setVoidReason(''); setVoidFormError(''); }}
+                    type="button"
+                  >
+                    Batalkan
+                  </button>
+                ) : null
+              ) : (
+                <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[9px] font-black uppercase text-rose-700">Dibatalkan</span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-600">Alasan Potongan: {item.reason}</p>
+            {item.operationalNote ? <p className="mt-0.5 text-[11px] text-slate-500">Catatan untuk Operational: {item.operationalNote}</p> : null}
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">{item.createdByName || '-'} - {formatDateTime(item.createdAt)}</p>
+            {item.status !== 'active' ? (
+              <p className="mt-1 text-[10px] font-semibold text-rose-600">Dibatalkan: {item.voidReason} - {item.voidedByName || '-'} - {formatDateTime(item.voidedAt)}</p>
+            ) : null}
+            {voidingId === item.id ? (
+              <div className="mt-2 grid gap-1.5 rounded-md border border-rose-200 bg-rose-100/40 p-2">
+                <textarea
+                  className="w-full rounded-md border border-rose-200 px-2 py-1.5 text-xs"
+                  onChange={(event) => setVoidReason(event.target.value)}
+                  placeholder="Alasan pembatalan potongan (wajib)"
+                  rows={2}
+                  value={voidReason}
+                />
+                {voidFormError ? <p className="text-[10px] font-semibold text-rose-700">{voidFormError}</p> : null}
+                <div className="flex justify-end gap-2">
+                  <button className="secondary-button" onClick={() => { setVoidingId(''); setVoidReason(''); setVoidFormError(''); }} type="button">Batal</button>
+                  <button
+                    className="rounded-md border border-rose-300 bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={!voidReason.trim() || saving}
+                    onClick={() => confirmVoid(item.id)}
+                    type="button"
+                  >
+                    Konfirmasi Batalkan
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, canManageDeduction, saving, onUploadProof, canVoidPayment, voidBusyId, voidError, onVoidPayment, onAddDeduction, onVoidDeduction, open, onClose }) {
   const [noteDraft, setNoteDraft] = useState('');
   const [pendingFile, setPendingFile] = useState(null);
   const [voidingOpen, setVoidingOpen] = useState(false);
@@ -276,6 +486,14 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
   const accountSource = payment || driver;
   const alreadyPaid = payment?.status === 'paid';
   const canUploadProof = canFinance && ['approved', 'paid'].includes(selectedBatch?.status || '');
+  const grossAmount = accountSource.grossAmount ?? accountSource.totalAmount ?? 0;
+  const deductionAmount = accountSource.deductionAmount ?? 0;
+  const netAmount = accountSource.netAmount ?? grossAmount;
+  const deductions = accountSource.deductions || [];
+  // payment bisa belum ada (komisi masih "eligible", belum diajukan Operational jadi belum masuk
+  // driver_commission_payments) -- jatuhkan balik ke driver.paymentId dari period-report, dan kalau
+  // dua-duanya kosong berarti memang belum ada payment sama sekali untuk dilekati potongan.
+  const paymentId = payment?.id || driver.paymentId || '';
 
   function submitProof(event) {
     event.preventDefault();
@@ -316,11 +534,25 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
               <strong className="mt-1 block break-words text-sm text-slate-800">{paymentAccountLabel(accountSource)}</strong>
               <span className="mt-1 block text-xs text-slate-500">{accountHolderLabel(accountSource)}</span>
             </div>
-            <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
-              <span className="block text-[11px] font-black uppercase text-amber-600">Total Komisi</span>
-              <strong className="mt-1 block text-lg text-amber-700">{formatCurrency(driver.totalAmount)}</strong>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+              <span className="block text-[11px] font-black uppercase text-emerald-600">Net Dibayar</span>
+              <strong className="mt-1 block text-lg text-emerald-700">{formatCurrency(netAmount)}</strong>
+              {deductionAmount > 0 ? <span className="mt-0.5 block text-[11px] font-semibold text-rose-600">Bruto {formatCurrency(grossAmount)} - Potongan {formatCurrency(deductionAmount)}</span> : null}
             </div>
           </div>
+
+          <DeductionSection
+            canManage={canManageDeduction}
+            deductionAmount={deductionAmount}
+            deductions={deductions}
+            grossAmount={grossAmount}
+            netAmount={netAmount}
+            onAddDeduction={onAddDeduction}
+            onVoidDeduction={onVoidDeduction}
+            paymentId={paymentId}
+            paymentPaid={alreadyPaid}
+            saving={saving}
+          />
 
           <div className="mt-4 rounded-lg border border-slate-200 p-3">
             {payment?.paidAt ? (
@@ -381,6 +613,12 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
             ) : null}
             {canUploadProof ? (
               <div className="mt-4">
+                {!alreadyPaid ? (
+                  <p className="mb-2 text-xs font-bold text-emerald-700">
+                    Nominal yang harus ditransfer (Net): {formatCurrency(netAmount)}
+                    {deductionAmount > 0 ? <span className="font-medium text-slate-500"> (Bruto {formatCurrency(grossAmount)} - Potongan {formatCurrency(deductionAmount)})</span> : null}
+                  </p>
+                ) : null}
                 {pendingFile ? (
                   <form className="grid gap-3" onSubmit={submitProof}>
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -611,6 +849,7 @@ function DriverCommissionPage() {
 
   const canFinance = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
   const canVoidPayment = user?.role === USER_ROLES.ADMIN;
+  const canManageDeduction = hasPermission(user, 'finance.driver_commission.deduction.manage');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
   const dropdownBatches = useMemo(() => {
@@ -776,6 +1015,34 @@ function DriverCommissionPage() {
     }
   }
 
+  async function handleAddDeduction(paymentId, payload) {
+    setSaving(true);
+    try {
+      const updated = await recordDriverCommissionDeduction(paymentId, payload);
+      notify({ title: 'Potongan komisi ditambahkan', message: `Net dibayar untuk sopir ini diperbarui.` });
+      setSelectedBatch(updated);
+      await loadData(updated.id);
+    } catch (error) {
+      throw new Error(error.message || 'Potongan komisi gagal disimpan.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleVoidDeduction(deductionId, reason) {
+    setSaving(true);
+    try {
+      const updated = await voidDriverCommissionDeduction(deductionId, reason);
+      notify({ title: 'Potongan komisi dibatalkan', message: 'Net dibayar untuk sopir ini diperbarui.' });
+      setSelectedBatch(updated);
+      await loadData(updated.id);
+    } catch (error) {
+      throw new Error(error.message || 'Potongan komisi gagal dibatalkan.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <main className="space-y-5 p-4 md:p-6">
       <header className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -844,13 +1111,15 @@ function DriverCommissionPage() {
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[920px] divide-y divide-slate-200 text-left text-sm">
+            <table className="w-full min-w-[1120px] divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Sopir</th>
                   <th className="px-4 py-3">Rekening</th>
                   <th className="px-4 py-3 text-right">Job</th>
-                  <th className="px-4 py-3 text-right">Total Komisi</th>
+                  <th className="px-4 py-3 text-right">Komisi Bruto</th>
+                  <th className="px-4 py-3 text-right">Potongan Finance</th>
+                  <th className="px-4 py-3 text-right">Net Dibayar</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-center">Detail</th>
                 </tr>
@@ -865,7 +1134,9 @@ function DriverCommissionPage() {
                       <span className="flex items-center gap-2 text-xs font-semibold text-slate-700"><CreditCard size={15} /> {paymentAccountLabel(driver)}</span>
                     </td>
                     <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700">{driver.totalItems}</td>
-                    <td className="px-4 py-3 text-right text-xs font-semibold text-amber-700">{formatCurrency(driver.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-amber-700">{formatCurrency(driver.grossAmount ?? driver.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{driver.deductionAmount ? formatCurrency(driver.deductionAmount) : '-'}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-emerald-700">{formatCurrency(driver.netAmount ?? driver.totalAmount)}</td>
                     <td className="px-4 py-3"><StatusPill status={driverFinanceStatus(driver)} /></td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center justify-center gap-1.5">
@@ -901,7 +1172,7 @@ function DriverCommissionPage() {
                 })}
                 {!drivers.length ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={6}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
+                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={8}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -922,12 +1193,15 @@ function DriverCommissionPage() {
         payment={selectedPayment}
         selectedBatch={selectedBatch}
         canFinance={canFinance}
+        canManageDeduction={canManageDeduction}
         saving={saving}
         onUploadProof={handleUploadProof}
         canVoidPayment={canVoidPayment}
         voidBusyId={voidBusyId}
         voidError={voidError}
         onVoidPayment={voidPayment}
+        onAddDeduction={handleAddDeduction}
+        onVoidDeduction={handleVoidDeduction}
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
       />

@@ -624,6 +624,11 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
                 {summary.missingRevenue || 0} perjalanan belum punya tarif penagihan, {summary.missingJourneyMoney || 0} perjalanan belum punya uang jalan.
               </p>
             ) : null}
+            {summary.journeyMoneyNeedsReviewCount ? (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                {summary.journeyMoneyNeedsReviewCount} perjalanan belum punya snapshot uang jalan -- nominalnya masih estimasi dari tarif master saat ini, bisa berubah kalau tarif diedit. Perlu review.
+              </p>
+            ) : null}
           </section>
 
           <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">

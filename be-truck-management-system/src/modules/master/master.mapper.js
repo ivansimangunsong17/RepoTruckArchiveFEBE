@@ -175,6 +175,7 @@ export const resourceConfig = {
       solarBarcodeNumber: row.solar_barcode_number || '',
       solarBarcodeDate: row.solar_barcode_date || null,
       defaultDriver: row.default_driver_name || '',
+      defaultDriverId: row.default_driver_id || null,
       status: row.operational_status || 'Aktif',
       stnkDocument: fileView(row.stnk_document),
       kirDocument: fileView(row.kir_document),

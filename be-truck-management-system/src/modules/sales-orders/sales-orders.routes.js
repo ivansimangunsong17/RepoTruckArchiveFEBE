@@ -44,7 +44,7 @@ export const salesOrderRoutes = [
   {
     method: 'PATCH',
     path: '/api/sales-orders/:id/invoice-delivery-status',
-    permission: 'sales_order.update',
+    permission: 'finance.invoice.delivery_status.update',
     handler: updateInvoiceDeliveryStatusController,
   },
   {

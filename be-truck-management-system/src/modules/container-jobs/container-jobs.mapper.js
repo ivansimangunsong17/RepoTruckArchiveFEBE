@@ -163,6 +163,15 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     repoCreatedByName: row.repo_created_by_name || '',
     repoPickedUpAt: row.repo_picked_up_at,
     repoPickedUpByName: row.repo_picked_up_by_name || '',
+    inapStartedAt: row.inap_started_at,
+    inapEndedAt: row.inap_ended_at,
+    inapReason: row.inap_reason || '',
+    inapNotes: row.inap_notes || '',
+    inapCreatedByName: row.inap_created_by_name || '',
+    ujAmountSnapshot: row.uj_amount_snapshot == null ? null : Number(row.uj_amount_snapshot),
+    ujSourceDestinationId: row.uj_source_destination_id || '',
+    ujSnapshotAt: row.uj_snapshot_at,
+    ujSnapshotSource: row.uj_snapshot_source || '',
     entrySource: row.entry_source || 'realtime',
     historicalPeriod: row.historical_period || '',
     historicalNotes: row.historical_notes || '',
@@ -214,5 +223,26 @@ export function toAssignmentSnapshot(form, driver, vehicle) {
     driverBankAccountHolder: form.driverBankAccountHolder || driver?.bank_account_holder || null,
     driverEmoneyProvider: form.driverEmoneyProvider || driver?.emoney_provider || null,
     driverEmoneyNumber: form.driverEmoneyNumber || driver?.emoney_number || null,
+  };
+}
+
+export function mapAssignmentHistory(row) {
+  return {
+    id: row.id,
+    containerJobId: row.container_job_id,
+    changeSource: row.change_source,
+    previousDriverId: row.previous_driver_id,
+    previousDriverName: row.previous_driver_name || '',
+    nextDriverId: row.next_driver_id,
+    nextDriverName: row.next_driver_name || '',
+    previousVehicleId: row.previous_vehicle_id,
+    previousPlateNumber: row.previous_plate_number || '',
+    nextVehicleId: row.next_vehicle_id,
+    nextPlateNumber: row.next_plate_number || '',
+    reason: row.reason || '',
+    note: row.note || '',
+    changedByName: row.changed_by_name || '',
+    changedByRole: row.changed_by_role || '',
+    createdAt: row.created_at,
   };
 }

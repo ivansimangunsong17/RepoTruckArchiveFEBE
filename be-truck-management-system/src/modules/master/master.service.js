@@ -5,9 +5,12 @@ import {
   findMasterRowById,
   findMasterRows,
   findMasterViewerNotes,
+  updateVehicleDefaultDriver,
   upsertMasterRow,
   upsertMasterViewerNote,
 } from './master.repository.js';
+
+const TRUCK_DEFAULT_DRIVER_REASON_MIN_LENGTH = 8;
 
 function parseFilters(query = {}) {
   return Object.entries(query).reduce((filters, [key, value]) => {
@@ -116,6 +119,29 @@ export async function saveMasterRow(resource, payload, id) {
 
 export function removeMasterRow(resource, id) {
   return archiveMasterRow(resource, id);
+}
+
+// Aksi sadar terpisah dari edit master truck biasa -- Operational cuma boleh mengubah field ini
+// (bukan seluruh data truck), dengan alasan wajib supaya perubahan "sopir tetap" truck selalu
+// punya jejak kenapa. Validasi eligibility (truck/sopir aktif) ada di repository karena butuh lock
+// baris di dalam transaksi yang sama dengan UPDATE-nya.
+export async function setVehicleDefaultDriver(vehicleId, payload = {}) {
+  const driverId = String(payload.defaultDriverId || payload.driverId || '').trim();
+  if (!driverId) {
+    const error = new Error('Sopir default wajib dipilih.');
+    error.statusCode = 400;
+    error.code = 'TRUCK_DEFAULT_DRIVER_DRIVER_REQUIRED';
+    throw error;
+  }
+  const reason = String(payload.reason || '').trim();
+  if (reason.length < TRUCK_DEFAULT_DRIVER_REASON_MIN_LENGTH) {
+    const error = new Error(`Alasan wajib diisi minimal ${TRUCK_DEFAULT_DRIVER_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'TRUCK_DEFAULT_DRIVER_REASON_REQUIRED';
+    throw error;
+  }
+  const { before, after } = await updateVehicleDefaultDriver(vehicleId, driverId);
+  return { before, after, reason };
 }
 
 export async function getMasterViewerNote(resource, id) {

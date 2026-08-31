@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Eye,
   FileText,
+  Moon,
   X,
   Search,
   SlidersHorizontal,
@@ -24,6 +25,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { updateTruckDefaultDriver } from '../../services/master-data/masterDataService';
 import { formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
@@ -37,8 +39,8 @@ import {
 } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
-const STATUS_ORDER = { received: 0, running: 1, repo_stored: 2, completed: 3, cancelled: 4 };
-const EMPTY_STATUS_COUNTS = { received: 0, running: 0, repo_stored: 0, completed: 0, cancelled: 0 };
+const STATUS_ORDER = { received: 0, running: 1, inap: 2, repo_stored: 3, completed: 4, cancelled: 5 };
+const EMPTY_STATUS_COUNTS = { received: 0, running: 0, inap: 0, repo_stored: 0, completed: 0, cancelled: 0 };
 const CANCEL_SOURCE_OPTIONS = [
   { value: 'customer', label: 'Customer' },
   { value: 'sales', label: 'Sales' },
@@ -108,6 +110,7 @@ function optionLabel(options, value) {
 function getJobStatusLabel(status) {
   if (status === 'completed') return 'Selesai';
   if (status === 'running') return 'Sedang Jalan';
+  if (status === 'inap') return 'Inap';
   if (status === 'repo_stored') return 'Container Titip';
   if (status === 'cancelled') return 'Batal';
   return 'Belum Jalan';
@@ -194,6 +197,27 @@ function canStoreRepoJob(job) {
   return Boolean(job && job.status === 'running' && !hasRepoStorageHistory(job));
 }
 
+function isInapJob(job) {
+  return job?.status === 'inap';
+}
+
+function hasInapHistory(job) {
+  return Boolean(job?.inapStartedAt || job?.inapReason);
+}
+
+function canMarkInap(job) {
+  return Boolean(job && job.status === 'running');
+}
+
+function inapSummary(job) {
+  return {
+    startedAt: job?.inapStartedAt ? formatDateTime(job.inapStartedAt) : 'Waktu inap belum diisi',
+    endedAt: job?.inapEndedAt ? formatDateTime(job.inapEndedAt) : '',
+    reason: job?.inapReason || 'Alasan inap belum diisi',
+    notes: job?.inapNotes || '',
+  };
+}
+
 function repoContainerConditionLabel(value) {
   return REPO_CONTAINER_CONDITIONS.find((option) => option.value === value)?.label || '-';
 }
@@ -242,6 +266,7 @@ function rpujDetail(job) {
 function nextActionHint(job, documents, rpuj, { documentFollowUp = false, repoSummary = null } = {}) {
   if (job?.status === 'cancelled') return null;
   if (repoSummary) return { label: 'Perlu ambil container', tone: 'repo' };
+  if (isInapJob(job)) return { label: 'Sedang inap', tone: 'warning' };
   if (documentFollowUp && documents.missing.length) return { label: 'Dokumen belum lengkap', tone: 'warning' };
   if (!String(job?.containerNumber || '').trim()) return { label: 'Isi nomor container', tone: 'warning' };
   if (rpuj.tone === 'rejected') return { label: 'Koreksi biaya', tone: 'danger' };
@@ -273,7 +298,7 @@ function groupJobsBySo(rows = []) {
 function getSoGroupStats(group) {
   const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
   const completed = jobs.filter((job) => job.status === 'completed').length;
-  const running = jobs.filter((job) => job.status === 'running' || isRepoStoredJob(job)).length;
+  const running = jobs.filter((job) => job.status === 'running' || isInapJob(job) || isRepoStoredJob(job)).length;
   const cancelled = jobs.filter((job) => job.status === 'cancelled').length;
   const waiting = Math.max(0, jobs.length - completed - running - cancelled);
   return {
@@ -375,6 +400,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     repoEirDocument: null,
   });
   const [repoSaving, setRepoSaving] = useState(false);
+  const [inapTarget, setInapTarget] = useState(null);
+  const [inapForm, setInapForm] = useState({ inapReason: '', inapNotes: '' });
+  const [inapSaving, setInapSaving] = useState(false);
   const canEdit = hasPermission(user, 'operations.update');
   const canReviewCancel = canEdit || user?.role === USER_ROLES.ADMIN;
   const canViewDocuments = hasPermission(user, 'documents.operational.read');
@@ -392,6 +420,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const repoEirNumberValid = Boolean(repoForm.repoEirNumber.trim());
   const repoEirValid = Boolean(repoForm.repoEirDocument || repoTarget?.repoEirDocument);
   const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid && repoConditionValid && repoEirNumberValid && repoEirValid);
+  const inapReasonValid = inapForm.inapReason.trim().length >= 8;
+  const inapFormValid = Boolean(inapTarget && inapReasonValid);
   const effectiveStatus = repoStorageOnly ? 'repo_stored' : status;
   const effectiveTripDateFilter = documentFollowUp || repoStorageOnly ? '' : tripDateFilter;
   const canManageHistoricalEntry = hasPermission(user, 'historical_entry.manage') || user?.role === USER_ROLES.ADMIN;
@@ -442,6 +472,21 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     };
   }, [detail, repoSaving, repoTarget]);
 
+  useEffect(() => {
+    if (!inapTarget) return undefined;
+
+    function closeInapOnEscape(event) {
+      if (event.key === 'Escape' && !inapSaving) setInapTarget(null);
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeInapOnEscape);
+    return () => {
+      document.body.style.overflow = detail ? 'hidden' : '';
+      window.removeEventListener('keydown', closeInapOnEscape);
+    };
+  }, [detail, inapSaving, inapTarget]);
+
   const demoJobs = useMemo(() => flattenDemoJobs(archive.orders), [archive.orders]);
   const filteredDemoJobs = useMemo(() => sortOperationalJobs(demoJobs.filter((job) => {
     const matchesQuery = !query || [
@@ -461,6 +506,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const counts = archive.isDatabaseMode ? statusCounts : {
     received: demoJobs.filter((job) => job.status === 'received').length,
     running: demoJobs.filter((job) => job.status === 'running').length,
+    inap: demoJobs.filter((job) => isInapJob(job)).length,
     repo_stored: demoJobs.filter((job) => isRepoStoredJob(job)).length,
     completed: demoJobs.filter((job) => job.status === 'completed').length,
     cancelled: demoJobs.filter((job) => job.status === 'cancelled').length,
@@ -471,7 +517,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     approved: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'approved').length,
     paid: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'paid').length,
   };
-  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
+  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.inap || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotalRows : filteredDemoJobs.length;
   const totalGroups = archive.isDatabaseMode ? serverTotal : allGroupedJobs.length;
   const totalPages = Math.max(1, Math.ceil(totalGroups / PAGE_SIZE));
@@ -629,6 +675,15 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     }
   }
 
+  // Aksi terpisah dari updateOperational -- cuma menulis default_driver_id/name di master truck,
+  // tidak pernah menyentuh container job yang sedang diedit. Feedback sukses/gagal ditampilkan
+  // inline di OperationalForm sendiri (bukan toast di sini) supaya tidak dobel notifikasi.
+  async function setTruckDefaultDriver(truckId, payload) {
+    const saved = await updateTruckDefaultDriver(truckId, payload);
+    archive.refresh?.();
+    return saved;
+  }
+
   async function generateOperationalSpk(form) {
     if (!editing?.id) {
       throw new Error('Container Job belum dipilih.');
@@ -761,6 +816,66 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     }
   }
 
+  function openInap(job) {
+    setInapTarget(job);
+    setInapForm({ inapReason: '', inapNotes: '' });
+  }
+
+  async function submitInap(event) {
+    event.preventDefault();
+    if (!inapFormValid || inapSaving) return;
+
+    const actorName = user?.fullName || user?.name || 'Operational';
+    const payload = {
+      status: 'inap',
+      inapReason: inapForm.inapReason.trim(),
+      inapNotes: inapForm.inapNotes.trim(),
+      updatedBy: actorName,
+    };
+
+    setInapSaving(true);
+    try {
+      const saved = await archive.updateJob(inapTarget.id, payload);
+      if (archive.isDatabaseMode) {
+        if (saved) setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
+        setListVersion((value) => value + 1);
+        archive.refresh?.();
+      }
+      setDetail(null);
+      setInapTarget(null);
+      notify({
+        title: 'Container ditandai inap',
+        message: `${containerLabel(inapTarget)} ditandai inap. Truck dan sopir tetap terkunci ke job ini.`,
+      });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Penandaan inap gagal', message: requestError.message });
+    } finally {
+      setInapSaving(false);
+    }
+  }
+
+  async function resumeFromInap(job) {
+    const actorName = user?.fullName || user?.name || 'Operational';
+    try {
+      const saved = await archive.updateJob(job.id, {
+        status: 'running',
+        containerNumber: job.containerNumber,
+        driver: job.driver,
+        plateNumber: job.plateNumber,
+        updatedBy: actorName,
+      });
+      if (archive.isDatabaseMode) {
+        if (saved) setDatabaseJobs((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+        setListVersion((value) => value + 1);
+        archive.refresh?.();
+      }
+      setDetail(null);
+      notify({ title: 'Perjalanan dilanjutkan', message: `${containerLabel(job)} keluar dari status inap.` });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Gagal melanjutkan perjalanan', message: requestError.message });
+    }
+  }
+
   async function approveJobCancellation(job) {
     const confirmed = await confirmAction({
       title: 'Setujui pembatalan?',
@@ -858,6 +973,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               ['', 'Semua', totalJobs],
               ['received', 'Belum Jalan', counts.received],
               ['running', 'Sedang Jalan', counts.running],
+              ['inap', 'Inap', counts.inap],
               ['repo_stored', 'Container Titip', counts.repo_stored],
               ['completed', 'Selesai', counts.completed],
               ['cancelled', 'Batal', counts.cancelled],
@@ -968,6 +1084,14 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                 </div>
               </header>
               <div className="operational-container-list">
+                <div className="operational-container-header" aria-hidden="true">
+                  <span>No / Container</span>
+                  <span>Status</span>
+                  <span>Saldo</span>
+                  <span>Assignment</span>
+                  <span>Dokumen</span>
+                  <span>Aksi</span>
+                </div>
                 {group.jobs.map((job, jobIndex) => {
                   const documents = documentState(job);
                   const shipmentLabel = formatShipmentLabel(job.shipment || job.jobType);
@@ -981,8 +1105,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   return (
                     <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''}`} key={job.id}>
                       <div className="container-row-main">
-                        <span className="container-sequence">Container {jobIndex + 1} dari {group.jobs.length}</span>
-                        <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
+                        <div className="container-row-title">
+                          <span className="container-sequence" title={`Container ${jobIndex + 1} dari ${group.jobs.length}`}>#{jobIndex + 1}</span>
+                          <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
+                        </div>
                         <small>{repoSummary ? `Container Titip - ${repoSummary.reason}` : `${shipmentLabel} - ${sizeTypeLabel}`}</small>
                         {historicalLocked ? <em className="container-action-hint warning">Data Lama - Admin only</em> : null}
                         {repoSummary && actionHint ? <em className={`container-action-hint ${actionHint.tone}`}>{actionHint.label}</em> : null}
@@ -1019,7 +1145,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         <button className="secondary-button" type="button" disabled={detailLoadingId === job.id} onClick={() => openJobDetail(job)}><Eye size={14} /> {detailLoadingId === job.id ? 'Memuat' : 'Detail'}</button>
                         {canEdit && !historicalLocked && canStoreRepoJob(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(job)}><Archive size={14} /> Titipkan</button> : null}
                         {canEdit && !historicalLocked && isRepoStoredJob(job) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
-                        {canEdit && !historicalLocked && !isRepoStoredJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
+                        {canEdit && !historicalLocked && canMarkInap(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(job)}><Moon size={14} /> Tandai Inap</button> : null}
+                        {canEdit && !historicalLocked && isInapJob(job) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(job)}><CheckCircle2 size={14} /> Selesai Inap</button> : null}
+                        {canEdit && !historicalLocked && !isRepoStoredJob(job) && !isInapJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
                     </article>
                   );
@@ -1109,6 +1237,18 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   {detail.repoNotes ? <p>{detail.repoNotes}</p> : null}
                 </section>
               ) : null}
+              {hasInapHistory(detail) ? (
+                <section className="container-repo-summary">
+                  <h3>Inap</h3>
+                  <div>
+                    <span>Mulai inap<strong>{inapSummary(detail).startedAt}</strong></span>
+                    {detail.inapEndedAt ? <span>Selesai inap<strong>{formatDateTime(detail.inapEndedAt)}</strong></span> : null}
+                    <span>Alasan<strong>{inapSummary(detail).reason}</strong></span>
+                    <span>Dicatat oleh<strong>{detail.inapCreatedByName || detail.updatedBy || '-'}</strong></span>
+                  </div>
+                  {detail.inapNotes ? <p>{detail.inapNotes}</p> : null}
+                </section>
+              ) : null}
               {detail.status === 'cancelled' || detail.cancelReason || detail.cancelRequestStatus === 'approved' ? (
                 <section className="container-cancel-summary">
                   <h3>Pembatalan</h3>
@@ -1127,8 +1267,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               {isHistoricalJob(detail) && !canManageHistoricalEntry ? <span className="container-action-hint warning">Data Lama - hanya Admin yang dapat mengubah.</span> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && canStoreRepoJob(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(detail)}><Archive size={16} /> Titipkan Container</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isRepoStoredJob(detail) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(detail)}><Truck size={16} /> Ambil Container</button> : null}
+              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && canMarkInap(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(detail)}><Moon size={16} /> Tandai Inap</button> : null}
+              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isInapJob(detail) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(detail)}><CheckCircle2 size={16} /> Selesai Inap</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !hasRepoStorageHistory(detail) && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
-              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !isRepoStoredJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
+              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !isRepoStoredJob(detail) && !isInapJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
           </section>
         </div>
@@ -1284,6 +1426,57 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
         </div>
       ) : null}
 
+      {inapTarget ? (
+        <div className="master-modal-backdrop" role="presentation" onMouseDown={() => !inapSaving && setInapTarget(null)}>
+          <section className="container-repo-modal" role="dialog" aria-modal="true" aria-labelledby="container-inap-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <span><Moon size={18} /></span>
+              <div>
+                <h2 id="container-inap-title">Tandai Inap</h2>
+                <p>{containerLabel(inapTarget)} - {inapTarget.soNumber || '-'} - {inapTarget.customer || '-'}</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup penandaan inap" disabled={inapSaving} onClick={() => setInapTarget(null)}><X size={18} /></button>
+            </header>
+            <form onSubmit={submitInap}>
+              <div className="repo-assignment-snapshot">
+                <span>Truck<strong>{inapTarget.plateNumber || '-'}</strong></span>
+                <span>Sopir<strong>{inapTarget.driver || '-'}</strong></span>
+                <span>Status<strong>{getJobStatusLabel(inapTarget.status)}</strong></span>
+              </div>
+              <div className="container-repo-warning">
+                <AlertTriangle size={16} />
+                <span>Truck dan sopir TETAP terkunci ke job ini selama inap. Nominal biaya inap (kalau ada) diisi Finance, bukan di sini.</span>
+              </div>
+              <label>
+                Alasan Inap
+                <textarea
+                  autoFocus
+                  rows={3}
+                  value={inapForm.inapReason}
+                  onChange={(event) => setInapForm((current) => ({ ...current, inapReason: event.target.value }))}
+                  placeholder="Contoh: Curfew malam, truk tidak boleh jalan sampai subuh"
+                />
+              </label>
+              <label>
+                Catatan Tambahan
+                <textarea
+                  rows={3}
+                  value={inapForm.inapNotes}
+                  onChange={(event) => setInapForm((current) => ({ ...current, inapNotes: event.target.value }))}
+                  placeholder="Lokasi parkir, kondisi container, atau info lain (opsional)"
+                />
+              </label>
+              <footer>
+                <button className="secondary-button" type="button" disabled={inapSaving} onClick={() => setInapTarget(null)}>Batal</button>
+                <button className="primary-button repo-submit-button" type="submit" disabled={!inapFormValid || inapSaving}>
+                  <Moon size={16} /> {inapSaving ? 'Menyimpan...' : 'Simpan Inap'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
       {editing ? (
         <OperationalForm
           container={editing}
@@ -1296,6 +1489,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           onClose={() => setEditing(null)}
           onSubmit={updateOperational}
           onGenerateSpk={generateOperationalSpk}
+          onSetTruckDefaultDriver={setTruckDefaultDriver}
         />
       ) : null}
     </div>

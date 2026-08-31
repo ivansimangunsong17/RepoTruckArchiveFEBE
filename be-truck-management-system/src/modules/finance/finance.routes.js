@@ -3,6 +3,7 @@ import {
   approveRpujController,
   completedTripDetailController,
   completedTripsController,
+  createRevenueLineController,
   debitNoteOrdersController,
   debitNoteOutstandingController,
   debitNotePaymentsController,
@@ -36,11 +37,13 @@ import {
   updateDebitNoteNumberController,
   updateInvoiceNumberController,
   updateOrderVerificationSoNumberController,
+  updateRevenueLineController,
   uploadInvoiceDocumentController,
   uploadOperationalFundTransferProofController,
   uploadRpujTransferProofController,
   voidDebitNotePaymentController,
   voidInvoicePaymentController,
+  voidRevenueLineController,
 } from './finance.controller.js';
 
 export const financeRoutes = [
@@ -253,6 +256,24 @@ export const financeRoutes = [
     path: '/api/finance/invoices/:id/payments/:paymentId/void',
     permission: 'finance.invoice.payment.void',
     handler: voidInvoicePaymentController,
+  },
+  {
+    method: 'POST',
+    path: '/api/finance/invoices/:id/revenue-lines',
+    permission: 'finance.invoice.revenue_line.create',
+    handler: createRevenueLineController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/finance/invoices/:id/revenue-lines/:lineId',
+    permission: 'finance.invoice.revenue_line.create',
+    handler: updateRevenueLineController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/finance/invoices/:id/revenue-lines/:lineId/void',
+    permission: 'finance.invoice.revenue_line.void',
+    handler: voidRevenueLineController,
   },
   {
     method: 'GET',

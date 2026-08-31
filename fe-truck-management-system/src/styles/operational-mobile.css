@@ -456,6 +456,10 @@
     background: #f8fafc;
   }
 
+  .operations-page .operational-container-header {
+    display: none;
+  }
+
   .operations-page .operational-container-row,
   .operations-page .operational-container-row.is-repo-stored {
     display: grid;
@@ -482,8 +486,16 @@
     border-bottom: 0;
   }
 
+  .operations-page .container-row-title {
+    align-items: flex-start;
+    gap: 7px;
+  }
+
   .operations-page .container-sequence {
-    display: none !important;
+    display: inline-flex !important;
+    min-width: 26px;
+    min-height: 22px;
+    font-size: .56rem;
   }
 
   .operations-page .container-row-main strong {

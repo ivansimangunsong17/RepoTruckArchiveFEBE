@@ -8,6 +8,7 @@ import {
   listMasterPageController,
   updateMasterViewerNoteController,
   updateMasterController,
+  updateVehicleDefaultDriverController,
 } from './master.controller.js';
 
 export const masterRoutes = [
@@ -52,6 +53,12 @@ export const masterRoutes = [
     path: '/api/master/destinations/:id/calculate-uj',
     permission: 'master_data.read',
     handler: calculateDestinationUjController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/master/trucks/:id/default-driver',
+    permission: 'operations.truck_default_driver.update',
+    handler: updateVehicleDefaultDriverController,
   },
   {
     method: 'PATCH',

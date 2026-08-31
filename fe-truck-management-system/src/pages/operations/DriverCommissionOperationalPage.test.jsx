@@ -51,6 +51,19 @@ const reportFixture = {
       driverName: 'Rahmat',
       totalItems: 2,
       totalAmount: 125000,
+      grossAmount: 125000,
+      deductionAmount: 25000,
+      netAmount: 100000,
+      deductions: [
+        {
+          id: 'deduction-1',
+          deductionType: 'hutang_sopir',
+          amount: 25000,
+          reason: 'Potongan hutang sopir sesuai catatan Finance',
+          operationalNote: 'Komisi dipotong Rp25.000 karena ada hutang aktif. Detail ada di Finance.',
+          status: 'active',
+        },
+      ],
       unpaidAmount: 125000,
       unpaidItems: 2,
       submittedItems: 0,
@@ -321,4 +334,40 @@ describe('DriverCommissionOperationalPage', () => {
     expect(screen.getByText(/otomatis kamis sampai rabu/i)).toBeInTheDocument();
   });
 
+  it('menampilkan badge "Ada Potongan Finance" untuk sopir yang komisinya dipotong', async () => {
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findAllByText('Rahmat');
+    expect(screen.getAllByText('Ada Potongan Finance').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Jajam')?.closest('tr')).not.toHaveTextContent('Ada Potongan Finance');
+  });
+
+  it('menampilkan komisi bruto, potongan, net, dan catatan Finance read-only di detail sopir', async () => {
+    const user = userEvent.setup();
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+
+    const dialog = await screen.findByRole('dialog', { name: /Rahmat/i });
+    expect(within(dialog).getByText('Komisi Bruto')).toBeInTheDocument();
+    expect(within(dialog).getByText('Potongan Finance')).toBeInTheDocument();
+    expect(within(dialog).getByText('Net Dibayar')).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText(/Rp\s*25\.000/i).length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText(/Rp\s*100\.000/i).length).toBeGreaterThan(0);
+    expect(within(dialog).getByText('Komisi dipotong Rp25.000 karena ada hutang aktif. Detail ada di Finance.')).toBeInTheDocument();
+  });
+
+  it('tidak menampilkan tombol kelola potongan (tambah/void) di detail sopir Operational', async () => {
+    const user = userEvent.setup();
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+
+    const dialog = await screen.findByRole('dialog', { name: /Rahmat/i });
+    expect(within(dialog).queryByRole('button', { name: /tambah potongan/i })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /^batalkan$/i })).not.toBeInTheDocument();
+  });
 });

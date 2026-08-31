@@ -589,6 +589,15 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     debitNotePaymentError,
     debitNotePaymentVoidBusyId,
     debitNotePaymentVoidError,
+    deliveryStatusSaving,
+    deliveryStatusError,
+    submitInvoiceDeliveryStatus,
+    revenueLineSaving,
+    revenueLineError,
+    revenueLineVoidBusyId,
+    revenueLineVoidError,
+    submitRevenueLine,
+    voidRevenueLineAction,
     submitDebitNoteNumber,
     loadDebitNotePayments,
     confirmDebitNotePayment,
@@ -817,6 +826,12 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoiceDocumentBusyKey={invoiceDocumentBusyKey}
         invoiceDocumentUploadError={invoiceDocumentUploadError}
         invoiceNumberSaving={Boolean(selectedInvoice) && invoiceBusyId === selectedInvoice.id}
+        deliveryStatusSaving={deliveryStatusSaving}
+        deliveryStatusError={deliveryStatusError}
+        revenueLineSaving={revenueLineSaving}
+        revenueLineError={revenueLineError}
+        revenueLineVoidBusyId={revenueLineVoidBusyId}
+        revenueLineVoidError={revenueLineVoidError}
         loading={invoiceDetailLoading}
         onClose={invoiceWorkflow.closeInvoiceDetail}
         onOpenCorrection={openCorrectionModal}
@@ -826,6 +841,9 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         onConfirmDebitNotePayment={confirmDebitNotePayment}
         onVoidDebitNotePayment={voidDebitNotePayment}
         onSaveInvoiceNumber={invoiceWorkflow.onSaveInvoice}
+        onSaveInvoiceDeliveryStatus={submitInvoiceDeliveryStatus}
+        onSaveRevenueLine={submitRevenueLine}
+        onVoidRevenueLine={voidRevenueLineAction}
       />
       <SoNumberInputModal
         busy={savingSoId === soModalId}

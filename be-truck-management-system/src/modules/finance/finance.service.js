@@ -36,10 +36,13 @@ import {
   rejectRpujRequest,
   rejectFinanceCorrectionRequest,
   reopenOperationalFundBatchRecord,
+  createManualRevenueLine,
   updateDebitNoteNumber,
   updateInvoiceNumber,
+  updateManualRevenueLine,
   updateOrderVerificationSoNumber,
   voidDebitNotePayment,
+  voidManualRevenueLine,
   voidSalesOrderPayment,
 } from './finance.repository.js';
 import {
@@ -535,13 +538,12 @@ export function fetchInvoicePayments(id) {
   return listSalesOrderPayments(id);
 }
 
-// Void sengaja lebih ketat dari record (admin-only, bukan finance+admin) -- ini jalur koreksi
-// resmi kalau Finance salah catat pembayaran, jadi butuh persetujuan level lebih tinggi dan
-// alasan wajib. reason divalidasi lagi di repository, tapi dicek juga di sini supaya error-nya
-// jelas sebelum masuk transaksi database.
+// Ini jalur koreksi resmi kalau Finance salah catat pembayaran -- alasan wajib diisi.
+// reason divalidasi lagi di repository, tapi dicek juga di sini supaya error-nya jelas
+// sebelum masuk transaksi database.
 export async function voidInvoicePayment(id, paymentId, payload = {}, actor) {
-  if (!actor || actor.role !== 'admin') {
-    const error = new Error('Pembatalan pembayaran invoice hanya dapat dilakukan oleh Admin.');
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Pembatalan pembayaran invoice hanya dapat dilakukan oleh Finance atau Admin.');
     error.statusCode = 403;
     error.code = 'FINANCE_INVOICE_PAYMENT_VOID_FORBIDDEN';
     throw error;
@@ -555,6 +557,89 @@ export async function voidInvoicePayment(id, paymentId, payload = {}, actor) {
   return voidSalesOrderPayment(id, paymentId, {
     reason: payload.reason,
     actorName: actor?.name || actor?.email || 'Admin',
+  });
+}
+
+const REVENUE_LINE_CHARGE_TYPES = ['inap', 'waiting_charge', 'extra_trip', 'storage', 'other'];
+
+function ensureCanManageRevenueLine(actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Revenue line hanya dapat dikelola oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'REVENUE_LINE_FORBIDDEN';
+    throw error;
+  }
+}
+
+function normalizeRevenueLinePayload(payload = {}) {
+  const chargeType = REVENUE_LINE_CHARGE_TYPES.includes(payload.chargeType) ? payload.chargeType : 'inap';
+  const description = String(payload.description || '').trim();
+  if (!description) {
+    const error = new Error('Deskripsi revenue line wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'REVENUE_LINE_DESCRIPTION_REQUIRED';
+    throw error;
+  }
+  const quantity = Number(payload.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    const error = new Error('Quantity revenue line wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'REVENUE_LINE_QUANTITY_INVALID';
+    throw error;
+  }
+  const unit = String(payload.unit || '').trim();
+  if (!unit) {
+    const error = new Error('Satuan revenue line wajib diisi (mis. malam, hari, rit).');
+    error.statusCode = 400;
+    error.code = 'REVENUE_LINE_UNIT_REQUIRED';
+    throw error;
+  }
+  const unitPrice = Number(payload.unitPrice);
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+    const error = new Error('Harga satuan revenue line wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'REVENUE_LINE_UNIT_PRICE_INVALID';
+    throw error;
+  }
+  return {
+    containerJobId: payload.containerJobId || null,
+    chargeType,
+    description,
+    quantity,
+    unit,
+    unitPrice,
+    note: payload.note || null,
+    status: payload.status === 'draft' ? 'draft' : 'active',
+  };
+}
+
+export function createRevenueLine(id, payload = {}, actor) {
+  ensureCanManageRevenueLine(actor);
+  return createManualRevenueLine(id, {
+    ...normalizeRevenueLinePayload(payload),
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function updateRevenueLine(id, lineId, payload = {}, actor) {
+  ensureCanManageRevenueLine(actor);
+  return updateManualRevenueLine(id, lineId, {
+    ...normalizeRevenueLinePayload(payload),
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function voidRevenueLine(id, lineId, payload = {}, actor) {
+  ensureCanManageRevenueLine(actor);
+  if (!String(payload.reason || '').trim()) {
+    const error = new Error('Alasan pembatalan wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'REVENUE_LINE_VOID_REASON_REQUIRED';
+    throw error;
+  }
+  return voidManualRevenueLine(id, lineId, {
+    reason: payload.reason,
+    actorName: actor?.name || actor?.email || 'Finance',
   });
 }
 
@@ -628,8 +713,8 @@ export function fetchDebitNotePayments(id) {
 }
 
 export async function voidDebitNotePaymentForOrder(id, paymentId, payload = {}, actor) {
-  if (!actor || actor.role !== 'admin') {
-    const error = new Error('Pembatalan pembayaran Debit Note hanya dapat dilakukan oleh Admin.');
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Pembatalan pembayaran Debit Note hanya dapat dilakukan oleh Finance atau Admin.');
     error.statusCode = 403;
     error.code = 'FINANCE_DEBIT_NOTE_PAYMENT_VOID_FORBIDDEN';
     throw error;

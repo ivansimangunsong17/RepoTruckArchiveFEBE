@@ -1,5 +1,5 @@
 import { query, withTransaction } from '../../db/client.js';
-import { mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
+import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.container_type,
@@ -19,6 +19,8 @@ const joinedJobColumns = `
   cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
   cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
   cj.repo_picked_up_at, cj.repo_picked_up_by_name,
+  cj.inap_started_at, cj.inap_ended_at, cj.inap_reason, cj.inap_notes, cj.inap_created_by_name,
+  cj.uj_amount_snapshot, cj.uj_source_destination_id, cj.uj_snapshot_at, cj.uj_snapshot_source,
   cj.entry_source, cj.historical_period, cj.historical_notes,
   cj.has_driver_commission, cj.driver_commission_amount,
   cj.driver_commission_source_destination_id, cj.driver_commission_note,
@@ -434,7 +436,7 @@ async function refreshOrderStatus(client, salesOrderId) {
     ? 'cancelled'
     : activeTotal > 0 && counts.completed === activeTotal
     ? 'completed'
-    : counts.running || counts.repo_stored || counts.completed
+    : counts.running || counts.inap || counts.repo_stored || counts.completed
       ? 'running'
       : 'waiting_operational';
 
@@ -556,10 +558,10 @@ function requireCompleteOperationalAssignment(form, driver, vehicle, existing, m
 
 async function findJourneyMoneyAmount(client, job = {}) {
   const destination = normalizeOptionalText(job.destination);
-  if (!destination) return 0;
+  if (!destination) return { amount: 0, destinationId: null };
   const result = await client.query(
     `
-      select uj_20ft, uj_40ft
+      select id, uj_20ft, uj_40ft
       from destination_locations
       where lower(trim(name)) = lower(trim($1))
         and archived_at is null
@@ -568,7 +570,11 @@ async function findJourneyMoneyAmount(client, job = {}) {
     `,
     [destination],
   );
-  return resolveJourneyMoneyAmountForSize(result.rows[0] || {}, job.container_size);
+  const row = result.rows[0] || {};
+  return {
+    amount: resolveJourneyMoneyAmountForSize(row, job.container_size),
+    destinationId: row.id || null,
+  };
 }
 
 async function syncAutoJourneyMoneyExpense(client, {
@@ -598,7 +604,27 @@ async function syncAutoJourneyMoneyExpense(client, {
   );
   if (existingJourneyMoney.rows[0]) return;
 
-  const amount = await findJourneyMoneyAmount(client, job);
+  // UJ dibekukan SEKALI per job -- kalau job ini sudah pernah punya uj_amount_snapshot, pakai
+  // nilai beku itu (jangan live-lookup ulang ke destination_locations), supaya biaya UJ yang
+  // sudah tercatat tidak diam-diam berubah kalau rate master destination diedit belakangan.
+  let amount = job.uj_amount_snapshot != null ? Number(job.uj_amount_snapshot) : null;
+  if (amount == null) {
+    const lookup = await findJourneyMoneyAmount(client, job);
+    amount = lookup.amount;
+    if (amount > 0) {
+      await client.query(
+        `
+          update container_jobs
+          set uj_amount_snapshot = $2,
+              uj_source_destination_id = $3,
+              uj_snapshot_at = now(),
+              uj_snapshot_source = 'destination_master'
+          where id = $1
+        `,
+        [job.id, amount, lookup.destinationId],
+      );
+    }
+  }
   if (amount <= 0) return;
 
   const paidAt = runningAt || new Date().toISOString();
@@ -1087,7 +1113,7 @@ export async function findContainerJobsPage(options = {}) {
     return groups;
   }, {});
 
-  const counts = { received: 0, running: 0, repo_stored: 0, completed: 0, cancelled: 0 };
+  const counts = { received: 0, running: 0, inap: 0, repo_stored: 0, completed: 0, cancelled: 0 };
   statusResult.rows.forEach((row) => {
     counts[row.status] = row.total;
   });
@@ -1143,6 +1169,29 @@ export async function findContainerJobExpensesByJobId(id) {
   }
   const expenseRows = await findExpenseRowsByJobId(query, id);
   return expenseRows.map(mapContainerJobExpense);
+}
+
+export async function findAssignmentHistory(id) {
+  const result = await query('select id from container_jobs where id = $1', [id]);
+  if (!result.rows[0]) {
+    const error = new Error('Container Job tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'CONTAINER_JOB_NOT_FOUND';
+    throw error;
+  }
+  const historyResult = await query(
+    `
+      select id, container_job_id, change_source,
+             previous_driver_id, previous_driver_name, next_driver_id, next_driver_name,
+             previous_vehicle_id, previous_plate_number, next_vehicle_id, next_plate_number,
+             reason, note, changed_by_name, changed_by_role, created_at
+      from container_job_assignment_history
+      where container_job_id = $1
+      order by created_at desc
+    `,
+    [id],
+  );
+  return historyResult.rows.map(mapAssignmentHistory);
 }
 
 export async function findContainerJobExpenseLedger(options = {}) {
@@ -1753,9 +1802,11 @@ async function updateContainerJobTransaction(id, form) {
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id, cj.repo_created_by_name,
                cj.repo_picked_up_at, cj.repo_picked_up_by_name,
+               cj.inap_started_at, cj.inap_ended_at, cj.inap_reason, cj.inap_notes, cj.inap_created_by_name,
                cj.entry_source, cj.historical_period, cj.historical_notes,
                cj.has_driver_commission, cj.driver_commission_amount,
                cj.driver_commission_source_destination_id, cj.driver_commission_note,
+               cj.uj_amount_snapshot, cj.uj_source_destination_id, cj.uj_snapshot_at, cj.uj_snapshot_source,
                so.so_number, so.do_number, so.customer_name, cj.destination,
                so.trip_date, so.finance_verification_status
         from container_jobs cj
@@ -1843,6 +1894,21 @@ async function updateContainerJobTransaction(id, form) {
     const nextDestination = allowAdminCorrection && hasOwnInput(form, 'destination')
       ? String(form.destination || existing.rows[0].destination || '').trim()
       : existing.rows[0].destination || '';
+    // UJ snapshot dibekukan otomatis oleh syncAutoJourneyMoneyExpense saat job pertama kali jalan --
+    // sama seperti destination, cuma bisa dikoreksi manual lewat mode koreksi admin (sudah divalidasi
+    // di service layer), bukan lewat update biasa.
+    const nextUjAmountSnapshot = allowAdminCorrection && hasOwnInput(form, 'ujAmountSnapshot')
+      ? Number(form.ujAmountSnapshot) || null
+      : existing.rows[0].uj_amount_snapshot;
+    const nextUjSourceDestinationId = allowAdminCorrection && hasOwnInput(form, 'ujAmountSnapshot')
+      ? form.ujSourceDestinationId || existing.rows[0].uj_source_destination_id || null
+      : existing.rows[0].uj_source_destination_id;
+    const nextUjSnapshotAt = allowAdminCorrection && hasOwnInput(form, 'ujAmountSnapshot')
+      ? new Date().toISOString()
+      : existing.rows[0].uj_snapshot_at;
+    const nextUjSnapshotSource = allowAdminCorrection && hasOwnInput(form, 'ujAmountSnapshot')
+      ? 'admin_correction'
+      : existing.rows[0].uj_snapshot_source;
     const runningAt = nextStatus === 'cancelled'
       ? existing.rows[0].running_at
       : nextStatus === 'repo_stored'
@@ -1925,6 +1991,20 @@ async function updateContainerJobTransaction(id, form) {
     const nextRepoPickedUpByName = isRepoPickup
       ? normalizeOptionalText(form.repoPickedUpByName || form.updatedBy || 'Operational')
       : existing.rows[0].repo_picked_up_by_name || null;
+    const nextInapReason = normalizeOptionalText(form.inapReason ?? existing.rows[0].inap_reason);
+    const nextInapNotes = normalizeOptionalText(form.inapNotes ?? existing.rows[0].inap_notes);
+    const nextInapStartedAt = nextStatus === 'inap'
+      ? form.inapAt || existing.rows[0].inap_started_at || new Date().toISOString()
+      : existing.rows[0].inap_started_at || null;
+    const isLeavingInap = existing.rows[0].status === 'inap' && nextStatus !== 'inap';
+    const nextInapEndedAt = isLeavingInap
+      ? new Date().toISOString()
+      : existing.rows[0].inap_ended_at || null;
+    const nextInapCreatedByName = normalizeOptionalText(
+      form.inapCreatedByName
+        ?? existing.rows[0].inap_created_by_name
+        ?? (nextStatus === 'inap' ? form.updatedBy || 'Operational' : null),
+    );
     const nextRpujNotes = hasOwnInput(form, 'rpujNotes') ? form.rpujNotes || null : existing.rows[0].rpuj_notes || null;
     const nextEirNumber = hasOwnInput(form, 'eirNumber') ? form.eirNumber || null : existing.rows[0].eir_number || null;
     const nextLoadingVoucher = hasOwnInput(form, 'loadingVoucher') ? form.loadingVoucher || null : existing.rows[0].loading_voucher_number || null;
@@ -2022,9 +2102,18 @@ async function updateContainerJobTransaction(id, form) {
             driver_commission_source_destination_id = $37::uuid,
             driver_commission_note = $38,
             destination = $39,
-            updated_by_name = $40,
+            inap_started_at = $40,
+            inap_ended_at = $41,
+            inap_reason = $42,
+            inap_notes = $43,
+            inap_created_by_name = $44,
+            uj_amount_snapshot = $45,
+            uj_source_destination_id = $46::uuid,
+            uj_snapshot_at = $47,
+            uj_snapshot_source = $48,
+            updated_by_name = $49,
             updated_at = now()
-        where id = $41
+        where id = $50
       `,
       [
         nextContainerNumber,
@@ -2066,10 +2155,57 @@ async function updateContainerJobTransaction(id, form) {
         nextDriverCommissionSourceDestinationId,
         nextDriverCommissionNote,
         nextDestination,
+        nextInapStartedAt,
+        nextInapEndedAt,
+        nextInapReason,
+        nextInapNotes,
+        nextInapCreatedByName,
+        nextUjAmountSnapshot,
+        nextUjSourceDestinationId,
+        nextUjSnapshotAt,
+        nextUjSnapshotSource,
         actorName,
         id,
       ],
     );
+
+    // Riwayat assignment dicatat SEKALI per event penyimpanan yang benar-benar mengganti identitas
+    // sopir/truck (driverIdentityChanging/vehicleIdentityChanging di atas), mencakup jalur normal
+    // maupun mode koreksi admin, supaya "sopir A -> sopir B, kapan, oleh siapa, kenapa" selalu
+    // terlacak terpisah dari dump before/after generik di activity_logs.
+    if (driverIdentityChanging || vehicleIdentityChanging) {
+      const assignmentChangeSource = allowAdminCorrection ? 'admin_correction' : 'operational';
+      const assignmentReason = allowAdminCorrection
+        ? normalizeOptionalText(form.adminCorrectionReason)
+        : normalizeOptionalText(form.assignmentChangeReason);
+      const assignmentNote = normalizeOptionalText(form.assignmentChangeNote);
+      await client.query(
+        `
+          insert into container_job_assignment_history (
+            container_job_id, change_source,
+            previous_driver_id, previous_driver_name, next_driver_id, next_driver_name,
+            previous_vehicle_id, previous_plate_number, next_vehicle_id, next_plate_number,
+            reason, note, changed_by_name, changed_by_role
+          ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `,
+        [
+          id,
+          assignmentChangeSource,
+          existing.rows[0].driver_id,
+          existingAssignment.driver || null,
+          nextDriverId,
+          nextAssignmentSnapshot.driver || null,
+          existing.rows[0].vehicle_id,
+          existingAssignment.plateNumber || null,
+          nextVehicleId,
+          nextAssignmentSnapshot.plateNumber || null,
+          assignmentReason,
+          assignmentNote,
+          actorName,
+          form.actorRole || null,
+        ],
+      );
+    }
 
     if (nextStatus === 'cancelled') {
       await voidAutoJourneyMoneyExpense(client, id, actorName);

@@ -47,6 +47,30 @@ function normalizeVerificationStatus(row) {
   return row.finance_verification_status === 'verified' && row.accurate_so_number ? 'verified' : 'pending_so';
 }
 
+// UJ dibaca dari snapshot dulu (dibekukan container-jobs.repository.js syncAutoJourneyMoneyExpense
+// saat job pertama kali jalan) -- master destination_locations cuma fallback untuk job LAMA yang
+// belum pernah punya snapshot (dibuat sebelum kolom ini ada), supaya UJ job yang sudah lama selesai
+// tidak diam-diam berubah kalau rate UJ destinasi diedit belakangan.
+function ujAmountExpression(cjAlias = 'cj', dlAlias = 'dl') {
+  return `
+    coalesce(
+      nullif(${cjAlias}.uj_amount_snapshot, 0),
+      case
+        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then nullif(${dlAlias}.uj_40ft, 0)
+        else nullif(${dlAlias}.uj_20ft, 0)
+      end
+    )
+  `;
+}
+
+function ujSourceExpression(cjAlias = 'cj') {
+  return `case when nullif(${cjAlias}.uj_amount_snapshot, 0) is not null then 'snapshot' else 'master_current' end`;
+}
+
+function ujNeedsReviewExpression(cjAlias = 'cj') {
+  return `(nullif(${cjAlias}.uj_amount_snapshot, 0) is null)`;
+}
+
 function paymentTermsExpression(alias = 'so') {
   return `
     case
@@ -379,10 +403,9 @@ function financeRowsCte() {
             else null
           end
         ) + (coalesce(ofi.reimbursement_total, 0) / greatest(coalesce(jc.total_jobs, 1), 1)) as total_revenue,
-        case
-          when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
-          else nullif(dl.uj_20ft, 0)
-        end as journey_money,
+        ${ujAmountExpression()} as journey_money,
+        ${ujSourceExpression()} as journey_money_source,
+        ${ujNeedsReviewExpression()} as journey_money_needs_review,
         coalesce(((regexp_match(coalesce(cj.rpuj_notes, ''), '"amount"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1])::numeric, 0) as additional_cost,
         case
           when coalesce(cj.has_driver_commission, false) then coalesce(cj.driver_commission_amount, 0)
@@ -402,10 +425,7 @@ function financeRowsCte() {
               else null
             end
           ) is not null
-            and case
-              when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
-              else nullif(dl.uj_20ft, 0)
-            end is not null
+            and ${ujAmountExpression()} is not null
           then coalesce(
             nullif(tup.unit_price, 0),
             case
@@ -419,10 +439,7 @@ function financeRowsCte() {
               else null
             end
           )
-            - case
-              when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
-              else nullif(dl.uj_20ft, 0)
-            end
+            - ${ujAmountExpression()}
             - coalesce(((regexp_match(coalesce(cj.rpuj_notes, ''), '"amount"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)'))[1])::numeric, 0)
             - case
               when coalesce(cj.has_driver_commission, false) then coalesce(cj.driver_commission_amount, 0)
@@ -454,10 +471,7 @@ function financeRowsCte() {
                 else null
               end
             ) is not null
-              and case
-                when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
-                else nullif(dl.uj_20ft, 0)
-              end is not null
+              and ${ujAmountExpression()} is not null
             then 'SIAP_DITAGIHKAN'
             else 'LENGKAP'
           end
@@ -478,7 +492,11 @@ function financeRowsCte() {
         on tup.sales_order_id = cj.sales_order_id
        and tup.finance_size_key = cj.finance_size_key
        and tup.finance_size_sequence = cj.finance_size_sequence
-      left join destination_locations dl on lower(trim(dl.name)) = lower(trim(cj.destination)) and dl.archived_at is null
+      left join destination_locations dl on dl.archived_at is null
+        and (
+          dl.id = cj.uj_source_destination_id
+          or (cj.uj_source_destination_id is null and lower(trim(dl.name)) = lower(trim(cj.destination)))
+        )
       left join attachment_flags af on af.entity_id = cj.id
       where cj.status = 'completed'
         and so.status <> 'cancelled'
@@ -764,10 +782,9 @@ function rpujRowsSelect() {
       cj.destination,
       so.trip_date,
       so.terminal,
-      case
-        when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(dl.uj_40ft, 0)
-        else nullif(dl.uj_20ft, 0)
-      end as journey_money,
+      ${ujAmountExpression()} as journey_money,
+      ${ujSourceExpression()} as journey_money_source,
+      ${ujNeedsReviewExpression()} as journey_money_needs_review,
       tp.id as transfer_proof_id,
       tp.file_name as transfer_proof_file_name,
       tp.storage_path as transfer_proof_storage_path,
@@ -776,7 +793,11 @@ function rpujRowsSelect() {
     from container_jobs cj
     join sales_orders so on so.id = cj.sales_order_id
     left join drivers d on d.id = cj.driver_id and d.archived_at is null
-    left join destination_locations dl on lower(trim(dl.name)) = lower(trim(cj.destination)) and dl.archived_at is null
+    left join destination_locations dl on dl.archived_at is null
+      and (
+        dl.id = cj.uj_source_destination_id
+        or (cj.uj_source_destination_id is null and lower(trim(dl.name)) = lower(trim(cj.destination)))
+      )
     left join lateral (
       select id, file_name, storage_path, mime_type, file_size
       from attachments
@@ -955,6 +976,8 @@ function mapRpujRequestRow(row) {
     ujRecommendation: row.journey_money == null
       ? 'Rekomendasi UJ belum tersedia'
       : `1 x ${row.container_size || 'Container'} @ Rp ${Number(row.journey_money || 0).toLocaleString('id-ID')}`,
+    ujSource: row.journey_money_needs_review ? 'master_current' : 'snapshot',
+    ujNeedsReview: Boolean(row.journey_money_needs_review),
     notes,
     totalUj,
     additionalCost,
@@ -1201,6 +1224,19 @@ function mapInvoiceOrderRow(row) {
     debitNoteOutstandingAmount: Math.max(Number(row.debit_note_amount || 0) - Number(row.debit_note_total_paid || 0), 0),
     debitNoteAgingBucket: row.debit_note_number ? mapDebitNoteAgingBucket(row.debit_note_due_date) : '',
     containerNumbers: Array.isArray(row.container_numbers) ? row.container_numbers.filter(Boolean) : [],
+    manualRevenueAmount: Number(row.manual_revenue_amount || 0),
+    internalCost: {
+      journeyMoney: Number(row.journey_money_total || 0),
+      journeyMoneySource: row.journey_money_needs_review ? 'master_current' : 'snapshot',
+      journeyMoneyNeedsReview: Boolean(row.journey_money_needs_review),
+      additionalCost: Number(row.additional_cost_total || 0),
+      driverCommissionCost: Number(row.driver_commission_cost_total || 0),
+      operationalExpenseTotal: Number(row.operational_expense_amount || 0),
+      total: Number(row.journey_money_total || 0)
+        + Number(row.additional_cost_total || 0)
+        + Number(row.driver_commission_cost_total || 0)
+        + Number(row.operational_expense_amount || 0),
+    },
   };
 }
 
@@ -1380,6 +1416,20 @@ function invoiceOrdersCte() {
       where voided_at is null
       group by sales_order_id
     ),
+    manual_revenue_totals as (
+      select sales_order_id, sum(total_amount)::numeric as manual_revenue_amount
+      from manual_revenue_lines
+      where status = 'active'
+      group by sales_order_id
+    ),
+    internal_cost_totals as (
+      select sales_order_id, sum(amount)::numeric as operational_expense_amount
+      from container_job_expenses
+      where expense_group = 'operational'
+        and sales_order_id is not null
+        and payment_status <> 'batal'
+      group by sales_order_id
+    ),
     invoice_orders as (
       select
         so.id,
@@ -1418,6 +1468,12 @@ function invoiceOrdersCte() {
         coalesce(max(det.debit_note_amount), 0)::numeric as debit_note_amount,
         coalesce(max(det.debit_note_item_count), 0)::int as debit_note_item_count,
         coalesce(max(dnpt.debit_note_total_paid), 0)::numeric as debit_note_total_paid,
+        coalesce(max(mrt.manual_revenue_amount), 0)::numeric as manual_revenue_amount,
+        coalesce(max(ict.operational_expense_amount), 0)::numeric as operational_expense_amount,
+        coalesce(sum(fr.journey_money) filter (where fr.journey_money is not null), 0)::numeric as journey_money_total,
+        bool_or(coalesce(fr.journey_money_needs_review, false)) as journey_money_needs_review,
+        coalesce(sum(fr.additional_cost), 0)::numeric as additional_cost_total,
+        coalesce(sum(fr.driver_commission_cost), 0)::numeric as driver_commission_cost_total,
         coalesce(
           array_agg(distinct fr.container_number) filter (where fr.container_number is not null),
           array[]::text[]
@@ -1438,7 +1494,8 @@ function invoiceOrdersCte() {
         coalesce(max(ojs.repo_stored_jobs_count), 0)::int as repo_stored_jobs_count,
         count(fr.id) filter (where fr.document_status = 'BELUM_LENGKAP')::int as incomplete_documents_count,
         count(fr.id) filter (where fr.document_status = 'SIAP_DITAGIHKAN')::int as ready_documents_count,
-        coalesce(sum(fr.total_revenue) filter (where fr.total_revenue is not null), nullif(so.total_amount, 0), 0)::numeric as billing_amount,
+        coalesce(sum(fr.total_revenue) filter (where fr.total_revenue is not null), nullif(so.total_amount, 0), 0)::numeric
+          + coalesce(max(mrt.manual_revenue_amount), 0)::numeric as billing_amount,
         bool_and(fr.has_loading_document) as has_loading_document,
         bool_and(fr.has_tila_gatepass_document) as has_tila_gatepass_document,
         bool_and(fr.has_travel_document) as has_travel_document,
@@ -1485,6 +1542,16 @@ function invoiceOrdersCte() {
               lower('Jasa Lainnya')
             )
           ),
+          array[]::text[]
+        ) || coalesce(
+          (
+            select array_agg(
+              concat(mrl.description, ' (', mrl.quantity, ' ', mrl.unit, ') - Rp ', mrl.total_amount::text)
+              order by mrl.created_at
+            )
+            from manual_revenue_lines mrl
+            where mrl.sales_order_id = so.id and mrl.status = 'active'
+          ),
           array[]::text[])
         as billing_items
       from sales_orders so
@@ -1492,6 +1559,8 @@ function invoiceOrdersCte() {
       left join order_job_statuses ojs on ojs.sales_order_id = so.id
       left join debit_note_expense_totals det on det.sales_order_id = so.id
       left join debit_note_payment_totals dnpt on dnpt.sales_order_id = so.id
+      left join manual_revenue_totals mrt on mrt.sales_order_id = so.id
+      left join internal_cost_totals ict on ict.sales_order_id = so.id
       where so.status = 'completed'
         and so.finance_verification_status = 'verified'
         and nullif(btrim(so.accurate_so_number), '') is not null
@@ -1521,7 +1590,8 @@ export async function getFinanceDashboard(options = {}) {
           count(*) filter (where invoice_status = 'BELUM_DIBUAT')::int as not_invoiced,
           count(*) filter (where invoice_status <> 'BELUM_DIBUAT')::int as invoiced,
           count(*) filter (where total_revenue is null)::int as missing_revenue,
-          count(*) filter (where journey_money is null)::int as missing_journey_money
+          count(*) filter (where journey_money is null)::int as missing_journey_money,
+          count(*) filter (where journey_money_needs_review)::int as journey_money_needs_review_count
         from finance_rows
         ${whereSql}
       `,
@@ -1650,6 +1720,7 @@ export async function getFinanceDashboard(options = {}) {
     invoiced: Number(row.invoiced || 0),
     missingRevenue: Number(row.missing_revenue || 0),
     missingJourneyMoney: Number(row.missing_journey_money || 0),
+    journeyMoneyNeedsReviewCount: Number(row.journey_money_needs_review_count || 0),
     queues: {
       pendingSo: Number(queue.pending_so || 0),
       verifiedOrders: Number(queue.verified_orders || 0),
@@ -4161,8 +4232,31 @@ function mapContainerBreakdownRow(row) {
   };
 }
 
+function mapManualRevenueLineRow(row) {
+  return {
+    id: row.id,
+    containerJobId: row.container_job_id || '',
+    containerNumber: row.container_number || '',
+    chargeType: row.charge_type || 'inap',
+    description: row.description || '',
+    quantity: row.quantity == null ? 0 : Number(row.quantity),
+    unit: row.unit || '',
+    unitPrice: row.unit_price == null ? 0 : Number(row.unit_price),
+    totalAmount: row.total_amount == null ? 0 : Number(row.total_amount),
+    note: row.note || '',
+    status: row.status || 'active',
+    createdByName: row.created_by_name || '',
+    createdAt: row.created_at,
+    updatedByName: row.updated_by_name || '',
+    updatedAt: row.updated_at,
+    voidedAt: row.voided_at,
+    voidedByName: row.voided_by_name || '',
+    voidReason: row.void_reason || '',
+  };
+}
+
 export async function getInvoiceOrderDetail(id) {
-  const [invoice, documents, debitNoteRows, containerBreakdown] = await Promise.all([
+  const [invoice, documents, debitNoteRows, containerBreakdown, manualRevenueRows] = await Promise.all([
     query(
       `
         ${invoiceOrdersCte()}
@@ -4251,12 +4345,27 @@ export async function getInvoiceOrderDetail(id) {
       `,
       [id],
     ),
+    query(
+      `
+        select
+          mrl.id, mrl.container_job_id, cj.container_number, mrl.charge_type, mrl.description,
+          mrl.quantity, mrl.unit, mrl.unit_price, mrl.total_amount, mrl.note, mrl.status,
+          mrl.created_by_name, mrl.created_at, mrl.updated_by_name, mrl.updated_at,
+          mrl.voided_at, mrl.voided_by_name, mrl.void_reason
+        from manual_revenue_lines mrl
+        left join container_jobs cj on cj.id = mrl.container_job_id
+        where mrl.sales_order_id = $1
+        order by mrl.created_at asc
+      `,
+      [id],
+    ),
   ]);
 
   if (!invoice.rows[0]) return null;
   // debitNoteItems sengaja tetap menampilkan item yang sudah 'batal' (transparansi riwayat), tapi
   // totalnya wajib mengecualikan item batal supaya tidak ikut menagih customer untuk biaya yang
-  // sudah dikoreksi/dibatalkan.
+  // sudah dikoreksi/dibatalkan. Pola yang sama dipakai manualRevenueLines: baris void tetap
+  // ditampilkan (transparansi), tapi manualRevenueAmount di mapInvoiceOrderRow sudah mengecualikannya.
   const debitNoteItems = debitNoteRows.rows.map(mapDebitNoteItem);
   return {
     ...mapInvoiceOrderRow(invoice.rows[0]),
@@ -4266,7 +4375,191 @@ export async function getInvoiceOrderDetail(id) {
       .filter((item) => item.paymentStatus !== 'batal')
       .reduce((sum, item) => sum + item.amount, 0),
     containerBreakdown: containerBreakdown.rows.map(mapContainerBreakdownRow),
+    manualRevenueLines: manualRevenueRows.rows.map(mapManualRevenueLineRow),
   };
+}
+
+async function ensureSalesOrderNotPaidForRevenueLine(client, salesOrderId) {
+  const locked = await client.query(
+    'select id, billing_status from sales_orders where id = $1 for update',
+    [salesOrderId],
+  );
+  if (!locked.rows[0]) {
+    const error = new Error('Sales Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
+  if (locked.rows[0].billing_status === 'lunas') {
+    const error = new Error('Invoice sudah lunas. Void pembayaran dulu sebelum mengubah revenue line, supaya outstanding tidak berubah diam-diam.');
+    error.statusCode = 409;
+    error.code = 'REVENUE_LINE_INVOICE_ALREADY_PAID';
+    throw error;
+  }
+  return locked.rows[0];
+}
+
+async function recomputeBillingAmount(client, salesOrderId) {
+  const invoiceResult = await client.query(
+    `
+      ${invoiceOrdersCte()}
+      select billing_amount
+      from invoice_orders
+      where id = $1
+      limit 1
+    `,
+    [salesOrderId],
+  );
+  return Number(invoiceResult.rows[0]?.billing_amount || 0);
+}
+
+export async function createManualRevenueLine(salesOrderId, payload = {}) {
+  return withTransaction(async (client) => {
+    await ensureSalesOrderNotPaidForRevenueLine(client, salesOrderId);
+
+    const quantity = Number(payload.quantity);
+    const unitPrice = Number(payload.unitPrice);
+    const totalAmount = Math.round(quantity * unitPrice);
+
+    const inserted = await client.query(
+      `
+        insert into manual_revenue_lines (
+          sales_order_id, container_job_id, charge_type, description, quantity, unit,
+          unit_price, total_amount, note, status, created_by_name, updated_by_name
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+        returning id, container_job_id, charge_type, description, quantity, unit, unit_price,
+          total_amount, note, status, created_by_name, created_at, updated_by_name, updated_at,
+          voided_at, voided_by_name, void_reason
+      `,
+      [
+        salesOrderId,
+        payload.containerJobId || null,
+        payload.chargeType || 'inap',
+        payload.description,
+        quantity,
+        payload.unit,
+        unitPrice,
+        totalAmount,
+        payload.note || null,
+        payload.status === 'draft' ? 'draft' : 'active',
+        payload.actorName || 'Finance',
+      ],
+    );
+
+    const billingAmount = await recomputeBillingAmount(client, salesOrderId);
+    return { line: mapManualRevenueLineRow(inserted.rows[0]), billingAmount };
+  });
+}
+
+export async function updateManualRevenueLine(salesOrderId, lineId, payload = {}) {
+  return withTransaction(async (client) => {
+    await ensureSalesOrderNotPaidForRevenueLine(client, salesOrderId);
+
+    const existing = await client.query(
+      'select * from manual_revenue_lines where id = $1 and sales_order_id = $2 for update',
+      [lineId, salesOrderId],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Revenue line tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'REVENUE_LINE_NOT_FOUND';
+      throw error;
+    }
+    if (existing.rows[0].voided_at) {
+      const error = new Error('Revenue line yang sudah dibatalkan tidak bisa diubah.');
+      error.statusCode = 409;
+      error.code = 'REVENUE_LINE_ALREADY_VOIDED';
+      throw error;
+    }
+
+    const quantity = Number(payload.quantity ?? existing.rows[0].quantity);
+    const unitPrice = Number(payload.unitPrice ?? existing.rows[0].unit_price);
+    const totalAmount = Math.round(quantity * unitPrice);
+
+    const updated = await client.query(
+      `
+        update manual_revenue_lines
+        set container_job_id = $2,
+            charge_type = $3,
+            description = $4,
+            quantity = $5,
+            unit = $6,
+            unit_price = $7,
+            total_amount = $8,
+            note = $9,
+            status = $10,
+            updated_by_name = $11,
+            updated_at = now()
+        where id = $1
+        returning id, container_job_id, charge_type, description, quantity, unit, unit_price,
+          total_amount, note, status, created_by_name, created_at, updated_by_name, updated_at,
+          voided_at, voided_by_name, void_reason
+      `,
+      [
+        lineId,
+        payload.containerJobId ?? existing.rows[0].container_job_id,
+        payload.chargeType || existing.rows[0].charge_type,
+        payload.description ?? existing.rows[0].description,
+        quantity,
+        payload.unit ?? existing.rows[0].unit,
+        unitPrice,
+        totalAmount,
+        payload.note ?? existing.rows[0].note,
+        payload.status === 'draft' || payload.status === 'active' ? payload.status : existing.rows[0].status,
+        payload.actorName || 'Finance',
+      ],
+    );
+
+    const billingAmount = await recomputeBillingAmount(client, salesOrderId);
+    return { line: mapManualRevenueLineRow(updated.rows[0]), billingAmount };
+  });
+}
+
+export async function voidManualRevenueLine(salesOrderId, lineId, payload = {}) {
+  return withTransaction(async (client) => {
+    await ensureSalesOrderNotPaidForRevenueLine(client, salesOrderId);
+
+    const existing = await client.query(
+      'select * from manual_revenue_lines where id = $1 and sales_order_id = $2 for update',
+      [lineId, salesOrderId],
+    );
+    if (!existing.rows[0]) {
+      const error = new Error('Revenue line tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'REVENUE_LINE_NOT_FOUND';
+      throw error;
+    }
+    if (existing.rows[0].voided_at) {
+      const error = new Error('Revenue line ini sudah dibatalkan sebelumnya.');
+      error.statusCode = 409;
+      error.code = 'REVENUE_LINE_ALREADY_VOIDED';
+      throw error;
+    }
+
+    const reason = String(payload.reason || '').trim();
+    if (!reason) {
+      const error = new Error('Alasan pembatalan wajib diisi.');
+      error.statusCode = 400;
+      error.code = 'REVENUE_LINE_VOID_REASON_REQUIRED';
+      throw error;
+    }
+
+    const voided = await client.query(
+      `
+        update manual_revenue_lines
+        set status = 'void', voided_at = now(), voided_by_name = $2, void_reason = $3
+        where id = $1
+        returning id, container_job_id, charge_type, description, quantity, unit, unit_price,
+          total_amount, note, status, created_by_name, created_at, updated_by_name, updated_at,
+          voided_at, voided_by_name, void_reason
+      `,
+      [lineId, payload.actorName || 'Finance', reason],
+    );
+
+    const billingAmount = await recomputeBillingAmount(client, salesOrderId);
+    return { line: mapManualRevenueLineRow(voided.rows[0]), billingAmount };
+  });
 }
 
 export async function updateInvoiceNumber(id, payload = {}) {

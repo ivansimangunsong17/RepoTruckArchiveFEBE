@@ -6,6 +6,7 @@ import {
   createContainerJobSpk,
   getContainerJob,
   getContainerJobExpense,
+  listContainerJobAssignmentHistory,
   listContainerJobExpenseLedger,
   listContainerJobExpenses,
   listContainerJobs,
@@ -34,6 +35,7 @@ const adminCorrectionAuditFields = {
   status: 'Status',
   containerNumber: 'No. Container',
   destination: 'Tujuan',
+  ujAmountSnapshot: 'UJ (Uang Jalan)',
   plateNumber: 'Truck',
   driver: 'Sopir',
   runningAt: 'Waktu Mulai',
@@ -98,6 +100,11 @@ export async function listContainerJobExpensesController(request, response) {
 
 export async function listContainerJobExpenseLedgerController(request, response) {
   const result = await listContainerJobExpenseLedger(request.query);
+  sendSuccess(response, result);
+}
+
+export async function listContainerJobAssignmentHistoryController(request, response) {
+  const result = await listContainerJobAssignmentHistory(request.params.id);
   sendSuccess(response, result);
 }
 
@@ -307,6 +314,50 @@ export async function updateContainerJobController(request, response) {
           soNumber: saved.soNumber,
           containerNumber: saved.containerNumber,
           repoLocation: before.repoLocation,
+        },
+      });
+    }
+    if (saved.status === 'inap') {
+      await safeRecordActivityLog(request, {
+        action: 'INAP_CONTAINER_JOB',
+        module: 'container_jobs',
+        entityType: 'container_job',
+        entityId: saved.id,
+        beforeData: { status: before.status },
+        afterData: {
+          status: saved.status,
+          inapStartedAt: saved.inapStartedAt,
+          inapReason: saved.inapReason,
+          inapNotes: saved.inapNotes,
+          inapCreatedByName: saved.inapCreatedByName,
+        },
+        metadata: {
+          salesOrderId: saved.orderId,
+          soNumber: saved.soNumber,
+          containerNumber: saved.containerNumber,
+          reason: saved.inapReason,
+        },
+      });
+    }
+    if (before.status === 'inap' && saved.status !== 'inap') {
+      await safeRecordActivityLog(request, {
+        action: 'RESUME_CONTAINER_JOB_FROM_INAP',
+        module: 'container_jobs',
+        entityType: 'container_job',
+        entityId: saved.id,
+        beforeData: {
+          status: before.status,
+          inapStartedAt: before.inapStartedAt,
+          inapReason: before.inapReason,
+        },
+        afterData: {
+          status: saved.status,
+          inapEndedAt: saved.inapEndedAt,
+        },
+        metadata: {
+          salesOrderId: saved.orderId,
+          soNumber: saved.soNumber,
+          containerNumber: saved.containerNumber,
         },
       });
     }

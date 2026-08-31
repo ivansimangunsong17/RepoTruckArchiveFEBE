@@ -709,7 +709,7 @@ export async function getMonthlyRevenueReport(options = {}) {
           coalesce(cj.entry_source, 'realtime') as entry_source,
           cj.historical_period,
           nullif(cj.assignment_snapshot->>'driver', '') as driver,
-          coalesce(v.unit_code, snapshot_vehicle.unit_code, nullif(cj.assignment_snapshot->>'unitCode', '')) as unit_code,
+          coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code,
           nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
           greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
         from sales_orders so
@@ -958,7 +958,7 @@ export async function getOperationReport(options = {}) {
                so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
                so.sales_name, so.created_by_name,
                so.origin, cj.destination,
-               coalesce(v.unit_code, snapshot_vehicle.unit_code, nullif(cj.assignment_snapshot->>'unitCode', '')) as unit_code
+               coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         left join vehicles v on v.id = cj.vehicle_id

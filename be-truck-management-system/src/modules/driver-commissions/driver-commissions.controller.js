@@ -7,9 +7,12 @@ import {
   listDriverCommissionBatches,
   payDriverCommissionPayment,
   previewEligibleDriverCommissions,
+  recordDriverCommissionDeduction,
   rejectSubmittedDriverCommissionBatch,
   submitDriverCommissionBatch,
+  updateDriverCommissionDeductionRecord,
   uploadDriverCommissionPaymentProof,
+  voidDriverCommissionDeductionRecord,
   voidDriverCommissionPaymentRecord,
 } from './driver-commissions.service.js';
 
@@ -35,6 +38,9 @@ export function driverCommissionBatchAuditSnapshot(batch = {}) {
       status: payment.status,
       totalItems: payment.totalItems || 0,
       totalAmount: payment.totalAmount || 0,
+      grossAmount: payment.grossAmount || 0,
+      deductionAmount: payment.deductionAmount || 0,
+      netAmount: payment.netAmount ?? payment.totalAmount ?? 0,
       paidAt: payment.paidAt,
       paidByName: payment.paidByName || '',
       paymentProofAttachmentId: payment.paymentProofAttachmentId || null,
@@ -188,4 +194,59 @@ export async function uploadDriverCommissionPaymentProofController(request, resp
     },
   });
   sendSuccess(response, result, 'Bukti transfer komisi sopir disimpan.');
+}
+
+export async function createDriverCommissionDeductionController(request, response) {
+  const { batch, deduction } = await recordDriverCommissionDeduction(request.params.id, request.body || {}, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'CREATE_DRIVER_COMMISSION_DEDUCTION',
+    module: 'driver_commissions',
+    entityType: 'driver_commission_deduction',
+    entityId: deduction.id,
+    afterData: deduction,
+    metadata: {
+      batchId: batch.id,
+      paymentId: request.params.id,
+      deductionType: deduction.deductionType,
+      amount: deduction.amount,
+    },
+  });
+  sendSuccess(response, batch, 'Potongan komisi sopir berhasil ditambahkan.', 201);
+}
+
+export async function updateDriverCommissionDeductionController(request, response) {
+  const { batch, deduction, previousDeduction } = await updateDriverCommissionDeductionRecord(request.params.id, request.body || {}, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'UPDATE_DRIVER_COMMISSION_DEDUCTION',
+    module: 'driver_commissions',
+    entityType: 'driver_commission_deduction',
+    entityId: deduction.id,
+    beforeData: previousDeduction,
+    afterData: deduction,
+    metadata: {
+      batchId: batch.id,
+      paymentId: deduction.paymentId,
+      deductionType: deduction.deductionType,
+      amount: deduction.amount,
+    },
+  });
+  sendSuccess(response, batch, 'Potongan komisi sopir berhasil diperbarui.');
+}
+
+export async function voidDriverCommissionDeductionController(request, response) {
+  const { batch, deduction, previousDeduction } = await voidDriverCommissionDeductionRecord(request.params.id, request.body || {}, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'VOID_DRIVER_COMMISSION_DEDUCTION',
+    module: 'driver_commissions',
+    entityType: 'driver_commission_deduction',
+    entityId: deduction.id,
+    beforeData: previousDeduction,
+    afterData: deduction,
+    metadata: {
+      batchId: batch.id,
+      paymentId: deduction.paymentId,
+      reason: deduction.voidReason,
+    },
+  });
+  sendSuccess(response, batch, 'Potongan komisi sopir berhasil dibatalkan.');
 }

@@ -3,6 +3,7 @@ import {
   createContainerJobExpenseController,
   generateContainerJobSpkController,
   getContainerJobController,
+  listContainerJobAssignmentHistoryController,
   listContainerJobExpenseLedgerController,
   listContainerJobExpensesController,
   listContainerJobsController,
@@ -36,6 +37,12 @@ export const containerJobRoutes = [
     path: '/api/container-jobs/:id/expenses',
     permission: 'container_job.read',
     handler: listContainerJobExpensesController,
+  },
+  {
+    method: 'GET',
+    path: '/api/container-jobs/:id/assignment-history',
+    permission: 'container_job.read',
+    handler: listContainerJobAssignmentHistoryController,
   },
   {
     method: 'POST',

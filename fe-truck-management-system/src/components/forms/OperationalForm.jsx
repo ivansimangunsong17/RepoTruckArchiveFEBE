@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
+import { hasPermission } from '../../constants/roles';
+import AssignmentHistorySection from './AssignmentHistorySection';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import DateTimeWibInput from '../common/DateTimeWibInput';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
@@ -121,6 +123,15 @@ function isTruckBusyForAnotherJob(truck, activeJobs = [], currentJobId) {
     const sameDriver = defaultDriver && normalizeName(job.driver) === defaultDriver;
     return sameTruck || sameDriver;
   });
+}
+
+function isDriverBusyForAnotherJob(driver, activeJobs = [], currentJobId) {
+  if (!driver) return false;
+  const driverName = normalizeName(driver.name);
+  if (!driverName) return false;
+  return (activeJobs || []).some((job) => (
+    isActiveAssignmentJob(job) && String(job.id) !== String(currentJobId) && normalizeName(job.driver) === driverName
+  ));
 }
 
 function getDriverPaymentInfo(driver) {
@@ -385,7 +396,7 @@ function createSpkPdfBlob(documentData, logoImage = null) {
   return buildPdfFile(commands.join('\n'), logoImage);
 }
 
-function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTrucks, masterDrivers, masterDestinations, activeJobs = [], currentUser, initialPhase = 'preparation' }) {
+function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTruckDefaultDriver, masterTrucks, masterDrivers, masterDestinations, activeJobs = [], currentUser, initialPhase = 'preparation' }) {
   const apiDataMode = isApiDataSource();
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
   const [fallbackDriverRows] = useState(() => getMasterData('tms-master-drivers-v2', fallbackDrivers));
@@ -396,6 +407,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     .map((truck) => normalizeTruck(truck, localTruckRows));
   const drivers = Array.isArray(masterDrivers) ? masterDrivers : localDriverRows;
   const findDriverByName = (name) => drivers.find((driver) => normalizeName(driver.name) === normalizeName(name));
+  const findDriverById = (id) => (id ? drivers.find((driver) => driver.id === id) : null);
   const getDriverDisplayName = (name) => (name ? findDriverByName(name)?.nickname || name : name);
   const isTruckDefaultDriverBlacklisted = (truck) => isDriverBlacklisted(findDriverByName(getTruckDefaultDriver(truck, localTruckRows)));
   const containerSize = normalizeSize(container.size || container.containerSize);
@@ -433,9 +445,13 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     tilaGatepassDocument: container.tilaGatepassDocument || container.unloadingVoucher || container.weighingDocument || '',
     tilaGatepassDocumentFile: container.tilaGatepassDocumentFile || container.unloadingVoucherDocument || container.weighingDocumentFile || null,
     driver: container.driver || '',
+    driverId: container.driverId || '',
     ...initialDriverPayment,
     chassis: container.chassis || '',
     plateNumber: container.plateNumber || '',
+    vehicleId: container.vehicleId || '',
+    assignmentChangeReason: '',
+    assignmentChangeNote: '',
     travelDocument: container.travelDocument || '',
     travelDocumentFile: container.travelDocumentFile || null,
     otherDocuments: container.otherDocuments || [],
@@ -449,6 +465,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const [error, setError] = useState('');
   const [notification, setNotification] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [defaultDriverFormOpen, setDefaultDriverFormOpen] = useState(false);
+  const [defaultDriverReason, setDefaultDriverReason] = useState('');
+  const [defaultDriverSaving, setDefaultDriverSaving] = useState(false);
+  const [defaultDriverError, setDefaultDriverError] = useState('');
   const submitInFlightRef = useRef(false);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const driverCommissionAmountValue = form.hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
@@ -469,6 +489,24 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   const canEditDriverCommission = !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
   const canFillMissingAssignment = !hasCompleteAssignment && form.status !== 'completed';
   const canEditAssignment = canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed');
+  const originalAssignedDriver = String(container.driver || '').trim();
+  const originalAssignedPlate = String(container.plateNumber || '').trim();
+  const hadCompleteAssignmentBefore = Boolean(originalAssignedDriver && originalAssignedPlate);
+  const assignmentIdentityChanged = String(form.driver || '').trim() !== originalAssignedDriver
+    || String(form.plateNumber || '').trim() !== originalAssignedPlate;
+  const assignmentChangeReasonRequired = !canReviseLockedFields
+    && hadCompleteAssignmentBefore
+    && assignmentIdentityChanged
+    && form.status !== 'received';
+  const canSetTruckDefaultDriver = hasPermission(currentUser, 'operations.truck_default_driver.update');
+  const selectedTruckForDefault = trucks.find((truck) => truck.plateNumber === form.plateNumber) || null;
+  const canTriggerSetDefaultDriver = Boolean(
+    canSetTruckDefaultDriver
+      && onSetTruckDefaultDriver
+      && selectedTruckForDefault
+      && String(form.driver || '').trim()
+      && normalizeName(form.driver) !== normalizeName(selectedTruckForDefault.defaultDriver),
+  );
   const hasSavedContainerNumber = Boolean(String(container.containerNumber || '').trim());
   const canFillInitialContainerNumber = !hasSavedContainerNumber && !['completed', 'cancelled'].includes(container.status);
   const canEditContainerNumber = !isRepoPickupMode && (
@@ -608,19 +646,26 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
       setError(`Truck ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }
-    const driverName = getTruckDefaultDriver(truck, localTruckRows);
-    const selectedDriver = findDriverByName(driverName);
-    if (truck && isDriverBlacklisted(selectedDriver) && truck.plateNumber !== container.plateNumber) {
+    // Sopir cuma di-auto-fill dari default truck kalau belum ada sopir terpilih sama sekali --
+    // begitu Operational sudah memilih sopir sendiri (independen dari truck), ganti truck tidak
+    // boleh menimpa pilihan itu. Dicoba dulu lookup by id (default_driver_id, lebih akurat, tidak
+    // rentan salah tangkap kalau ada nama kembar) baru fallback by name untuk truck lama yang
+    // cuma pernah diisi lewat halaman Master Truck (belum punya defaultDriverId).
+    const shouldAutoFillDriver = !String(form.driver || '').trim();
+    const driverByIdFallback = shouldAutoFillDriver ? findDriverById(truck?.defaultDriverId) : null;
+    const driverName = shouldAutoFillDriver ? (driverByIdFallback?.name || getTruckDefaultDriver(truck, localTruckRows)) : '';
+    const selectedDriver = shouldAutoFillDriver ? (driverByIdFallback || findDriverByName(driverName)) : null;
+    if (shouldAutoFillDriver && truck && isDriverBlacklisted(selectedDriver) && truck.plateNumber !== container.plateNumber) {
       setError(`Sopir ${selectedDriver.name} masuk blacklist dan tidak bisa di-assign.`);
       return;
     }
-    const driverPayment = getDriverPaymentInfo(selectedDriver);
+    const driverPayment = shouldAutoFillDriver ? getDriverPaymentInfo(selectedDriver) : null;
     setError('');
     setForm((current) => ({
       ...current,
       plateNumber,
-      driver: driverName,
-      ...driverPayment,
+      vehicleId: truck?.id || '',
+      ...(shouldAutoFillDriver ? { driver: driverName, driverId: selectedDriver?.id || '', ...driverPayment } : {}),
       chassis: truck ? `${truck.unitCode} - ${truck.brand} ${truck.type}` : '',
       status: !plateNumber && current.status === 'running'
           ? 'received'
@@ -630,6 +675,57 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
           : current.runningAt,
       completedAt: !plateNumber && current.status === 'running' ? '' : current.completedAt,
     }));
+  }
+
+  function updateDriver(event) {
+    if (!canEditAssignment) {
+      setError('Driver dan truck tidak bisa diubah lagi setelah UJ ditransfer atau pekerjaan selesai.');
+      return;
+    }
+    const driverName = event.target.value;
+    const selectedDriver = findDriverByName(driverName);
+    if (selectedDriver && isDriverBlacklisted(selectedDriver) && normalizeName(driverName) !== normalizeName(container.driver)) {
+      setError(`Sopir ${selectedDriver.name} masuk blacklist dan tidak bisa di-assign.`);
+      return;
+    }
+    const driverPayment = getDriverPaymentInfo(selectedDriver);
+    setError('');
+    setForm((current) => ({
+      ...current,
+      driver: driverName,
+      driverId: selectedDriver?.id || '',
+      ...driverPayment,
+    }));
+  }
+
+  async function submitSetTruckDefaultDriver(event) {
+    event.preventDefault();
+    if (!canTriggerSetDefaultDriver || !selectedTruckForDefault) return;
+    const trimmedReason = defaultDriverReason.trim();
+    if (trimmedReason.length < 8) {
+      setDefaultDriverError('Alasan wajib diisi minimal 8 karakter.');
+      return;
+    }
+    const driver = findDriverByName(form.driver);
+    if (!driver?.id) {
+      setDefaultDriverError('Sopir aktual ritasi belum terdaftar di master driver.');
+      return;
+    }
+    setDefaultDriverSaving(true);
+    setDefaultDriverError('');
+    try {
+      await onSetTruckDefaultDriver(selectedTruckForDefault.id, { defaultDriverId: driver.id, reason: trimmedReason });
+      setDefaultDriverFormOpen(false);
+      setDefaultDriverReason('');
+      setNotification({
+        title: 'Default sopir truck diperbarui',
+        message: 'Default sopir truck diperbarui. Berlaku untuk ritasi baru berikutnya.',
+      });
+    } catch (requestError) {
+      setDefaultDriverError(requestError?.message || 'Default sopir truck gagal disimpan.');
+    } finally {
+      setDefaultDriverSaving(false);
+    }
   }
 
   function updateFile(key, file) {
@@ -930,6 +1026,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
   }
 
   function buildSubmitForm({ forceRpujStatus } = {}) {
+    if (assignmentChangeReasonRequired && !String(form.assignmentChangeReason || '').trim()) {
+      return { error: 'Ritasi sudah berjalan -- alasan perubahan sopir/truck wajib diisi.' };
+    }
     const hasDriverCommission = Boolean(form.hasDriverCommission);
     const driverCommissionAmount = hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
     if (driverCommissionAmount < 0) {
@@ -1066,6 +1165,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
     && (!isTruckDefaultDriverBlacklisted(truck) || truck.plateNumber === form.plateNumber)
   ));
   const currentTruckExists = availableTrucks.some((truck) => truck.plateNumber === form.plateNumber);
+  const availableDrivers = drivers.filter((driver) => (
+    (!isDriverBlacklisted(driver) || normalizeName(driver.name) === normalizeName(form.driver))
+    && !isDriverBusyForAnotherJob(driver, activeJobs, container.id)
+  ));
+  const currentDriverExists = availableDrivers.some((driver) => normalizeName(driver.name) === normalizeName(form.driver));
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={isSaving ? undefined : onClose}>
@@ -1148,17 +1252,68 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
 
           <div className="operational-form-content">
           {activePhase === 'preparation' ? (
+          <>
           <div className="form-section">
-            <h3>Assignment</h3>
+            <h3>Assignment Aktual</h3>
+            <p className="mb-2 text-[11px] font-medium text-slate-500">Perubahan ini hanya berlaku untuk ritasi ini dan tidak mengubah master.</p>
             <div className="order-form-grid">
-              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'} - {getDriverDisplayName(truck.defaultDriver) || 'Driver belum diset'}</option>)}</select></label>
+              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'}</option>)}</select></label>
               <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
-              <label>Driver Otomatis<input name="driver" value={form.driver || 'Pilih truck terlebih dahulu'} readOnly /></label>
+              <label>Sopir Aktual Ritasi<select name="driver" value={form.driver} onChange={updateDriver} disabled={!canEditAssignment}><option value="">Pilih sopir</option>{form.driver && !currentDriverExists ? <option value={form.driver}>{form.driver}</option> : null}{availableDrivers.map((driver) => <option key={driver.id || driver.name} value={driver.name}>{driver.nickname ? `${driver.name} (${driver.nickname})` : driver.name}</option>)}</select></label>
               <label>Pembayaran UJ Driver<input value={form.driverBankAccount || 'Belum diisi di master driver'} readOnly /></label>
               <label>Detail Truck<input value={form.chassis} readOnly /></label>
+              <label>Alasan Perubahan{assignmentChangeReasonRequired ? ' *' : ''}<input name="assignmentChangeReason" value={form.assignmentChangeReason} onChange={updateField} disabled={!canEditAssignment} placeholder="Contoh: sopir sakit, truck rusak di jalan" /></label>
+              <label>Catatan<textarea name="assignmentChangeNote" value={form.assignmentChangeNote} onChange={updateField} disabled={!canEditAssignment} placeholder="Catatan tambahan (opsional)" rows={2} /></label>
             </div>
+            {selectedTruckForDefault ? (
+              <p className="mt-2 text-[11px] font-medium text-slate-500">Default sopir truck saat ini: {getDriverDisplayName(selectedTruckForDefault.defaultDriver) || 'belum diset'}</p>
+            ) : null}
+            {canSetTruckDefaultDriver ? (
+              <div className="mt-2">
+                {defaultDriverFormOpen ? (
+                  <form className="grid gap-2 rounded-md border border-sky-200 bg-sky-50 p-3" onSubmit={submitSetTruckDefaultDriver}>
+                    <p className="text-xs font-semibold text-sky-900">
+                      Ini akan mengubah default sopir untuk {selectedTruckForDefault?.plateNumber} menjadi {form.driver}. Perubahan hanya berlaku untuk ritasi baru berikutnya dan tidak mengubah ritasi lama.
+                    </p>
+                    <label className="grid gap-1 text-[11px] font-bold text-slate-700">
+                      Alasan
+                      <textarea
+                        className="min-h-14 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
+                        disabled={defaultDriverSaving}
+                        onChange={(event) => setDefaultDriverReason(event.target.value)}
+                        placeholder="Contoh: sopir tetap truck ini memang diganti"
+                        value={defaultDriverReason}
+                      />
+                    </label>
+                    {defaultDriverError ? <p className="text-xs font-semibold text-rose-700">{defaultDriverError}</p> : null}
+                    <div className="flex flex-wrap gap-2">
+                      <button className="primary-button" disabled={defaultDriverSaving} type="submit">{defaultDriverSaving ? 'Menyimpan...' : 'Konfirmasi'}</button>
+                      <button
+                        className="secondary-button"
+                        disabled={defaultDriverSaving}
+                        onClick={() => { setDefaultDriverFormOpen(false); setDefaultDriverReason(''); setDefaultDriverError(''); }}
+                        type="button"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    className="text-xs font-bold text-sky-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
+                    disabled={!canTriggerSetDefaultDriver}
+                    onClick={() => { setDefaultDriverFormOpen(true); setDefaultDriverError(''); }}
+                    type="button"
+                  >
+                    Jadikan sopir ini default truck
+                  </button>
+                )}
+              </div>
+            ) : null}
             {!canEditAssignment ? (
               <p className="mt-2 text-[11px] font-medium text-amber-700">Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</p>
+            ) : assignmentChangeReasonRequired ? (
+              <p className="mt-2 text-[11px] font-medium text-amber-700">Ritasi sudah berjalan -- alasan perubahan sopir/truck wajib diisi sebelum disimpan.</p>
             ) : null}
             {!canEditContainerNumber ? (
               <p className="mt-2 text-[11px] font-medium text-amber-700">{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</p>
@@ -1166,6 +1321,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, masterTr
               <p className="mt-2 text-[11px] font-medium text-emerald-700">No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</p>
             ) : null}
           </div>
+          <AssignmentHistorySection containerJobId={container.id} />
+          </>
           ) : null}
 
           {activePhase === 'rpuj' ? (

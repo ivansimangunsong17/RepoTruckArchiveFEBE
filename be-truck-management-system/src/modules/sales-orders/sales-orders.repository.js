@@ -131,6 +131,30 @@ const attachmentColumns = `
   mime_type, file_size, notes, uploaded_by_name, created_at
 `;
 
+// Approksimasi read-only untuk follow-up Sales -- pakai total_amount, bukan billing_amount
+// live finance module (finance.repository.js invoiceOrdersCte) yang menjumlahkan finance_rows
+// per-container. Ledger presisi tetap di halaman Finance; ini cuma untuk tahu siapa yang perlu
+// ditagih, jadi selisih kecil akibat koreksi pasca-invoice bisa diterima.
+const dueDateAndOutstandingSelectSql = `
+  case
+    when invoice_number is null or btrim(invoice_number) = '' then null
+    when invoice_issued_at is null then null
+    when lower(coalesce(payment_type, 'cash')) = 'tempo'
+      then invoice_issued_at + (greatest(coalesce(payment_term_days, 0), 1) * interval '1 day')
+    else invoice_issued_at
+  end as due_date,
+  case
+    when invoice_number is null or btrim(invoice_number) = '' then null
+    else greatest(
+      coalesce(nullif(total_amount, 0), 0) - coalesce((
+        select sum(amount) from sales_order_payments sop
+        where sop.sales_order_id = sales_orders.id and sop.voided_at is null
+      ), 0),
+      0
+    )
+  end::numeric as outstanding_amount
+`;
+
 function parsePage(options = {}) {
   const page = Math.max(1, Number(options.page || 1));
   const pageSize = Math.max(1, Math.min(100, Number(options.pageSize || 20)));
@@ -492,13 +516,13 @@ export async function findSalesOrdersPage(options = {}) {
   const orderColumns = await getSalesOrderColumns();
   const sortByCompletedAt = options.status === 'completed' || Boolean(options.invoiced) || Boolean(options.invoiceDocumentStatus);
   const orderBySql = sortByCompletedAt
-    ? 'order by completed_at desc nulls last, trip_date desc, created_at desc'
+    ? 'order by updated_at desc nulls last, trip_date desc, created_at desc'
     : 'order by trip_date asc, created_at desc';
 
   const [rowsResult, countResult, summaryResult] = await Promise.all([
     query(
       `
-        select ${orderColumns}
+        select ${orderColumns}, ${dueDateAndOutstandingSelectSql}
         from sales_orders
         ${whereSql}
         ${orderBySql}
@@ -558,7 +582,10 @@ export async function findSalesOrdersPage(options = {}) {
 
 export async function findSalesOrderById(id) {
   const orderColumns = await getSalesOrderColumns();
-  const result = await query(`select ${orderColumns} from sales_orders where id = $1`, [id]);
+  const result = await query(
+    `select ${orderColumns}, ${dueDateAndOutstandingSelectSql} from sales_orders where id = $1`,
+    [id],
+  );
   const rows = await fetchOrdersWithJobs(result.rows);
   return rows[0] || null;
 }

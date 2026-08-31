@@ -9,6 +9,7 @@ import {
   removeMasterRow,
   saveMasterRow,
   saveMasterViewerNote,
+  setVehicleDefaultDriver,
 } from './master.service.js';
 
 function isDestinationResource(resource) {
@@ -90,6 +91,29 @@ export async function updateMasterController(request, response) {
     afterData: saved,
   });
   sendSuccess(response, saved, 'Data master berhasil diperbarui.');
+}
+
+export async function updateVehicleDefaultDriverController(request, response) {
+  const { before, after, reason } = await setVehicleDefaultDriver(request.params.id, request.body);
+  await safeRecordActivityLog(request, {
+    action: 'UPDATE_TRUCK_DEFAULT_DRIVER',
+    module: 'vehicles',
+    entityType: 'vehicle',
+    entityId: after.id,
+    beforeData: { defaultDriverId: before.defaultDriverId, defaultDriver: before.defaultDriver },
+    afterData: { defaultDriverId: after.defaultDriverId, defaultDriver: after.defaultDriver },
+    metadata: {
+      truckId: after.id,
+      plateNumber: after.plateNumber,
+      unitCode: after.unitCode,
+      previousDefaultDriverId: before.defaultDriverId,
+      previousDefaultDriverName: before.defaultDriver,
+      nextDefaultDriverId: after.defaultDriverId,
+      nextDefaultDriverName: after.defaultDriver,
+      reason,
+    },
+  });
+  sendSuccess(response, after, 'Default sopir truck berhasil diperbarui.');
 }
 
 export async function archiveMasterController(request, response) {

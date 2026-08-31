@@ -26,7 +26,7 @@ import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
-import { fetchSalesOrdersPage, updateSalesOrderInvoiceDeliveryStatus } from '../../services/archive/salesOrderService';
+import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
 import { generateContainerJobSpk } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
@@ -48,11 +48,6 @@ const INVOICE_DOCUMENT_LABELS = {
   siap_dikirim: 'Dokumen Siap Dikirim',
   terkirim: 'Dokumen Terkirim',
 };
-const INVOICE_DELIVERY_METHOD_OPTIONS = [
-  { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'email', label: 'Email' },
-  { value: 'lainnya', label: 'Lainnya' },
-];
 const ACCURATE_DOCUMENT_SLOTS = [
   { category: 'invoicePdf', label: 'Invoice' },
   { category: 'taxInvoicePdf', label: 'Faktur Pajak' },
@@ -201,34 +196,8 @@ function getBillingStatusTone(order, overrideValue = '') {
   return 'pending';
 }
 
-function getBillingSelectStyle(order, overrideValue = '') {
-  const status = getBillingStatusValue(order, overrideValue);
-  if (status === 'lunas') {
-    return { borderColor: '#5eead4', backgroundColor: '#f0fdfa', color: '#0f766e' };
-  }
-  if (status === 'belum_invoice') {
-    return { borderColor: '#fecaca', backgroundColor: '#fff7f7', color: '#991b1b' };
-  }
-  return { borderColor: '#fcd34d', backgroundColor: '#fffbeb', color: '#92400e' };
-}
-
 function isWaitingStatus(value) {
   return ['received', 'waiting_operational'].includes(value || 'waiting_operational');
-}
-
-function toDateInputValue(value) {
-  if (!value) return '';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10);
-  return [
-    parsed.getFullYear(),
-    String(parsed.getMonth() + 1).padStart(2, '0'),
-    String(parsed.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function todayDateInputValue() {
-  return toDateInputValue(new Date());
 }
 
 function toValidDate(value) {
@@ -520,13 +489,9 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingContainer, setEditingContainer] = useState(null);
   const [invoiceOverrides] = useState({});
-  const [billingStatusOverrides, setBillingStatusOverrides] = useState(() => (
+  const [billingStatusOverrides] = useState(() => (
     archive.isDatabaseMode ? {} : readLocalBillingStatusOverrides()
   ));
-  const [billingStatusDraft, setBillingStatusDraft] = useState('belum_invoice');
-  const [invoiceDeliveryDateDraft, setInvoiceDeliveryDateDraft] = useState(todayDateInputValue);
-  const [invoiceDeliveryMethodDraft, setInvoiceDeliveryMethodDraft] = useState('whatsapp');
-  const [invoiceDeliveryNotesDraft, setInvoiceDeliveryNotesDraft] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [cancelContainerTarget, setCancelContainerTarget] = useState(null);
@@ -551,17 +516,6 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
     if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && !isNumberedByFinance(order) && !hasSentRpuj(order);
     return false;
   };
-  const canUpdateBillingOrder = (order) => canViewCommercial && canUpdateOrder && (
-    user?.role === USER_ROLES.ADMIN
-    || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, order))
-  );
-  const selectedBillingStatus = getBillingStatusValue(
-    selectedOrder,
-    archive.isDatabaseMode ? '' : billingStatusOverrides[selectedOrder?.id] || '',
-  );
-  const selectedInvoiceDocumentsReady = hasReadyAccurateDocuments(selectedOrder);
-  const selectedBillingLockedForSales = user?.role === USER_ROLES.SALES && selectedBillingStatus === 'lunas';
-  const canEditSelectedCommercial = canUpdateBillingOrder(selectedOrder) && !selectedBillingLockedForSales;
   const canModifySelectedOrder = canModifyOrder(selectedOrder);
   const canCancelSelectedOrder = canModifySelectedOrder
     && hasPermission(user, 'orders.cancel')
@@ -619,13 +573,6 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const getBillingStatusOverride = useCallback((order) => (
     archive.isDatabaseMode ? '' : billingStatusOverrides[order?.id] || ''
   ), [archive.isDatabaseMode, billingStatusOverrides]);
-
-  useEffect(() => {
-    setBillingStatusDraft(getBillingStatusValue(selectedOrder, getBillingStatusOverride(selectedOrder)));
-    setInvoiceDeliveryDateDraft(toDateInputValue(selectedOrder?.invoiceDocumentSentAt) || todayDateInputValue());
-    setInvoiceDeliveryMethodDraft(selectedOrder?.invoiceDocumentDeliveryMethod || 'whatsapp');
-    setInvoiceDeliveryNotesDraft(selectedOrder?.invoiceDocumentDeliveryNotes || '');
-  }, [selectedOrder, getBillingStatusOverride]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) persistLocalBillingStatusOverrides(billingStatusOverrides);
@@ -698,98 +645,6 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
 
   function openOrderDetail(order) {
     setSelectedOrder(order);
-    setBillingStatusDraft(getBillingStatusValue(order, getBillingStatusOverride(order)));
-    setInvoiceDeliveryDateDraft(toDateInputValue(order?.invoiceDocumentSentAt) || todayDateInputValue());
-    setInvoiceDeliveryMethodDraft(order?.invoiceDocumentDeliveryMethod || 'whatsapp');
-    setInvoiceDeliveryNotesDraft(order?.invoiceDocumentDeliveryNotes || '');
-  }
-
-  async function saveBillingStatusDraft(nextValue = billingStatusDraft) {
-    if (!canEditSelectedCommercial || !selectedOrder) return;
-
-    const resolvedValue = typeof nextValue === 'string' ? nextValue : billingStatusDraft;
-    const nextBillingStatus = normalizeBillingStatus(resolvedValue, getOrderInvoiceNumber(selectedOrder));
-    if (selectedOrder.status !== 'completed') {
-      notify({
-        type: 'error',
-        title: 'Status belum bisa diubah',
-        message: 'Status billing hanya dapat diisi setelah order selesai dari operational.',
-      });
-      return;
-    }
-
-    if (!getOrderInvoiceNumber(selectedOrder)) {
-      notify({
-        type: 'error',
-        title: 'Invoice belum tersedia',
-        message: 'Tunggu Finance input nomor invoice sebelum update status pengiriman.',
-      });
-      return;
-    }
-
-    if (nextBillingStatus !== 'belum_dikirim' && !selectedInvoiceDocumentsReady) {
-      notify({
-        type: 'error',
-        title: 'Dokumen belum lengkap',
-        message: 'Tunggu Finance upload Invoice dan Faktur Pajak dari Accurate.',
-      });
-      return;
-    }
-
-    if (nextBillingStatus !== 'belum_dikirim' && !invoiceDeliveryDateDraft) {
-      notify({
-        type: 'error',
-        title: 'Tanggal kirim belum diisi',
-        message: 'Isi tanggal pengiriman dokumen sebelum menyimpan status.',
-      });
-      return;
-    }
-
-    if (!archive.isDatabaseMode) {
-      setBillingStatusOverrides((current) => ({ ...current, [selectedOrder.id]: nextBillingStatus }));
-      setSelectedOrder((current) => (current ? {
-        ...current,
-        billingStatus: nextBillingStatus,
-        invoiceDocumentStatus: nextBillingStatus === 'belum_dikirim' ? current.invoiceDocumentStatus : 'terkirim',
-        invoiceDocumentSentAt: nextBillingStatus === 'belum_dikirim' ? current.invoiceDocumentSentAt : invoiceDeliveryDateDraft,
-        invoiceDocumentDeliveryMethod: nextBillingStatus === 'belum_dikirim' ? current.invoiceDocumentDeliveryMethod : invoiceDeliveryMethodDraft,
-        invoiceDocumentDeliveryNotes: nextBillingStatus === 'belum_dikirim' ? current.invoiceDocumentDeliveryNotes : invoiceDeliveryNotesDraft,
-      } : current));
-    }
-
-    try {
-      const nextOrder = { ...selectedOrder, billingStatus: nextBillingStatus };
-      if (archive.isDatabaseMode) {
-        const savedOrder = await updateSalesOrderInvoiceDeliveryStatus(selectedOrder.id, {
-          billingStatus: nextBillingStatus,
-          sentAt: nextBillingStatus === 'belum_dikirim' ? null : invoiceDeliveryDateDraft,
-          deliveryMethod: nextBillingStatus === 'belum_dikirim' ? '' : invoiceDeliveryMethodDraft,
-          deliveryNotes: nextBillingStatus === 'belum_dikirim' ? '' : invoiceDeliveryNotesDraft.trim(),
-        });
-        setSelectedOrder(savedOrder);
-        setListVersion((value) => value + 1);
-      } else {
-        setSelectedOrder({
-          ...nextOrder,
-          invoiceDocumentStatus: nextBillingStatus === 'belum_dikirim' ? nextOrder.invoiceDocumentStatus : 'terkirim',
-          invoiceDocumentSentAt: nextBillingStatus === 'belum_dikirim' ? nextOrder.invoiceDocumentSentAt : invoiceDeliveryDateDraft,
-          invoiceDocumentDeliveryMethod: nextBillingStatus === 'belum_dikirim' ? nextOrder.invoiceDocumentDeliveryMethod : invoiceDeliveryMethodDraft,
-          invoiceDocumentDeliveryNotes: nextBillingStatus === 'belum_dikirim' ? nextOrder.invoiceDocumentDeliveryNotes : invoiceDeliveryNotesDraft,
-        });
-        setBillingStatusOverrides((current) => ({ ...current, [selectedOrder.id]: nextBillingStatus }));
-      }
-
-      notify({
-        title: 'Status billing tersimpan',
-        message: `${selectedOrder.soNumber} sekarang berstatus ${getBillingStatusLabel({ billingStatus: nextBillingStatus, invoiceNumber: selectedOrder.invoiceNumber })}.`,
-      });
-    } catch (requestError) {
-      notify({
-        type: 'error',
-        title: 'Status billing gagal disimpan',
-        message: requestError.message,
-      });
-    }
   }
 
   useEffect(() => {
@@ -1217,76 +1072,19 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                         ))}
                       </div>
                     ) : null}
-                    {canEditSelectedCommercial && getOrderInvoiceNumber(selectedOrder) && selectedInvoiceDocumentsReady ? (
-                      <div className="order-billing-controls">
-                        <label className="order-billing-select">
-                          Status Pengiriman Invoice
-                          <select
-                            value={billingStatusDraft}
-                            style={getBillingSelectStyle(selectedOrder, billingStatusDraft)}
-                            onChange={async (event) => {
-                              const nextValue = event.target.value;
-                              setBillingStatusDraft(nextValue);
-                              setBillingStatusOverrides((current) => ({ ...current, [selectedOrder.id]: nextValue }));
-                              await saveBillingStatusDraft(nextValue);
-                            }}
-                          >
-                            {BILLING_STATUS_OPTIONS.map((option) => (
-                              <option
-                                key={option.value}
-                                value={option.value}
-                              >
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {billingStatusDraft !== 'belum_dikirim' ? (
-                          <>
-                            <label className="order-billing-select">
-                              Tanggal Kirim
-                              <input
-                                type="date"
-                                value={invoiceDeliveryDateDraft}
-                                onChange={(event) => setInvoiceDeliveryDateDraft(event.target.value)}
-                              />
-                            </label>
-                            <label className="order-billing-select">
-                              Metode
-                              <select
-                                value={invoiceDeliveryMethodDraft}
-                                onChange={(event) => setInvoiceDeliveryMethodDraft(event.target.value)}
-                              >
-                                {INVOICE_DELIVERY_METHOD_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>{option.label}</option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="order-billing-select order-billing-note-field">
-                              Catatan
-                              <input
-                                placeholder="Opsional"
-                                value={invoiceDeliveryNotesDraft}
-                                onChange={(event) => setInvoiceDeliveryNotesDraft(event.target.value)}
-                              />
-                            </label>
-                          </>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="secondary-button invoice-edit-button"
-                          onClick={() => saveBillingStatusDraft()}
-                        >
-                          Simpan Status
-                        </button>
-                      </div>
-                    ) : selectedBillingLockedForSales ? (
-                      <small className="order-billing-note">Invoice sudah lunas. Perubahan status hanya dapat dilakukan oleh Admin.</small>
-                    ) : canEditSelectedCommercial && getOrderInvoiceNumber(selectedOrder) ? (
-                      <small className="order-billing-note">Tunggu Finance upload Invoice dan Faktur Pajak sebelum dokumen dapat dikirim ke customer.</small>
-                    ) : canEditSelectedCommercial ? (
-                      <small className="order-billing-note">Finance perlu input nomor invoice sebelum Sales bisa update status pengiriman.</small>
+                    {getOrderInvoiceNumber(selectedOrder) ? (
+                      <>
+                        <div className="order-invoice-card-value">
+                          <span>Jatuh Tempo</span>
+                          <strong>{selectedOrder.dueDate ? formatDate(selectedOrder.dueDate) : '-'}</strong>
+                        </div>
+                        <div className="order-invoice-card-value">
+                          <span>Outstanding</span>
+                          <strong>{selectedOrder.outstandingAmount == null ? '-' : formatCurrency(selectedOrder.outstandingAmount)}</strong>
+                        </div>
+                      </>
                     ) : null}
+                    <small className="order-billing-note">Status pengiriman invoice dan pembayaran dikelola oleh Finance.</small>
                   </div>
                 ) : null}
               </div>

@@ -5,7 +5,7 @@ import SalesOrdersPage from './SalesOrdersPage';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
 import { useArchiveData } from '../../hooks/useArchiveData';
-import { fetchSalesOrdersPage, updateSalesOrderInvoiceDeliveryStatus } from '../../services/archive/salesOrderService';
+import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
 
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: vi.fn(),
@@ -21,7 +21,6 @@ vi.mock('../../hooks/useArchiveData', () => ({
 
 vi.mock('../../services/archive/salesOrderService', () => ({
   fetchSalesOrdersPage: vi.fn(),
-  updateSalesOrderInvoiceDeliveryStatus: vi.fn(),
 }));
 
 describe('SalesOrdersPage billing status flow', () => {
@@ -53,6 +52,8 @@ describe('SalesOrdersPage billing status flow', () => {
         receivedAt: '2026-07-20T10:21:00.000Z',
         invoiceNumber: 'INV-001',
         invoiceIssuedAt: '2026-07-21T08:00:00.000Z',
+        dueDate: '2026-08-04T00:00:00.000Z',
+        outstandingAmount: 4500000,
         billingStatus: 'menunggu_pembayaran',
         invoiceDocumentStatus: 'siap_dikirim',
         invoiceDocumentUploadedAt: '2026-07-21T09:00:00.000Z',
@@ -94,22 +95,9 @@ describe('SalesOrdersPage billing status flow', () => {
         cancelledContainers: 1,
       },
     });
-    updateSalesOrderInvoiceDeliveryStatus.mockResolvedValue({
-      id: 'order-1',
-      soNumber: 'SO-001',
-      customer: 'PT Contoh',
-      shipment: 'import',
-      status: 'completed',
-      invoiceNumber: 'INV-001',
-      billingStatus: 'menunggu_pembayaran',
-      invoiceDocumentStatus: 'terkirim',
-      invoiceDocumentSentAt: '2026-07-22T00:00:00.000Z',
-      invoiceDocumentDeliveryMethod: 'whatsapp',
-      salesName: 'Sales A',
-    });
   });
 
-  it('mengirim status billing yang sedang dipilih saat tombol simpan diklik', async () => {
+  it('menampilkan status invoice dan pembayaran secara read-only, tanpa kontrol edit -- status pengiriman invoice sudah menjadi wewenang Finance', async () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage />);
 
@@ -130,15 +118,14 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(screen.getByText('Faktur Pajak diupload Finance')).toBeInTheDocument();
     expect(screen.getAllByText('invoice-001.pdf').length).toBeGreaterThan(0);
     expect(screen.getAllByText('faktur-001.pdf').length).toBeGreaterThan(0);
-    await user.click(await screen.findByRole('button', { name: 'Simpan Status' }));
 
-    await waitFor(() => expect(updateSalesOrderInvoiceDeliveryStatus).toHaveBeenCalledWith(
-      'order-1',
-      expect.objectContaining({
-        billingStatus: 'menunggu_pembayaran',
-        deliveryMethod: 'whatsapp',
-      }),
-    ));
+    expect(screen.getByText('Jatuh Tempo')).toBeInTheDocument();
+    expect(screen.getByText('Outstanding')).toBeInTheDocument();
+    expect(screen.getByText(/Rp\s*4\.500\.000/)).toBeInTheDocument();
+    expect(screen.getByText('Status pengiriman invoice dan pembayaran dikelola oleh Finance.')).toBeInTheDocument();
+
+    expect(screen.queryByLabelText('Status Pengiriman Invoice')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Simpan Status' })).not.toBeInTheDocument();
   });
 
   it('membuka form update container job langsung dari detail Sales Order', async () => {
@@ -210,7 +197,7 @@ describe('SalesOrdersPage billing status flow', () => {
     })));
   });
 
-  it('mengunci status invoice lunas untuk Sales', async () => {
+  it('tidak menampilkan kontrol edit status invoice untuk Sales meski invoice sudah lunas', async () => {
     const user = userEvent.setup();
     useAuth.mockReturnValue({
       user: { id: 'user-1', role: 'sales', fullName: 'Sales A' },
@@ -244,7 +231,7 @@ describe('SalesOrdersPage billing status flow', () => {
     render(<SalesOrdersPage />);
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
 
-    expect(screen.getByText(/Invoice sudah lunas.*hanya dapat dilakukan oleh Admin/i)).toBeInTheDocument();
+    expect(screen.getByText('Status pengiriman invoice dan pembayaran dikelola oleh Finance.')).toBeInTheDocument();
     expect(screen.queryByLabelText('Status Pengiriman Invoice')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Simpan Status' })).not.toBeInTheDocument();
   });

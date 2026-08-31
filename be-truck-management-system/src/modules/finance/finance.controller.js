@@ -22,6 +22,7 @@ import {
   fetchOrderVerifications,
   fetchRpujRequests,
   createOperationalFundRequest,
+  createRevenueLine,
   depositOperationalFund,
   fetchInvoicePayments,
   fetchCustomerOutstandingRollup,
@@ -38,11 +39,13 @@ import {
   saveDebitNoteNumber,
   saveInvoiceNumber,
   saveOrderVerificationSoNumber,
+  updateRevenueLine,
   uploadInvoiceDocument,
   uploadOperationalFundTransferProof,
   uploadRpujTransferProof,
   voidDebitNotePaymentForOrder,
   voidInvoicePayment,
+  voidRevenueLine,
 } from './finance.service.js';
 
 export async function financeDashboardController(request, response) {
@@ -355,6 +358,58 @@ export async function voidInvoicePaymentController(request, response) {
     },
   });
   sendSuccess(response, result, 'Pembayaran berhasil dibatalkan.');
+}
+
+export async function createRevenueLineController(request, response) {
+  const result = await createRevenueLine(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_CREATE_REVENUE_LINE',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result?.line,
+    metadata: {
+      chargeType: result?.line?.chargeType,
+      description: result?.line?.description,
+      totalAmount: result?.line?.totalAmount,
+      billingAmount: result?.billingAmount,
+    },
+  });
+  sendSuccess(response, result, 'Revenue line berhasil ditambahkan.');
+}
+
+export async function updateRevenueLineController(request, response) {
+  const result = await updateRevenueLine(request.params.id, request.params.lineId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_UPDATE_REVENUE_LINE',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result?.line,
+    metadata: {
+      lineId: request.params.lineId,
+      totalAmount: result?.line?.totalAmount,
+      billingAmount: result?.billingAmount,
+    },
+  });
+  sendSuccess(response, result, 'Revenue line berhasil diperbarui.');
+}
+
+export async function voidRevenueLineController(request, response) {
+  const result = await voidRevenueLine(request.params.id, request.params.lineId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_VOID_REVENUE_LINE',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result?.line,
+    metadata: {
+      lineId: request.params.lineId,
+      reason: request.body?.reason,
+      billingAmount: result?.billingAmount,
+    },
+  });
+  sendSuccess(response, result, 'Revenue line berhasil dibatalkan.');
 }
 
 export async function debitNoteOrdersController(request, response) {

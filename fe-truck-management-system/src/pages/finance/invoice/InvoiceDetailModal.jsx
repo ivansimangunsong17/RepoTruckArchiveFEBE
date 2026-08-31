@@ -14,6 +14,30 @@ import {
   validateInvoicePdfFile,
 } from './invoiceUtils';
 
+const INVOICE_DELIVERY_STATUS_OPTIONS = [
+  { value: 'belum_dikirim', label: 'Dokumen Siap Dikirim' },
+  { value: 'belum_diterima', label: 'Dokumen Terkirim' },
+  { value: 'belum_dikonfirmasi', label: 'Belum Dikonfirmasi' },
+  { value: 'menunggu_pembayaran', label: 'Belum Dibayar' },
+  { value: 'revisi_dispute', label: 'Revisi / Dispute' },
+];
+
+const INVOICE_DELIVERY_METHOD_OPTIONS = [
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'email', label: 'Email' },
+  { value: 'lainnya', label: 'Lainnya' },
+];
+
+const REVENUE_LINE_CHARGE_TYPE_OPTIONS = [
+  { value: 'inap', label: 'Inap' },
+  { value: 'waiting_charge', label: 'Waiting Charge' },
+  { value: 'extra_trip', label: 'Extra Trip' },
+  { value: 'storage', label: 'Storage' },
+  { value: 'other', label: 'Lainnya' },
+];
+
+const EMPTY_REVENUE_LINE_DRAFT = { chargeType: 'inap', description: '', quantity: '1', unit: 'malam', unitPrice: '', note: '' };
+
 const DEBIT_NOTE_AGING_LABELS = {
   current: 'Belum Jatuh Tempo',
   overdue_1_30: 'Terlambat 1-30 Hari',
@@ -288,6 +312,12 @@ function InvoiceDetailModal({
   debitNotePaymentVoidBusyId = '',
   debitNotePaymentVoidError = '',
   invoiceNumberSaving = false,
+  deliveryStatusSaving = false,
+  deliveryStatusError = '',
+  revenueLineSaving = false,
+  revenueLineError = '',
+  revenueLineVoidBusyId = '',
+  revenueLineVoidError = '',
   onClose,
   onOpenCorrection,
   onUploadInvoiceDocument,
@@ -296,6 +326,9 @@ function InvoiceDetailModal({
   onConfirmDebitNotePayment,
   onVoidDebitNotePayment,
   onSaveInvoiceNumber,
+  onSaveInvoiceDeliveryStatus,
+  onSaveRevenueLine,
+  onVoidRevenueLine,
 }) {
   const [dragUploadKey, setDragUploadKey] = useState('');
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState({});
@@ -308,6 +341,14 @@ function InvoiceDetailModal({
   // tertutup di tengah mengetik (invoice.invoiceNumber cuma berubah setelah nomor BENAR-BENAR
   // tersimpan di server, bukan tiap keystroke).
   const [invoiceNumberDraft, setInvoiceNumberDraft] = useState('');
+  const [deliveryStatusDraft, setDeliveryStatusDraft] = useState('belum_dikirim');
+  const [deliveryDateDraft, setDeliveryDateDraft] = useState('');
+  const [deliveryMethodDraft, setDeliveryMethodDraft] = useState('whatsapp');
+  const [deliveryNotesDraft, setDeliveryNotesDraft] = useState('');
+  const [revenueLineFormOpen, setRevenueLineFormOpen] = useState(false);
+  const [revenueLineDraft, setRevenueLineDraft] = useState(EMPTY_REVENUE_LINE_DRAFT);
+  const [voidingRevenueLineId, setVoidingRevenueLineId] = useState(null);
+  const [revenueLineVoidReasonDraft, setRevenueLineVoidReasonDraft] = useState('');
 
   useEffect(() => {
     setDragUploadKey('');
@@ -317,9 +358,29 @@ function InvoiceDetailModal({
     setDebitNotePaymentOpen(false);
     setActiveSection('ringkasan');
     setInvoiceNumberDraft('');
+    setRevenueLineFormOpen(false);
+    setVoidingRevenueLineId(null);
+    setRevenueLineVoidReasonDraft('');
   }, [invoice?.id]);
 
+  // Seed draft status pengiriman dari nilai server saat invoice yang dibuka berganti (atau saat
+  // status barusan tersimpan) -- disengaja terpisah dari effect reset di atas supaya upload/debit
+  // note draft di tab lain tidak ikut ke-reset tiap kali status pengiriman berubah.
+  useEffect(() => {
+    setDeliveryStatusDraft(
+      invoice?.billingStatus && !['belum_invoice', 'lunas'].includes(invoice.billingStatus)
+        ? invoice.billingStatus
+        : 'belum_dikirim',
+    );
+    setDeliveryDateDraft(
+      invoice?.invoiceDocumentSentAt ? String(invoice.invoiceDocumentSentAt).slice(0, 10) : new Date().toISOString().slice(0, 10),
+    );
+    setDeliveryMethodDraft(invoice?.invoiceDocumentDeliveryMethod || 'whatsapp');
+    setDeliveryNotesDraft(invoice?.invoiceDocumentDeliveryNotes || '');
+  }, [invoice?.id, invoice?.billingStatus, invoice?.invoiceDocumentSentAt, invoice?.invoiceDocumentDeliveryMethod, invoice?.invoiceDocumentDeliveryNotes]);
+
   if (!invoice) return null;
+  const internalCost = invoice.internalCost || { journeyMoney: 0, journeyMoneySource: 'snapshot', journeyMoneyNeedsReview: false, additionalCost: 0, driverCommissionCost: 0, operationalExpenseTotal: 0, total: 0 };
   const documents = Array.isArray(invoice.documents) ? invoice.documents : [];
   const supportDocuments = documents.filter((document) => document.source !== 'Finance');
   const availableDocumentCount = supportDocuments.filter((document) => document.ready !== false && document.file?.path).length;
@@ -424,6 +485,47 @@ function InvoiceDetailModal({
     } catch (saveError) {
       // Error sudah ditampilkan lewat prop debitNoteNumberError.
     }
+  }
+
+  async function saveDeliveryStatus() {
+    const isSendingDocument = deliveryStatusDraft !== 'belum_dikirim';
+    try {
+      await onSaveInvoiceDeliveryStatus?.(invoice.id, {
+        billingStatus: deliveryStatusDraft,
+        sentAt: isSendingDocument ? deliveryDateDraft : null,
+        deliveryMethod: isSendingDocument ? deliveryMethodDraft : '',
+        deliveryNotes: isSendingDocument ? deliveryNotesDraft.trim() : '',
+      });
+    } catch {
+      // Error sudah ditampilkan lewat prop deliveryStatusError.
+    }
+  }
+
+  function openRevenueLineForm(chargeType) {
+    setRevenueLineDraft({ ...EMPTY_REVENUE_LINE_DRAFT, chargeType: chargeType || 'inap' });
+    setRevenueLineFormOpen(true);
+  }
+
+  async function saveRevenueLine() {
+    try {
+      await onSaveRevenueLine?.(invoice.id, {
+        chargeType: revenueLineDraft.chargeType,
+        description: revenueLineDraft.description.trim(),
+        quantity: Number(revenueLineDraft.quantity),
+        unit: revenueLineDraft.unit.trim(),
+        unitPrice: Number(revenueLineDraft.unitPrice),
+        note: revenueLineDraft.note.trim() || undefined,
+      });
+      setRevenueLineFormOpen(false);
+    } catch {
+      // Error sudah ditampilkan lewat prop revenueLineError.
+    }
+  }
+
+  async function confirmVoidRevenueLine(lineId) {
+    await onVoidRevenueLine?.(invoice.id, lineId, revenueLineVoidReasonDraft);
+    setVoidingRevenueLineId(null);
+    setRevenueLineVoidReasonDraft('');
   }
 
   function openDebitNotePaymentModal() {
@@ -562,6 +664,71 @@ function InvoiceDetailModal({
               </section>
             ) : null}
 
+            {invoice.invoiceNumber && invoice.billingStatus !== 'lunas' ? (
+              <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Status Pengiriman Invoice</p>
+                <div className="mt-1.5 flex flex-wrap items-end gap-2.5">
+                  <label className="grid min-w-[200px] flex-1 gap-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                    Status
+                    <select
+                      className="h-9 w-full rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-slate-500"
+                      onChange={(event) => setDeliveryStatusDraft(event.target.value)}
+                      value={deliveryStatusDraft}
+                    >
+                      {INVOICE_DELIVERY_STATUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {deliveryStatusDraft !== 'belum_dikirim' ? (
+                    <>
+                      <label className="grid min-w-[150px] gap-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                        Tanggal Kirim
+                        <input
+                          className="h-9 w-full rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-slate-500"
+                          onChange={(event) => setDeliveryDateDraft(event.target.value)}
+                          type="date"
+                          value={deliveryDateDraft}
+                        />
+                      </label>
+                      <label className="grid min-w-[150px] gap-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                        Metode
+                        <select
+                          className="h-9 w-full rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-slate-500"
+                          onChange={(event) => setDeliveryMethodDraft(event.target.value)}
+                          value={deliveryMethodDraft}
+                        >
+                          {INVOICE_DELIVERY_METHOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid min-w-[200px] flex-1 gap-1 text-[10px] font-black uppercase tracking-wide text-slate-600">
+                        Catatan
+                        <input
+                          className="h-9 w-full rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold normal-case text-slate-900 outline-none focus:border-slate-500"
+                          onChange={(event) => setDeliveryNotesDraft(event.target.value)}
+                          placeholder="Opsional"
+                          value={deliveryNotesDraft}
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                  <button
+                    className="h-9 shrink-0 rounded-md bg-slate-900 px-4 text-xs font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={deliveryStatusSaving}
+                    onClick={saveDeliveryStatus}
+                    type="button"
+                  >
+                    {deliveryStatusSaving ? 'Menyimpan' : 'Simpan Status'}
+                  </button>
+                </div>
+                {deliveryStatusError ? (
+                  <p className="mt-1.5 text-[11px] font-semibold text-rose-700">{deliveryStatusError}</p>
+                ) : null}
+              </section>
+            ) : null}
+
             <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 p-1.5" role="tablist" aria-label="Bagian detail invoice">
               {detailSections.map((section) => {
                 const active = section.id === activeSection;
@@ -595,7 +762,10 @@ function InvoiceDetailModal({
               </div>
               <div className="finance-invoice-support-stack">
                 <div className="finance-invoice-detail-card">
-                  <h4 className="mb-1.5 text-xs font-black text-slate-950">Rincian Tagihan</h4>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-slate-950">Invoice / Revenue</h4>
+                    <strong className="text-xs font-black text-slate-950">{formatCurrency(invoice.billingAmount)}</strong>
+                  </div>
                   <CompactList items={invoice.billingItems} />
                   {invoice.cancellationNote ? (
                     <div className="mt-2 flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs font-semibold leading-relaxed text-amber-800">
@@ -609,7 +779,202 @@ function InvoiceDetailModal({
                       <span>{invoice.repoStoredNote}</span>
                     </div>
                   ) : null}
+
+                  {invoice.manualRevenueLines?.length ? (
+                    <div className="mt-2.5 grid gap-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Biaya Inap / Revenue Manual</p>
+                      {invoice.manualRevenueLines.map((line) => (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-2" key={line.id}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className={`min-w-0 ${line.status === 'void' ? 'opacity-60' : ''}`}>
+                              <span className={`block text-xs font-semibold text-slate-700 ${line.status === 'void' ? 'line-through' : ''}`}>
+                                {readableLabel(Object.fromEntries(REVENUE_LINE_CHARGE_TYPE_OPTIONS.map((option) => [option.value, option.label])), line.chargeType)} - {line.description}
+                              </span>
+                              <span className="block truncate text-[10px] font-medium text-slate-500">
+                                {line.quantity} {line.unit} x {formatCurrency(line.unitPrice)}{line.note ? ` - ${line.note}` : ''}
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <strong className={`text-xs font-black text-slate-900 ${line.status === 'void' ? 'line-through opacity-60' : ''}`}>{formatCurrency(line.totalAmount)}</strong>
+                              {line.status === 'void' ? (
+                                <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
+                              ) : (
+                                <button
+                                  className="rounded-md border border-rose-200 px-2 py-1 text-[10px] font-black uppercase text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={revenueLineVoidBusyId === line.id}
+                                  onClick={() => { setVoidingRevenueLineId(voidingRevenueLineId === line.id ? null : line.id); setRevenueLineVoidReasonDraft(''); }}
+                                  type="button"
+                                >
+                                  Batalkan
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {line.status === 'void' ? (
+                            <p className="mt-1 text-[10px] font-semibold text-rose-600">Alasan: {line.voidReason} &middot; oleh {line.voidedByName}</p>
+                          ) : null}
+                          {voidingRevenueLineId === line.id ? (
+                            <div className="mt-2 grid gap-1.5 rounded-md border border-rose-200 bg-rose-100/40 p-2">
+                              <textarea
+                                className="w-full rounded-md border border-rose-200 px-2 py-1.5 text-xs"
+                                onChange={(event) => setRevenueLineVoidReasonDraft(event.target.value)}
+                                placeholder="Alasan pembatalan (wajib)"
+                                rows={2}
+                                value={revenueLineVoidReasonDraft}
+                              />
+                              {revenueLineVoidError ? <p className="text-[10px] font-semibold text-rose-700">{revenueLineVoidError}</p> : null}
+                              <div className="flex justify-end gap-2">
+                                <button className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50" onClick={() => setVoidingRevenueLineId(null)} type="button">Batal</button>
+                                <button
+                                  className="rounded-md border border-rose-300 bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={!revenueLineVoidReasonDraft.trim() || revenueLineVoidBusyId === line.id}
+                                  onClick={() => confirmVoidRevenueLine(line.id)}
+                                  type="button"
+                                >
+                                  {revenueLineVoidBusyId === line.id ? 'Membatalkan...' : 'Konfirmasi Batalkan'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {revenueLineFormOpen ? (
+                    <div className="mt-2.5 grid gap-1.5 rounded-md border border-slate-200 bg-slate-50 p-2.5">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
+                          Jenis
+                          <select
+                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, chargeType: event.target.value }))}
+                            value={revenueLineDraft.chargeType}
+                          >
+                            {REVENUE_LINE_CHARGE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </label>
+                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
+                          Satuan
+                          <input
+                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, unit: event.target.value }))}
+                            placeholder="malam, hari, rit"
+                            value={revenueLineDraft.unit}
+                          />
+                        </label>
+                      </div>
+                      <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
+                        Deskripsi
+                        <input
+                          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                          onChange={(event) => setRevenueLineDraft((current) => ({ ...current, description: event.target.value }))}
+                          placeholder="Contoh: Inap 1 malam di rest area KM 57"
+                          value={revenueLineDraft.description}
+                        />
+                      </label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
+                          Qty
+                          <input
+                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                            min="0"
+                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, quantity: event.target.value }))}
+                            type="number"
+                            value={revenueLineDraft.quantity}
+                          />
+                        </label>
+                        <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
+                          Harga Satuan
+                          <input
+                            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                            min="0"
+                            onChange={(event) => setRevenueLineDraft((current) => ({ ...current, unitPrice: event.target.value }))}
+                            type="number"
+                            value={revenueLineDraft.unitPrice}
+                          />
+                        </label>
+                      </div>
+                      <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500">
+                        Catatan
+                        <input
+                          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
+                          onChange={(event) => setRevenueLineDraft((current) => ({ ...current, note: event.target.value }))}
+                          placeholder="Opsional"
+                          value={revenueLineDraft.note}
+                        />
+                      </label>
+                      {revenueLineError ? <p className="text-[10px] font-semibold text-rose-700">{revenueLineError}</p> : null}
+                      <div className="flex justify-end gap-2">
+                        <button className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50" disabled={revenueLineSaving} onClick={() => setRevenueLineFormOpen(false)} type="button">Batal</button>
+                        <button
+                          className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={revenueLineSaving || !revenueLineDraft.description.trim() || !revenueLineDraft.unit.trim() || Number(revenueLineDraft.quantity) <= 0 || Number(revenueLineDraft.unitPrice) <= 0}
+                          onClick={saveRevenueLine}
+                          type="button"
+                        >
+                          {revenueLineSaving ? 'Menyimpan...' : 'Simpan'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      <button
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-[10px] font-black uppercase text-slate-700 hover:bg-slate-50"
+                        onClick={() => openRevenueLineForm('inap')}
+                        type="button"
+                      >
+                        Tambah Biaya Inap
+                      </button>
+                      <button
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-[10px] font-black uppercase text-slate-700 hover:bg-slate-50"
+                        onClick={() => openRevenueLineForm('other')}
+                        type="button"
+                      >
+                        Tambah Revenue Manual
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                <div className="finance-invoice-detail-card">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-slate-950">Debit Note / Reimbursement</h4>
+                    <strong className="text-xs font-black text-slate-950">{formatCurrency(invoice.debitNoteAmount)}</strong>
+                  </div>
+                  <p className="text-[11px] font-medium text-slate-500">
+                    Biaya reimbursement (bon muat/bongkar, TILA/gatepass, biaya pihak ketiga) ditagih terpisah lewat Debit Note, tidak masuk total Invoice.
+                    {invoice.debitNoteItemCount ? ` ${invoice.debitNoteItemCount} item tercatat.` : ''}
+                  </p>
+                  <button className="mt-2 text-[10px] font-black uppercase text-slate-700 underline" onClick={() => setActiveSection('debit-note')} type="button">
+                    Lihat rincian di tab Debit Note
+                  </button>
+                </div>
+
+                <div className="finance-invoice-detail-card">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-slate-950">Internal Cost</h4>
+                    <strong className="text-xs font-black text-slate-950">{formatCurrency(internalCost.total)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-1 py-1">
+                    <span className="text-xs font-semibold text-slate-700">UJ (Uang Jalan): {formatCurrency(internalCost.journeyMoney)}</span>
+                    {internalCost.journeyMoneyNeedsReview ? (
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-800" title="Belum pernah punya snapshot -- nominal masih estimasi dari tarif master saat ini, bisa berubah kalau tarif diedit">
+                        Perlu Review
+                      </span>
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-800" title="Nominal sudah dibekukan saat job pertama kali jalan, tidak berubah lagi meski tarif master diedit">
+                        Snapshot
+                      </span>
+                    )}
+                  </div>
+                  <CompactList items={[
+                    { label: `Biaya Tambahan: ${formatCurrency(internalCost.additionalCost)}` },
+                    { label: `Komisi Sopir: ${formatCurrency(internalCost.driverCommissionCost)}` },
+                    { label: `Biaya Operasional: ${formatCurrency(internalCost.operationalExpenseTotal)}` },
+                  ]} />
+                </div>
+
                 <div className="finance-invoice-detail-card">
                   <h4 className="mb-1.5 text-xs font-black text-slate-950">Riwayat Finance</h4>
                   <ActivityLogList logs={invoice.activityLogs} />

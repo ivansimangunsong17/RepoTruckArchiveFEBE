@@ -48,6 +48,10 @@ export function fetchContainerJobExpenses(id) {
   return httpClient.get(`/container-jobs/${id}/expenses`);
 }
 
+export function fetchContainerJobAssignmentHistory(id) {
+  return httpClient.get(`/container-jobs/${id}/assignment-history`);
+}
+
 export function fetchContainerJobExpenseLedger({
   page = 1,
   pageSize = 100,

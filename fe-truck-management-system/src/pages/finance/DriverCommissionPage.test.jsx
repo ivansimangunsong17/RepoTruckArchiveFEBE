@@ -7,6 +7,8 @@ import {
   fetchDriverCommissionBatchDetail,
   fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
+  recordDriverCommissionDeduction,
+  voidDriverCommissionDeduction,
 } from '../../services/finance/driverCommissionService';
 
 const notify = vi.fn();
@@ -16,7 +18,12 @@ vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: {
       role: 'finance',
-      permissions: ['finance.read', 'finance.rpuj_approval.approve', 'finance.transfer_proof.upload'],
+      permissions: [
+        'finance.read',
+        'finance.rpuj_approval.approve',
+        'finance.transfer_proof.upload',
+        'finance.driver_commission.deduction.manage',
+      ],
     },
   }),
 }));
@@ -30,8 +37,11 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
   fetchDriverCommissionBatchDetail: vi.fn(),
   fetchDriverCommissionBatches: vi.fn(),
   fetchDriverCommissionPeriodReport: vi.fn(),
+  recordDriverCommissionDeduction: vi.fn(),
   rejectDriverCommissionBatch: vi.fn(),
   uploadDriverCommissionTransferProof: vi.fn(),
+  voidDriverCommissionDeduction: vi.fn(),
+  voidDriverCommissionPayment: vi.fn(),
 }));
 
 const periodReport = {
@@ -66,6 +76,22 @@ const periodReport = {
       paymentStatus: 'pending',
       totalItems: 2,
       totalAmount: 125000,
+      grossAmount: 125000,
+      deductionAmount: 25000,
+      netAmount: 100000,
+      deductions: [
+        {
+          id: 'deduction-1',
+          paymentId: 'payment-1',
+          deductionType: 'hutang_sopir',
+          amount: 25000,
+          reason: 'Potongan hutang sopir sesuai catatan Finance',
+          operationalNote: 'Komisi dipotong Rp25.000 karena ada hutang aktif. Detail ada di Finance.',
+          status: 'active',
+          createdByName: 'Sprint2C Finance',
+          createdAt: '2026-08-20T04:00:00.000Z',
+        },
+      ],
       items: [
         {
           id: 'item-1',
@@ -105,8 +131,36 @@ const batchDetail = {
       bankAccountHolder: 'Rahmat',
       totalItems: 2,
       totalAmount: 125000,
+      grossAmount: 125000,
+      deductionAmount: 25000,
+      netAmount: 100000,
+      deductions: [
+        {
+          id: 'deduction-1',
+          paymentId: 'payment-1',
+          deductionType: 'hutang_sopir',
+          amount: 25000,
+          reason: 'Potongan hutang sopir sesuai catatan Finance',
+          operationalNote: 'Komisi dipotong Rp25.000 karena ada hutang aktif. Detail ada di Finance.',
+          status: 'active',
+          createdByName: 'Sprint2C Finance',
+          createdAt: '2026-08-20T04:00:00.000Z',
+        },
+      ],
       status: 'pending',
       items: [],
+    },
+  ],
+};
+
+const paidBatchDetail = {
+  ...batchDetail,
+  payments: [
+    {
+      ...batchDetail.payments[0],
+      status: 'paid',
+      paidAt: '2026-08-21T02:00:00.000Z',
+      paidByName: 'Sprint2C Finance',
     },
   ],
 };
@@ -278,6 +332,126 @@ describe('DriverCommissionPage finance', () => {
     await waitFor(() => {
       expect(confirmAction).toHaveBeenCalled();
       expect(approveDriverCommissionBatch).toHaveBeenCalledWith('batch-1');
+    });
+  });
+
+  it('menampilkan komisi bruto, potongan Finance, dan net dibayar per sopir di tabel', async () => {
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Rp\s*25\.000/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Rp\s*100\.000/i).length).toBeGreaterThan(0);
+  });
+
+  it('finance bisa membuka modal potongan dan menambah potongan baru', async () => {
+    const user = userEvent.setup();
+    recordDriverCommissionDeduction.mockResolvedValue({ ...batchDetail, id: 'batch-1' });
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+    expect(await screen.findByText('Potongan Komisi')).toBeInTheDocument();
+    expect(screen.getByText(/Potongan hutang sopir sesuai catatan Finance/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /tambah potongan/i }));
+    await user.type(screen.getByPlaceholderText('100000'), '50000');
+    await user.type(screen.getByPlaceholderText(/Potongan hutang sopir sesuai catatan Finance/), 'Kasbon belum lunas dari minggu lalu');
+    await user.click(screen.getByRole('button', { name: /simpan potongan/i }));
+
+    await waitFor(() => {
+      expect(recordDriverCommissionDeduction).toHaveBeenCalledWith('payment-1', expect.objectContaining({
+        amount: 50000,
+        reason: 'Kasbon belum lunas dari minggu lalu',
+      }));
+    });
+  });
+
+  it('tidak menampilkan tombol tambah potongan saat komisi sopir belum diajukan ke Finance (belum ada payment)', async () => {
+    const eligibleOnlyReport = {
+      ...periodReport,
+      status: 'draft',
+      activeBatch: null,
+      drivers: [
+        {
+          driverKey: 'name:budi',
+          driverId: null,
+          driverName: 'Budi',
+          paymentMethod: 'bank',
+          bankName: 'BRI',
+          bankAccountNumber: '999',
+          bankAccountHolder: 'Budi',
+          batchId: null,
+          batchStatus: null,
+          paymentId: null,
+          paymentStatus: 'unsubmitted',
+          totalItems: 1,
+          totalAmount: 65000,
+          grossAmount: 65000,
+          deductionAmount: 0,
+          netAmount: 65000,
+          deductions: [],
+          items: [],
+        },
+      ],
+    };
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [] });
+    fetchDriverCommissionPeriodReport.mockResolvedValue(eligibleOnlyReport);
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Budi');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+    expect(await screen.findByText('Potongan Komisi')).toBeInTheDocument();
+
+    expect(screen.queryByRole('button', { name: /tambah potongan/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/diajukan Operational ke Finance/i)).toBeInTheDocument();
+    expect(recordDriverCommissionDeduction).not.toHaveBeenCalled();
+  });
+
+  it('finance tidak bisa tambah atau membatalkan potongan setelah payment sudah paid', async () => {
+    fetchDriverCommissionBatchDetail.mockResolvedValue(paidBatchDetail);
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [paidBatchDetail] });
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+    expect(await screen.findByText('Potongan Komisi')).toBeInTheDocument();
+
+    expect(screen.queryByRole('button', { name: /tambah potongan/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^batalkan$/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Potongan terkunci karena pembayaran sudah paid/i)).toBeInTheDocument();
+  });
+
+  it('upload bukti transfer menampilkan nominal net yang harus ditransfer', async () => {
+    const approvedBatchDetail = { ...batchDetail, status: 'approved' };
+    fetchDriverCommissionBatchDetail.mockResolvedValue(approvedBatchDetail);
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [approvedBatchDetail] });
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+
+    expect(await screen.findByText(/Nominal yang harus ditransfer \(Net\): Rp\s*100\.000/i)).toBeInTheDocument();
+  });
+
+  it('finance bisa membatalkan potongan yang belum paid', async () => {
+    const user = userEvent.setup();
+    voidDriverCommissionDeduction.mockResolvedValue({ ...batchDetail, id: 'batch-1' });
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+    await screen.findByText('Potongan Komisi');
+
+    await user.click(screen.getByRole('button', { name: /^batalkan$/i }));
+    await user.type(screen.getByPlaceholderText(/alasan pembatalan potongan/i), 'Hutang sudah lunas');
+    await user.click(screen.getByRole('button', { name: /konfirmasi batalkan/i }));
+
+    await waitFor(() => {
+      expect(voidDriverCommissionDeduction).toHaveBeenCalledWith('deduction-1', 'Hutang sudah lunas');
     });
   });
 });

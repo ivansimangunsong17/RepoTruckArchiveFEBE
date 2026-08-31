@@ -1,4 +1,4 @@
-import { query } from '../../db/client.js';
+import { query, withTransaction } from '../../db/client.js';
 import { getResourceConfig } from './master.mapper.js';
 
 function buildWhere(config, { keyword = '', filters = {} } = {}) {
@@ -151,6 +151,72 @@ export async function clearVehicleDefaultDriverByNames(names = []) {
     [normalizedNames],
   );
   return result.rowCount || 0;
+}
+
+// Endpoint khusus, terpisah dari upsertMasterRow generik -- default sopir truck sengaja punya
+// validasi eligibility (truck/sopir) dan alasan wajib yang tidak berlaku untuk field master lain,
+// jadi tidak lewat jalur PATCH /api/master/trucks/:id biasa. Menulis default_driver_id (akurat,
+// FK) SEKALIGUS default_driver_name (dipertahankan untuk kompatibilitas tampilan/halaman Truck
+// Admin yang masih pakai teks nama saja) -- tidak pernah menyentuh container_jobs sama sekali.
+export async function updateVehicleDefaultDriver(vehicleId, driverId) {
+  return withTransaction(async (client) => {
+    const vehicleResult = await client.query(
+      'select * from vehicles where id = $1 and archived_at is null for update',
+      [vehicleId],
+    );
+    const vehicle = vehicleResult.rows[0];
+    if (!vehicle) {
+      const error = new Error('Truck tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'TRUCK_NOT_FOUND';
+      throw error;
+    }
+    if (['Maintenance', 'Tidak Aktif'].includes(vehicle.operational_status)) {
+      const error = new Error(`Truck ${vehicle.plate_number} sedang ${vehicle.operational_status} dan default sopirnya tidak bisa diubah.`);
+      error.statusCode = 409;
+      error.code = 'TRUCK_DEFAULT_DRIVER_TRUCK_NOT_ELIGIBLE';
+      throw error;
+    }
+
+    const driverResult = await client.query(
+      'select * from drivers where id = $1 and archived_at is null',
+      [driverId],
+    );
+    const driver = driverResult.rows[0];
+    if (!driver) {
+      const error = new Error('Sopir tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'DRIVER_NOT_FOUND';
+      throw error;
+    }
+    // 'Bertugas' (sedang jalan di job lain) sengaja TETAP boleh dijadikan default -- status itu
+    // cuma mencerminkan job yang berjalan SEKARANG, bukan indikasi sopir tidak layak untuk
+    // assignment BERIKUTNYA (justru itu tujuan "default"). Yang benar-benar ditolak cuma status
+    // yang menandakan sopir memang tidak layak dipakai lagi: blacklist/cuti/tidak aktif.
+    if (['Blacklist', 'Cuti', 'Tidak Aktif'].includes(driver.operational_status)) {
+      const error = new Error(`Sopir ${driver.name} sedang ${driver.operational_status} dan tidak bisa dijadikan default truck.`);
+      error.statusCode = 409;
+      error.code = 'TRUCK_DEFAULT_DRIVER_DRIVER_NOT_ELIGIBLE';
+      throw error;
+    }
+
+    const updated = await client.query(
+      `
+        update vehicles
+        set default_driver_id = $2,
+            default_driver_name = $3,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [vehicleId, driver.id, driver.name],
+    );
+
+    return {
+      before: getResourceConfig('trucks').toApi(vehicle),
+      after: getResourceConfig('trucks').toApi(updated.rows[0]),
+    };
+  });
 }
 
 export async function archiveMasterRow(resource, id) {

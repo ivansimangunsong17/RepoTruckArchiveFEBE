@@ -59,6 +59,7 @@ export const ROLE_PERMISSIONS = {
     'finance.invoice.upload',
     'finance.invoice.payment.record',
     'finance.invoice.payment.void',
+    'finance.invoice.delivery_status.update',
     'finance.debit_note.read',
     'finance.debit_note.update',
     'finance.debit_note.payment.record',
@@ -67,6 +68,8 @@ export const ROLE_PERMISSIONS = {
     'finance.correction.request',
     'finance.correction.approve',
     'driver_commission.void',
+    'finance.driver_commission.deduction.manage',
+    'operations.truck_default_driver.update',
   ],
   sales: [
     'orders.create',
@@ -89,6 +92,7 @@ export const ROLE_PERMISSIONS = {
     'documents.operational.read',
     'finance.operational_fund.read',
     'finance.operational_fund.request',
+    'operations.truck_default_driver.update',
   ],
   observer: [
     'orders.read',
@@ -120,12 +124,16 @@ export const ROLE_PERMISSIONS = {
     'finance.invoice.update_number',
     'finance.invoice.upload',
     'finance.invoice.payment.record',
+    'finance.invoice.payment.void',
+    'finance.invoice.delivery_status.update',
     'finance.debit_note.read',
     'finance.debit_note.update',
     'finance.debit_note.payment.record',
+    'finance.debit_note.payment.void',
     'finance.correction.read',
     'finance.correction.request',
     'documents.operational.read',
+    'finance.driver_commission.deduction.manage',
   ],
 };
 
@@ -167,6 +175,7 @@ const BACKEND_PERMISSION_ALIASES = {
   'finance.invoice.upload': ['finance.invoice.upload'],
   'finance.invoice.payment.record': ['finance.invoice.payment.record'],
   'finance.invoice.payment.void': ['finance.invoice.payment.void'],
+  'finance.invoice.delivery_status.update': ['finance.invoice.delivery_status.update'],
   'finance.debit_note.read': ['finance.debit_note.read', 'finance.read'],
   'finance.debit_note.update': ['finance.debit_note.update'],
   'finance.debit_note.payment.record': ['finance.debit_note.payment.record'],
@@ -175,6 +184,8 @@ const BACKEND_PERMISSION_ALIASES = {
   'finance.correction.request': ['finance.correction.request'],
   'finance.correction.approve': ['finance.correction.approve'],
   'driver_commission.void': ['driver_commission.void'],
+  'finance.driver_commission.deduction.manage': ['finance.driver_commission.deduction.manage'],
+  'operations.truck_default_driver.update': ['operations.truck_default_driver.update'],
 };
 
 function isAdminRole(role) {

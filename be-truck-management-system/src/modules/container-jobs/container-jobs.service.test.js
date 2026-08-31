@@ -8,6 +8,7 @@ const {
   canUseAdminCorrection,
   createContainerJobExpense,
   correctContainerJobExpense,
+  ensureInapPayload,
   ensureRepoStoragePayload,
   hasCompletedTimelineChange,
   hasDriverCommissionChange,
@@ -312,6 +313,34 @@ test('menolak titip container jika hanya EIR akhir yang tersedia', () => {
       repoContainerCondition: 'empty',
     },
   ), /EIR Titip/);
+});
+
+test('menolak inap jika job belum sedang jalan', () => {
+  assert.throws(() => ensureInapPayload(
+    { status: 'received' },
+    { status: 'inap', inapReason: 'Curfew malam, tidak boleh jalan' },
+  ), /Sedang Jalan/);
+});
+
+test('mengizinkan inap jika job sedang jalan dan alasan terisi', () => {
+  assert.doesNotThrow(() => ensureInapPayload(
+    { status: 'running' },
+    { status: 'inap', inapReason: 'Curfew malam, tidak boleh jalan' },
+  ));
+});
+
+test('menolak inap tanpa alasan yang cukup panjang', () => {
+  assert.throws(() => ensureInapPayload(
+    { status: 'running' },
+    { status: 'inap', inapReason: 'macet' },
+  ), /Alasan inap wajib diisi minimal 8 karakter/);
+});
+
+test('tidak memvalidasi apa pun kalau status yang dikirim bukan inap', () => {
+  assert.doesNotThrow(() => ensureInapPayload(
+    { status: 'received' },
+    { status: 'running' },
+  ));
 });
 
 test('create expense menolak kategori, nominal, jenis biaya, dan bukti pembayaran yang tidak valid', () => {

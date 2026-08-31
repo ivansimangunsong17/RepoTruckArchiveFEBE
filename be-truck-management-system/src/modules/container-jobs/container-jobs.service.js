@@ -2,6 +2,7 @@ import {
   correctContainerJobExpenseRecord,
   createContainerJobExpenseRecord,
   generateContainerJobSpk,
+  findAssignmentHistory,
   findContainerJobById,
   findContainerJobExpenseByIdRecord,
   findContainerJobExpenseLedger,
@@ -294,6 +295,15 @@ function ensureOperationalCanChangeStatus(actor, job, payload = {}) {
     error.code = 'CONTAINER_JOB_REPO_STORED_LOCKED';
     throw error;
   }
+
+  // Keluar dari inap tidak butuh reassignment -- sopir/truck tetap terkunci ke job ini
+  // selama inap (beda dari repo_stored yang melepas assignment).
+  if (job?.status === 'inap' && !['running', 'completed', 'cancelled'].includes(payload.status)) {
+    const error = new Error('Container yang sedang inap hanya bisa dilanjutkan (Sedang Jalan) atau diselesaikan.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_INAP_INVALID_TRANSITION';
+    throw error;
+  }
 }
 
 function ensureOperationalCanEditContainerNumber(actor, job, payload = {}) {
@@ -391,13 +401,30 @@ function ensureOperationalCanEditAssignment(actor, job, payload) {
     error.code = 'CONTAINER_JOB_REPO_ASSIGNMENT_LOCKED';
     throw error;
   }
-  if (job?.rpujStatus !== 'paid' && job?.status !== 'completed') return;
+  if (job?.rpujStatus !== 'paid' && job?.status !== 'completed' && job?.status !== 'cancelled') return;
   if (!hasAssignmentChange(job, payload)) return;
-  if (job?.status !== 'completed' && isCompletingMissingAssignment(job, payload)) return;
+  if (job?.status !== 'completed' && job?.status !== 'cancelled' && isCompletingMissingAssignment(job, payload)) return;
 
   const error = new Error('Driver dan truck tidak bisa diubah lagi setelah UJ ditransfer atau pekerjaan selesai.');
   error.statusCode = 409;
   error.code = 'CONTAINER_JOB_ASSIGNMENT_LOCKED';
+  throw error;
+}
+
+// Sekali ritasi sudah berjalan (bukan lagi 'received'), pergantian sopir/truck tetap boleh
+// dilakukan Operational -- tapi alasan wajib diisi supaya ada jejak "kenapa" di riwayat assignment,
+// beda dengan lock total ensureOperationalCanEditAssignment di atas (yang baru menutup total
+// setelah completed/cancelled/RPUJ paid).
+function ensureAssignmentChangeReasonRequired(actor, job, payload) {
+  if (!shouldEnforceOperationalLock(actor, payload)) return;
+  if (!hasAssignmentChange(job, payload)) return;
+  if (isCompletingMissingAssignment(job, payload)) return;
+  if (job?.status === 'received') return;
+  if (normalizeText(payload.assignmentChangeReason)) return;
+
+  const error = new Error('Alasan perubahan sopir/truck wajib diisi karena ritasi sudah berjalan.');
+  error.statusCode = 400;
+  error.code = 'CONTAINER_JOB_ASSIGNMENT_REASON_REQUIRED';
   throw error;
 }
 
@@ -470,6 +497,25 @@ export function ensureRepoStoragePayload(job, payload = {}) {
   }
 }
 
+export function ensureInapPayload(job, payload = {}) {
+  if (payload.status !== 'inap') return;
+
+  if (job?.status !== 'running') {
+    const error = new Error('Container hanya bisa ditandai inap saat status pekerjaan Sedang Jalan.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_INAP_REQUIRES_RUNNING_STATUS';
+    throw error;
+  }
+
+  const inapReason = normalizeText(payload.inapReason);
+  if (inapReason.length < 8) {
+    const error = new Error('Alasan inap wajib diisi minimal 8 karakter.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_INAP_REASON_REQUIRED';
+    throw error;
+  }
+}
+
 export function isRepoCancellationLockedForOperational(actor, job, payload = {}) {
   return Boolean(shouldEnforceOperationalLock(actor, payload) && payload.status === 'cancelled' && hasRepoStorageHistory(job));
 }
@@ -496,6 +542,10 @@ export async function getContainerJob(id) {
 
 export function listContainerJobExpenses(id) {
   return findContainerJobExpensesByJobId(id);
+}
+
+export function listContainerJobAssignmentHistory(id) {
+  return findAssignmentHistory(id);
 }
 
 export function getContainerJobExpense(expenseId) {
@@ -643,7 +693,7 @@ export async function saveContainerJob(id, payload, actor) {
     normalizedPayload.tilaGatepassDocument = payload.tilaGatepassDocument || payload.unloadingVoucher || payload.weighingDocument || '';
   }
 
-  const allowedStatuses = ['received', 'running', 'repo_stored', 'completed', 'cancelled'];
+  const allowedStatuses = ['received', 'running', 'repo_stored', 'completed', 'cancelled', 'inap'];
   if (normalizedPayload.status && !allowedStatuses.includes(normalizedPayload.status)) {
     const error = new Error('Status Container Job tidak valid.');
     error.statusCode = 400;
@@ -667,14 +717,16 @@ export async function saveContainerJob(id, payload, actor) {
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
   ensureRepoStoragePayload(currentJob, payloadForUpdate);
+  ensureInapPayload(currentJob, payloadForUpdate);
   ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
   ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
   ensureOperationalCanInputDriverCommission(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
+  ensureAssignmentChangeReasonRequired(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditDocuments(actor, currentJob, payloadForUpdate);
   ensureOperationalCanEditCompletedTimeline(actor, currentJob, payloadForUpdate);
 
-  return updateContainerJob(id, payloadForUpdate);
+  return updateContainerJob(id, { ...payloadForUpdate, actorRole: actor?.role || '' });
 }
 
 export function createContainerJobSpk(id, payload = {}) {

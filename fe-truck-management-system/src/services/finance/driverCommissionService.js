@@ -75,6 +75,21 @@ export function voidDriverCommissionPayment(id, reason) {
   return httpClient.patch(`/driver-commissions/payments/${encodeURIComponent(id)}/void`, { reason });
 }
 
+export function recordDriverCommissionDeduction(paymentId, payload = {}) {
+  if (!paymentId) throw new Error('Payment komisi sopir belum tersedia untuk dilekati potongan.');
+  return httpClient.post(`/driver-commissions/payments/${encodeURIComponent(paymentId)}/deductions`, payload);
+}
+
+export function updateDriverCommissionDeduction(deductionId, payload = {}) {
+  if (!deductionId) throw new Error('Potongan komisi tidak ditemukan.');
+  return httpClient.patch(`/driver-commissions/deductions/${encodeURIComponent(deductionId)}`, payload);
+}
+
+export function voidDriverCommissionDeduction(deductionId, reason) {
+  if (!deductionId) throw new Error('Potongan komisi tidak ditemukan.');
+  return httpClient.patch(`/driver-commissions/deductions/${encodeURIComponent(deductionId)}/void`, { reason });
+}
+
 export async function uploadDriverCommissionTransferProof(id, file, payload = {}) {
   const uploadFile = file?.type?.startsWith('image/') ? await compressImageFile(file) : file;
   const validationError = validateArchiveFile(uploadFile, { label: 'Bukti transfer komisi' })

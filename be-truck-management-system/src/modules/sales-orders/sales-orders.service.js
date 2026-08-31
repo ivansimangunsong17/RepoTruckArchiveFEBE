@@ -413,9 +413,7 @@ function applyActorToPayload(payload, actor, currentOrder = null) {
       invoiceDocumentSentBy: currentOrder.invoiceDocumentSentBy || null,
       invoiceDocumentDeliveryMethod: currentOrder.invoiceDocumentDeliveryMethod || null,
       invoiceDocumentDeliveryNotes: currentOrder.invoiceDocumentDeliveryNotes || null,
-      billingStatus: actor?.role === 'sales'
-        ? currentOrder.billingStatus || 'belum_invoice'
-        : payload.billingStatus || currentOrder.billingStatus || 'belum_invoice',
+      billingStatus: currentOrder.billingStatus || 'belum_invoice',
     };
   }
 
@@ -583,8 +581,8 @@ export async function saveSalesOrder(payload, id, actor) {
 }
 
 export async function updateInvoiceDeliveryStatus(id, payload = {}, actor) {
-  if (!actor || !['sales', 'admin'].includes(actor.role)) {
-    const error = new Error('Status pengiriman invoice hanya dapat diubah oleh Sales atau Admin.');
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Status pengiriman invoice hanya dapat diubah oleh Finance atau Admin.');
     error.statusCode = 403;
     error.code = 'INVOICE_DELIVERY_STATUS_FORBIDDEN';
     throw error;
@@ -599,10 +597,10 @@ export async function updateInvoiceDeliveryStatus(id, payload = {}, actor) {
   }
   ensureCanAccessSalesOrder(actor, order);
 
-  if (actor.role === 'sales' && normalizeSalesOrderBillingStatus(order.billingStatus) === 'lunas') {
-    const error = new Error('Invoice yang sudah lunas hanya dapat direvisi oleh Admin.');
-    error.statusCode = 403;
-    error.code = 'INVOICE_DELIVERY_STATUS_PAID_ADMIN_ONLY';
+  if (normalizeSalesOrderBillingStatus(order.billingStatus) === 'lunas') {
+    const error = new Error('Invoice sudah lunas. Status pengiriman tidak dapat diubah lagi lewat sini -- gunakan void pembayaran jika perlu koreksi.');
+    error.statusCode = 409;
+    error.code = 'INVOICE_DELIVERY_STATUS_ALREADY_PAID';
     throw error;
   }
 
