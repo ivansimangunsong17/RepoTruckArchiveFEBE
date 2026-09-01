@@ -354,6 +354,7 @@ function FinanceTable({
   expenseReconciliationLoading,
   expenseReconciliationBusyId,
   invoiceError,
+  invoiceBusyId,
   invoiceLoading,
   onInvoicePageChange,
   onOrderPageChange,
@@ -490,6 +491,8 @@ function FinanceTable({
           invoiceDateFrom={invoiceDateFrom}
           invoiceDateTo={invoiceDateTo}
           invoiceFilterMonth={invoiceFilterMonth}
+          invoiceBusyId={invoiceBusyId}
+          onSaveInvoiceNumberInline={handlers.onSaveInvoiceNumberInline}
           query={query}
           rows={invoiceRows}
           summary={invoiceSummary}
@@ -668,7 +671,6 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     confirmExpenseChecked,
     closeOperationalFundCloseValidationModal,
     confirmCloseOperationalFundBatch,
-    openOperationalFundReopenValidationModal,
     closeOperationalFundReopenValidationModal,
     handleOperationalFundReopenReasonChange,
     confirmReopenOperationalFundBatch,
@@ -720,6 +722,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     onOpenSoModal: orderVerification.onOpenSoModal,
     onSelectOrder: orderVerification.onSelectOrder,
     onSelectInvoice: invoiceWorkflow.onSelectInvoice,
+    onSaveInvoiceNumberInline: invoiceWorkflow.saveInvoiceNumberDirect,
     onOpenOperationalFundRequest: operationalFund.openOperationalFundRequestModal,
     onOpenOperationalFundDeposit: operationalFund.openOperationalFundDepositModal,
     onOperationalFundBatchDateChange: operationalFund.handleOperationalFundBatchDateChange,
@@ -743,6 +746,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         invoiceError={invoiceError}
         invoiceFilterMonth={invoiceFilterMonth}
         invoiceLoading={invoiceLoading}
+        invoiceBusyId={invoiceBusyId}
         invoicePage={invoicePage}
         invoiceRows={invoiceRows}
         invoiceSummary={invoiceSummary}

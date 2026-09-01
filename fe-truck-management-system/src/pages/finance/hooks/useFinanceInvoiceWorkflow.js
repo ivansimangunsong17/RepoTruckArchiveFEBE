@@ -227,7 +227,7 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     try {
       const result = await fetchFinanceDebitNotePayments(id);
       setDebitNotePayments(result || []);
-    } catch (error) {
+    } catch {
       setDebitNotePayments([]);
     } finally {
       setDebitNotePaymentsLoading(false);
@@ -359,6 +359,34 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     }
   }
 
+  async function saveInvoiceNumberDirect(id, invoiceNumberInput) {
+    const invoiceNumber = String(invoiceNumberInput || '').trim().toUpperCase();
+    setInvoiceError('');
+    setInvoiceConfirmError('');
+    if (!invoiceNumber) {
+      setInvoiceError('Nomor invoice wajib diisi sebelum disimpan.');
+      return;
+    }
+    if (invoiceNumber.length < 4) {
+      setInvoiceError('Nomor invoice terlalu pendek. Cek kembali nomor dari dokumen invoice.');
+      return;
+    }
+
+    setInvoiceBusyId(id);
+    try {
+      const saved = await updateFinanceInvoiceNumber(id, invoiceNumber);
+      const normalized = normalizeFinanceInvoiceRow(saved);
+      setInvoiceRows((rows) => rows.map((item) => (item.id === id ? normalized : item)));
+      setInvoiceDetail((detail) => (detail?.id === id ? { ...detail, ...normalized } : detail));
+      if (invoiceConfirmId === id) setInvoiceConfirmId('');
+    } catch (error) {
+      setInvoiceError(error.message || 'Nomor invoice gagal disimpan.');
+      throw error;
+    } finally {
+      setInvoiceBusyId('');
+    }
+  }
+
   async function handleUploadInvoiceDocument(id, documentType, file) {
     if (!id || !documentType || !file) return;
     const busyKey = `${id}:${documentType}`;
@@ -474,6 +502,7 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     submitInvoiceNumber,
     handleUploadInvoiceDocument,
     onSaveInvoice,
+    saveInvoiceNumberDirect,
     loadInvoiceOrders,
     applyInvoiceNumberCorrection,
     resetInvoiceWorkflow,

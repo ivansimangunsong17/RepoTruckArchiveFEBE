@@ -1,4 +1,5 @@
-import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Eye, FileText, Info, Upload } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Eye, FileText, Info, Save, Upload } from 'lucide-react';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import MonthFilterControl from '../shared/MonthFilterControl';
 import StatusPill from '../shared/StatusPill';
@@ -24,7 +25,10 @@ function InvoiceTable({
   onInvoiceDateToChange,
   onResetInvoiceDateFilter,
   onSelectInvoice,
+  invoiceBusyId = '',
+  onSaveInvoiceNumberInline,
 }) {
+  const [invoiceDrafts, setInvoiceDrafts] = useState({});
   const invoiceTabs = [
     {
       id: 'need-number',
@@ -78,6 +82,23 @@ function InvoiceTable({
     paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
   };
   const allInvoiceTotal = tabCounts['need-number'] + tabCounts['in-progress'] + tabCounts.paid;
+
+  function invoiceDraftValue(row) {
+    return invoiceDrafts[row.id] ?? row.invoiceNumber ?? '';
+  }
+
+  function updateInvoiceDraft(id, value) {
+    setInvoiceDrafts((current) => ({ ...current, [id]: value.toUpperCase() }));
+  }
+
+  async function saveInvoiceNumber(row) {
+    if (!onSaveInvoiceNumberInline) return;
+    try {
+      await onSaveInvoiceNumberInline(row.id, invoiceDraftValue(row));
+    } catch {
+      // Error message is rendered by the parent invoice error banner.
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-b-lg border border-slate-200 bg-white">
@@ -198,20 +219,22 @@ function InvoiceTable({
         <table className="data-table master-table finance-master-table finance-invoice-table table-fixed">
           <colgroup>
             <col className="w-[3%]" />
+            <col className="w-[9%]" />
+            <col className="w-[13%]" />
+            <col className="w-[15%]" />
             <col className="w-[10%]" />
-            <col className="w-[16%]" />
-            <col className="w-[11%]" />
-            <col className="w-[11%]" />
-            <col className="w-[13%]" />
-            <col className="w-[13%]" />
-            <col className="w-[13%]" />
             <col className="w-[10%]" />
+            <col className="w-[12%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+            <col className="w-[7%]" />
           </colgroup>
           <thead>
             <tr>
               {[
                 { label: 'No', align: 'text-left' },
                 { label: 'Nomor SO', align: 'text-left' },
+                { label: 'Nomor Invoice', align: 'text-left' },
                 { label: 'Customer', align: 'text-left' },
                 { label: 'Selesai', align: 'text-left' },
                 { label: 'Jatuh Tempo', align: 'text-left' },
@@ -234,6 +257,38 @@ function InvoiceTable({
                 <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
                   <td className="font-black text-slate-800" data-label="No">{showingFrom + index}</td>
                   <td className="finance-invoice-so font-semibold text-slate-700" data-label="Nomor SO">{row.soNumber}</td>
+                  <td className="finance-invoice-number-cell" data-label="Nomor Invoice">
+                    {row.invoiceNumber ? (
+                      <span className="block truncate font-black text-slate-900" title={row.invoiceNumber}>{row.invoiceNumber}</span>
+                    ) : (
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <input
+                          aria-label={`Nomor Invoice ${row.soNumber}`}
+                          className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold uppercase text-slate-900 outline-none transition placeholder:normal-case placeholder:text-slate-400 focus:border-red-300 focus:ring-2 focus:ring-red-100"
+                          disabled={invoiceBusyId === row.id}
+                          onChange={(event) => updateInvoiceDraft(row.id, event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              saveInvoiceNumber(row);
+                            }
+                          }}
+                          placeholder="No. invoice"
+                          value={invoiceDraftValue(row)}
+                        />
+                        <button
+                          aria-label={`Simpan nomor invoice ${row.soNumber}`}
+                          className="inline-grid h-8 w-8 shrink-0 place-items-center rounded-md border border-red-200 bg-red-600 text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200 disabled:text-slate-400"
+                          disabled={invoiceBusyId === row.id || !invoiceDraftValue(row).trim()}
+                          onClick={() => saveInvoiceNumber(row)}
+                          title={invoiceBusyId === row.id ? 'Menyimpan nomor invoice' : 'Simpan nomor invoice'}
+                          type="button"
+                        >
+                          <Save size={13} />
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   <td className="finance-invoice-customer" data-label="Customer">
                     <span className="block truncate font-semibold text-slate-900">{row.customer}</span>
                     <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">
@@ -285,7 +340,7 @@ function InvoiceTable({
             })}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={9}>Tidak ada data pada klasifikasi ini.</td>
+                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={10}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
