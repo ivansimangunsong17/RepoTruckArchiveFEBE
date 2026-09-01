@@ -204,6 +204,8 @@ function buildOrderWhere({
   invoiceDocumentStatus = '',
   entrySource = '',
   historicalPeriod = '',
+  dateFrom = '',
+  dateTo = '',
 } = {}, { hasOwnerUserIdColumn = true } = {}) {
   const clauses = [];
   const params = [];
@@ -212,6 +214,16 @@ function buildOrderWhere({
   if (cleanKeyword) {
     params.push(`%${cleanKeyword}%`);
     clauses.push(`(so_number ilike $${params.length} or accurate_so_number ilike $${params.length} or do_number ilike $${params.length} or invoice_number ilike $${params.length} or customer_name ilike $${params.length})`);
+  }
+
+  if (dateFrom) {
+    params.push(dateFrom);
+    clauses.push(`so_date >= $${params.length}`);
+  }
+
+  if (dateTo) {
+    params.push(dateTo);
+    clauses.push(`so_date <= $${params.length}`);
   }
 
   if (status === 'waiting_operational') {
@@ -510,6 +522,8 @@ export async function findSalesOrdersPage(options = {}) {
     ownerName: options.ownerName,
     entrySource: options.entrySource,
     historicalPeriod: options.historicalPeriod,
+    dateFrom: options.dateFrom,
+    dateTo: options.dateTo,
   }, ownerColumnOptions);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;

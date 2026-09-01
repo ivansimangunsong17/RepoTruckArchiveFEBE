@@ -12,8 +12,8 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
 
   return (
     <div className="finance-order-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="finance-order-detail-modal max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+      <section className="finance-order-detail-modal flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="flex flex-none flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Request Order</p>
             <h3 className="mt-0.5 text-lg font-black text-slate-950">{order.customer}</h3>
@@ -24,7 +24,7 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
           </button>
         </header>
 
-        <div className="max-h-[calc(90vh-68px)] overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             <DetailField label="Nama Sales" value={order.salesName} />
             <DetailField label="Order Dibuat" value={order.orderDate} />

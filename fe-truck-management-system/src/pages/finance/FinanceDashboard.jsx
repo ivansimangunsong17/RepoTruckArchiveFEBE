@@ -159,8 +159,8 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
 
   return (
     <div className="finance-dashboard-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section className="finance-dashboard-detail-modal max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+      <section className="finance-dashboard-detail-modal flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-xl" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="flex flex-none items-start justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Detail Perjalanan Finance</p>
             <h2 className="mt-0.5 text-lg font-black text-slate-950">{trip?.soNumber || 'Memuat detail'}</h2>
@@ -171,7 +171,7 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
           </button>
         </header>
 
-        <div className="max-h-[calc(92vh-72px)] overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="grid min-h-64 place-items-center text-sm font-semibold text-slate-500">
               <span className="inline-flex items-center gap-2"><Loader2 className="animate-spin" size={18} /> Memuat detail perjalanan...</span>

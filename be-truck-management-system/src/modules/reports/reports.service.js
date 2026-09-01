@@ -3,6 +3,7 @@ import {
   getCustomerPerformanceReport,
   getDocumentReport,
   getDriverPerformanceReport,
+  getMonthlyComparisonReport,
   getMonthlyRevenueReport,
   getOperationReport,
   getSalesPerformanceReport,
@@ -28,6 +29,14 @@ export function fetchSalesOrderReport(query) {
 export function fetchMonthlyRevenueReport(query) {
   return getMonthlyRevenueReport({
     month: query.month,
+    year: query.year,
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
+  });
+}
+
+export function fetchMonthlyComparisonReport(query) {
+  return getMonthlyComparisonReport({
     year: query.year,
     entrySource: query.entrySource || '',
     historicalPeriod: query.historicalPeriod || '',

@@ -5,6 +5,12 @@ import {
   splitFinancialLineItems,
 } from './revenue-line-items.js';
 
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+function daysInMonth(month, year) {
+  return new Date(Number(year), Number(month), 0).getDate();
+}
+
 function parsePage(options = {}) {
   const page = Math.max(1, Number(options.page || 1));
   const pageSize = Math.max(1, Math.min(100, Number(options.pageSize || 20)));
@@ -46,6 +52,116 @@ function appendEntrySourceFilters(clauses, params, options = {}, alias = 'cj') {
 
 function timestampToJakartaDateSql(expression) {
   return `(${expression} at time zone 'Asia/Jakarta')::date`;
+}
+
+function parseComparisonYear(options = {}) {
+  const now = new Date();
+  const year = Number(options.year || now.getFullYear());
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    const error = new Error('Tahun laporan perbandingan bulanan tidak valid.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  return year;
+}
+
+function monthIndexFromDate(value) {
+  if (!value) return -1;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getUTCMonth();
+  const month = Number(String(value).trim().slice(5, 7));
+  return month >= 1 && month <= 12 ? month - 1 : -1;
+}
+
+function utilizationDaysInMonth(month, year, baseDate = new Date()) {
+  const selectedMonthIndex = Number(month) - 1;
+  const currentYear = baseDate.getFullYear();
+  const currentMonthIndex = baseDate.getMonth();
+  const totalDays = daysInMonth(month, year);
+
+  if (Number(year) > currentYear || (Number(year) === currentYear && selectedMonthIndex > currentMonthIndex)) return 0;
+  if (Number(year) === currentYear && selectedMonthIndex === currentMonthIndex) return Math.max(0, baseDate.getDate() - 1);
+  return totalDays;
+}
+
+function getComparisonTruckKey(row = {}) {
+  return String(
+    row.vehicle_id
+    || row.vehicleId
+    || row.plate_number
+    || row.plateNumber
+    || row.unit_code
+    || row.unitCode
+    || '',
+  ).trim();
+}
+
+function getComparisonDateKey(row = {}) {
+  const value = row.completed_date || row.completedDate || row.completed_at || row.completedAt;
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  return String(value).trim().slice(0, 10);
+}
+
+export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], options = {}, baseDate = new Date()) {
+  const year = parseComparisonYear(options);
+  const activeTruckCount = Math.max(0, Number(options.activeTruckCount || 0));
+  const months = MONTH_NAMES.map((label, index) => ({
+    month: index + 1,
+    monthKey: `${year}-${String(index + 1).padStart(2, '0')}`,
+    label,
+    totalRevenue: 0,
+    totalTrips: 0,
+    totalVolume: 0,
+    totalCustomers: 0,
+    activeSales: 0,
+    utilizationPercent: 0,
+    repoStoredCount: 0,
+    customerKeys: new Set(),
+    salesKeys: new Set(),
+    truckDayKeys: new Set(),
+  }));
+
+  completedRows.forEach((row) => {
+    const monthIndex = monthIndexFromDate(row.completed_date || row.completedDate || row.completed_at || row.completedAt);
+    if (!months[monthIndex]) return;
+
+    const month = months[monthIndex];
+    const revenue = calculateCompletedJobRevenue(row);
+    const customerKey = normalizeCustomerName(row).toLowerCase();
+    const salesKey = normalizeSalesName(row).toLowerCase();
+    const truckKey = getComparisonTruckKey(row);
+    const dateKey = getComparisonDateKey(row);
+
+    month.totalRevenue += revenue;
+    month.totalTrips += 1;
+    month.totalVolume += 1;
+    if (customerKey) month.customerKeys.add(customerKey);
+    if (salesKey) month.salesKeys.add(salesKey);
+    if (truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
+  });
+
+  repoRows.forEach((row) => {
+    const monthIndex = monthIndexFromDate(row.repo_stored_date || row.repoStoredDate || row.repo_stored_at || row.repoStoredAt);
+    if (months[monthIndex]) months[monthIndex].repoStoredCount += 1;
+  });
+
+  return months.map((month) => {
+    const utilizationDays = utilizationDaysInMonth(month.month, year, baseDate);
+    const potentialTruckDays = activeTruckCount * utilizationDays;
+    return {
+      month: month.month,
+      monthKey: month.monthKey,
+      label: month.label,
+      totalRevenue: month.totalRevenue,
+      totalTrips: month.totalTrips,
+      totalVolume: month.totalVolume,
+      totalCustomers: month.customerKeys.size,
+      activeSales: month.salesKeys.size,
+      utilizationPercent: potentialTruckDays ? (month.totalTrips / potentialTruckDays) * 100 : 0,
+      repoStoredCount: month.repoStoredCount,
+    };
+  });
 }
 
 export function calculateCompletedJobRevenue(row = {}) {
@@ -930,6 +1046,117 @@ export async function getCustomerPerformanceReport(options = {}) {
     rows,
     total: rows.length,
     summary: summarizeCustomerPerformanceRows(rows),
+  };
+}
+
+export async function getMonthlyComparisonReport(options = {}) {
+  const year = parseComparisonYear(options);
+  const dateFrom = `${year}-01-01`;
+  const dateToExclusive = `${year + 1}-01-01`;
+  const completedClauses = [];
+  const completedParams = [dateFrom, dateToExclusive];
+  appendEntrySourceFilters(completedClauses, completedParams, options, 'cj');
+  const completedSourceWhereSql = completedClauses.length ? `and ${completedClauses.join(' and ')}` : '';
+
+  const repoClauses = [];
+  const repoParams = [dateFrom, dateToExclusive];
+  appendEntrySourceFilters(repoClauses, repoParams, options, 'cj');
+  const repoSourceWhereSql = repoClauses.length ? `and ${repoClauses.join(' and ')}` : '';
+
+  const [completedResult, repoResult, activeTruckResult] = await Promise.all([
+    query(
+      `
+        with order_job_totals as (
+          select sales_order_id, count(*)::int as total_jobs
+          from container_jobs
+          group by sales_order_id
+        ),
+        completed_jobs as (
+          select
+            cj.id as job_id,
+            so.id,
+            so.so_number,
+            so.customer_name,
+            c.sales_name as customer_sales_name,
+            so.sales_name,
+            so.created_by_name,
+            so.price,
+            so.total_amount,
+            to_jsonb(so)->'line_items' as line_items,
+            cj.container_size,
+            ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
+            cj.completed_at,
+            cj.vehicle_id,
+            coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number) as plate_number,
+            coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code) as unit_code,
+            greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
+          from sales_orders so
+          join container_jobs cj on cj.sales_order_id = so.id
+          left join customers c on c.archived_at is null
+            and (
+              c.id = so.customer_id
+              or (
+                so.customer_id is null
+                and lower(btrim(c.name)) = lower(btrim(so.customer_name))
+              )
+            )
+          left join vehicles v on v.id = cj.vehicle_id
+          left join order_job_totals ojt on ojt.sales_order_id = so.id
+          where so.status <> 'cancelled'
+            and cj.status = 'completed'
+            ${completedSourceWhereSql}
+        )
+        select *
+        from completed_jobs
+        where completed_date >= $1::date
+          and completed_date < $2::date
+        order by completed_date asc, so_number asc, job_id asc
+      `,
+      completedParams,
+    ),
+    query(
+      `
+        with repo_jobs as (
+          select
+            cj.id,
+            ${timestampToJakartaDateSql('cj.repo_stored_at')} as repo_stored_date
+          from sales_orders so
+          join container_jobs cj on cj.sales_order_id = so.id
+          where so.status <> 'cancelled'
+            and cj.repo_stored_at is not null
+            ${repoSourceWhereSql}
+        )
+        select *
+        from repo_jobs
+        where repo_stored_date >= $1::date
+          and repo_stored_date < $2::date
+        order by repo_stored_date asc, id asc
+      `,
+      repoParams,
+    ),
+    query(
+      `
+        select count(*)::int as total
+        from vehicles
+        where archived_at is null
+          and lower(btrim(coalesce(operational_status, 'Aktif'))) not in ('maintenance', 'maintanance', 'tidak aktif', 'nonaktif', 'inactive', 'archived', 'arsip')
+      `,
+    ),
+  ]);
+
+  const activeTruckCount = Number(activeTruckResult.rows[0]?.total || 0);
+  const rows = buildMonthlyComparisonRows(completedResult.rows, repoResult.rows, { year, activeTruckCount });
+
+  return {
+    year,
+    rows,
+    summary: {
+      totalRevenue: rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0),
+      totalTrips: rows.reduce((total, row) => total + Number(row.totalTrips || 0), 0),
+      totalVolume: rows.reduce((total, row) => total + Number(row.totalVolume || 0), 0),
+      repoStoredCount: rows.reduce((total, row) => total + Number(row.repoStoredCount || 0), 0),
+      activeTruckCount,
+    },
   };
 }
 

@@ -5,6 +5,7 @@ process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters'
 
 const {
   buildCustomerPerformanceRows,
+  buildMonthlyComparisonRows,
   buildSalesPerformanceRows,
   calculateCompletedJobRevenue,
   calculateDriverCommissionAmount,
@@ -65,6 +66,59 @@ test('monthly revenue memilih jasa angkut sesuai ukuran container', () => {
       { serviceName: 'Jasa Angkut D40', qty: 1, price: 2500000 },
     ]),
   }), 2500000);
+});
+
+test('monthly comparison membandingkan revenue, sales/customer, utilisasi, dan container titip per bulan', () => {
+  const rows = buildMonthlyComparisonRows([
+    {
+      id: 'so-1',
+      so_number: 'SO-001',
+      completed_date: '2026-01-03',
+      customer_sales_name: 'Sales A',
+      customer_name: 'Customer Alpha',
+      price: 1500000,
+      total_containers: 1,
+      container_size: '20FT',
+      vehicle_id: 'truck-1',
+    },
+    {
+      id: 'so-2',
+      so_number: 'SO-002',
+      completed_date: '2026-01-03',
+      customer_sales_name: 'Sales B',
+      customer_name: 'Customer Beta',
+      price: 2500000,
+      total_containers: 1,
+      container_size: '40FT',
+      vehicle_id: 'truck-2',
+    },
+    {
+      id: 'so-3',
+      so_number: 'SO-003',
+      completed_date: '2026-02-10',
+      customer_sales_name: 'Sales A',
+      customer_name: 'Customer Alpha',
+      price: 2000000,
+      total_containers: 1,
+      container_size: '20FT',
+      vehicle_id: 'truck-1',
+    },
+  ], [
+    { repo_stored_date: '2026-01-04' },
+    { repo_stored_date: '2026-02-11' },
+    { repo_stored_date: '2026-02-12' },
+  ], { year: 2026, activeTruckCount: 2 }, new Date('2026-03-15T00:00:00.000Z'));
+
+  assert.equal(rows.length, 12);
+  assert.equal(rows[0].label, 'Jan');
+  assert.equal(rows[0].totalRevenue, 4000000);
+  assert.equal(rows[0].totalTrips, 2);
+  assert.equal(rows[0].totalCustomers, 2);
+  assert.equal(rows[0].activeSales, 2);
+  assert.equal(rows[0].repoStoredCount, 1);
+  assert.equal(rows[0].utilizationPercent, (2 / (2 * 31)) * 100);
+  assert.equal(rows[1].totalRevenue, 2000000);
+  assert.equal(rows[1].repoStoredCount, 2);
 });
 
 test('driver commission hanya dihitung ketika flag komisi aktif', () => {

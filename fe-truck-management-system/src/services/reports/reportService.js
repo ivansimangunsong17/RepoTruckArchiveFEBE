@@ -22,6 +22,10 @@ export function fetchMonthlyRevenueReport(params = {}) {
   return httpClient.get(`/reports/monthly-revenue${buildQuery(params)}`);
 }
 
+export function fetchMonthlyComparisonReport(params = {}) {
+  return httpClient.get(`/reports/monthly-comparison${buildQuery(params)}`);
+}
+
 export function fetchSalesPerformanceReport(params = {}) {
   return httpClient.get(`/reports/sales-performance${buildQuery(params)}`);
 }

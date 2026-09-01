@@ -3,6 +3,7 @@ import {
   dashboardReportController,
   documentReportController,
   driverPerformanceReportController,
+  monthlyComparisonReportController,
   monthlyRevenueReportController,
   operationReportController,
   salesPerformanceReportController,
@@ -27,6 +28,12 @@ export const reportRoutes = [
     path: '/api/reports/monthly-revenue',
     permission: 'report.read',
     handler: monthlyRevenueReportController,
+  },
+  {
+    method: 'GET',
+    path: '/api/reports/monthly-comparison',
+    permission: 'report.read',
+    handler: monthlyComparisonReportController,
   },
   {
     method: 'GET',

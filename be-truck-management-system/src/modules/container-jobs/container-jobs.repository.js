@@ -179,6 +179,46 @@ async function ensureSufficientOperationalFundBalance(client, batch, expenseId, 
   }
 }
 
+const NON_BLOCKING_AUTO_UJ_OPERATIONAL_FUND_CODES = new Set([
+  'OPERATIONAL_FUND_BATCH_CLOSED',
+  'OPERATIONAL_FUND_INSUFFICIENT_BALANCE',
+]);
+
+export function isNonBlockingAutoJourneyMoneyOperationalFundError(error) {
+  return NON_BLOCKING_AUTO_UJ_OPERATIONAL_FUND_CODES.has(error?.code);
+}
+
+function autoJourneyMoneyPendingFinanceNote(error) {
+  return [
+    'UJ otomatis belum masuk Catatan Saldo rekening dropping.',
+    error?.message || 'Finance perlu mengecek transaksi UJ otomatis ini.',
+  ].filter(Boolean).join(' ');
+}
+
+async function markAutoJourneyMoneyExpensePendingFinanceReview(client, {
+  expenseId,
+  actorName,
+  error,
+}) {
+  await client.query(
+    `
+      update container_job_expenses
+      set finance_check_status = 'perlu_klarifikasi',
+          finance_checked_by_name = null,
+          finance_checked_at = null,
+          finance_note = $1,
+          updated_by_name = $2,
+          updated_at = now()
+      where id = $3
+    `,
+    [
+      autoJourneyMoneyPendingFinanceNote(error),
+      actorName || 'Operational',
+      expenseId,
+    ],
+  );
+}
+
 function isFortyFeetContainer(size = '') {
   return normalizeContainerSize(size).includes('40');
 }
@@ -584,7 +624,7 @@ async function findJourneyMoneyAmount(client, job = {}) {
   };
 }
 
-async function syncAutoJourneyMoneyExpense(client, {
+export async function syncAutoJourneyMoneyExpense(client, {
   job,
   nextStatus,
   nextEntrySource,
@@ -592,6 +632,7 @@ async function syncAutoJourneyMoneyExpense(client, {
   runningAt,
   assignment,
   actorName,
+  allowOperationalFundPending = false,
 }) {
   if (!['running', 'completed'].includes(nextStatus)) return;
   if (nextEntrySource === 'historical') return;
@@ -637,6 +678,29 @@ async function syncAutoJourneyMoneyExpense(client, {
   const paidAt = runningAt || new Date().toISOString();
   const description = buildAutoJourneyMoneyDescription(job, assignment);
   const sourceRefId = job.id;
+  const existingAutoLedger = await client.query(
+    `
+      select
+        expense.id,
+        oft.id as ledger_id,
+        batch.status as batch_status
+      from container_job_expenses expense
+      left join operational_fund_transactions oft
+        on oft.container_job_expense_id = expense.id
+       and oft.transaction_type = 'debit'
+       and oft.status = 'posted'
+      left join operational_fund_batches batch on batch.id = oft.batch_id
+      where expense.source = 'auto_uj_order'
+        and expense.source_ref_id = $1
+        and expense.payment_status <> 'batal'
+      limit 1
+    `,
+    [String(sourceRefId)],
+  );
+  if (existingAutoLedger.rows[0]?.ledger_id && existingAutoLedger.rows[0]?.batch_status === 'closed') {
+    return null;
+  }
+
   const expenseResult = await client.query(
     `
       insert into container_job_expenses (
@@ -694,7 +758,23 @@ async function syncAutoJourneyMoneyExpense(client, {
   );
   const expenseId = expenseResult.rows[0].id;
   const batchDate = paidAt ? String(paidAt).slice(0, 10) : null;
-  const batch = await ensureOperationalFundBatch(client, batchDate, actorName || 'Operational');
+  let batch;
+  try {
+    batch = await ensureOperationalFundBatch(client, batchDate, actorName || 'Operational');
+  } catch (error) {
+    if (!allowOperationalFundPending || !isNonBlockingAutoJourneyMoneyOperationalFundError(error)) {
+      throw error;
+    }
+    await markAutoJourneyMoneyExpensePendingFinanceReview(client, {
+      expenseId,
+      actorName,
+      error,
+    });
+    return {
+      code: 'AUTO_UJ_PENDING_FINANCE_REVIEW',
+      message: autoJourneyMoneyPendingFinanceNote(error),
+    };
+  }
 
   await client.query(
     `
@@ -750,6 +830,7 @@ async function syncAutoJourneyMoneyExpense(client, {
       String(job.id),
     ],
   );
+  return null;
 }
 
 async function voidAutoJourneyMoneyExpense(client, jobId, actorName = 'Operational') {
@@ -2214,10 +2295,11 @@ async function updateContainerJobTransaction(id, form) {
       );
     }
 
+    const updateWarnings = [];
     if (nextStatus === 'cancelled') {
       await voidAutoJourneyMoneyExpense(client, id, actorName);
     } else {
-      await syncAutoJourneyMoneyExpense(client, {
+      const autoUjWarning = await syncAutoJourneyMoneyExpense(client, {
         job: existing.rows[0],
         nextStatus,
         nextEntrySource,
@@ -2225,7 +2307,9 @@ async function updateContainerJobTransaction(id, form) {
         runningAt,
         assignment: nextAssignmentSnapshot,
         actorName,
+        allowOperationalFundPending: nextStatus === 'completed',
       });
+      if (autoUjWarning) updateWarnings.push(autoUjWarning);
     }
 
     await syncResourceAssignmentStatus(client, existing.rows[0], {
@@ -2251,7 +2335,9 @@ async function updateContainerJobTransaction(id, form) {
       `,
       [id],
     );
-    return mapContainerJob(updated.rows[0], attachmentResult.rows);
+    const mapped = mapContainerJob(updated.rows[0], attachmentResult.rows);
+    if (updateWarnings.length) mapped.updateWarnings = updateWarnings;
+    return mapped;
   });
 }
 

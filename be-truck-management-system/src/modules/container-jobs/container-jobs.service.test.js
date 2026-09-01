@@ -27,6 +27,7 @@ const {
   hasRequiredRepoCompletionDocuments,
   resolveJourneyMoneyAmountForSize,
   shouldValidateVehicleContainerSize,
+  syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
@@ -191,6 +192,51 @@ test('auto UJ memilih tarif sesuai ukuran container dan membuat keterangan ledge
     },
     { driver: 'Randi', plateNumber: 'B9180BEL' },
   ), 'UJ Revo Patimban 50X40 B9180BEL');
+});
+
+test('auto UJ saat closing tidak menggagalkan ritasi jika batch rekening dropping sudah ditutup', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (sql.includes("coalesce(source, 'manual') <> 'auto_uj_order'")) return { rows: [] };
+      if (sql.includes('left join operational_fund_transactions oft')) return { rows: [] };
+      if (sql.includes('insert into container_job_expenses')) return { rows: [{ id: 'expense-1' }] };
+      if (sql.includes('insert into operational_fund_batches')) {
+        return { rows: [{ id: 'batch-1', batch_date: '2026-08-31', status: 'closed' }] };
+      }
+      if (sql.includes("set finance_check_status = 'perlu_klarifikasi'")) return { rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  const result = await syncAutoJourneyMoneyExpense(client, {
+    job: {
+      id: 'job-1',
+      sales_order_id: 'order-1',
+      customer_name: 'Customer A',
+      destination: 'Cikarang',
+      container_size: '20FT',
+      uj_amount_snapshot: 60000,
+      rpuj_status: 'draft',
+      assignment_snapshot: { plateNumber: 'B 1234 XYZ' },
+    },
+    nextStatus: 'completed',
+    nextEntrySource: 'realtime',
+    nextDriverId: 'driver-1',
+    runningAt: '2026-08-31T12:00:00.000Z',
+    assignment: { driver: 'Budi', plateNumber: 'B 1234 XYZ' },
+    actorName: 'Operational Test',
+    allowOperationalFundPending: true,
+  });
+
+  assert.equal(result.code, 'AUTO_UJ_PENDING_FINANCE_REVIEW');
+  assert.match(result.message, /belum masuk Catatan Saldo/);
+  assert.equal(calls.some((call) => call.sql.includes('insert into operational_fund_transactions')), false);
+  const reviewUpdate = calls.find((call) => call.sql.includes("set finance_check_status = 'perlu_klarifikasi'"));
+  assert.ok(reviewUpdate);
+  assert.equal(reviewUpdate.params[1], 'Operational Test');
+  assert.equal(reviewUpdate.params[2], 'expense-1');
 });
 
 test('data lama tidak mengunci mismatch ukuran truck dan container', () => {

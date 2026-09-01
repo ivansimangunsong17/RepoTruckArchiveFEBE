@@ -667,11 +667,14 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
         archive.refresh?.();
       }
       setEditing(null);
+      const updateWarning = Array.isArray(saved?.updateWarnings) ? saved.updateWarnings[0] : null;
       notify({
-        title: editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
+        title: updateWarning
+          ? 'Proses Operational diperbarui dengan catatan'
+          : editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
         message: editing.repoPickupMode
           ? `${containerNumber} berhasil diambil dari Repo dan lanjut Sedang Jalan dengan assignment perjalanan.`
-          : `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
+          : updateWarning?.message || `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });

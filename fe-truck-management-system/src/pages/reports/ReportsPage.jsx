@@ -12,6 +12,7 @@ import { buildHolidayMap, fetchIndonesiaPublicHolidays } from '../../services/re
 import {
   fetchCustomerPerformanceReport,
   fetchDriverPerformanceReport,
+  fetchMonthlyComparisonReport,
   fetchMonthlyRevenueReport,
   fetchOperationReport,
   fetchSalesPerformanceReport,
@@ -999,6 +1000,111 @@ function formatMasterValue(value) {
   return String(value);
 }
 
+const MONTHLY_COMPARISON_CONFIG = {
+  revenue: {
+    title: 'Perbandingan Revenue Bulanan',
+    description: 'Total revenue invoice per bulan.',
+    metricKey: 'totalRevenue',
+    valueType: 'currency',
+    toneClassName: 'bg-emerald-500',
+  },
+  utilization: {
+    title: 'Perbandingan Utilisasi Bulanan',
+    description: 'Persentase pemakaian truck per bulan.',
+    metricKey: 'utilizationPercent',
+    valueType: 'percent',
+    toneClassName: 'bg-sky-500',
+  },
+  customer: {
+    title: 'Perbandingan Customer Bulanan',
+    description: 'Total revenue customer per bulan.',
+    metricKey: 'totalRevenue',
+    valueType: 'currency',
+    toneClassName: 'bg-rose-500',
+  },
+  sales: {
+    title: 'Perbandingan Sales Bulanan',
+    description: 'Total revenue sales per bulan.',
+    metricKey: 'totalRevenue',
+    valueType: 'currency',
+    toneClassName: 'bg-slate-700',
+  },
+  repo: {
+    title: 'Perbandingan Container Titip Bulanan',
+    description: 'Jumlah container yang masuk titip per bulan.',
+    metricKey: 'repoStoredCount',
+    valueType: 'count',
+    toneClassName: 'bg-blue-500',
+  },
+};
+
+function formatMonthlyComparisonValue(value, type) {
+  const number = Number(value || 0);
+  if (type === 'currency') return formatCurrency(number);
+  if (type === 'percent') return `${number.toFixed(1)}%`;
+  return `${number.toLocaleString('id-ID')} container`;
+}
+
+function MonthlyComparisonChart({ rows = [], selectedReport, year, loading = false, error = '' }) {
+  const config = MONTHLY_COMPARISON_CONFIG[selectedReport];
+  if (!config) return null;
+
+  const chartRows = rows.map((row) => ({
+    ...row,
+    value: Number(row?.[config.metricKey] || 0),
+  }));
+  const maxValue = Math.max(...chartRows.map((row) => row.value), 0);
+  const peakRow = chartRows.reduce((peak, row) => (row.value > Number(peak?.value || 0) ? row : peak), null);
+
+  return (
+    <section className="mb-4 rounded-md border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 px-3 py-2.5">
+        <div>
+          <h2 className="text-sm font-bold text-slate-950">{config.title}</h2>
+          <p className="text-xs text-slate-500">{config.description} Tahun {year}.</p>
+        </div>
+        {peakRow && maxValue > 0 ? (
+          <div className="rounded-md bg-slate-50 px-2.5 py-1 text-right">
+            <span className="block text-[10px] font-black uppercase text-slate-400">Tertinggi</span>
+            <strong className="block text-xs font-black text-slate-900">{peakRow.label} - {formatMonthlyComparisonValue(peakRow.value, config.valueType)}</strong>
+          </div>
+        ) : null}
+      </div>
+      {loading ? (
+        <div className="px-3 py-8 text-sm font-semibold text-slate-500">Memuat grafik perbandingan bulanan...</div>
+      ) : error ? (
+        <div className="px-3 py-4 text-sm font-semibold text-red-600">{error}</div>
+      ) : (
+        <div className="overflow-x-auto px-3 py-4">
+          <div className="grid min-w-[720px] grid-cols-12 items-end gap-2">
+            {chartRows.map((row) => {
+              const height = maxValue ? Math.max(6, (row.value / maxValue) * 100) : 0;
+              return (
+                <div className="grid gap-2" key={row.monthKey || row.label}>
+                  <div className="flex h-36 items-end rounded-md bg-slate-50 px-1.5 py-1.5">
+                    <div
+                      aria-label={`${row.label} ${formatMonthlyComparisonValue(row.value, config.valueType)}`}
+                      className={`w-full rounded-t ${config.toneClassName} transition-all`}
+                      style={{ height: `${height}%` }}
+                      title={`${row.label}: ${formatMonthlyComparisonValue(row.value, config.valueType)}`}
+                    />
+                  </div>
+                  <div className="text-center">
+                    <strong className="block text-[11px] font-black text-slate-700">{row.label}</strong>
+                    <span className="block truncate text-[10px] font-semibold text-slate-500" title={formatMonthlyComparisonValue(row.value, config.valueType)}>
+                      {formatMonthlyComparisonValue(row.value, config.valueType)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function buildMasterReportSections(masters = {}) {
   return [
     {
@@ -1679,6 +1785,9 @@ function ReportsPage() {
   const [customerPerformanceSummary, setCustomerPerformanceSummary] = useState(DEFAULT_CUSTOMER_PERFORMANCE_SUMMARY);
   const [customerPerformanceLoading, setCustomerPerformanceLoading] = useState(true);
   const [customerPerformanceError, setCustomerPerformanceError] = useState('');
+  const [monthlyComparisonRows, setMonthlyComparisonRows] = useState([]);
+  const [monthlyComparisonLoading, setMonthlyComparisonLoading] = useState(true);
+  const [monthlyComparisonError, setMonthlyComparisonError] = useState('');
   const [utilizationRows, setUtilizationRows] = useState([]);
   const [utilizationLoading, setUtilizationLoading] = useState(true);
   const [utilizationError, setUtilizationError] = useState('');
@@ -1729,6 +1838,11 @@ function ReportsPage() {
     if (dataSource === 'realtime') return { entrySource: 'realtime' };
     return {};
   }, [activePeriodKey, dataSource]);
+  const yearlyComparisonSourceParams = useMemo(() => {
+    if (dataSource === 'historical') return { entrySource: 'historical' };
+    if (dataSource === 'realtime') return { entrySource: 'realtime' };
+    return {};
+  }, [dataSource]);
 
   useEffect(() => {
     setSelectedReport(normalizeReportTab(searchParams.get('tab'), { revenueOnly: isFinanceOnly }));
@@ -1782,6 +1896,30 @@ function ReportsPage() {
       active = false;
     };
   }, [activePeriodKey]);
+
+  useEffect(() => {
+    let active = true;
+    setMonthlyComparisonLoading(true);
+    setMonthlyComparisonError('');
+
+    fetchMonthlyComparisonReport({ year, ...yearlyComparisonSourceParams })
+      .then((result) => {
+        if (!active) return;
+        setMonthlyComparisonRows(Array.isArray(result?.rows) ? result.rows : []);
+      })
+      .catch((requestError) => {
+        if (!active) return;
+        setMonthlyComparisonRows([]);
+        setMonthlyComparisonError(requestError.message || 'Grafik perbandingan bulanan gagal dimuat.');
+      })
+      .finally(() => {
+        if (active) setMonthlyComparisonLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [year, yearlyComparisonSourceParams]);
 
   function selectReport(report) {
     const normalized = normalizeReportTab(report, { revenueOnly: isFinanceOnly });
@@ -2064,9 +2202,15 @@ function ReportsPage() {
   // Filter umur piutang di tab Outstanding dilakukan di sisi frontend -- datanya sudah lengkap
   // sekali fetch (tidak dipaginasi backend), jadi tidak perlu bolak-balik ke server tiap ganti
   // ambang batas.
-  const visibleCustomerPerformanceRows = customerDetailView === 'outstanding' && outstandingMinOverdueDays
+  const customerPerformanceBaseRows = customerDetailView === 'outstanding' && outstandingMinOverdueDays
     ? customerPerformanceRows.filter((row) => Number(row.oldestOverdueDays || 0) >= outstandingMinOverdueDays)
     : customerPerformanceRows;
+  // Backend mengurutkan rows berdasarkan outstanding terbesar dulu (relevan untuk tab Outstanding),
+  // jadi tab Revenue perlu diurutkan ulang di sini supaya customer dengan revenue terbanyak tampil
+  // di baris paling atas.
+  const visibleCustomerPerformanceRows = customerDetailView === 'revenue'
+    ? [...customerPerformanceBaseRows].sort((left, right) => Number(right.totalRevenue || 0) - Number(left.totalRevenue || 0))
+    : customerPerformanceBaseRows;
   const customerPerformanceTotalPages = Math.max(1, Math.ceil(visibleCustomerPerformanceRows.length / CUSTOMER_PERFORMANCE_PAGE_SIZE));
   const safeCustomerPerformancePage = Math.min(customerPerformancePage, customerPerformanceTotalPages);
   const customerPerformanceStartIndex = visibleCustomerPerformanceRows.length
@@ -2249,6 +2393,16 @@ function ReportsPage() {
           </>
         ) : null}
       </section>
+
+      {selectedReport !== 'driver' && selectedReport !== 'master' ? (
+        <MonthlyComparisonChart
+          error={monthlyComparisonError}
+          loading={monthlyComparisonLoading}
+          rows={monthlyComparisonRows}
+          selectedReport={selectedReport}
+          year={year}
+        />
+      ) : null}
 
       {selectedReport === 'master' ? (
         <section className="grid gap-3 xl:grid-cols-2">

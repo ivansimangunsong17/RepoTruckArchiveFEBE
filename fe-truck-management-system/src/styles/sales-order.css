@@ -1547,7 +1547,7 @@
 .order-modal > header h2 { margin-bottom: 3px; font-size: 1.15rem; }
 .order-modal > header span { color: #7d899b; font-size: .7rem; }
 .order-modal > header button { display: grid; place-items: center; border: 0; color: #7d899b; background: transparent; }
-.order-modal form { display: block; overflow-y: auto; min-height: 0; max-height: calc(100vh - 138px); background: #f7f7f8; overscroll-behavior: contain; }
+.order-modal form { display: block; flex: 1; overflow-y: auto; min-height: 0; background: #f7f7f8; overscroll-behavior: contain; }
 .ionion { margin: 10px 12px 0; padding: 14px 16px; border: 1px solid #e1e2e5; border-radius: 10px; background: white; }
 .form-section:last-of-type { margin-bottom: 12px; }
 .form-section h3 { margin: 0 0 10px; font-size: .78rem; }

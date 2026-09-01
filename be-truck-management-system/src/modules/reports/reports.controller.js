@@ -4,6 +4,7 @@ import {
   fetchDashboardReport,
   fetchDocumentReport,
   fetchDriverPerformanceReport,
+  fetchMonthlyComparisonReport,
   fetchMonthlyRevenueReport,
   fetchOperationReport,
   fetchSalesPerformanceReport,
@@ -22,6 +23,11 @@ export async function salesOrderReportController(request, response) {
 
 export async function monthlyRevenueReportController(request, response) {
   const result = await fetchMonthlyRevenueReport(request.query);
+  sendSuccess(response, result);
+}
+
+export async function monthlyComparisonReportController(request, response) {
+  const result = await fetchMonthlyComparisonReport(request.query);
   sendSuccess(response, result);
 }
 

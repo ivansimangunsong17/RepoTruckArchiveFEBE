@@ -534,6 +534,8 @@ export function listSalesOrders(query) {
     invoiceDocumentStatus: query.invoiceDocumentStatus || '',
     entrySource: query.entrySource || '',
     historicalPeriod: query.historicalPeriod || '',
+    dateFrom: query.dateFrom || '',
+    dateTo: query.dateTo || '',
   });
 }
 

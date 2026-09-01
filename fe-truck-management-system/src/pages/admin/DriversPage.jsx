@@ -1,6 +1,6 @@
-import { FileText } from 'lucide-react';
 import MasterDataPage, { DetailDocumentActions } from '../../components/master/MasterDataPage';
 import MasterExpiryDate from '../../components/master/MasterExpiryDate';
+import DocumentLink from '../../components/common/DocumentLink';
 import { buildOperationalJobs, getActiveOperationalJobs } from '../../data/operationalDashboard';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { useArchiveData } from '../../hooks/useArchiveData';
@@ -332,14 +332,13 @@ function DriversPage({ readOnly = false }) {
         {
           key: 'nik',
           label: 'NIK',
-          render: (_value, row, meta) => (
-            <button
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
-              onClick={meta.onViewDetail}
-              type="button"
-            >
-              <FileText size={12} /> Lihat Dokumen
-            </button>
+          render: (_value, row) => (
+            <DocumentLink
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              file={row.identityDocument}
+              label="Lihat Dokumen"
+              iconOnly
+            />
           ),
         },
         { key: 'birthDate', label: 'Umur', render: (_, row) => <DriverAge row={row} /> },

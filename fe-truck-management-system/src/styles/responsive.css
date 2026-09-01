@@ -360,7 +360,6 @@
   .master-modal .master-form-heading { align-items: flex-start; flex-direction: row; }
   .modal-backdrop { align-items: end; padding: 0; }
   .order-modal { width: 100%; max-height: 94vh; border-radius: 16px 16px 0 0; }
-  .order-modal form { max-height: calc(94vh - 78px); }
   .order-modal footer { align-items: stretch; flex-direction: column-reverse; padding: 14px 16px; }
   .order-modal footer button { width: 100%; }
   .operational-list, .dashboard-grid.lower { grid-template-columns: 1fr; }
@@ -1119,7 +1118,6 @@
     line-height: 1.25;
   }
 
-  .order-modal form,
   .sales-order-detail-body,
   .container-job-detail-body,
   .container-cancel-modal form,
@@ -1701,6 +1699,8 @@
   }
 
   .document-preview-image-scroll {
+    width: 100%;
+    height: 100%;
     overflow: hidden;
     padding: 10px;
     place-items: center;
@@ -1710,6 +1710,7 @@
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+    border-radius: 8px;
   }
 
   .order-modal footer,

@@ -584,6 +584,37 @@ if (!hasDatabase) {
       assert.equal(salesScopedList.status, 200);
       assert.equal(salesScopedList.body.data.rows.some((row) => row.id === created.orderId), true);
 
+      // Filter tanggal (dateFrom/dateTo) di daftar Sales Order -- pakai Tanggal SO yang jauh di luar
+      // rentang tanggal fixture lain di suite ini supaya tidak bentrok dengan data test lain.
+      const dateFilterSoNumber = `${created.orderSoNumber}-DATEFILTER`;
+      const dateFilterOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: adminToken,
+        body: salesOrderPayload({
+          soNumber: dateFilterSoNumber,
+          soDate: '2019-03-05',
+          tripDate: '2019-03-06',
+          receivedAt: '2019-03-05T00:00:00.000Z',
+          entrySource: 'historical',
+          historicalPeriod: '2019-03',
+          historicalNotes: `Backfill test filter tanggal ${runId}`,
+          createdBy: users.admin.name,
+          updatedBy: users.admin.name,
+        }),
+      });
+      assert.equal(dateFilterOrder.status, 201);
+
+      const dateFilterQuery = encodeURIComponent(dateFilterSoNumber);
+      const withinDateRange = await api(`/api/sales-orders?query=${dateFilterQuery}&dateFrom=2019-03-01&dateTo=2019-03-31`, { token: adminToken });
+      assert.equal(withinDateRange.status, 200);
+      assert.equal(withinDateRange.body.data.rows.some((row) => row.id === dateFilterOrder.body.data.id), true);
+
+      const beforeDateRange = await api(`/api/sales-orders?query=${dateFilterQuery}&dateTo=2019-03-04`, { token: adminToken });
+      assert.equal(beforeDateRange.body.data.rows.some((row) => row.id === dateFilterOrder.body.data.id), false);
+
+      const afterDateRange = await api(`/api/sales-orders?query=${dateFilterQuery}&dateFrom=2019-03-06`, { token: adminToken });
+      assert.equal(afterDateRange.body.data.rows.some((row) => row.id === dateFilterOrder.body.data.id), false);
+
       const historicalOrder = await api('/api/sales-orders', {
         method: 'POST',
         token: adminToken,
