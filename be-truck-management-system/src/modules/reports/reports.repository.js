@@ -145,6 +145,8 @@ function normalizeUtilizationChassisCorrection(correction = {}) {
   const targetVehicleId = correction.targetVehicleId || correction.target_vehicle_id || '';
   const targetPlateNumber = correction.targetPlateNumber || correction.target_plate_number || '';
   const targetUnitCode = correction.targetUnitCode || correction.target_unit_code || '';
+  const sourceChassisSize = correction.sourceChassisSize || correction.source_chassis_size || '';
+  const targetChassisSize = correction.targetChassisSize || correction.target_chassis_size || '';
   const effectiveFrom = getReportDateKey({ completedDate: correction.effectiveFrom || correction.effective_from });
   const effectiveTo = getReportDateKey({ completedDate: correction.effectiveTo || correction.effective_to });
   const sourceKeys = [sourceVehicleId, sourcePlateNumber, sourceUnitCode]
@@ -161,6 +163,8 @@ function normalizeUtilizationChassisCorrection(correction = {}) {
     targetVehicleId,
     targetPlateNumber,
     targetUnitCode,
+    sourceChassisSize,
+    targetChassisSize,
     effectiveFrom,
     effectiveTo,
     reason: correction.reason || '',
@@ -194,23 +198,25 @@ export function applyUtilizationChassisCorrectionsToRows(rows = [], corrections 
     const originalVehicleId = row.originalVehicleId || row.vehicleId || row.vehicle_id || '';
     const originalPlateNumber = row.originalPlateNumber || row.plateNumber || row.plate_number || '';
     const originalUnitCode = row.originalUnitCode || row.unitCode || row.unit_code || '';
+    const originalChassisSize = row.originalChassisSize || row.chassisSize || row.chassis_size || row.size || '';
 
     return {
       ...row,
       originalVehicleId,
       originalPlateNumber,
       originalUnitCode,
-      vehicleId: correction.targetVehicleId || row.vehicleId,
-      plateNumber: correction.targetPlateNumber || row.plateNumber,
-      unitCode: correction.targetUnitCode || row.unitCode,
+      originalChassisSize,
+      chassisSize: correction.targetChassisSize || row.chassisSize,
       utilizationChassisCorrection: {
         id: correction.id,
         sourceVehicleId: correction.sourceVehicleId,
         sourcePlateNumber: correction.sourcePlateNumber || originalPlateNumber,
         sourceUnitCode: correction.sourceUnitCode || originalUnitCode,
+        sourceChassisSize: correction.sourceChassisSize || originalChassisSize,
         targetVehicleId: correction.targetVehicleId,
         targetPlateNumber: correction.targetPlateNumber || row.plateNumber,
         targetUnitCode: correction.targetUnitCode || row.unitCode,
+        targetChassisSize: correction.targetChassisSize || row.chassisSize || row.size,
         effectiveFrom: correction.effectiveFrom,
         effectiveTo: correction.effectiveTo,
         reason: correction.reason,
@@ -1291,9 +1297,11 @@ async function findActiveUtilizationChassisCorrections(options = {}) {
              c.source_vehicle_id,
              source_vehicle.plate_number as source_plate_number,
              source_vehicle.unit_code as source_unit_code,
+             source_vehicle.container_size as source_chassis_size,
              c.target_vehicle_id,
              target_vehicle.plate_number as target_plate_number,
              target_vehicle.unit_code as target_unit_code,
+             target_vehicle.container_size as target_chassis_size,
              to_char(c.effective_from, 'YYYY-MM-DD') as effective_from,
              to_char(c.effective_to, 'YYYY-MM-DD') as effective_to,
              c.reason,
@@ -1375,7 +1383,8 @@ export async function getOperationReport(options = {}) {
                so.origin, cj.destination,
                coalesce(cj.vehicle_id, snapshot_vehicle.id) as display_vehicle_id,
                coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number, snapshot_vehicle.plate_number) as plate_number,
-               coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code
+               coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code,
+               coalesce(v.container_size, snapshot_vehicle.container_size) as vehicle_chassis_size
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         left join vehicles v on v.id = cj.vehicle_id
@@ -1441,6 +1450,7 @@ export async function getOperationReport(options = {}) {
       driver: row.assignment_snapshot?.driver || null,
       unitCode: row.unit_code || row.assignment_snapshot?.unitCode || '',
       plateNumber: row.plate_number || row.assignment_snapshot?.plateNumber || null,
+      chassisSize: row.vehicle_chassis_size || row.container_size || '',
       receivedAt: row.received_at,
       runningAt: row.running_at,
       completedAt: row.completed_at,

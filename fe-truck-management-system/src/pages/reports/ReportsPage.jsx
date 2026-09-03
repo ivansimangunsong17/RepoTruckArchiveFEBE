@@ -129,7 +129,19 @@ function normalizeTruckSize(value) {
 }
 
 function getTruckSize(row = {}) {
-  return normalizeTruckSize(row.capacity || row.containerSize || row.container_size || row.size || row.defaultSize || row.chassisSize);
+  return normalizeTruckSize(
+    row.capacity
+    || row.chassisSize
+    || row.chassis_size
+    || row.vehicleChassisSize
+    || row.vehicle_chassis_size
+    || row.currentChassisSize
+    || row.displayChassisSize
+    || row.containerSize
+    || row.container_size
+    || row.size
+    || row.defaultSize,
+  );
 }
 
 function truckSizeSortKey(size) {
@@ -452,6 +464,34 @@ function getUtilizationTruckKey(row = {}, activeTruckLookup = new Map()) {
   return keys.map((key) => activeTruckLookup.get(key)).find(Boolean) || '';
 }
 
+function previousDateKeyValue(value) {
+  const key = String(value || '').slice(0, 10);
+  if (!key) return '';
+  const date = new Date(`${key}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setDate(date.getDate() - 1);
+  return dateKey(date);
+}
+
+function createPivotCells(days, period = {}) {
+  return days.reduce((cells, day) => {
+    const inactive = Boolean(
+      (period.activeFrom && day.key < period.activeFrom)
+      || (period.activeTo && day.key > period.activeTo),
+    );
+    return {
+      ...cells,
+      [day.key]: {
+        count: 0,
+        labels: [],
+        corrections: [],
+        inactive,
+        transition: period.transitionDate === day.key ? period.transition : null,
+      },
+    };
+  }, {});
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], month, year, baseDate = new Date()) {
   const period = buildUtilizationPeriod(month, year, baseDate);
@@ -536,20 +576,109 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
   const days = buildMonthDays(month, year, holidaysByDate);
   const dayKeys = new Set(days.map((day) => day.key));
   const trucks = new Map();
+  const normalTruckKeyByPlate = new Map();
+  const transitionsByPlate = new Map();
+
+  rows.forEach((row) => {
+    const correction = row.utilizationChassisCorrection;
+    if (!correction) return;
+
+    const plateNumber = getTruckPlate(row);
+    const sourceSize = normalizeTruckSize(correction.sourceChassisSize || row.originalChassisSize || row.size || getTruckSize(row));
+    const targetSize = normalizeTruckSize(correction.targetChassisSize || row.chassisSize || getTruckSize(row));
+    const effectiveFrom = String(correction.effectiveFrom || '').slice(0, 10);
+    if (!plateNumber || !sourceSize || !targetSize || !effectiveFrom || transitionsByPlate.has(plateNumber)) return;
+
+    transitionsByPlate.set(plateNumber, {
+      id: correction.id || `${plateNumber}-${effectiveFrom}-${sourceSize}-${targetSize}`,
+      plateNumber,
+      unitCode: getTruckUnitCode(row),
+      sourceSize,
+      targetSize,
+      effectiveFrom,
+      effectiveTo: String(correction.effectiveTo || '').slice(0, 10),
+      oldActiveFrom: days[0]?.key || '',
+      oldActiveTo: previousDateKeyValue(effectiveFrom),
+      newActiveFrom: effectiveFrom,
+      newActiveTo: String(correction.effectiveTo || days[days.length - 1]?.key || '').slice(0, 10),
+      reason: correction.reason || '',
+      note: correction.note || '',
+    });
+  });
+
+  const transitionByRowKey = (plateNumber, phase) => {
+    const transition = transitionsByPlate.get(plateNumber);
+    if (!transition) return null;
+    return {
+      transition,
+      key: `${plateNumber}|${phase === 'after' ? transition.targetSize : transition.sourceSize}|${phase}|${transition.id}`,
+    };
+  };
+
+  const addTruckRow = (source, options = {}) => {
+    const plateNumber = getTruckPlate(source);
+    const phase = options.phase || 'normal';
+    const size = options.size || getTruckSize(source);
+    const rowKey = options.key || `${plateNumber}|${size || 'unknown'}|${phase}`;
+
+    if (trucks.has(rowKey)) return trucks.get(rowKey);
+
+    const transition = options.transition || null;
+    const row = {
+      id: getTruckId(source) || plateNumber,
+      rowKey,
+      plateNumber,
+      unitCode: getTruckUnitCode(source),
+      size,
+      driver: getDriverName(source),
+      segmentPhase: phase,
+      segmentBadge: options.segmentBadge || '',
+      isDuplicateUnit: Boolean(options.isDuplicateUnit),
+      activeFrom: options.activeFrom || '',
+      activeTo: options.activeTo || '',
+      transition,
+      cells: createPivotCells(days, {
+        activeFrom: options.activeFrom || '',
+        activeTo: options.activeTo || '',
+        transitionDate: transition?.effectiveFrom || '',
+        transition,
+      }),
+      totalTrips: 0,
+    };
+    trucks.set(rowKey, row);
+    if (phase === 'normal' && !normalTruckKeyByPlate.has(plateNumber)) {
+      normalTruckKeyByPlate.set(plateNumber, rowKey);
+    }
+    return row;
+  };
 
   masterTrucks.forEach((truck) => {
     const plateNumber = getTruckPlate(truck);
-    if (!trucks.has(plateNumber)) {
-      trucks.set(plateNumber, {
-        id: getTruckId(truck) || plateNumber,
-        plateNumber,
-        unitCode: getTruckUnitCode(truck),
-        size: getTruckSize(truck),
-        driver: getDriverName(truck),
-        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [], corrections: [] } }), {}),
-        totalTrips: 0,
+    const transition = transitionsByPlate.get(plateNumber);
+    if (transition) {
+      addTruckRow(truck, {
+        key: transitionByRowKey(plateNumber, 'before').key,
+        phase: 'before',
+        size: transition.sourceSize || getTruckSize(truck),
+        segmentBadge: 'Sebelum Pindah',
+        isDuplicateUnit: true,
+        activeTo: transition.oldActiveTo,
+        transition,
       });
+      addTruckRow(truck, {
+        key: transitionByRowKey(plateNumber, 'after').key,
+        phase: 'after',
+        size: transition.targetSize || getTruckSize(truck),
+        segmentBadge: 'Setelah Pindah',
+        isDuplicateUnit: true,
+        activeFrom: transition.newActiveFrom,
+        activeTo: transition.newActiveTo,
+        transition,
+      });
+      return;
     }
+
+    addTruckRow(truck);
   });
 
   rows.forEach((row) => {
@@ -557,22 +686,30 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     if (!dayKeys.has(dateKey)) return;
 
     const plateNumber = getTruckPlate(row);
-    if (!trucks.has(plateNumber)) {
-      trucks.set(plateNumber, {
-        id: getTruckId(row) || plateNumber,
-        plateNumber,
-        unitCode: getTruckUnitCode(row),
-        size: getTruckSize(row),
-        driver: getDriverName(row),
-        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [], corrections: [] } }), {}),
-        totalTrips: 0,
+    const transition = transitionsByPlate.get(plateNumber);
+    let truck;
+    if (transition) {
+      const phase = dateKey >= transition.newActiveFrom ? 'after' : 'before';
+      const transitionRow = transitionByRowKey(plateNumber, phase);
+      truck = trucks.get(transitionRow.key) || addTruckRow(row, {
+        key: transitionRow.key,
+        phase,
+        size: phase === 'after' ? transition.targetSize : transition.sourceSize,
+        segmentBadge: phase === 'after' ? 'Setelah Pindah' : 'Sebelum Pindah',
+        isDuplicateUnit: true,
+        activeFrom: phase === 'after' ? transition.newActiveFrom : '',
+        activeTo: phase === 'after' ? transition.newActiveTo : transition.oldActiveTo,
+        transition,
       });
+    } else {
+      const existingKey = normalTruckKeyByPlate.get(plateNumber);
+      truck = existingKey ? trucks.get(existingKey) : addTruckRow(row);
     }
 
-    const truck = trucks.get(plateNumber);
     if (!truck.unitCode) truck.unitCode = getTruckUnitCode(row);
     if (!truck.size) truck.size = getTruckSize(row);
     const cell = truck.cells[dateKey];
+    if (cell?.inactive) cell.inactive = false;
     cell.count += 1;
     const label = compactCellLabel(row);
     if (label && !cell.labels.includes(label)) cell.labels.push(label);
@@ -585,6 +722,11 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
         effectiveFrom: row.utilizationChassisCorrection.effectiveFrom || '',
         effectiveTo: row.utilizationChassisCorrection.effectiveTo || '',
         reason: row.utilizationChassisCorrection.reason || '',
+        sourceChassisSize: row.utilizationChassisCorrection.sourceChassisSize || row.originalChassisSize || '',
+        targetChassisSize: row.utilizationChassisCorrection.targetChassisSize || row.chassisSize || '',
+        oldActiveTo: transition?.oldActiveTo || '',
+        newActiveFrom: transition?.newActiveFrom || '',
+        note: row.utilizationChassisCorrection.note || '',
       });
     }
     if (row.driver) truck.driver = getDriverName(row);
@@ -601,6 +743,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
   return {
     days,
     rows: rowsByTruck,
+    transitions: Array.from(transitionsByPlate.values()),
     totalsByDay: days.reduce((totals, day) => ({
       ...totals,
       [day.key]: rowsByTruck.reduce((total, truck) => total + truck.cells[day.key].count, 0),
@@ -1437,11 +1580,13 @@ function MasterReportSection({ section }) {
   );
 }
 
-function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
+function PivotCell({ cell, note, canEditNote = false, onOpenNote, onOpenCorrection }) {
   const hasCount = Boolean(cell?.count);
   const hasNote = Boolean(note?.reasonLabel || note?.notes);
   const corrections = Array.isArray(cell?.corrections) ? cell.corrections : [];
   const hasCorrection = corrections.length > 0;
+  const hasTransition = Boolean(cell?.transition);
+  const isInactive = Boolean(cell?.inactive);
   const correctionTitle = corrections.map((correction) => [
     `Koreksi chassis: ${correction.sourcePlateNumber || '-'} -> ${correction.targetPlateNumber || '-'}`,
     correction.reason ? `Alasan: ${correction.reason}` : '',
@@ -1453,6 +1598,7 @@ function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
         : `${cell.count} trip`
       : 'Tidak ada trip',
     hasNote ? `Catatan: ${note.reasonLabel}${note.notes ? ` - ${note.notes}` : ''}` : '',
+    hasTransition ? `Tanggal pergantian chassis: ${cell.transition.effectiveFrom}` : '',
     correctionTitle,
   ].filter(Boolean).join('\n');
 
@@ -1465,22 +1611,30 @@ function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
         </span>
       ) : null}
     </span>
+  ) : hasTransition ? (
+    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm text-[12px] font-black leading-none text-orange-500" title={title}>
+      •
+    </span>
   ) : hasNote ? (
     <span className="inline-flex h-4 min-w-6 items-center justify-center rounded-sm bg-amber-100 px-1 text-[7px] font-black leading-none text-amber-800">
       {formatUtilizationNoteCode(note)}
+    </span>
+  ) : isInactive ? (
+    <span className="inline-flex h-4 min-w-5 items-center justify-center rounded-sm bg-slate-100 text-[8px] font-black leading-none text-slate-400" title={title}>
+      -
     </span>
   ) : (
     <span className="text-[8px] text-slate-300">-</span>
   );
 
-  if (!hasNote && !canEditNote) return content;
+  if (!hasNote && !canEditNote && !hasCorrection && !hasTransition) return content;
 
   return (
     <button
       type="button"
       className={`group relative inline-grid min-h-5 min-w-7 place-items-center rounded-sm border-0 bg-transparent px-0.5 shadow-none outline-none ${hasNote ? 'ring-1 ring-amber-300' : canEditNote ? 'hover:bg-amber-50 focus-visible:ring-1 focus-visible:ring-amber-300' : ''}`}
       title={title}
-      onClick={onOpenNote}
+      onClick={hasCorrection || hasTransition ? onOpenCorrection : onOpenNote}
     >
       {content}
       {!hasNote && canEditNote ? (
@@ -1489,6 +1643,7 @@ function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
         </span>
       ) : null}
       {hasNote ? <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" /> : null}
+      {hasTransition ? <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden="true" /> : null}
     </button>
   );
 }
@@ -1601,20 +1756,99 @@ function UtilizationNoteModal({
   );
 }
 
-function buildPivotDisplayRows(rows = []) {
+function buildPivotDisplayRows(rows = [], transitions = []) {
   const items = [];
   let currentSize = '';
+  let transitionInserted = false;
+
+  const insertTransitionRows = () => {
+    if (transitionInserted || !transitions.length) return;
+    transitionInserted = true;
+    items.push({ type: 'transitionGroup', id: 'group-chassis-transition' });
+    transitions.forEach((transition, index) => {
+      items.push({ type: 'transition', id: `transition-${transition.id || index}`, transition, number: index + 1 });
+    });
+  };
 
   rows.forEach((truck, index) => {
     const size = getTruckSize(truck) || 'Ukuran Belum Diisi';
     if (size !== currentSize) {
+      if (currentSize) insertTransitionRows();
       currentSize = size;
       items.push({ type: 'group', id: `group-${size}`, size });
     }
-    items.push({ type: 'truck', id: truck.plateNumber, truck, number: index + 1 });
+    items.push({ type: 'truck', id: truck.rowKey || truck.plateNumber, truck, number: index + 1 });
   });
 
+  insertTransitionRows();
+
   return items;
+}
+
+function UtilizationChassisCorrectionModal({ correction, onClose }) {
+  if (!correction) return null;
+
+  const sourceSize = correction.sourceChassisSize || correction.sourceSize || '-';
+  const targetSize = correction.targetChassisSize || correction.targetSize || '-';
+  const oldActiveTo = correction.oldActiveTo || previousDateKeyValue(correction.effectiveFrom) || '-';
+  const newActiveFrom = correction.newActiveFrom || correction.effectiveFrom || '-';
+
+  return createPortal(
+    <div className="fixed inset-0 z-[240] flex items-center justify-center bg-slate-950/50 px-3" role="presentation" onMouseDown={onClose}>
+      <section
+        className="w-full max-w-lg overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="chassis-correction-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-amber-50 px-4 py-3">
+          <div>
+            <span className="text-[10px] font-black uppercase text-amber-700">Pertukaran Chassis</span>
+            <h3 id="chassis-correction-title" className="mt-0.5 text-base font-black text-slate-950">
+              {correction.plateNumber || correction.sourcePlateNumber || '-'}
+            </h3>
+          </div>
+          <button type="button" className="rounded-md border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100" onClick={onClose} aria-label="Tutup detail pertukaran chassis">
+            <X size={16} />
+          </button>
+        </header>
+        <div className="grid gap-3 p-4 text-sm">
+          <div className="grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+            <div>
+              <span className="block text-[10px] font-black uppercase text-slate-500">Tanggal Perubahan</span>
+              <strong className="text-slate-950">{correction.effectiveFrom || '-'}</strong>
+            </div>
+            <div>
+              <span className="block text-[10px] font-black uppercase text-slate-500">Arah Perpindahan</span>
+              <strong className="text-slate-950">{sourceSize} → {targetSize}</strong>
+            </div>
+            <div>
+              <span className="block text-[10px] font-black uppercase text-slate-500">Periode Aktif Lama</span>
+              <strong className="text-slate-950">01 sampai {oldActiveTo}</strong>
+            </div>
+            <div>
+              <span className="block text-[10px] font-black uppercase text-slate-500">Periode Aktif Baru</span>
+              <strong className="text-slate-950">{newActiveFrom} sampai {correction.effectiveTo || '-'}</strong>
+            </div>
+          </div>
+          <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs font-semibold leading-relaxed text-amber-900">
+            Unit yang sama bisa muncul dua kali karena histori utilisasi mengikuti ukuran chassis aktif pada tanggal tersebut. Ini bukan duplikasi data ritasi.
+          </p>
+          {correction.reason || correction.note ? (
+            <div className="rounded-md border border-slate-200 p-3 text-xs text-slate-700">
+              {correction.reason ? <p><strong>Alasan:</strong> {correction.reason}</p> : null}
+              {correction.note ? <p className="mt-1"><strong>Catatan:</strong> {correction.note}</p> : null}
+            </div>
+          ) : null}
+        </div>
+        <footer className="flex justify-end border-t border-slate-200 bg-slate-50 px-4 py-3">
+          <button type="button" className="secondary-button" onClick={onClose}>Tutup</button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
 }
 
 export function MonthlyUtilizationModal({
@@ -1631,6 +1865,7 @@ export function MonthlyUtilizationModal({
   onDeleteNote,
 }) {
   const [noteTarget, setNoteTarget] = useState(null);
+  const [correctionTarget, setCorrectionTarget] = useState(null);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -1647,7 +1882,7 @@ export function MonthlyUtilizationModal({
 
   if (!open) return null;
 
-  const displayRows = buildPivotDisplayRows(pivot.rows);
+  const displayRows = buildPivotDisplayRows(pivot.rows, pivot.transitions);
   const stickyNoWidth = 34;
   const truckLeftOffset = stickyNoWidth;
 
@@ -1668,6 +1903,11 @@ export function MonthlyUtilizationModal({
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
               {pivot.grandTotal} Trip
             </span>
+            {pivot.transitions?.length ? (
+              <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-black text-amber-800">
+                {pivot.transitions.length} Pertukaran Chassis
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -1679,6 +1919,12 @@ export function MonthlyUtilizationModal({
             </button>
           </div>
         </header>
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600">
+          <span><span className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-sky-100 px-1 text-[9px] font-black text-sky-900">1</span> angka biru = trip</span>
+          <span><span className="text-sm font-black text-orange-500">•</span> titik orange = tanggal pergantian chassis</span>
+          <span><span className="inline-flex h-4 min-w-5 items-center justify-center rounded-sm bg-slate-100 text-[8px] font-black text-slate-400">-</span> strip abu-abu = tidak aktif di group tersebut</span>
+          <span><span className="rounded bg-rose-100 px-1.5 py-0.5 text-[8px] font-black text-rose-700">DUP</span> unit muncul di group lain karena pindah chassis</span>
+        </div>
 
         {pivot.rows.length ? (
           <div className="min-h-0 flex-1 overflow-auto bg-white">
@@ -1729,15 +1975,71 @@ export function MonthlyUtilizationModal({
                     );
                   }
 
+                  if (item.type === 'transitionGroup') {
+                    return (
+                      <tr key={item.id} className="bg-amber-100 text-amber-950">
+                        <th colSpan={pivot.days.length + 3} className="border-y border-amber-300 px-1.5 py-1 text-left font-black">
+                          Pertukaran Chassis
+                        </th>
+                      </tr>
+                    );
+                  }
+
+                  if (item.type === 'transition') {
+                    const { transition } = item;
+                    return (
+                      <tr key={item.id} className="bg-amber-50/80 text-amber-950">
+                        <td className="sticky left-0 z-10 min-w-[34px] border-x border-amber-200 border-b border-b-amber-300 bg-amber-50 px-1 py-0.5 text-center font-black text-amber-700">
+                          ↔
+                        </td>
+                        <th className="sticky z-10 min-w-[130px] border-x border-amber-200 border-b border-b-amber-300 bg-amber-50 px-1.5 py-0.5 text-left font-black text-amber-950" style={{ left: truckLeftOffset }}>
+                          <button
+                            type="button"
+                            className="block w-[116px] truncate text-left underline decoration-amber-400 underline-offset-2"
+                            title={`${transition.plateNumber} ${transition.sourceSize} -> ${transition.targetSize}`}
+                            onClick={() => setCorrectionTarget(transition)}
+                          >
+                            {transition.plateNumber} {transition.sourceSize} → {transition.targetSize}
+                          </button>
+                        </th>
+                        {pivot.days.map((day) => (
+                          <td key={day.key} className="h-6 max-w-[38px] border-x border-b border-amber-200 px-0.5 py-0 text-center align-middle">
+                            {day.key === transition.effectiveFrom ? (
+                              <button
+                                type="button"
+                                className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm text-[12px] font-black leading-none text-orange-500"
+                                title={`Tanggal pergantian chassis ${transition.effectiveFrom}`}
+                                onClick={() => setCorrectionTarget(transition)}
+                              >
+                                •
+                              </button>
+                            ) : null}
+                          </td>
+                        ))}
+                        <td className="sticky right-0 z-10 border-x border-amber-200 border-b border-b-amber-300 bg-amber-50 px-1 py-0.5 text-center font-black text-amber-900">
+                          DUP
+                        </td>
+                      </tr>
+                    );
+                  }
+
                   const { truck } = item;
                   return (
-                    <tr key={truck.plateNumber} className="odd:bg-white even:bg-slate-50/80">
+                    <tr key={truck.rowKey || truck.plateNumber} className="odd:bg-white even:bg-slate-50/80">
                       <td className="sticky left-0 z-10 min-w-[34px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-700 shadow-[inset_0_-1px_0_#94a3b8]">
                         {item.number}
                       </td>
                       <th className="sticky z-10 min-w-[130px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-left font-black text-slate-900 shadow-[inset_0_-1px_0_#94a3b8]" style={{ left: truckLeftOffset }}>
                         <span className="grid w-[116px] grid-cols-[74px_34px] items-center gap-2">
-                          <span className="block min-w-0 truncate" title={truck.plateNumber}>{truck.plateNumber}</span>
+                          <span className="block min-w-0 truncate" title={`${truck.plateNumber}${truck.segmentBadge ? ` - ${truck.segmentBadge}` : ''}`}>
+                            {truck.plateNumber}
+                            {truck.isDuplicateUnit ? (
+                              <span className="ml-1 rounded bg-rose-100 px-1 text-[7px] font-black text-rose-700">DUP</span>
+                            ) : null}
+                            {truck.segmentBadge ? (
+                              <span className="mt-0.5 block truncate text-[7px] font-black text-amber-700">{truck.segmentBadge}</span>
+                            ) : null}
+                          </span>
                           <span className="inline-flex h-4 min-w-5 justify-self-center items-center justify-center rounded bg-slate-200 px-1 text-[8px] font-black leading-none text-slate-700" title="No Lambung">
                             {formatTruckUnitCode(truck.unitCode)}
                           </span>
@@ -1760,6 +2062,13 @@ export function MonthlyUtilizationModal({
                               date: day.key,
                               cell: truck.cells[day.key],
                               note: utilizationNotesByKey.get(utilizationNoteKey(truck.id || truck.plateNumber, day.key)),
+                            })}
+                            onOpenCorrection={() => setCorrectionTarget({
+                              ...(truck.transition || {}),
+                              ...(truck.cells[day.key]?.corrections?.[0] || {}),
+                              plateNumber: truck.plateNumber,
+                              sourceSize: truck.transition?.sourceSize || truck.cells[day.key]?.corrections?.[0]?.sourceChassisSize,
+                              targetSize: truck.transition?.targetSize || truck.cells[day.key]?.corrections?.[0]?.targetChassisSize,
                             })}
                           />
                         </td>
@@ -1815,6 +2124,10 @@ export function MonthlyUtilizationModal({
             await onDeleteNote?.(note);
             setNoteTarget(null);
           }}
+        />
+        <UtilizationChassisCorrectionModal
+          correction={correctionTarget}
+          onClose={() => setCorrectionTarget(null)}
         />
       </section>
     </div>

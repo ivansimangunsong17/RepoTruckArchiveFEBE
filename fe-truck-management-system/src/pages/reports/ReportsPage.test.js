@@ -186,26 +186,37 @@ describe('buildMonthlyUtilizationPivot', () => {
     expect(pivot.totalsByDay['2026-08-03']).toBe(1);
   });
 
-  it('menampilkan ritase hasil koreksi chassis pada truck target dan menyimpan marker koreksi', () => {
+  it('menampilkan unit yang pindah chassis sebagai dua baris sesuai periode aktif', () => {
     const pivot = buildMonthlyUtilizationPivot(
       [
         { id: 'truck-9211', plateNumber: 'B 9211 BEL', unitCode: '11', capacity: '40FT' },
-        { id: 'truck-9130', plateNumber: 'B 9130 BEL', unitCode: '30', capacity: '40FT' },
+        { id: 'truck-9130', plateNumber: 'B 9130 BEL', unitCode: '30', capacity: '20FT' },
       ],
       [
         {
           id: 'job-1',
-          vehicleId: 'truck-9130',
-          plateNumber: 'B 9130 BEL',
-          originalVehicleId: 'truck-9211',
-          originalPlateNumber: 'B 9211 BEL',
+          vehicleId: 'truck-9211',
+          plateNumber: 'B 9211 BEL',
+          chassisSize: '40FT',
+          completedDate: '2026-08-06',
+          destination: 'Cikarang',
+          status: 'completed',
+        },
+        {
+          id: 'job-2',
+          vehicleId: 'truck-9211',
+          plateNumber: 'B 9211 BEL',
+          originalChassisSize: '40FT',
+          chassisSize: '20FT',
           completedDate: '2026-08-20',
           destination: 'Cikarang',
           status: 'completed',
           utilizationChassisCorrection: {
             sourcePlateNumber: 'B 9211 BEL',
-            targetPlateNumber: 'B 9130 BEL',
-            effectiveFrom: '2026-08-15',
+            sourceChassisSize: '40FT',
+            targetPlateNumber: 'B 9103 BEL',
+            targetChassisSize: '20FT',
+            effectiveFrom: '2026-08-08',
             effectiveTo: '2026-08-31',
             reason: 'Tukar chassis tengah bulan',
           },
@@ -215,18 +226,28 @@ describe('buildMonthlyUtilizationPivot', () => {
       2026,
     );
 
-    const source = pivot.rows.find((row) => row.plateNumber === 'B 9211 BEL');
-    const target = pivot.rows.find((row) => row.plateNumber === 'B 9130 BEL');
+    const before = pivot.rows.find((row) => row.plateNumber === 'B 9211 BEL' && row.size === '40FT');
+    const after = pivot.rows.find((row) => row.plateNumber === 'B 9211 BEL' && row.size === '20FT');
 
-    expect(source.cells['2026-08-20'].count).toBe(0);
-    expect(target.cells['2026-08-20'].count).toBe(1);
-    expect(target.cells['2026-08-20'].correctedCount).toBe(1);
-    expect(target.cells['2026-08-20'].corrections[0]).toMatchObject({
+    expect(before.segmentBadge).toBe('Sebelum Pindah');
+    expect(after.segmentBadge).toBe('Setelah Pindah');
+    expect(before.cells['2026-08-06'].count).toBe(1);
+    expect(before.cells['2026-08-20'].inactive).toBe(true);
+    expect(after.cells['2026-08-06'].inactive).toBe(true);
+    expect(after.cells['2026-08-20'].count).toBe(1);
+    expect(after.cells['2026-08-20'].correctedCount).toBe(1);
+    expect(after.cells['2026-08-20'].corrections[0]).toMatchObject({
       sourcePlateNumber: 'B 9211 BEL',
-      targetPlateNumber: 'B 9130 BEL',
+      targetChassisSize: '20FT',
       reason: 'Tukar chassis tengah bulan',
     });
-    expect(pivot.grandTotal).toBe(1);
+    expect(pivot.transitions[0]).toMatchObject({
+      plateNumber: 'B 9211 BEL',
+      sourceSize: '40FT',
+      targetSize: '20FT',
+      effectiveFrom: '2026-08-08',
+    });
+    expect(pivot.grandTotal).toBe(2);
   });
 });
 

@@ -130,19 +130,21 @@ test('koreksi chassis utilisasi tidak mengubah baris jika tidak ada mapping', ()
   assert.equal(applyUtilizationChassisCorrectionsToRows(rows, []), rows);
 });
 
-test('koreksi chassis full-month memindahkan ritase ke truck target untuk tampilan report', () => {
+test('koreksi chassis full-month memindahkan ukuran chassis tampilan tanpa mengubah plat report', () => {
   const rows = applyUtilizationChassisCorrectionsToRows([
-    { id: 'job-1', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', unitCode: '11', completedDate: '2026-08-03' },
-    { id: 'job-2', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', unitCode: '11', completedDate: '2026-08-20' },
+    { id: 'job-1', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', unitCode: '11', chassisSize: '40FT', completedDate: '2026-08-03' },
+    { id: 'job-2', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', unitCode: '11', chassisSize: '40FT', completedDate: '2026-08-20' },
   ], [
     {
       id: 'correction-1',
       sourceVehicleId: 'truck-9211',
       sourcePlateNumber: 'B 9211 BEL',
       sourceUnitCode: '11',
+      sourceChassisSize: '40FT',
       targetVehicleId: 'truck-9130',
       targetPlateNumber: 'B 9130 BEL',
       targetUnitCode: '30',
+      targetChassisSize: '20FT',
       effectiveFrom: '2026-08-01',
       effectiveTo: '2026-08-31',
       reason: 'Tukar chassis Agustus',
@@ -150,8 +152,10 @@ test('koreksi chassis full-month memindahkan ritase ke truck target untuk tampil
   ]);
 
   assert.equal(rows.length, 2);
-  assert.deepEqual(rows.map((row) => row.plateNumber), ['B 9130 BEL', 'B 9130 BEL']);
+  assert.deepEqual(rows.map((row) => row.plateNumber), ['B 9211 BEL', 'B 9211 BEL']);
+  assert.deepEqual(rows.map((row) => row.chassisSize), ['20FT', '20FT']);
   assert.deepEqual(rows.map((row) => row.originalPlateNumber), ['B 9211 BEL', 'B 9211 BEL']);
+  assert.deepEqual(rows.map((row) => row.originalChassisSize), ['40FT', '40FT']);
   assert.equal(rows[0].utilizationChassisCorrection.reason, 'Tukar chassis Agustus');
 });
 
@@ -164,50 +168,58 @@ test('koreksi chassis mid-month hanya memindahkan ritase dalam periode efektif',
     {
       sourceVehicleId: 'truck-9211',
       sourcePlateNumber: 'B 9211 BEL',
+      sourceChassisSize: '40FT',
       targetVehicleId: 'truck-9130',
       targetPlateNumber: 'B 9130 BEL',
+      targetChassisSize: '20FT',
       effectiveFrom: '2026-08-15',
       effectiveTo: '2026-08-31',
     },
   ]);
 
   assert.equal(rows[0].plateNumber, 'B 9211 BEL');
-  assert.equal(rows[1].plateNumber, 'B 9130 BEL');
+  assert.equal(rows[1].plateNumber, 'B 9211 BEL');
+  assert.equal(rows[1].chassisSize, '20FT');
   assert.equal(rows[2].plateNumber, 'B 9211 BEL');
 });
 
-test('koreksi chassis two-way swap menjaga grand total dan menukar distribusi ritase', () => {
+test('koreksi chassis two-way swap menjaga grand total dan menukar ukuran chassis tampilan', () => {
   const rows = applyUtilizationChassisCorrectionsToRows([
-    { id: 'job-9211', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', completedDate: '2026-08-18' },
-    { id: 'job-9130', vehicleId: 'truck-9130', plateNumber: 'B 9130 BEL', completedDate: '2026-08-19' },
-    { id: 'job-outside', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', completedDate: '2026-08-10' },
+    { id: 'job-9211', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', chassisSize: '40FT', completedDate: '2026-08-18' },
+    { id: 'job-9130', vehicleId: 'truck-9130', plateNumber: 'B 9130 BEL', chassisSize: '20FT', completedDate: '2026-08-19' },
+    { id: 'job-outside', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', chassisSize: '40FT', completedDate: '2026-08-10' },
   ], [
     {
       sourceVehicleId: 'truck-9211',
       sourcePlateNumber: 'B 9211 BEL',
+      sourceChassisSize: '40FT',
       targetVehicleId: 'truck-9130',
       targetPlateNumber: 'B 9130 BEL',
+      targetChassisSize: '20FT',
       effectiveFrom: '2026-08-15',
       effectiveTo: '2026-08-31',
     },
     {
       sourceVehicleId: 'truck-9130',
       sourcePlateNumber: 'B 9130 BEL',
+      sourceChassisSize: '20FT',
       targetVehicleId: 'truck-9211',
       targetPlateNumber: 'B 9211 BEL',
+      targetChassisSize: '40FT',
       effectiveFrom: '2026-08-15',
       effectiveTo: '2026-08-31',
     },
   ]);
 
-  const countsByPlate = rows.reduce((counts, row) => ({
+  const countsByPlateAndSize = rows.reduce((counts, row) => ({
     ...counts,
-    [row.plateNumber]: Number(counts[row.plateNumber] || 0) + 1,
+    [`${row.plateNumber}|${row.chassisSize}`]: Number(counts[`${row.plateNumber}|${row.chassisSize}`] || 0) + 1,
   }), {});
 
   assert.equal(rows.length, 3);
-  assert.equal(countsByPlate['B 9211 BEL'], 2);
-  assert.equal(countsByPlate['B 9130 BEL'], 1);
+  assert.equal(countsByPlateAndSize['B 9211 BEL|20FT'], 1);
+  assert.equal(countsByPlateAndSize['B 9211 BEL|40FT'], 1);
+  assert.equal(countsByPlateAndSize['B 9130 BEL|40FT'], 1);
   assert.equal(rows.filter((row) => row.utilizationChassisCorrection).length, 2);
 });
 
