@@ -200,6 +200,20 @@ export async function updateVehicleDefaultDriver(vehicleId, driverId) {
       throw error;
     }
 
+    // Satu sopir cuma boleh jadi default di satu truck -- kalau sopir ini sebelumnya default di
+    // truck lain, lepas dulu dari sana supaya tidak ada dua truck menganggap sopir yang sama
+    // sebagai default-nya masing-masing.
+    await client.query(
+      `
+        update vehicles
+        set default_driver_id = null,
+            default_driver_name = null,
+            updated_at = now()
+        where default_driver_id = $1 and id <> $2
+      `,
+      [driver.id, vehicleId],
+    );
+
     const updated = await client.query(
       `
         update vehicles

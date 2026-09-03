@@ -89,21 +89,6 @@ const DATA_SOURCE_OPTIONS = [
   { value: 'historical', label: 'Data Lama' },
 ];
 
-const DRIVER_COMMISSION_FILTER_OPTIONS = [
-  { value: 'all', label: 'Semua Komisi' },
-  { value: 'with_commission', label: 'Ada Komisi' },
-  { value: 'without_commission', label: 'Tanpa Komisi' },
-];
-
-const DRIVER_COMMISSION_PAYMENT_FILTER_OPTIONS = [
-  { value: 'all', label: 'Semua Status Bayar' },
-  { value: 'unsubmitted', label: 'Belum Diajukan' },
-  { value: 'submitted', label: 'Menunggu Finance' },
-  { value: 'approved', label: 'Approved Belum Paid' },
-  { value: 'paid', label: 'Sudah Dibayar' },
-  { value: 'unpaid', label: 'Belum Dibayar' },
-];
-
 const CUSTOMER_PERFORMANCE_PAGE_SIZE = 10;
 
 function utilizationNoteKey(resourceId, date) {
@@ -561,7 +546,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
         unitCode: getTruckUnitCode(truck),
         size: getTruckSize(truck),
         driver: getDriverName(truck),
-        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
+        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [], corrections: [] } }), {}),
         totalTrips: 0,
       });
     }
@@ -579,7 +564,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
         unitCode: getTruckUnitCode(row),
         size: getTruckSize(row),
         driver: getDriverName(row),
-        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
+        cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [], corrections: [] } }), {}),
         totalTrips: 0,
       });
     }
@@ -591,6 +576,17 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     cell.count += 1;
     const label = compactCellLabel(row);
     if (label && !cell.labels.includes(label)) cell.labels.push(label);
+    if (row.utilizationChassisCorrection) {
+      cell.correctedCount = Number(cell.correctedCount || 0) + 1;
+      cell.corrections.push({
+        jobId: row.id || '',
+        sourcePlateNumber: row.utilizationChassisCorrection.sourcePlateNumber || row.originalPlateNumber || '',
+        targetPlateNumber: row.utilizationChassisCorrection.targetPlateNumber || row.plateNumber || '',
+        effectiveFrom: row.utilizationChassisCorrection.effectiveFrom || '',
+        effectiveTo: row.utilizationChassisCorrection.effectiveTo || '',
+        reason: row.utilizationChassisCorrection.reason || '',
+      });
+    }
     if (row.driver) truck.driver = getDriverName(row);
     truck.totalTrips += 1;
   });
@@ -759,54 +755,124 @@ function SummaryToggleCard({
   tertiaryValue,
   expanded,
   onClick,
+  onOpenStatistics,
   tone = 'slate',
 }) {
   const toneClass = {
-    slate: 'border-slate-200 bg-slate-50 text-slate-600',
-    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    amber: 'border-amber-200 bg-amber-50 text-amber-700',
-    sky: 'border-sky-200 bg-sky-50 text-sky-700',
-    rose: 'border-rose-200 bg-rose-50 text-rose-700',
+    slate: 'border-slate-200 bg-white text-slate-600',
+    emerald: 'border-emerald-200 bg-emerald-50/80 text-emerald-700',
+    amber: 'border-amber-200 bg-amber-50/80 text-amber-700',
+    sky: 'border-sky-200 bg-sky-50/80 text-sky-700',
+    rose: 'border-rose-200 bg-rose-50/80 text-rose-700',
   }[tone] || 'border-slate-200 bg-slate-50 text-slate-600';
   const activeClass = {
-    slate: 'border-slate-300 bg-slate-100 text-slate-800',
-    emerald: 'border-emerald-300 bg-emerald-100 text-emerald-900',
-    amber: 'border-amber-300 bg-amber-100 text-amber-900',
-    sky: 'border-sky-300 bg-sky-100 text-sky-900',
-    rose: 'border-rose-300 bg-rose-100 text-rose-900',
+    slate: 'border-slate-400 bg-white text-slate-800 ring-1 ring-slate-200',
+    emerald: 'border-emerald-400 bg-emerald-50 text-emerald-900 ring-1 ring-emerald-200',
+    amber: 'border-amber-400 bg-amber-50 text-amber-900 ring-1 ring-amber-200',
+    sky: 'border-sky-400 bg-sky-50 text-sky-900 ring-1 ring-sky-200',
+    rose: 'border-rose-400 bg-rose-50 text-rose-900 ring-1 ring-rose-200',
   }[tone] || 'border-slate-300 bg-slate-100 text-slate-800';
+  const actionClass = {
+    slate: 'border-slate-200 bg-slate-900 text-white hover:bg-slate-800',
+    emerald: 'border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700',
+    amber: 'border-amber-200 bg-amber-600 text-white hover:bg-amber-700',
+    sky: 'border-sky-200 bg-sky-600 text-white hover:bg-sky-700',
+    rose: 'border-rose-200 bg-rose-600 text-white hover:bg-rose-700',
+  }[tone] || 'border-slate-200 bg-slate-900 text-white hover:bg-slate-800';
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={expanded}
-      className={`flex w-full cursor-pointer items-start justify-between gap-4 rounded-md border p-4 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 ${
+    <article
+      className={`flex min-h-[14rem] w-full flex-col justify-between gap-3 rounded-md border p-4 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:shadow-md ${
         expanded ? activeClass : `${toneClass} hover:border-slate-300 hover:shadow-md`
       }`}
     >
-      <div className="min-w-0">
-        <span className="block text-[11px] font-semibold uppercase tracking-normal text-slate-500">{label}</span>
-        <strong className="mt-1 block text-2xl font-semibold leading-tight text-slate-900">{value}</strong>
-        <small className="mt-1 block text-xs text-slate-500">{helper}</small>
-        {secondaryLabel ? (
-          <span className="mt-3 flex flex-col gap-0.5 border-t border-white/70 pt-3">
-            <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{secondaryLabel}</span>
-            <strong className="text-base font-semibold leading-snug text-slate-900">{secondaryValue}</strong>
-          </span>
-        ) : null}
-        {tertiaryLabel ? (
-          <span className="mt-2 flex flex-col gap-0.5">
-            <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{tertiaryLabel}</span>
-            <strong className="text-base font-semibold leading-snug text-slate-900">{tertiaryValue}</strong>
-          </span>
-        ) : null}
-      </div>
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border ${toneClass}`}>
-        <Icon size={17} />
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={expanded}
+        className="flex w-full flex-1 cursor-pointer appearance-none items-start justify-between gap-4 border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2"
+      >
+        <span className="min-w-0">
+          <span className="block text-[11px] font-semibold uppercase tracking-normal text-slate-500">{label}</span>
+          <strong className="mt-1 block text-2xl font-semibold leading-tight text-slate-900">{value}</strong>
+          <small className="mt-1 block text-xs text-slate-500">{helper}</small>
+          {secondaryLabel ? (
+            <span className="mt-3 flex flex-col gap-0.5 border-t border-white/70 pt-3">
+              <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{secondaryLabel}</span>
+              <strong className="text-base font-semibold leading-snug text-slate-900">{secondaryValue}</strong>
+            </span>
+          ) : null}
+          {tertiaryLabel ? (
+            <span className="mt-2 flex flex-col gap-0.5">
+              <span className="text-[11px] font-semibold uppercase tracking-normal text-slate-500">{tertiaryLabel}</span>
+              <strong className="text-base font-semibold leading-snug text-slate-900">{tertiaryValue}</strong>
+            </span>
+          ) : null}
+        </span>
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border ${toneClass}`}>
+          <Icon size={17} />
+        </span>
+      </button>
+      {onOpenStatistics ? (
+        <button
+          type="button"
+          className={`inline-flex h-8 w-fit appearance-none items-center justify-center gap-1.5 self-end rounded-md border px-2.5 text-[11px] font-black shadow-sm transition focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${actionClass}`}
+          onClick={onOpenStatistics}
+        >
+          <BarChart3 size={13} />
+          Lihat Statistik
+        </button>
+      ) : null}
+    </article>
   );
+}
+
+function MonthlyComparisonModal({ open, onClose, rows, selectedReport, year, loading, error }) {
+  if (!open) return null;
+
+  const config = MONTHLY_COMPARISON_CONFIG[selectedReport];
+  if (!config) return null;
+
+  const modal = (
+    <div className="fixed inset-0 z-[220] flex items-start justify-center overflow-hidden bg-slate-950/45 px-3 py-6" role="presentation" onMouseDown={onClose}>
+      <section
+        className="flex max-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="monthly-comparison-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="min-w-0">
+            <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Statistik Bulanan</span>
+            <h2 id="monthly-comparison-modal-title" className="mt-0.5 text-base font-black text-slate-950">{config.title}</h2>
+          </div>
+          <button
+            className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 hover:bg-slate-100"
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup statistik bulanan"
+          >
+            <X size={16} />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          <MonthlyComparisonChart
+            error={error}
+            loading={loading}
+            rows={rows}
+            selectedReport={selectedReport}
+            year={year}
+          />
+        </div>
+        <div className="flex justify-end border-t border-slate-200 bg-slate-50 px-4 py-2.5">
+          <button className="secondary-button" type="button" onClick={onClose}>Tutup</button>
+        </div>
+      </section>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
 }
 
 function DetailTable({ columns, rows, rowRenderer }) {
@@ -1045,6 +1111,114 @@ function formatMonthlyComparisonValue(value, type) {
   return `${number.toLocaleString('id-ID')} container`;
 }
 
+function formatMonthlyCount(value, suffix) {
+  return `${formatDecimal(value)} ${suffix}`;
+}
+
+function hasMonthlyComparisonActivity(row = {}) {
+  return Number(row.totalRevenue || 0) > 0
+    || Number(row.totalTrips || 0) > 0
+    || Number(row.totalVolume || 0) > 0
+    || Number(row.totalCustomers || 0) > 0
+    || Number(row.activeSales || 0) > 0
+    || Number(row.repoStoredCount || 0) > 0;
+}
+
+function getMonthlyComparisonDetailLines(row = {}, selectedReport) {
+  if (selectedReport === 'utilization') {
+    return [
+      formatMonthlyCount(row.totalTrips, 'trip'),
+      `${formatMonthlyCount(row.activeTruckCount, 'truck')} x ${formatMonthlyCount(row.utilizationDays, 'hari')}`,
+      `${formatMonthlyCount(row.totalTrips, 'trip')} / ${formatMonthlyCount(row.potentialTruckDays, 'truck-day')}`,
+    ];
+  }
+
+  if (selectedReport === 'customer') {
+    return [
+      formatMonthlyCount(row.totalTrips, 'trip'),
+      formatMonthlyCount(row.totalCustomers, 'customer'),
+      row.totalTrips ? `${formatCurrency(Number(row.totalRevenue || 0) / Number(row.totalTrips || 1))} / trip` : 'Rp 0 / trip',
+    ];
+  }
+
+  if (selectedReport === 'sales') {
+    return [
+      formatMonthlyCount(row.totalVolume, 'volume'),
+      formatMonthlyCount(row.activeSales, 'sales aktif'),
+      row.activeSales ? `${formatCurrency(Number(row.totalRevenue || 0) / Number(row.activeSales || 1))} / sales` : 'Rp 0 / sales',
+    ];
+  }
+
+  if (selectedReport === 'repo') {
+    return [
+      formatMonthlyCount(row.repoStoredCount, 'container'),
+      formatMonthlyCount(row.totalTrips, 'trip selesai'),
+    ];
+  }
+
+  return [
+    formatMonthlyCount(row.totalTrips, 'trip'),
+    formatMonthlyCount(row.totalVolume, 'volume'),
+    row.totalTrips ? `${formatCurrency(Number(row.totalRevenue || 0) / Number(row.totalTrips || 1))} / trip` : 'Rp 0 / trip',
+  ];
+}
+
+function buildMonthlyComparisonSummary(rows = [], selectedReport, config = {}) {
+  const activeRows = rows.filter(hasMonthlyComparisonActivity);
+  const totalRevenue = rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
+  const totalTrips = rows.reduce((total, row) => total + Number(row.totalTrips || 0), 0);
+  const totalVolume = rows.reduce((total, row) => total + Number(row.totalVolume || 0), 0);
+  const maxActiveTruckCount = rows.length ? Math.max(...rows.map((row) => Number(row.activeTruckCount || 0)), 0) : 0;
+  const averageValue = activeRows.length
+    ? activeRows.reduce((total, row) => total + Number(row?.[config.metricKey] || 0), 0) / activeRows.length
+    : 0;
+  const peakRow = rows.reduce((peak, row) => (Number(row?.[config.metricKey] || 0) > Number(peak?.[config.metricKey] || 0) ? row : peak), null);
+
+  if (selectedReport === 'utilization') {
+    return [
+      { label: 'Total Trip', value: formatMonthlyCount(totalTrips, 'trip') },
+      { label: 'Rata-rata Utilisasi', value: `${averageValue.toFixed(1)}%` },
+      { label: 'Truck Aktif', value: formatMonthlyCount(maxActiveTruckCount, 'unit') },
+      { label: 'Tertinggi', value: peakRow && Number(peakRow.utilizationPercent || 0) > 0 ? `${peakRow.label} - ${peakRow.utilizationPercent.toFixed(1)}%` : '-' },
+    ];
+  }
+
+  if (selectedReport === 'customer') {
+    return [
+      { label: 'Total Revenue', value: formatCurrency(totalRevenue) },
+      { label: 'Total Trip', value: formatMonthlyCount(totalTrips, 'trip') },
+      { label: 'Customer Terbanyak', value: formatDecimal(rows.length ? Math.max(...rows.map((row) => Number(row.totalCustomers || 0)), 0) : 0) },
+      { label: 'Tertinggi', value: peakRow && Number(peakRow.totalRevenue || 0) > 0 ? `${peakRow.label} - ${formatCurrency(peakRow.totalRevenue)}` : '-' },
+    ];
+  }
+
+  if (selectedReport === 'sales') {
+    return [
+      { label: 'Total Revenue', value: formatCurrency(totalRevenue) },
+      { label: 'Total Volume', value: formatMonthlyCount(totalVolume, 'volume') },
+      { label: 'Sales Aktif Terbanyak', value: formatDecimal(rows.length ? Math.max(...rows.map((row) => Number(row.activeSales || 0)), 0) : 0) },
+      { label: 'Tertinggi', value: peakRow && Number(peakRow.totalRevenue || 0) > 0 ? `${peakRow.label} - ${formatCurrency(peakRow.totalRevenue)}` : '-' },
+    ];
+  }
+
+  if (selectedReport === 'repo') {
+    const totalRepoStored = rows.reduce((total, row) => total + Number(row.repoStoredCount || 0), 0);
+    return [
+      { label: 'Total Titip', value: formatMonthlyCount(totalRepoStored, 'container') },
+      { label: 'Bulan Aktif', value: formatMonthlyCount(activeRows.length, 'bulan') },
+      { label: 'Rata-rata', value: activeRows.length ? formatMonthlyCount(totalRepoStored / activeRows.length, 'container') : '0 container' },
+      { label: 'Tertinggi', value: peakRow && Number(peakRow.repoStoredCount || 0) > 0 ? `${peakRow.label} - ${formatMonthlyCount(peakRow.repoStoredCount, 'container')}` : '-' },
+    ];
+  }
+
+  return [
+    { label: 'Total Revenue', value: formatCurrency(totalRevenue) },
+    { label: 'Total Trip', value: formatMonthlyCount(totalTrips, 'trip') },
+    { label: 'Rata-rata / Trip', value: totalTrips ? formatCurrency(totalRevenue / totalTrips) : 'Rp 0' },
+    { label: 'Tertinggi', value: peakRow && Number(peakRow.totalRevenue || 0) > 0 ? `${peakRow.label} - ${formatCurrency(peakRow.totalRevenue)}` : '-' },
+  ];
+}
+
 function MonthlyComparisonChart({ rows = [], selectedReport, year, loading = false, error = '' }) {
   const config = MONTHLY_COMPARISON_CONFIG[selectedReport];
   if (!config) return null;
@@ -1055,6 +1229,7 @@ function MonthlyComparisonChart({ rows = [], selectedReport, year, loading = fal
   }));
   const maxValue = Math.max(...chartRows.map((row) => row.value), 0);
   const peakRow = chartRows.reduce((peak, row) => (row.value > Number(peak?.value || 0) ? row : peak), null);
+  const summaryItems = buildMonthlyComparisonSummary(chartRows, selectedReport, config);
 
   return (
     <section className="mb-4 rounded-md border border-slate-200 bg-white shadow-sm">
@@ -1075,13 +1250,23 @@ function MonthlyComparisonChart({ rows = [], selectedReport, year, loading = fal
       ) : error ? (
         <div className="px-3 py-4 text-sm font-semibold text-red-600">{error}</div>
       ) : (
-        <div className="overflow-x-auto px-3 py-4">
-          <div className="grid min-w-[720px] grid-cols-12 items-end gap-2">
+        <div className="px-3 py-4">
+          <div className="mb-4 grid gap-2 md:grid-cols-4">
+            {summaryItems.map((item) => (
+              <div key={item.label} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="block text-[10px] font-black uppercase text-slate-400">{item.label}</span>
+                <strong className="mt-0.5 block truncate text-sm font-black text-slate-950" title={item.value}>{item.value}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+          <div className="grid min-w-[900px] grid-cols-12 items-end gap-2">
             {chartRows.map((row) => {
               const height = maxValue ? Math.max(6, (row.value / maxValue) * 100) : 0;
+              const detailLines = getMonthlyComparisonDetailLines(row, selectedReport);
               return (
                 <div className="grid gap-2" key={row.monthKey || row.label}>
-                  <div className="flex h-36 items-end rounded-md bg-slate-50 px-1.5 py-1.5">
+                  <div className="flex h-40 items-end rounded-md bg-slate-50 px-1.5 py-1.5">
                     <div
                       aria-label={`${row.label} ${formatMonthlyComparisonValue(row.value, config.valueType)}`}
                       className={`w-full rounded-t ${config.toneClassName} transition-all`}
@@ -1091,13 +1276,17 @@ function MonthlyComparisonChart({ rows = [], selectedReport, year, loading = fal
                   </div>
                   <div className="text-center">
                     <strong className="block text-[11px] font-black text-slate-700">{row.label}</strong>
-                    <span className="block truncate text-[10px] font-semibold text-slate-500" title={formatMonthlyComparisonValue(row.value, config.valueType)}>
+                    <span className="block truncate text-[10px] font-black text-slate-700" title={formatMonthlyComparisonValue(row.value, config.valueType)}>
                       {formatMonthlyComparisonValue(row.value, config.valueType)}
                     </span>
+                    {detailLines.slice(0, 2).map((line) => (
+                      <span key={line} className="block truncate text-[9px] font-semibold text-slate-500" title={line}>{line}</span>
+                    ))}
                   </div>
                 </div>
               );
             })}
+          </div>
           </div>
         </div>
       )}
@@ -1251,6 +1440,12 @@ function MasterReportSection({ section }) {
 function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
   const hasCount = Boolean(cell?.count);
   const hasNote = Boolean(note?.reasonLabel || note?.notes);
+  const corrections = Array.isArray(cell?.corrections) ? cell.corrections : [];
+  const hasCorrection = corrections.length > 0;
+  const correctionTitle = corrections.map((correction) => [
+    `Koreksi chassis: ${correction.sourcePlateNumber || '-'} -> ${correction.targetPlateNumber || '-'}`,
+    correction.reason ? `Alasan: ${correction.reason}` : '',
+  ].filter(Boolean).join(' | ')).join('\n');
   const title = [
     hasCount
       ? cell.labels?.length
@@ -1258,11 +1453,17 @@ function PivotCell({ cell, note, canEditNote = false, onOpenNote }) {
         : `${cell.count} trip`
       : 'Tidak ada trip',
     hasNote ? `Catatan: ${note.reasonLabel}${note.notes ? ` - ${note.notes}` : ''}` : '',
+    correctionTitle,
   ].filter(Boolean).join('\n');
 
   const content = hasCount ? (
-    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-sky-100 px-1 text-[9px] font-black leading-none text-sky-900">
+    <span className="relative inline-flex h-4 min-w-4 items-center justify-center rounded-sm bg-sky-100 px-1 text-[9px] font-black leading-none text-sky-900" title={title}>
       {cell.count}
+      {hasCorrection ? (
+        <span className="absolute -right-1 -top-1 text-[8px] font-black leading-none text-rose-600" aria-label="Ada koreksi chassis">
+          ↔
+        </span>
+      ) : null}
     </span>
   ) : hasNote ? (
     <span className="inline-flex h-4 min-w-6 items-center justify-center rounded-sm bg-amber-100 px-1 text-[7px] font-black leading-none text-amber-800">
@@ -1799,6 +2000,7 @@ function ReportsPage() {
   const [repoError, setRepoError] = useState('');
   const [publicHolidays, setPublicHolidays] = useState([]);
   const [selectedReport, setSelectedReport] = useState(() => normalizeReportTab(searchParams.get('tab'), { revenueOnly: isFinanceOnly }));
+  const [statisticsModalReport, setStatisticsModalReport] = useState(null);
   // Revenue di tabel Customer Performance selalu mengikuti bulan/periode yang sedang dipilih,
   // sedangkan Outstanding menampilkan sisa piutang riil saat ini yang bisa berasal dari invoice
   // beberapa bulan sebelumnya -- keduanya dipisah jadi tampilan sendiri-sendiri supaya tidak
@@ -1816,9 +2018,6 @@ function ReportsPage() {
   const [outstandingBucketLoading, setOutstandingBucketLoading] = useState(false);
   const [outstandingBucketError, setOutstandingBucketError] = useState('');
   const [dataSource, setDataSource] = useState('all');
-  const [driverCommissionFilter, setDriverCommissionFilter] = useState('all');
-  const [driverCommissionPaymentFilter, setDriverCommissionPaymentFilter] = useState('all');
-  const [driverCommissionPeriod, setDriverCommissionPeriod] = useState('all');
   const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
   const [driverUtilizationModalOpen, setDriverUtilizationModalOpen] = useState(false);
   const [utilizationNotes, setUtilizationNotes] = useState([]);
@@ -1830,8 +2029,6 @@ function ReportsPage() {
   }, []);
   const activeMonthLabel = MONTHS.find((item) => Number(item.value) === Number(month))?.label || '-';
   const activePeriodKey = monthKey(month, year);
-  const driverCommissionPeriodOptions = useMemo(() => buildCommissionWeekOptions(month, year), [month, year]);
-  const selectedDriverCommissionPeriod = driverCommissionPeriodOptions.find((option) => option.value === driverCommissionPeriod) || driverCommissionPeriodOptions[0];
   const canEditUtilizationNotes = user?.role === USER_ROLES.ADMIN || hasPermission(user, 'operations.update');
   const reportSourceParams = useMemo(() => {
     if (dataSource === 'historical') return { entrySource: 'historical', historicalPeriod: activePeriodKey };
@@ -1856,12 +2053,6 @@ function ReportsPage() {
   useEffect(() => {
     setCustomerPerformancePage(1);
   }, [activePeriodKey, customerDetailView, dataSource, outstandingMinOverdueDays, selectedReport]);
-
-  useEffect(() => {
-    if (!driverCommissionPeriodOptions.some((option) => option.value === driverCommissionPeriod)) {
-      setDriverCommissionPeriod('all');
-    }
-  }, [driverCommissionPeriod, driverCommissionPeriodOptions]);
 
   useEffect(() => {
     let active = true;
@@ -1962,6 +2153,7 @@ function ReportsPage() {
           status: 'completed',
           dateFrom: range.dateFrom,
           dateTo: range.dateTo,
+          applyUtilizationCorrections: 'chassis',
           ...reportSourceParams,
         });
         const rows = Array.isArray(result?.rows) ? result.rows : [];
@@ -1980,13 +2172,7 @@ function ReportsPage() {
       isFinanceOnly ? Promise.resolve(null) : fetchCustomerPerformanceReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve([]) : loadUtilizationRows(),
       isFinanceOnly ? Promise.resolve(null) : fetchDriverPerformanceReport({
-        month: selectedDriverCommissionPeriod?.from ? 'all' : activePeriodKey,
-        ...(driverCommissionFilter !== 'all' ? { commissionStatus: driverCommissionFilter } : {}),
-        ...(driverCommissionPaymentFilter !== 'all' ? { commissionPaymentStatus: driverCommissionPaymentFilter } : {}),
-        ...(selectedDriverCommissionPeriod?.from ? {
-          weekFrom: selectedDriverCommissionPeriod.from,
-          weekTo: selectedDriverCommissionPeriod.to,
-        } : {}),
+        month: activePeriodKey,
         ...reportSourceParams,
       }),
       isFinanceOnly ? Promise.resolve(null) : fetchOperationReport({
@@ -2092,7 +2278,7 @@ function ReportsPage() {
     return () => {
       active = false;
     };
-  }, [activePeriodKey, driverCommissionFilter, driverCommissionPaymentFilter, isFinanceOnly, month, reportSourceParams, selectedDriverCommissionPeriod, year]);
+  }, [activePeriodKey, isFinanceOnly, month, reportSourceParams, year]);
 
   const masterTruckRows = archive.masters?.trucks;
   const masterDriverRows = archive.masters?.drivers;
@@ -2131,19 +2317,10 @@ function ReportsPage() {
     () => buildMonthlyDriverUtilizationPivot(masterDriverRows || [], utilizationSourceRows, month, year, holidaysByDate),
     [holidaysByDate, masterDriverRows, month, utilizationSourceRows, year],
   );
-  const driverRows = useMemo(() => {
-    const rows = buildDriverPerformanceRows(masterDriverRows || [], driverPerformanceRows);
-    if (driverCommissionFilter === 'with_commission') {
-      return rows.filter((driver) => Number(driver.totalDriverCommission || 0) > 0);
-    }
-    if (driverCommissionFilter === 'without_commission') {
-      return rows.filter((driver) => Number(driver.totalTrips || 0) > 0 && Number(driver.totalDriverCommission || 0) <= 0);
-    }
-    if (driverCommissionPaymentFilter !== 'all') {
-      return rows.filter((driver) => Number(driver.totalTrips || 0) > 0);
-    }
-    return rows;
-  }, [driverCommissionFilter, driverCommissionPaymentFilter, masterDriverRows, driverPerformanceRows]);
+  const driverRows = useMemo(
+    () => buildDriverPerformanceRows(masterDriverRows || [], driverPerformanceRows),
+    [masterDriverRows, driverPerformanceRows],
+  );
   const driverSummary = useMemo(() => ({
     totalTrips: driverRows.reduce((total, driver) => total + driver.totalTrips, 0),
     totalDriverCommission: driverRows.reduce((total, driver) => total + Number(driver.totalDriverCommission || 0), 0),
@@ -2282,40 +2459,6 @@ function ReportsPage() {
             <strong className="text-sm text-slate-900">{activeMonthLabel} {year}</strong>
           </div>
         </div>
-        {selectedReport === 'driver' ? (
-          <div className="mt-3 grid gap-2 md:grid-cols-3">
-            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
-              Status Komisi
-              <select
-                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
-                value={driverCommissionFilter}
-                onChange={(event) => setDriverCommissionFilter(event.target.value)}
-              >
-                {DRIVER_COMMISSION_FILTER_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
-              Status Pembayaran
-              <select
-                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
-                value={driverCommissionPaymentFilter}
-                onChange={(event) => setDriverCommissionPaymentFilter(event.target.value)}
-              >
-                {DRIVER_COMMISSION_PAYMENT_FILTER_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
-              Periode Komisi Kamis-Rabu
-              <select
-                className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm text-slate-900 outline-none focus:border-slate-500"
-                value={driverCommissionPeriod}
-                onChange={(event) => setDriverCommissionPeriod(event.target.value)}
-              >
-                {driverCommissionPeriodOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>
-          </div>
-        ) : null}
       </section>
       ) : (
       <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
@@ -2335,6 +2478,7 @@ function ReportsPage() {
           tone="emerald"
           expanded={selectedReport === 'revenue'}
           onClick={() => selectReport('revenue')}
+          onOpenStatistics={() => setStatisticsModalReport('revenue')}
         />
         {!isFinanceOnly ? (
           <>
@@ -2350,6 +2494,7 @@ function ReportsPage() {
               tone="sky"
               expanded={selectedReport === 'utilization'}
               onClick={() => selectReport('utilization')}
+              onOpenStatistics={() => setStatisticsModalReport('utilization')}
             />
             <SummaryToggleCard
               icon={Users}
@@ -2376,6 +2521,7 @@ function ReportsPage() {
               tone="rose"
               expanded={selectedReport === 'customer'}
               onClick={() => selectReport('customer')}
+              onOpenStatistics={() => setStatisticsModalReport('customer')}
             />
             <SummaryToggleCard
               icon={Users}
@@ -2389,20 +2535,21 @@ function ReportsPage() {
               tone="slate"
               expanded={selectedReport === 'sales'}
               onClick={() => selectReport('sales')}
+              onOpenStatistics={() => setStatisticsModalReport('sales')}
             />
           </>
         ) : null}
       </section>
 
-      {selectedReport !== 'driver' && selectedReport !== 'master' ? (
-        <MonthlyComparisonChart
-          error={monthlyComparisonError}
-          loading={monthlyComparisonLoading}
-          rows={monthlyComparisonRows}
-          selectedReport={selectedReport}
-          year={year}
-        />
-      ) : null}
+      <MonthlyComparisonModal
+        error={monthlyComparisonError}
+        loading={monthlyComparisonLoading}
+        onClose={() => setStatisticsModalReport(null)}
+        open={Boolean(statisticsModalReport)}
+        rows={monthlyComparisonRows}
+        selectedReport={statisticsModalReport}
+        year={year}
+      />
 
       {selectedReport === 'master' ? (
         <section className="grid gap-3 xl:grid-cols-2">

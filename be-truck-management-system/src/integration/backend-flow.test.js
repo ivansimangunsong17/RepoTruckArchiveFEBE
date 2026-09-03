@@ -4599,6 +4599,312 @@ if (!hasDatabase) {
       assert.equal(truckAfterUpdate.body.data.defaultDriver, driverUpdated);
     });
 
+    await t.test('fleet assignment: Operational/Admin ubah sopir default lewat menu baru, Sales/Finance ditolak, alasan pendek ditolak, riwayat & activity log tercatat, job lama tidak berubah', async () => {
+      const driverOld = `Driver Fleet Lama ${runId}`;
+      const driverNew = `Driver Fleet Baru ${runId}`;
+      const plate = `B-${String(runId).slice(-4)}-FLA`;
+      const unitCode = `TRK-FLA-${String(runId).slice(-4)}`;
+
+      const insertedOld = await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman')
+          returning id
+        `,
+        [driverOld, `061${String(Date.now()).slice(-9)}`],
+      );
+      const driverOldId = insertedOld.rows[0].id;
+      const insertedNew = await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman')
+          returning id
+        `,
+        [driverNew, `062${String(Date.now()).slice(-9)}`],
+      );
+      const driverNewId = insertedNew.rows[0].id;
+      const truckResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status, default_driver_id, default_driver_name)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif', $3, $4)
+          returning id
+        `,
+        [unitCode, plate, driverOldId, driverOld],
+      );
+      const vehicleId = truckResult.rows[0].id;
+
+      const soNumber = `SO-FLA-${runId}`;
+      const containerNumber = `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`;
+      const createdOrder = await api('/api/sales-orders', {
+        method: 'POST',
+        token: salesToken,
+        body: salesOrderPayload({ soNumber, tripDate: '2025-01-01' }),
+      });
+      assert.equal(createdOrder.status, 201);
+      const jobId = createdOrder.body.data.containers[0].id;
+      const assigned = await api(`/api/container-jobs/${jobId}/status`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { containerNumber, driver: driverOld, plateNumber: plate, status: 'running', runningAt: new Date().toISOString(), updatedBy: 'Sprint2C Operational' },
+      });
+      assert.equal(assigned.status, 200);
+
+      const shortReason = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { defaultDriverId: driverNewId, reason: 'pendek' },
+      });
+      assert.equal(shortReason.status, 400);
+      assert.equal(shortReason.body.error.code, 'FLEET_ASSIGNMENT_REASON_REQUIRED');
+
+      const salesTry = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: salesToken,
+        body: { defaultDriverId: driverNewId, reason: `Sales coba ganti assignment armada ${runId}` },
+      });
+      assert.equal(salesTry.status, 403);
+      const financeTry = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: financeToken,
+        body: { defaultDriverId: driverNewId, reason: `Finance coba ganti assignment armada ${runId}` },
+      });
+      assert.equal(financeTry.status, 403);
+
+      const reason = `Sopir default unit ${unitCode} diganti lewat menu Assignment Armada`;
+      const note = 'Sopir lama pindah tugas ke rute lain';
+      const updated = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { defaultDriverId: driverNewId, reason, note },
+      });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.data.defaultDriverId, driverNewId);
+      assert.equal(updated.body.data.defaultDriver, driverNew);
+
+      const auditLog = await latestActivityForEntity('UPDATE_FLEET_DEFAULT_DRIVER', vehicleId);
+      assert.ok(auditLog, 'perubahan sopir default lewat Assignment Armada harus tercatat di activity log');
+      assert.equal(auditLog.metadata.previousDefaultDriverId, driverOldId);
+      assert.equal(auditLog.metadata.nextDefaultDriverId, driverNewId);
+      assert.equal(auditLog.metadata.reason, reason);
+
+      const history = await api(`/api/operations/fleet-assignment/${vehicleId}/history`, { token: operationalToken });
+      assert.equal(history.status, 200);
+      const historyEntry = history.body.data.find((item) => item.changeType === 'default_driver' && item.nextDriverId === driverNewId);
+      assert.ok(historyEntry, 'perubahan sopir default harus tercatat di vehicle_assignment_history');
+      assert.equal(historyEntry.previousDriverId, driverOldId);
+      assert.equal(historyEntry.previousDriverName, driverOld);
+      assert.equal(historyEntry.nextDriverName, driverNew);
+      assert.equal(historyEntry.reason, reason);
+      assert.equal(historyEntry.note, note);
+      assert.equal(historyEntry.changedByRole, 'operational');
+
+      const jobAfterChange = await api(`/api/container-jobs/${jobId}`, { token: operationalToken });
+      assert.equal(jobAfterChange.status, 200);
+      assert.equal(jobAfterChange.body.data.driver, driverOld, 'sopir aktual job lama tidak boleh berubah walau default armada diganti');
+      assert.equal(jobAfterChange.body.data.driverId, driverOldId);
+
+      const adminUpdate = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { defaultDriverId: driverOldId, reason: `Admin kembalikan default sopir unit ${unitCode}` },
+      });
+      assert.equal(adminUpdate.status, 200);
+      assert.equal(adminUpdate.body.data.defaultDriverId, driverOldId);
+    });
+
+    await t.test('fleet assignment: sopir baru yang sebelumnya default di unit lain otomatis lepas dari unit lama', async () => {
+      const driverShared = `Driver Fleet Shared ${runId}`;
+      const insertedDriver = await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman')
+          returning id
+        `,
+        [driverShared, `063${String(Date.now()).slice(-9)}`],
+      );
+      const driverSharedId = insertedDriver.rows[0].id;
+
+      const truckAResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status, default_driver_id, default_driver_name)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif', $3, $4)
+          returning id
+        `,
+        [`TRK-FLB1-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-FB1`, driverSharedId, driverShared],
+      );
+      const truckAId = truckAResult.rows[0].id;
+      const truckBResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif')
+          returning id
+        `,
+        [`TRK-FLB2-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-FB2`],
+      );
+      const truckBId = truckBResult.rows[0].id;
+
+      const moved = await api(`/api/operations/fleet-assignment/${truckBId}/default-driver`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { defaultDriverId: driverSharedId, reason: `Sopir ${driverShared} dipindah jadi default unit B` },
+      });
+      assert.equal(moved.status, 200);
+      assert.equal(moved.body.data.defaultDriverId, driverSharedId);
+
+      const truckAAfter = await query('select default_driver_id from vehicles where id = $1', [truckAId]);
+      assert.equal(truckAAfter.rows[0].default_driver_id, null, 'unit lama harus otomatis kehilangan default sopir yang sama');
+    });
+
+    await t.test('fleet assignment: driver tidak eligible dan unit maintenance ditolak', async () => {
+      const driverBlacklist = `Driver Fleet Blacklist ${runId}`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Blacklist', 'Aman')
+        `,
+        [driverBlacklist, `064${String(Date.now()).slice(-9)}`],
+      );
+      const driverBlacklistId = (await query('select id from drivers where name = $1', [driverBlacklist])).rows[0].id;
+      const driverActive = `Driver Fleet Aktif ${runId}`;
+      await query(
+        `
+          insert into drivers (name, phone, license_type, license_expiry_date, operational_status, health_status)
+          values ($1, $2, 'SIM B2 Umum', '2027-07-17', 'Aktif', 'Aman')
+        `,
+        [driverActive, `065${String(Date.now()).slice(-9)}`],
+      );
+      const driverActiveId = (await query('select id from drivers where name = $1', [driverActive])).rows[0].id;
+      const truckResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif')
+          returning id
+        `,
+        [`TRK-FLC-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-FLC`],
+      );
+      const vehicleId = truckResult.rows[0].id;
+
+      const blacklistTry = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { defaultDriverId: driverBlacklistId, reason: `Coba jadikan sopir blacklist default armada ${runId}` },
+      });
+      assert.equal(blacklistTry.status, 409);
+      assert.equal(blacklistTry.body.error.code, 'TRUCK_DEFAULT_DRIVER_DRIVER_NOT_ELIGIBLE');
+
+      await query(`update vehicles set operational_status = 'Maintenance' where id = $1`, [vehicleId]);
+      const maintenanceTry = await api(`/api/operations/fleet-assignment/${vehicleId}/default-driver`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { defaultDriverId: driverActiveId, reason: `Coba ubah default unit maintenance ${runId}` },
+      });
+      assert.equal(maintenanceTry.status, 409);
+      assert.equal(maintenanceTry.body.error.code, 'TRUCK_DEFAULT_DRIVER_TRUCK_NOT_ELIGIBLE');
+    });
+
+    await t.test('fleet assignment: pindah chassis, chassis lama & baru otomatis lepas, status tidak eligible ditolak, riwayat tercatat', async () => {
+      const chassisOldCode = `CHS-FLD-OLD-${runId}`;
+      const chassisNewCode = `CHS-FLD-NEW-${runId}`;
+      const chassisInactiveCode = `CHS-FLD-INACTIVE-${runId}`;
+      const chassisRenewalCode = `CHS-FLD-RENEWAL-${runId}`;
+
+      const chassisOld = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '20FT', 'Aktif') returning id`,
+        [chassisOldCode],
+      )).rows[0];
+      const chassisNew = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '20FT', 'Aktif') returning id`,
+        [chassisNewCode],
+      )).rows[0];
+      const chassisInactive = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '20FT', 'Tidak Aktif') returning id`,
+        [chassisInactiveCode],
+      )).rows[0];
+      const chassisRenewal = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '20FT', 'Perlu Perpanjang') returning id`,
+        [chassisRenewalCode],
+      )).rows[0];
+
+      const truckAResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status, current_chassis_id, current_chassis_code)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif', $3, $4)
+          returning id
+        `,
+        [`TRK-FLD1-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-FD1`, chassisOld.id, chassisOldCode],
+      );
+      const truckAId = truckAResult.rows[0].id;
+      const truckCResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status, current_chassis_id, current_chassis_code)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif', $3, $4)
+          returning id
+        `,
+        [`TRK-FLD2-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-FD2`, chassisNew.id, chassisNewCode],
+      );
+      const truckCId = truckCResult.rows[0].id;
+
+      // Chassis tidak aktif / perlu perpanjang ditolak.
+      const inactiveTry = await api(`/api/operations/fleet-assignment/${truckAId}/chassis`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { chassisId: chassisInactive.id, reason: `Coba pasang chassis tidak aktif ${runId}` },
+      });
+      assert.equal(inactiveTry.status, 409);
+      assert.equal(inactiveTry.body.error.code, 'FLEET_ASSIGNMENT_CHASSIS_NOT_ELIGIBLE');
+      const renewalTry = await api(`/api/operations/fleet-assignment/${truckAId}/chassis`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { chassisId: chassisRenewal.id, reason: `Coba pasang chassis perlu perpanjang ${runId}` },
+      });
+      assert.equal(renewalTry.status, 409);
+      assert.equal(renewalTry.body.error.code, 'FLEET_ASSIGNMENT_CHASSIS_NOT_ELIGIBLE');
+
+      // Unit maintenance ditolak.
+      const truckMaintenanceResult = await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Maintenance')
+          returning id
+        `,
+        [`TRK-FLD3-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-FD3`],
+      );
+      const maintenanceTry = await api(`/api/operations/fleet-assignment/${truckMaintenanceResult.rows[0].id}/chassis`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { chassisId: chassisOld.id, reason: `Coba pasang chassis di unit maintenance ${runId}` },
+      });
+      assert.equal(maintenanceTry.status, 409);
+      assert.equal(maintenanceTry.body.error.code, 'FLEET_ASSIGNMENT_VEHICLE_NOT_ELIGIBLE');
+
+      // Pindahkan chassisNew (sebelumnya di truckC) ke truckA (sebelumnya pakai chassisOld).
+      const reason = `Chassis unit ${truckAId} dipindah ke chassis lain sesuai kondisi lapangan`;
+      const moved = await api(`/api/operations/fleet-assignment/${truckAId}/chassis`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { chassisId: chassisNew.id, reason },
+      });
+      assert.equal(moved.status, 200);
+      assert.equal(moved.body.data.currentChassisId, chassisNew.id);
+      assert.equal(moved.body.data.currentChassisCode, chassisNewCode);
+
+      // Chassis baru otomatis lepas dari unit lama (truckC).
+      const truckCAfter = await query('select current_chassis_id from vehicles where id = $1', [truckCId]);
+      assert.equal(truckCAfter.rows[0].current_chassis_id, null, 'chassis yang dipindah harus otomatis lepas dari unit lamanya');
+
+      const auditLog = await latestActivityForEntity('UPDATE_FLEET_CHASSIS', truckAId);
+      assert.ok(auditLog, 'perubahan chassis harus tercatat di activity log');
+      assert.equal(auditLog.metadata.nextChassisId, chassisNew.id);
+
+      const history = await api(`/api/operations/fleet-assignment/${truckAId}/history`, { token: operationalToken });
+      assert.equal(history.status, 200);
+      const historyEntry = history.body.data.find((item) => item.changeType === 'chassis' && item.nextChassisId === chassisNew.id);
+      assert.ok(historyEntry, 'perubahan chassis harus tercatat di vehicle_assignment_history');
+      assert.equal(historyEntry.previousChassisId, chassisOld.id);
+      assert.equal(historyEntry.previousChassisCode, chassisOldCode);
+      assert.equal(historyEntry.reason, reason);
+    });
+
     await t.test('container job: dua request assignment bersamaan untuk driver/truck yang sama tidak boleh lolos dua-duanya (race condition)', async () => {
       const raceDriverName = `Driver Race ${runId}`;
       const racePlate = `B-${String(runId).slice(-4)}-RC`;

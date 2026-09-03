@@ -1,6 +1,7 @@
 import {
   Archive,
   Anchor,
+  ArrowRightLeft,
   BarChart3,
   Boxes,
   Building2,
@@ -112,6 +113,12 @@ export const navigationGroups = [
         to: '/operations/driver-commissions',
         label: 'Report Komisi',
         icon: CircleDollarSign,
+        roles: operationalRoles,
+      },
+      {
+        to: '/operations/fleet-assignment',
+        label: 'Assignment Armada',
+        icon: ArrowRightLeft,
         roles: operationalRoles,
       },
     ],

@@ -71,6 +71,7 @@ export function fetchOperationReport(query) {
     query: query.query || query.search || '',
     entrySource: query.entrySource || '',
     historicalPeriod: query.historicalPeriod || '',
+    applyUtilizationCorrections: query.applyUtilizationCorrections || query.apply_utilization_corrections || '',
   });
 }
 

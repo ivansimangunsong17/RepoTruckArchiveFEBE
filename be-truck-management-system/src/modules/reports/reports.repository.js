@@ -103,6 +103,123 @@ function getComparisonDateKey(row = {}) {
   return String(value).trim().slice(0, 10);
 }
 
+function normalizeReportIdentity(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getReportDateKey(row = {}) {
+  const value = row.completedDate
+    || row.completedAt
+    || row.completed_date
+    || row.completed_at
+    || row.tripDate
+    || row.trip_date
+    || row.updatedAt
+    || row.updated_at;
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  return String(value).trim().slice(0, 10);
+}
+
+function collectReportVehicleKeys(row = {}) {
+  return [
+    row.vehicleId,
+    row.vehicle_id,
+    row.originalVehicleId,
+    row.original_vehicle_id,
+    row.plateNumber,
+    row.plate_number,
+    row.originalPlateNumber,
+    row.original_plate_number,
+    row.unitCode,
+    row.unit_code,
+    row.originalUnitCode,
+    row.original_unit_code,
+  ].map(normalizeReportIdentity).filter(Boolean);
+}
+
+function normalizeUtilizationChassisCorrection(correction = {}) {
+  const sourceVehicleId = correction.sourceVehicleId || correction.source_vehicle_id || '';
+  const sourcePlateNumber = correction.sourcePlateNumber || correction.source_plate_number || '';
+  const sourceUnitCode = correction.sourceUnitCode || correction.source_unit_code || '';
+  const targetVehicleId = correction.targetVehicleId || correction.target_vehicle_id || '';
+  const targetPlateNumber = correction.targetPlateNumber || correction.target_plate_number || '';
+  const targetUnitCode = correction.targetUnitCode || correction.target_unit_code || '';
+  const effectiveFrom = getReportDateKey({ completedDate: correction.effectiveFrom || correction.effective_from });
+  const effectiveTo = getReportDateKey({ completedDate: correction.effectiveTo || correction.effective_to });
+  const sourceKeys = [sourceVehicleId, sourcePlateNumber, sourceUnitCode]
+    .map(normalizeReportIdentity)
+    .filter(Boolean);
+
+  if (!sourceKeys.length || !targetVehicleId || !effectiveFrom || !effectiveTo) return null;
+
+  return {
+    id: correction.id || '',
+    sourceVehicleId,
+    sourcePlateNumber,
+    sourceUnitCode,
+    targetVehicleId,
+    targetPlateNumber,
+    targetUnitCode,
+    effectiveFrom,
+    effectiveTo,
+    reason: correction.reason || '',
+    note: correction.note || '',
+    sourceKeys,
+  };
+}
+
+// Koreksi ini hanya mengubah identitas truck untuk tampilan laporan utilisasi.
+// Data asli container_jobs tetap utuh dan bisa diaudit lewat original* fields.
+export function applyUtilizationChassisCorrectionsToRows(rows = [], corrections = []) {
+  const normalizedCorrections = (corrections || [])
+    .map(normalizeUtilizationChassisCorrection)
+    .filter(Boolean);
+
+  if (!normalizedCorrections.length) return rows;
+
+  return (rows || []).map((row) => {
+    const rowDate = getReportDateKey(row);
+    if (!rowDate) return row;
+
+    const rowKeys = new Set(collectReportVehicleKeys(row));
+    const correction = normalizedCorrections.find((entry) => (
+      rowDate >= entry.effectiveFrom
+      && rowDate <= entry.effectiveTo
+      && entry.sourceKeys.some((key) => rowKeys.has(key))
+    ));
+
+    if (!correction) return row;
+
+    const originalVehicleId = row.originalVehicleId || row.vehicleId || row.vehicle_id || '';
+    const originalPlateNumber = row.originalPlateNumber || row.plateNumber || row.plate_number || '';
+    const originalUnitCode = row.originalUnitCode || row.unitCode || row.unit_code || '';
+
+    return {
+      ...row,
+      originalVehicleId,
+      originalPlateNumber,
+      originalUnitCode,
+      vehicleId: correction.targetVehicleId || row.vehicleId,
+      plateNumber: correction.targetPlateNumber || row.plateNumber,
+      unitCode: correction.targetUnitCode || row.unitCode,
+      utilizationChassisCorrection: {
+        id: correction.id,
+        sourceVehicleId: correction.sourceVehicleId,
+        sourcePlateNumber: correction.sourcePlateNumber || originalPlateNumber,
+        sourceUnitCode: correction.sourceUnitCode || originalUnitCode,
+        targetVehicleId: correction.targetVehicleId,
+        targetPlateNumber: correction.targetPlateNumber || row.plateNumber,
+        targetUnitCode: correction.targetUnitCode || row.unitCode,
+        effectiveFrom: correction.effectiveFrom,
+        effectiveTo: correction.effectiveTo,
+        reason: correction.reason,
+        note: correction.note,
+      },
+    };
+  });
+}
+
 export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], options = {}, baseDate = new Date()) {
   const year = parseComparisonYear(options);
   const activeTruckCount = Math.max(0, Number(options.activeTruckCount || 0));
@@ -158,6 +275,10 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
       totalVolume: month.totalVolume,
       totalCustomers: month.customerKeys.size,
       activeSales: month.salesKeys.size,
+      activeTruckCount,
+      utilizationDays,
+      potentialTruckDays,
+      usedTruckDays: month.truckDayKeys.size,
       utilizationPercent: potentialTruckDays ? (month.totalTrips / potentialTruckDays) * 100 : 0,
       repoStoredCount: month.repoStoredCount,
     };
@@ -1160,9 +1281,43 @@ export async function getMonthlyComparisonReport(options = {}) {
   };
 }
 
+async function findActiveUtilizationChassisCorrections(options = {}) {
+  const dateFrom = String(options.dateFrom || '1900-01-01').trim();
+  const dateTo = String(options.dateTo || '2100-12-31').trim();
+
+  const result = await query(
+    `
+      select c.id,
+             c.source_vehicle_id,
+             source_vehicle.plate_number as source_plate_number,
+             source_vehicle.unit_code as source_unit_code,
+             c.target_vehicle_id,
+             target_vehicle.plate_number as target_plate_number,
+             target_vehicle.unit_code as target_unit_code,
+             to_char(c.effective_from, 'YYYY-MM-DD') as effective_from,
+             to_char(c.effective_to, 'YYYY-MM-DD') as effective_to,
+             c.reason,
+             c.note
+      from utilization_chassis_corrections c
+      join vehicles source_vehicle on source_vehicle.id = c.source_vehicle_id
+      join vehicles target_vehicle on target_vehicle.id = c.target_vehicle_id
+      where c.status = 'active'
+        and c.effective_from <= $2::date
+        and c.effective_to >= $1::date
+      order by c.effective_from asc, c.created_at asc
+    `,
+    [dateFrom, dateTo],
+  );
+
+  return result.rows;
+}
+
 export async function getOperationReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const status = String(options.status || '');
+  const applyUtilizationCorrections = String(options.applyUtilizationCorrections || '').toLowerCase();
+  const shouldApplyChassisCorrections = status === 'completed'
+    && ['1', 'true', 'yes', 'chassis'].includes(applyUtilizationCorrections);
   const isFinishedHistory = status === 'finished';
   const dateColumn = isFinishedHistory
     ? `coalesce(${timestampToJakartaDateSql('cj.completed_at')}, ${timestampToJakartaDateSql('cj.cancelled_at')}, so.trip_date)`
@@ -1201,7 +1356,7 @@ export async function getOperationReport(options = {}) {
   const orderBySql = (isFinishedHistory || status === 'completed')
     ? 'order by coalesce(cj.completed_at, cj.cancelled_at) desc nulls last, so.trip_date desc, cj.created_at desc'
     : 'order by so.trip_date desc, cj.created_at desc';
-  const [rows, total, summary] = await Promise.all([
+  const [rows, total, summary, chassisCorrections] = await Promise.all([
     query(
       `
         select cj.id, cj.container_number, cj.container_size, cj.container_type,
@@ -1218,6 +1373,8 @@ export async function getOperationReport(options = {}) {
                so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
                so.sales_name, so.created_by_name,
                so.origin, cj.destination,
+               coalesce(cj.vehicle_id, snapshot_vehicle.id) as display_vehicle_id,
+               coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number, snapshot_vehicle.plate_number) as plate_number,
                coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -1253,10 +1410,12 @@ export async function getOperationReport(options = {}) {
       `,
       params,
     ),
+    shouldApplyChassisCorrections
+      ? findActiveUtilizationChassisCorrections(options)
+      : Promise.resolve([]),
   ]);
 
-  return {
-    rows: rows.rows.map((row) => ({
+  const mappedRows = rows.rows.map((row) => ({
       id: row.id,
       soNumber: row.so_number,
       doNumber: row.do_number,
@@ -1278,10 +1437,10 @@ export async function getOperationReport(options = {}) {
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,
       driverId: row.driver_id,
-      vehicleId: row.vehicle_id,
+      vehicleId: row.display_vehicle_id || row.vehicle_id,
       driver: row.assignment_snapshot?.driver || null,
       unitCode: row.unit_code || row.assignment_snapshot?.unitCode || '',
-      plateNumber: row.assignment_snapshot?.plateNumber || null,
+      plateNumber: row.plate_number || row.assignment_snapshot?.plateNumber || null,
       receivedAt: row.received_at,
       runningAt: row.running_at,
       completedAt: row.completed_at,
@@ -1301,7 +1460,12 @@ export async function getOperationReport(options = {}) {
       entrySource: row.entry_source || 'realtime',
       historicalPeriod: row.historical_period || '',
       historicalNotes: row.historical_notes || '',
-    })),
+    }));
+
+  return {
+    rows: shouldApplyChassisCorrections
+      ? applyUtilizationChassisCorrectionsToRows(mappedRows, chassisCorrections)
+      : mappedRows,
     total: total.rows[0]?.total || 0,
     summary: summary.rows[0] || { jobs: 0, completed: 0, cancelled: 0, running: 0, received: 0, repo_stored: 0 },
   };

@@ -15,6 +15,7 @@ const HistoricalEntryPage = lazy(() => import('../pages/admin/HistoricalEntryPag
 const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
 const OperationalDroppingAccountPage = lazy(() => import('../pages/operations/OperationalDroppingAccountPage'));
 const DriverCommissionOperationalPage = lazy(() => import('../pages/operations/DriverCommissionOperationalPage'));
+const FleetAssignmentPage = lazy(() => import('../pages/operations/FleetAssignmentPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
 const ClientsPage = lazy(() => import('../pages/admin/ClientsPage'));
 const EndUsersPage = lazy(() => import('../pages/admin/EndUsersPage'));
@@ -95,6 +96,7 @@ export const router = createBrowserRouter([
         { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },
         { path: 'operations/driver-commissions', children: [guardedPage(operationalRoles, <LazyPage><DriverCommissionOperationalPage /></LazyPage>)] },
+        { path: 'operations/fleet-assignment', children: [guardedPage(operationalRoles, <LazyPage><FleetAssignmentPage /></LazyPage>)] },
         { path: 'driver-commissions', children: [guardedPage(driverCommissionRoles, <DriverCommissionRedirect />)] },
         { path: 'trucks', children: [guardedPage(adminRoles, <LazyPage><TrucksPage /></LazyPage>)] },
         { path: 'drivers', children: [guardedPage(adminRoles, <LazyPage><DriversPage /></LazyPage>)] },

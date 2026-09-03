@@ -185,6 +185,49 @@ describe('buildMonthlyUtilizationPivot', () => {
     expect(pivot.rows[0].cells['2026-08-03'].count).toBe(1);
     expect(pivot.totalsByDay['2026-08-03']).toBe(1);
   });
+
+  it('menampilkan ritase hasil koreksi chassis pada truck target dan menyimpan marker koreksi', () => {
+    const pivot = buildMonthlyUtilizationPivot(
+      [
+        { id: 'truck-9211', plateNumber: 'B 9211 BEL', unitCode: '11', capacity: '40FT' },
+        { id: 'truck-9130', plateNumber: 'B 9130 BEL', unitCode: '30', capacity: '40FT' },
+      ],
+      [
+        {
+          id: 'job-1',
+          vehicleId: 'truck-9130',
+          plateNumber: 'B 9130 BEL',
+          originalVehicleId: 'truck-9211',
+          originalPlateNumber: 'B 9211 BEL',
+          completedDate: '2026-08-20',
+          destination: 'Cikarang',
+          status: 'completed',
+          utilizationChassisCorrection: {
+            sourcePlateNumber: 'B 9211 BEL',
+            targetPlateNumber: 'B 9130 BEL',
+            effectiveFrom: '2026-08-15',
+            effectiveTo: '2026-08-31',
+            reason: 'Tukar chassis tengah bulan',
+          },
+        },
+      ],
+      8,
+      2026,
+    );
+
+    const source = pivot.rows.find((row) => row.plateNumber === 'B 9211 BEL');
+    const target = pivot.rows.find((row) => row.plateNumber === 'B 9130 BEL');
+
+    expect(source.cells['2026-08-20'].count).toBe(0);
+    expect(target.cells['2026-08-20'].count).toBe(1);
+    expect(target.cells['2026-08-20'].correctedCount).toBe(1);
+    expect(target.cells['2026-08-20'].corrections[0]).toMatchObject({
+      sourcePlateNumber: 'B 9211 BEL',
+      targetPlateNumber: 'B 9130 BEL',
+      reason: 'Tukar chassis tengah bulan',
+    });
+    expect(pivot.grandTotal).toBe(1);
+  });
 });
 
 describe('buildMonthlyDriverUtilizationPivot', () => {

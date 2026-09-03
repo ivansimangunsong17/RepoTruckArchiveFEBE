@@ -70,6 +70,9 @@ export const ROLE_PERMISSIONS = {
     'driver_commission.void',
     'finance.driver_commission.deduction.manage',
     'operations.truck_default_driver.update',
+    'operations.fleet_assignment.read',
+    'operations.fleet_assignment.driver.update',
+    'operations.fleet_assignment.chassis.update',
   ],
   sales: [
     'orders.create',
@@ -93,6 +96,9 @@ export const ROLE_PERMISSIONS = {
     'finance.operational_fund.read',
     'finance.operational_fund.request',
     'operations.truck_default_driver.update',
+    'operations.fleet_assignment.read',
+    'operations.fleet_assignment.driver.update',
+    'operations.fleet_assignment.chassis.update',
   ],
   observer: [
     'orders.read',
@@ -186,6 +192,9 @@ const BACKEND_PERMISSION_ALIASES = {
   'driver_commission.void': ['driver_commission.void'],
   'finance.driver_commission.deduction.manage': ['finance.driver_commission.deduction.manage'],
   'operations.truck_default_driver.update': ['operations.truck_default_driver.update'],
+  'operations.fleet_assignment.read': ['operations.fleet_assignment.read'],
+  'operations.fleet_assignment.driver.update': ['operations.fleet_assignment.driver.update'],
+  'operations.fleet_assignment.chassis.update': ['operations.fleet_assignment.chassis.update'],
 };
 
 function isAdminRole(role) {
