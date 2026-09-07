@@ -3,6 +3,7 @@ import {
   getCustomerPerformanceReport,
   getDocumentReport,
   getDriverPerformanceReport,
+  getInputMonitoringReport,
   getMonthlyComparisonReport,
   getMonthlyRevenueReport,
   getOperationReport,
@@ -93,5 +94,11 @@ export function fetchDriverPerformanceReport(query) {
     commissionStatus: query.commissionStatus || query.commission_status || '',
     entrySource: query.entrySource || '',
     historicalPeriod: query.historicalPeriod || '',
+  });
+}
+
+export function fetchInputMonitoringReport(query) {
+  return getInputMonitoringReport({
+    limit: query.limit,
   });
 }

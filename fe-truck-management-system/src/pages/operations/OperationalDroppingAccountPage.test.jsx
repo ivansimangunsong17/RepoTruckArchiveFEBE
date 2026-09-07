@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OperationalDroppingAccountPage from './OperationalDroppingAccountPage';
@@ -8,7 +8,10 @@ import {
   createContainerJobExpense,
   fetchContainerJobExpenseLedger,
   fetchContainerJobsPage,
+  moveDroppingExpense,
+  updateDroppingExpense,
   uploadContainerJobExpenseProof,
+  voidDroppingExpense,
 } from '../../services/archive/containerJobService';
 import { fetchOperationalFundBatches, fetchOperationalFundTransactions } from '../../services/finance/financeService';
 
@@ -33,7 +36,10 @@ vi.mock('../../services/archive/containerJobService', () => ({
   createContainerJobExpense: vi.fn(),
   fetchContainerJobExpenseLedger: vi.fn(),
   fetchContainerJobsPage: vi.fn(),
+  moveDroppingExpense: vi.fn(),
+  updateDroppingExpense: vi.fn(),
   uploadContainerJobExpenseProof: vi.fn(),
+  voidDroppingExpense: vi.fn(),
 }));
 
 vi.mock('../../services/finance/financeService', () => ({
@@ -178,6 +184,32 @@ describe('OperationalDroppingAccountPage', () => {
       paymentStatus: 'sudah_dibayar',
       financeCheckStatus: 'belum_dicek',
       proofAttachment: { name: 'parkir.pdf', path: 'attachment-proof-2' },
+    });
+    updateDroppingExpense.mockResolvedValue({
+      id: 'expense-1',
+      containerJobId: 'job-1',
+      category: 'parkir',
+      amount: 90000,
+      description: 'Tol Cikampek edit sendiri',
+      paymentStatus: 'sudah_dibayar',
+      financeCheckStatus: 'belum_dicek',
+    });
+    moveDroppingExpense.mockResolvedValue({
+      id: 'expense-1',
+      containerJobId: 'job-2',
+      soNumber: 'SO-ARM-202608-0002',
+      category: 'tol',
+      amount: 125000,
+      paymentStatus: 'sudah_dibayar',
+      financeCheckStatus: 'belum_dicek',
+    });
+    voidDroppingExpense.mockResolvedValue({
+      id: 'expense-1',
+      containerJobId: 'job-1',
+      category: 'tol',
+      amount: 125000,
+      paymentStatus: 'batal',
+      financeCheckStatus: 'belum_dicek',
     });
   });
 
@@ -374,5 +406,83 @@ describe('OperationalDroppingAccountPage', () => {
       }));
     });
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Koreksi tersimpan' }));
+  });
+
+  it('mengedit transaksi biaya sendiri selama belum dicek Finance dan batch masih open', async () => {
+    const user = userEvent.setup();
+    render(<OperationalDroppingAccountPage />);
+
+    await screen.findByText('Tol Cikampek');
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /edit transaksi biaya/i });
+    await user.clear(within(dialog).getByLabelText(/nominal/i));
+    await user.type(within(dialog).getByLabelText(/nominal/i), '90000');
+    await user.click(within(dialog).getByRole('button', { name: /simpan perubahan/i }));
+
+    await waitFor(() => {
+      expect(updateDroppingExpense).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
+        amount: 90000,
+        paymentStatus: 'sudah_dibayar',
+        updatedBy: 'Fitri Operational',
+      }));
+    });
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Transaksi tersimpan' }));
+  });
+
+  it('memindahkan transaksi biaya ke ritasi lain selama belum dicek Finance', async () => {
+    const user = userEvent.setup();
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [
+        { id: 'job-1', status: 'running', soNumber: 'SO-ARM-202608-0001', containerNumber: 'CONT-001', customer: 'PT Sumber Logistik', destination: 'Cikarang' },
+        { id: 'job-2', status: 'running', soNumber: 'SO-ARM-202608-0002', containerNumber: 'CONT-002', customer: 'PT Nusantara Cargo', destination: 'Bekasi' },
+      ],
+    });
+    render(<OperationalDroppingAccountPage />);
+
+    await screen.findByText('Tol Cikampek');
+    await user.click(screen.getByRole('button', { name: /pindah ritasi/i }));
+    const dialog = await screen.findByRole('dialog', { name: /pindah ritasi transaksi biaya/i });
+    await user.click(await within(dialog).findByRole('button', { name: /SO-ARM-202608-0002/i }));
+    await user.click(within(dialog).getByRole('button', { name: /^pindahkan$/i }));
+
+    await waitFor(() => {
+      expect(moveDroppingExpense).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
+        targetContainerJobId: 'job-2',
+        updatedBy: 'Fitri Operational',
+      }));
+    });
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Ritasi dipindahkan' }));
+  });
+
+  it('membatalkan (void) transaksi biaya sendiri selama belum dicek Finance', async () => {
+    const user = userEvent.setup();
+    render(<OperationalDroppingAccountPage />);
+
+    await screen.findByText('Tol Cikampek');
+    await user.click(screen.getByRole('button', { name: /^void$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /void transaksi biaya/i });
+    await user.click(within(dialog).getByRole('button', { name: /ya, void transaksi/i }));
+
+    await waitFor(() => {
+      expect(voidDroppingExpense).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
+        updatedBy: 'Fitri Operational',
+      }));
+    });
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Transaksi dibatalkan' }));
+  });
+
+  it('tidak menampilkan tombol edit/pindah ritasi/void kalau batch tanggal ini sudah closed', async () => {
+    fetchOperationalFundBatches.mockResolvedValue({
+      rows: [{ id: 'batch-2026-08-20', batchDate: '2026-08-20', status: 'closed' }],
+      total: 1,
+      totalPages: 1,
+    });
+    render(<OperationalDroppingAccountPage />);
+
+    await screen.findByText('Tol Cikampek');
+    expect(screen.getByText(/sudah ditutup Finance/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /pindah ritasi/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^void$/i })).not.toBeInTheDocument();
   });
 });

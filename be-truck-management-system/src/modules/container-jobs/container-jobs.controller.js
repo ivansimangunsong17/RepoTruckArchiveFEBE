@@ -10,10 +10,13 @@ import {
   listContainerJobExpenseLedger,
   listContainerJobExpenses,
   listContainerJobs,
+  moveDroppingExpenseToAnotherJobBeforeFinanceCheck,
   requestContainerJobCancellation,
   reviewContainerJobCancellation,
   saveContainerJob,
   updateContainerJobExpenseProof,
+  updateDroppingExpenseBeforeFinanceCheck,
+  voidDroppingExpenseBeforeFinanceCheck,
 } from './container-jobs.service.js';
 
 function isHistoricalRecord(record = {}) {
@@ -165,6 +168,63 @@ export async function updateContainerJobExpenseProofController(request, response
     },
   });
   sendSuccess(response, result, 'Bukti pembayaran berhasil diupload.');
+}
+
+export async function updateDroppingExpenseController(request, response) {
+  const before = await getContainerJobExpense(request.params.expenseId);
+  const result = await updateDroppingExpenseBeforeFinanceCheck(request.params.id, request.params.expenseId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_UPDATE_DROPPING_EXPENSE',
+    module: 'container_jobs',
+    entityType: 'container_job_expense',
+    entityId: request.params.expenseId,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      containerJobId: request.params.id,
+      category: result.category,
+      amount: result.amount,
+      paymentStatus: result.paymentStatus,
+      financeCheckStatus: result.financeCheckStatus,
+    },
+  });
+  sendSuccess(response, result, 'Transaksi biaya berhasil diperbarui.');
+}
+
+export async function moveDroppingExpenseController(request, response) {
+  const before = await getContainerJobExpense(request.params.expenseId);
+  const result = await moveDroppingExpenseToAnotherJobBeforeFinanceCheck(request.params.id, request.params.expenseId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_MOVE_DROPPING_EXPENSE',
+    module: 'container_jobs',
+    entityType: 'container_job_expense',
+    entityId: request.params.expenseId,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      previousContainerJobId: before.containerJobId,
+      nextContainerJobId: result.containerJobId,
+    },
+  });
+  sendSuccess(response, result, 'Transaksi biaya berhasil dipindahkan ke ritasi lain.');
+}
+
+export async function voidDroppingExpenseController(request, response) {
+  const before = await getContainerJobExpense(request.params.expenseId);
+  const result = await voidDroppingExpenseBeforeFinanceCheck(request.params.id, request.params.expenseId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_VOID_DROPPING_EXPENSE',
+    module: 'container_jobs',
+    entityType: 'container_job_expense',
+    entityId: request.params.expenseId,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      containerJobId: request.params.id,
+      voidReason: request.body?.voidReason || request.body?.reason || '',
+    },
+  });
+  sendSuccess(response, result, 'Transaksi biaya berhasil dibatalkan.');
 }
 
 export async function updateContainerJobController(request, response) {

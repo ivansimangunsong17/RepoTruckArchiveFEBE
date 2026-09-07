@@ -8,11 +8,15 @@ import {
   findContainerJobExpenseLedger,
   findContainerJobExpensesByJobId,
   findContainerJobsPage,
+  moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord,
   requestContainerJobCancellation as requestContainerJobCancellationRepository,
   reviewContainerJobCancellation as reviewContainerJobCancellationRepository,
   updateContainerJobExpenseProofRecord,
   updateContainerJob,
+  updateDroppingExpenseBeforeFinanceCheckRecord,
+  voidDroppingExpenseBeforeFinanceCheckRecord,
 } from './container-jobs.repository.js';
+export { canOperationalEditDroppingTransaction } from './container-jobs.mapper.js';
 import { findSalesOrderById } from '../sales-orders/sales-orders.repository.js';
 import { hasContainerSentRpuj } from '../sales-orders/sales-orders.rpuj-lock.js';
 import { actorHasPermission } from '../../utils/permissions.js';
@@ -674,6 +678,42 @@ export function updateContainerJobExpenseProof(id, expenseId, payload = {}, acto
     paidAt: payload.paidAt || null,
     proofAttachmentId: payload.proofAttachmentId,
     paidByName: getActorName(actor),
+    actorName: getActorName(actor),
+  });
+}
+
+export function updateDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {}, actor) {
+  const paymentStatus = normalizeExpensePaymentStatus(payload.paymentStatus);
+  return updateDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, {
+    category: normalizeExpenseCategory(payload.category),
+    amount: normalizeExpenseAmount(payload.amount),
+    description: normalizeExpenseText(payload.description, 'Keterangan biaya'),
+    recipientType: normalizeExpenseText(payload.recipientType || 'driver', 'Tipe penerima', 80) || 'driver',
+    recipientName: normalizeExpenseText(payload.recipientName, 'Nama penerima', 160),
+    paymentStatus,
+    paidAt: payload.paidAt || null,
+    proofAttachmentId: payload.proofAttachmentId || null,
+    paidByName: getActorName(actor),
+    actorName: getActorName(actor),
+  });
+}
+
+export function moveDroppingExpenseToAnotherJobBeforeFinanceCheck(id, expenseId, payload = {}, actor) {
+  const targetContainerJobId = normalizeExpenseText(payload.targetContainerJobId, 'Ritasi tujuan', 100);
+  if (!targetContainerJobId) {
+    const error = new Error('Ritasi tujuan wajib dipilih.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_MOVE_TARGET_REQUIRED';
+    throw error;
+  }
+  return moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord(id, expenseId, targetContainerJobId, {
+    actorName: getActorName(actor),
+  });
+}
+
+export function voidDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {}, actor) {
+  return voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, {
+    voidReason: normalizeExpenseText(payload.voidReason || payload.reason, 'Alasan void', 500),
     actorName: getActorName(actor),
   });
 }

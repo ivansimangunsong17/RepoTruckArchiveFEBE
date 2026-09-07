@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   ReceiptText,
   Route,
+  Satellite,
   Send,
   Settings,
   ShieldCheck,
@@ -121,12 +122,19 @@ export const navigationGroups = [
         icon: ArrowRightLeft,
         roles: operationalRoles,
       },
+      {
+        to: '/operations/hino-connect',
+        label: 'HINO Connect',
+        icon: Satellite,
+        roles: operationalRoles,
+      },
     ],
   },
   {
     label: 'Laporan',
     items: [
       { to: '/reports', label: 'Laporan', icon: BarChart3, roles: reportRoles },
+      { to: '/input-monitoring', label: 'Monitoring Input', icon: ClipboardCheck, roles: reportRoles },
     ],
   },
   {

@@ -170,6 +170,8 @@ export const resourceConfig = {
       kirHeadNumber: row.kir_head_number || row.kir_number || '',
       kirExpiryDate: row.kir_expiry_date || null,
       kirChassisNumber: row.kir_chassis_number || '',
+      currentChassisId: row.current_chassis_id || null,
+      currentChassisCode: row.current_chassis_code || '',
       stidCode: row.stid_code || '',
       stidExpiryDate: row.stid_expiry_date || null,
       solarBarcodeNumber: row.solar_barcode_number || '',

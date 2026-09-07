@@ -67,7 +67,46 @@ describe('FleetAssignmentPage', () => {
 
     expect(await screen.findByText('Sopir Lama')).toBeInTheDocument();
     expect(screen.getByText('CHS-OLD')).toBeInTheDocument();
-    expect(screen.getByText('TRK-01')).toBeInTheDocument();
+    expect(screen.getByText('01')).toBeInTheDocument();
+  });
+
+  it('menampilkan header tabel yang disederhanakan', async () => {
+    setup();
+    render(<FleetAssignmentPage />);
+
+    await screen.findByText('Sopir Lama');
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
+    expect(headers).toEqual(['No', 'Plat', 'Size', 'Sopir', 'Chassis', 'Status', 'Aksi']);
+  });
+
+  it('menyederhanakan nomor lambung di kolom No sesuai pola unitCode', async () => {
+    setup();
+    fetchFleetAssignments.mockResolvedValue({
+      rows: [
+        { ...baseRow, id: 'vehicle-2', unitCode: 'TRK-DMY-01', plateNumber: 'B 0001 XX' },
+        { ...baseRow, id: 'vehicle-3', unitCode: 'TRK-4475-20', plateNumber: 'B 0002 XX' },
+        { ...baseRow, id: 'vehicle-4', unitCode: 'HEAD-4475-HD', plateNumber: 'B 0003 XX' },
+      ],
+      driversOnActiveTrip: [],
+    });
+    render(<FleetAssignmentPage />);
+
+    expect(await screen.findByText('DMY-01')).toBeInTheDocument();
+    expect(screen.getByText('4475-20')).toBeInTheDocument();
+    expect(screen.getByText('4475-HD')).toBeInTheDocument();
+  });
+
+  it('menampilkan strip saat unit belum memiliki chassis terpasang dan filter ukuran hanya 20FT/40FT', async () => {
+    setup();
+    fetchFleetAssignments.mockResolvedValue({
+      rows: [{ ...baseRow, containerSize: '', currentChassisId: null, currentChassisCode: '' }],
+      driversOnActiveTrip: [],
+    });
+    render(<FleetAssignmentPage />);
+
+    await screen.findByText('Sopir Lama');
+    expect(screen.getByText('-')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: /Filter ukuran/i })).not.toHaveTextContent('COMBO');
   });
 
   it('tombol Ganti Sopir dan Pindahkan Chassis tersembunyi untuk role tanpa permission (Sales/Finance)', async () => {
@@ -80,7 +119,7 @@ describe('FleetAssignmentPage', () => {
     expect(screen.getByRole('button', { name: /Riwayat/i })).toBeInTheDocument();
   });
 
-  it('modal ganti sopir menolak alasan kurang dari 8 karakter dan menyimpan saat valid', async () => {
+  it('modal ganti sopir bisa simpan tanpa alasan, catatan opsional terkirim jika diisi', async () => {
     const user = userEvent.setup();
     const { notify } = setup();
     updateFleetDefaultDriver.mockResolvedValue({ id: 'vehicle-1', defaultDriverId: 'driver-new', defaultDriver: 'Sopir Baru' });
@@ -90,21 +129,15 @@ describe('FleetAssignmentPage', () => {
     await user.click(screen.getByRole('button', { name: /Ganti sopir/i }));
 
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByLabelText(/Alasan Perubahan/i)).not.toBeInTheDocument();
+
     await user.selectOptions(within(dialog).getByLabelText(/Sopir Baru/i), 'driver-new');
-    await user.type(within(dialog).getByLabelText(/Alasan Perubahan/i), 'pendek');
-    await user.click(within(dialog).getByRole('button', { name: 'Simpan' }));
-
-    expect(await within(dialog).findByText(/minimal 8 karakter/i)).toBeInTheDocument();
-    expect(updateFleetDefaultDriver).not.toHaveBeenCalled();
-
-    await user.clear(within(dialog).getByLabelText(/Alasan Perubahan/i));
-    await user.type(within(dialog).getByLabelText(/Alasan Perubahan/i), 'Sopir lama resign dari perusahaan');
+    await user.type(within(dialog).getByLabelText(/Catatan Tambahan/i), 'Sopir lama resign dari perusahaan');
     await user.click(within(dialog).getByRole('button', { name: 'Simpan' }));
 
     await waitFor(() => expect(updateFleetDefaultDriver).toHaveBeenCalledWith('vehicle-1', {
       defaultDriverId: 'driver-new',
-      reason: 'Sopir lama resign dari perusahaan',
-      note: '',
+      note: 'Sopir lama resign dari perusahaan',
     }));
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       message: expect.stringContaining('Berlaku untuk ritasi baru berikutnya'),
@@ -125,7 +158,7 @@ describe('FleetAssignmentPage', () => {
     expect(await within(dialog).findByText(/sedang dipakai di ritasi berjalan/i)).toBeInTheDocument();
   });
 
-  it('modal pindah chassis menyimpan perubahan chassis', async () => {
+  it('modal pindah chassis bisa simpan tanpa alasan', async () => {
     const user = userEvent.setup();
     setup();
     updateFleetChassis.mockResolvedValue({ id: 'vehicle-1', currentChassisId: 'chassis-new', currentChassisCode: 'CHS-NEW' });
@@ -134,15 +167,31 @@ describe('FleetAssignmentPage', () => {
     await screen.findByText('Sopir Lama');
     await user.click(screen.getByRole('button', { name: /Pindahkan chassis/i }));
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByLabelText(/Alasan Perubahan/i)).not.toBeInTheDocument();
+
     await user.selectOptions(within(dialog).getByLabelText(/Chassis Baru/i), 'chassis-new');
-    await user.type(within(dialog).getByLabelText(/Alasan Perubahan/i), 'Chassis lama masuk servis rutin');
     await user.click(within(dialog).getByRole('button', { name: 'Simpan' }));
 
     await waitFor(() => expect(updateFleetChassis).toHaveBeenCalledWith('vehicle-1', {
       chassisId: 'chassis-new',
-      reason: 'Chassis lama masuk servis rutin',
       note: '',
     }));
+  });
+
+  it('tombol Simpan tetap disabled sebelum sopir/chassis baru dipilih', async () => {
+    const user = userEvent.setup();
+    setup();
+    render(<FleetAssignmentPage />);
+
+    await screen.findByText('Sopir Lama');
+    await user.click(screen.getByRole('button', { name: /Ganti sopir/i }));
+    const driverDialog = await screen.findByRole('dialog');
+    expect(within(driverDialog).getByRole('button', { name: 'Simpan' })).toBeDisabled();
+    await user.click(within(driverDialog).getByRole('button', { name: 'Batal' }));
+
+    await user.click(screen.getByRole('button', { name: /Pindahkan chassis/i }));
+    const chassisDialog = await screen.findByRole('dialog');
+    expect(within(chassisDialog).getByRole('button', { name: 'Simpan' })).toBeDisabled();
   });
 
   it('menampilkan riwayat assignment dalam modal Riwayat', async () => {

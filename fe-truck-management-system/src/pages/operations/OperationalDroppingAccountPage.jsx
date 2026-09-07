@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileUp, Plus, RefreshCw, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Ban, Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileUp, Pencil, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import PageHeader from '../../components/common/PageHeader';
 import EmptyState from '../../components/common/EmptyState';
@@ -13,7 +13,10 @@ import {
   createContainerJobExpense,
   fetchContainerJobExpenseLedger,
   fetchContainerJobsPage,
+  moveDroppingExpense,
+  updateDroppingExpense,
   uploadContainerJobExpenseProof,
+  voidDroppingExpense,
 } from '../../services/archive/containerJobService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
@@ -42,8 +45,15 @@ const paymentStatusLabels = {
 const financeStatusLabels = {
   belum_dicek: 'Belum Dicek',
   sudah_dicek: 'Sudah Dicek',
-  perlu_klarifikasi: 'Perlu Koreksi',
+  perlu_klarifikasi: 'Perlu Klarifikasi',
   dikoreksi: 'Dikoreksi',
+};
+
+const financeStatusBadgeTone = {
+  belum_dicek: 'border-slate-200 bg-slate-50 text-slate-600',
+  sudah_dicek: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  perlu_klarifikasi: 'border-amber-200 bg-amber-50 text-amber-800',
+  dikoreksi: 'border-sky-200 bg-sky-50 text-sky-700',
 };
 
 const fundCategoryLabels = {
@@ -114,8 +124,14 @@ function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
 
+function canOperationalEditRow(financeCheckStatus, paymentStatus) {
+  return (financeCheckStatus || 'belum_dicek') === 'belum_dicek' && paymentStatus !== 'batal';
+}
+
 function normalizeExpenseRow(job, expense) {
   const sourceJob = job || expense || {};
+  const paymentStatus = expense.paymentStatus || 'belum_dibayar';
+  const financeCheckStatus = expense.financeCheckStatus || 'belum_dicek';
   return {
     ...expense,
     id: expense.id,
@@ -138,8 +154,9 @@ function normalizeExpenseRow(job, expense) {
     doNumber: expense.doNumber || expense.destination || sourceJob.destination || '-',
     tripDate: expense.tripDate || sourceJob.tripDate || null,
     amount: Number(expense.amount || 0),
-    paymentStatus: expense.paymentStatus || 'belum_dibayar',
-    financeCheckStatus: expense.financeCheckStatus || 'belum_dicek',
+    paymentStatus,
+    financeCheckStatus,
+    canEdit: expense.canEdit ?? canOperationalEditRow(financeCheckStatus, paymentStatus),
   };
 }
 
@@ -172,6 +189,7 @@ function normalizeFundTransactionRow(row = {}) {
     financeCheckStatus: row.financeCheckStatus || '',
     proofAttachment: row.proofAttachment || null,
     proofAttachmentId: row.proofAttachmentId || '',
+    canEdit: row.containerJobExpenseId ? canOperationalEditRow(row.financeCheckStatus, row.expensePaymentStatus || row.paymentStatus) : false,
   };
 }
 
@@ -262,6 +280,288 @@ function ledgerCsvRows(rows = []) {
   ];
 }
 
+function EditDroppingExpenseModal({ expense, onClose, onSave }) {
+  const [form, setForm] = useState({
+    category: expense.category || 'tol',
+    amount: expense.amount ? String(expense.amount) : '',
+    description: expense.description || '',
+    recipientType: expense.recipientType || 'vendor',
+    recipientName: expense.recipientName || expense.driver || '',
+    proofFile: null,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const amount = Number(form.amount || 0);
+    if (!amount) {
+      setError('Nominal wajib lebih dari Rp 0.');
+      return;
+    }
+    if (!form.description.trim()) {
+      setError('Keterangan wajib diisi.');
+      return;
+    }
+    if (!form.recipientName.trim()) {
+      setError('Penerima wajib diisi.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave({ ...form, amount });
+    } catch (submitError) {
+      setError(submitError.message || 'Perubahan gagal disimpan.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalPortal>
+      <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
+        <section className="master-modal max-w-2xl" role="dialog" aria-modal="true" aria-label="Edit transaksi biaya" onMouseDown={(event) => event.stopPropagation()}>
+          <form className="master-form" onSubmit={handleSubmit}>
+            <div className="master-form-heading">
+              <div>
+                <span>{expense.soNumber}</span>
+                <h2>Edit Transaksi</h2>
+                <p>{expense.containerNumber} - Belum Dicek Finance, masih bisa diperbaiki sendiri.</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup edit transaksi" onClick={onClose} disabled={saving}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="master-form-sections">
+              <fieldset className="master-fieldset">
+                <legend>Detail Biaya</legend>
+                <div className="master-form-grid">
+                  <label className="master-field">
+                    <span>Jenis Biaya <em>*</em></span>
+                    <select value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>
+                      {expenseCategoryOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="master-field">
+                    <span>Nominal <em>*</em></span>
+                    <input min="0" type="number" onWheel={(event) => event.currentTarget.blur()} value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))} />
+                  </label>
+                  <label className="master-field span-full">
+                    <span>Keterangan <em>*</em></span>
+                    <input type="text" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
+                  </label>
+                  <label className="master-field">
+                    <span>Penerima <em>*</em></span>
+                    <input type="text" value={form.recipientName} onChange={(event) => setForm((current) => ({ ...current, recipientName: event.target.value }))} />
+                  </label>
+                  <div className="master-field span-full">
+                    <AttachmentUploadField
+                      compact
+                      helper="Opsional -- kosongkan kalau bukti tidak berubah"
+                      id="dropping-edit-proof"
+                      label="Ganti Bukti Pembayaran (opsional)"
+                      onClear={() => setForm((current) => ({ ...current, proofFile: null }))}
+                      onSelect={(file, validationError) => {
+                        if (validationError) {
+                          setError(validationError);
+                          return;
+                        }
+                        setForm((current) => ({ ...current, proofFile: file }));
+                        setError('');
+                      }}
+                      title={form.proofFile?.name ? 'Ganti' : 'Pilih Bukti Baru'}
+                      value={form.proofFile}
+                    />
+                  </div>
+                </div>
+              </fieldset>
+              {error ? <div className="alert error">{error}</div> : null}
+            </div>
+            <div className="master-form-actions">
+              <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Batal</button>
+              <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Menyimpan...' : 'Simpan Perubahan'}</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function MoveDroppingExpenseModal({ expense, onClose, onSave }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [options, setOptions] = useState([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [selectedTargetJob, setSelectedTargetJob] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    const debounce = setTimeout(async () => {
+      setLoadingOptions(true);
+      try {
+        const result = await fetchContainerJobsPage({
+          page: 1,
+          pageSize: 20,
+          query: searchTerm.trim(),
+          entrySource: 'realtime',
+        });
+        const rows = Array.isArray(result?.rows) ? result.rows : [];
+        if (active) {
+          setOptions(rows
+            .map(normalizeJobOption)
+            .filter(isExpenseJobOption)
+            .filter((job) => job.id !== expense.jobId));
+        }
+      } catch (loadError) {
+        if (active) setError(loadError.message || 'Ritasi gagal dimuat.');
+      } finally {
+        if (active) setLoadingOptions(false);
+      }
+    }, searchTerm.trim() ? 300 : 0);
+    return () => {
+      active = false;
+      clearTimeout(debounce);
+    };
+  }, [expense.jobId, searchTerm]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!selectedTargetJob) {
+      setError('Pilih ritasi tujuan terlebih dahulu.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(selectedTargetJob);
+    } catch (submitError) {
+      setError(submitError.message || 'Pindah ritasi gagal disimpan.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalPortal>
+      <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
+        <section className="master-modal max-w-2xl" role="dialog" aria-modal="true" aria-label="Pindah ritasi transaksi biaya" onMouseDown={(event) => event.stopPropagation()}>
+          <form className="master-form" onSubmit={handleSubmit}>
+            <div className="master-form-heading">
+              <div>
+                <span>{expense.soNumber}</span>
+                <h2>Pindah Ritasi</h2>
+                <p>{expense.containerNumber} - {formatCurrency(expense.amount)} - salah pilih ritasi? pindahkan ke ritasi yang benar.</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup pindah ritasi" onClick={onClose} disabled={saving}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="master-form-sections">
+              <fieldset className="master-fieldset">
+                <legend>Ritasi Tujuan</legend>
+                <div className="master-form-grid">
+                  <label className="master-field span-full">
+                    <span>Cari Ritasi <em>*</em></span>
+                    <input
+                      onChange={(event) => { setSearchTerm(event.target.value); setSelectedTargetJob(null); }}
+                      placeholder="Cari nomor SO, container, customer, tujuan..."
+                      value={searchTerm}
+                    />
+                  </label>
+                  <div className="master-field span-full max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                    {loadingOptions ? (
+                      <p className="px-3 py-2.5 text-[11px] font-semibold normal-case text-slate-500">Memuat ritasi...</p>
+                    ) : options.length ? (
+                      options.map((job) => (
+                        <button
+                          className={`flex w-full items-start justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50 ${selectedTargetJob?.id === job.id ? 'bg-slate-50' : ''}`}
+                          key={job.id}
+                          onClick={() => setSelectedTargetJob(job)}
+                          type="button"
+                        >
+                          <div className="min-w-0">
+                            <strong className="block truncate text-xs font-black normal-case text-slate-900">{job.soNumber}</strong>
+                            <span className="mt-0.5 block truncate text-[11px] font-semibold normal-case text-slate-500">{job.customer} - {job.destination}</span>
+                          </div>
+                          {selectedTargetJob?.id === job.id ? <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black normal-case text-emerald-700">Dipilih</span> : null}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-2.5 text-[11px] font-semibold normal-case text-slate-500">Ritasi tidak ditemukan.</p>
+                    )}
+                  </div>
+                </div>
+              </fieldset>
+              {error ? <div className="alert error">{error}</div> : null}
+            </div>
+            <div className="master-form-actions">
+              <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Batal</button>
+              <button className="primary-button" disabled={saving || !selectedTargetJob} type="submit">{saving ? 'Menyimpan...' : 'Pindahkan'}</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function VoidDroppingExpenseModal({ expense, onClose, onSave }) {
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(reason.trim());
+    } catch (submitError) {
+      setError(submitError.message || 'Transaksi gagal dibatalkan.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalPortal>
+      <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
+        <section className="master-modal max-w-lg" role="dialog" aria-modal="true" aria-label="Void transaksi biaya" onMouseDown={(event) => event.stopPropagation()}>
+          <form className="master-form" onSubmit={handleSubmit}>
+            <div className="master-form-heading">
+              <div>
+                <span>{expense.soNumber}</span>
+                <h2>Void / Batalkan Transaksi</h2>
+                <p>{expense.containerNumber} - {formatCurrency(expense.amount)}</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup void transaksi" onClick={onClose} disabled={saving}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="master-form-sections">
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                Transaksi yang dibatalkan tidak terhapus, tetap tersimpan sebagai histori void dan saldo batch akan pulih.
+              </p>
+              <label className="master-field">
+                <span>Catatan / Alasan (opsional)</span>
+                <textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} />
+              </label>
+              {error ? <div className="alert error">{error}</div> : null}
+            </div>
+            <div className="master-form-actions">
+              <button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Batal</button>
+              <button className="danger-button" type="submit" disabled={saving}>{saving ? 'Memproses...' : 'Ya, Void Transaksi'}</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </ModalPortal>
+  );
+}
+
 function MetricCard({ icon: Icon, label, value, helper, tone = 'text-slate-950' }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white p-4">
@@ -316,6 +616,9 @@ function OperationalDroppingAccountPage() {
   const [error, setError] = useState('');
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [correctionExpense, setCorrectionExpense] = useState(null);
+  const [editExpenseTarget, setEditExpenseTarget] = useState(null);
+  const [moveExpenseTarget, setMoveExpenseTarget] = useState(null);
+  const [voidExpenseTarget, setVoidExpenseTarget] = useState(null);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
   const [addExpenseValidationOpen, setAddExpenseValidationOpen] = useState(false);
   const [jobOptions, setJobOptions] = useState([]);
@@ -571,6 +874,18 @@ function OperationalDroppingAccountPage() {
     setFileError('');
   }
 
+  function openEditExpense(row) {
+    setEditExpenseTarget(row);
+  }
+
+  function openMoveExpense(row) {
+    setMoveExpenseTarget(row);
+  }
+
+  function openVoidExpense(row) {
+    setVoidExpenseTarget(row);
+  }
+
   function openAddExpense() {
     if (batchStatus === 'closed') {
       setFileError('Batch rekening dropping tanggal ini sudah ditutup.');
@@ -711,6 +1026,44 @@ function OperationalDroppingAccountPage() {
     }
   }
 
+  async function submitEditExpense(form) {
+    if (!editExpenseTarget) return;
+    const actorName = user?.fullName || user?.name || user?.email || 'Operational';
+    const saved = await updateDroppingExpense(editExpenseTarget.jobId, actionExpenseId(editExpenseTarget), {
+      ...form,
+      paymentStatus: 'sudah_dibayar',
+      updatedBy: actorName,
+    });
+    updateExpenseRow(editExpenseTarget, saved);
+    setEditExpenseTarget(null);
+    setRefreshVersion((value) => value + 1);
+    notify?.({ title: 'Transaksi tersimpan', message: `${editExpenseTarget.soNumber} - ${editExpenseTarget.containerNumber}` });
+  }
+
+  async function submitMoveExpense(targetJob) {
+    if (!moveExpenseTarget) return;
+    const actorName = user?.fullName || user?.name || user?.email || 'Operational';
+    const saved = await moveDroppingExpense(moveExpenseTarget.jobId, actionExpenseId(moveExpenseTarget), {
+      targetContainerJobId: targetJob.id,
+      updatedBy: actorName,
+    });
+    setMoveExpenseTarget(null);
+    setRefreshVersion((value) => value + 1);
+    notify?.({ title: 'Ritasi dipindahkan', message: `${moveExpenseTarget.soNumber} -> ${saved.soNumber || targetJob.soNumber}` });
+  }
+
+  async function submitVoidExpense(voidReason) {
+    if (!voidExpenseTarget) return;
+    const actorName = user?.fullName || user?.name || user?.email || 'Operational';
+    await voidDroppingExpense(voidExpenseTarget.jobId, actionExpenseId(voidExpenseTarget), {
+      voidReason,
+      updatedBy: actorName,
+    });
+    setVoidExpenseTarget(null);
+    setRefreshVersion((value) => value + 1);
+    notify?.({ title: 'Transaksi dibatalkan', message: `${voidExpenseTarget.soNumber} - ${voidExpenseTarget.containerNumber}` });
+  }
+
   function submitAddExpense(event) {
     event.preventDefault();
     if (saving) return;
@@ -848,6 +1201,13 @@ function OperationalDroppingAccountPage() {
           </div>
         </div>
 
+        {batchStatus === 'closed' ? (
+          <div className="mx-4 mt-4 alert warning flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+            <span>Batch tanggal ini sudah ditutup Finance. Perubahan hanya bisa melalui Finance/Admin.</span>
+          </div>
+        ) : null}
+
         {loading ? (
           <div className="p-6 text-sm font-semibold text-slate-500">Memuat riwayat saldo...</div>
         ) : null}
@@ -863,27 +1223,30 @@ function OperationalDroppingAccountPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[920px] divide-y divide-slate-200 text-left text-sm">
               <colgroup>
-                <col className="w-[13%]" />
-                <col className="w-[39%]" />
-                <col className="w-[13%]" />
-                <col className="w-[13%]" />
-                <col className="w-[13%]" />
-                <col className="w-[9%]" />
+                <col className="w-[11%]" />
+                <col className="w-[27%]" />
+                <col className="w-[10%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[19%]" />
               </colgroup>
               <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Tanggal</th>
                   <th className="px-4 py-3">Keterangan</th>
+                  <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Uang Masuk</th>
                   <th className="px-4 py-3 text-right">Uang Keluar</th>
                   <th className="px-4 py-3 text-right">Saldo</th>
-                  <th className="px-4 py-3 text-right">Bukti</th>
+                  <th className="px-4 py-3 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredRows.map((row) => {
-                  const financeChecked = row.financeCheckStatus === 'sudah_dicek';
+                  const isVoided = row.paymentStatus === 'batal';
                   const hasExpenseAction = Boolean(row.jobId && actionExpenseId(row));
+                  const canOperationalEdit = hasExpenseAction && Boolean(row.canEdit) && batchStatus === 'open' && !isVoided;
                   const secondaryInfo = [row.soNumber, row.containerNumber !== '-' ? row.containerNumber : '', row.driverName || row.driver || '', row.customerName || row.customer || '']
                     .filter(Boolean)
                     .filter((value) => value !== '-')
@@ -899,6 +1262,16 @@ function OperationalDroppingAccountPage() {
                         {secondaryInfo ? <span className="mt-0.5 block truncate text-xs font-medium text-slate-500/70">{secondaryInfo}</span> : null}
                         {row.financeNote ? <span className="mt-1 block rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{row.financeNote}</span> : null}
                       </td>
+                      <td className="px-4 py-3">
+                        {hasExpenseAction ? (
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${isVoided ? 'border-rose-200 bg-rose-50 text-rose-700' : financeStatusBadgeTone[row.financeCheckStatus] || financeStatusBadgeTone.belum_dicek}`}>
+                            {isVoided ? 'Void/Batal' : financeStatusLabels[row.financeCheckStatus] || row.financeCheckStatus}
+                          </span>
+                        ) : <span className="text-slate-300">-</span>}
+                        {canOperationalEdit ? (
+                          <span className="mt-1 block text-[10px] font-medium normal-case text-slate-400">Belum Dicek Finance, masih bisa diperbaiki.</span>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-700">{row.moneyIn ? formatCurrency(row.moneyIn) : <span className="text-slate-300">-</span>}</td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-rose-600">{row.moneyOut ? formatCurrency(row.moneyOut) : <span className="text-slate-300">-</span>}</td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900">{Number.isFinite(Number(row.runningBalance)) ? formatCurrency(row.runningBalance) : '-'}</td>
@@ -911,9 +1284,24 @@ function OperationalDroppingAccountPage() {
                               label="View"
                             />
                           ) : null}
-                          {hasExpenseAction && !financeChecked ? (
+                          {canOperationalEdit ? (
+                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => openEditExpense(row)}>
+                              <Pencil size={13} /> Edit
+                            </button>
+                          ) : null}
+                          {canOperationalEdit ? (
                             <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => openUpload(row)}>
                               <FileUp size={13} /> {row.proofAttachment ? 'Ganti' : 'Upload'}
+                            </button>
+                          ) : null}
+                          {canOperationalEdit ? (
+                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => openMoveExpense(row)}>
+                              <ArrowRightLeft size={13} /> Pindah Ritasi
+                            </button>
+                          ) : null}
+                          {canOperationalEdit ? (
+                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-600 hover:bg-rose-50" type="button" onClick={() => openVoidExpense(row)}>
+                              <Ban size={13} /> Void
                             </button>
                           ) : null}
                           {hasExpenseAction && row.financeCheckStatus === 'perlu_klarifikasi' ? (
@@ -986,6 +1374,30 @@ function OperationalDroppingAccountPage() {
           </section>
         </div>
         </ModalPortal>
+      ) : null}
+
+      {editExpenseTarget ? (
+        <EditDroppingExpenseModal
+          expense={editExpenseTarget}
+          onClose={() => setEditExpenseTarget(null)}
+          onSave={submitEditExpense}
+        />
+      ) : null}
+
+      {moveExpenseTarget ? (
+        <MoveDroppingExpenseModal
+          expense={moveExpenseTarget}
+          onClose={() => setMoveExpenseTarget(null)}
+          onSave={submitMoveExpense}
+        />
+      ) : null}
+
+      {voidExpenseTarget ? (
+        <VoidDroppingExpenseModal
+          expense={voidExpenseTarget}
+          onClose={() => setVoidExpenseTarget(null)}
+          onSave={submitVoidExpense}
+        />
       ) : null}
 
       {addExpenseOpen && !addExpenseValidationOpen ? (

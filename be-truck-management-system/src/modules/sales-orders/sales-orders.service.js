@@ -16,7 +16,9 @@ import { normalizeInvoiceDocumentDeliveryMethod } from './sales-orders.invoice-d
 import { isSalesOrderLockedByFinanceNumber, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
 import { ensureCanManageHistoricalEntry } from '../historical-entry/historical-entry.permissions.js';
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
-import { getCustomerOutstandingSummary } from '../finance/finance.repository.js';
+import { getCustomerOutstandingSummary, listSalesOrderPayments } from '../finance/finance.repository.js';
+import { hasActiveCommissionItemsForSalesOrder } from '../driver-commissions/driver-commissions.repository.js';
+import { hasActiveSalesOrderExpenses, hasSalesOrderDebitNoteDocument } from './sales-orders.repository.js';
 
 const SERVICE_OPTIONS = [
   'Jasa Angkut D20',
@@ -327,19 +329,35 @@ function ensureCanAccessSalesOrder(actor, order) {
   throw error;
 }
 
-function ensureSalesOrderUnlockedForSales(actor, order) {
-  if (actor?.role !== 'sales') return;
-  if (isSalesOrderLockedByFinanceNumber(order)) {
-    const error = new Error('Sales Order terkunci karena Finance sudah menerbitkan nomor SO. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.');
-    error.statusCode = 403;
-    error.code = 'SALES_ORDER_FINANCE_NUMBER_LOCKED_ADMIN_ONLY';
-    throw error;
-  }
-  if (!isSalesOrderLockedByRpuj(order)) return;
-  const error = new Error('Sales Order terkunci karena RPUJ sudah dikirim. Revisi atau pembatalan hanya dapat dilakukan oleh Admin.');
+async function canSalesReviseAfterFinanceSo(order) {
+  if (!isSalesOrderLockedByFinanceNumber(order) && !isSalesOrderLockedByRpuj(order)) return true;
+  const containers = order.containers || [];
+  if (containers.some((container) => container.status !== 'received')) return false;
+  if (isSalesOrderLockedByRpuj(order)) return false;
+  if (String(order.invoiceNumber || '').trim()) return false;
+  if (hasSalesOrderAttachment(order, 'invoicePdf') || hasSalesOrderAttachment(order, 'taxInvoicePdf')) return false;
+  const [hasExpense, hasDebitNoteDoc, payments, hasCommission] = await Promise.all([
+    hasActiveSalesOrderExpenses(order.id),
+    hasSalesOrderDebitNoteDocument(order.id),
+    listSalesOrderPayments(order.id),
+    hasActiveCommissionItemsForSalesOrder(order.id),
+  ]);
+  if (hasExpense || hasDebitNoteDoc || hasCommission) return false;
+  if (payments.some((payment) => !payment.voidedAt)) return false;
+  return true;
+}
+
+export async function ensureSalesOrderStillSafeForSalesRevision(order) {
+  if (await canSalesReviseAfterFinanceSo(order)) return;
+  const error = new Error('Order ini sudah diproses Operational/Finance lanjutan. Revisi atau pembatalan hanya bisa dilakukan oleh Admin/Koreksi.');
   error.statusCode = 403;
-  error.code = 'SALES_ORDER_RPUJ_LOCKED_ADMIN_ONLY';
+  error.code = 'SALES_ORDER_ADVANCED_PROCESSING_LOCKED';
   throw error;
+}
+
+async function ensureSalesOrderUnlockedForSales(actor, order) {
+  if (actor?.role !== 'sales') return;
+  await ensureSalesOrderStillSafeForSalesRevision(order);
 }
 
 function isHistoricalOrderContext(order = {}, payload = {}) {
@@ -351,9 +369,9 @@ function isHistoricalOrderContext(order = {}, payload = {}) {
   );
 }
 
-function ensureSalesOrderUnlockedForUpdate(actor, order, payload = {}) {
+async function ensureSalesOrderUnlockedForUpdate(actor, order, payload = {}) {
   if (normalizeRole(actor) !== 'admin') {
-    ensureSalesOrderUnlockedForSales(actor, order);
+    await ensureSalesOrderUnlockedForSales(actor, order);
     return;
   }
   // Data historis sengaja dibuat dengan financeVerificationStatus 'verified' langsung saat backfill,
@@ -566,7 +584,7 @@ export async function saveSalesOrder(payload, id, actor) {
   if (id) {
     ensureCanAccessSalesOrder(actor, currentOrder);
     ensureAdminCorrectionContract(actor, normalizedPayload);
-    ensureSalesOrderUnlockedForUpdate(actor, currentOrder, normalizedPayload);
+    await ensureSalesOrderUnlockedForUpdate(actor, currentOrder, normalizedPayload);
   }
   ensureCanManageHistoricalEntry(actor, {
     payload: normalizedPayload,
@@ -665,7 +683,7 @@ export async function removeSalesOrder(id, actor) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
-  ensureSalesOrderUnlockedForSales(actor, order);
+  await ensureSalesOrderUnlockedForSales(actor, order);
   return cancelSalesOrder(id);
 }
 
@@ -678,7 +696,7 @@ export async function requestSalesOrderCancellation(id, actor, payload = {}) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
-  ensureSalesOrderUnlockedForSales(actor, order);
+  await ensureSalesOrderUnlockedForSales(actor, order);
   return requestSalesOrderCancellationRepository(id, {
     cancelRequestNote: payload.cancelRequestNote || '',
     cancelRequestedByName: getActorName(actor),

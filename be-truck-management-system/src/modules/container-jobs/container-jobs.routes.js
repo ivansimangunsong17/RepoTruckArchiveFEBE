@@ -7,10 +7,13 @@ import {
   listContainerJobExpenseLedgerController,
   listContainerJobExpensesController,
   listContainerJobsController,
+  moveDroppingExpenseController,
   requestCancelContainerJobController,
   reviewCancelContainerJobController,
   updateContainerJobController,
   updateContainerJobExpenseProofController,
+  updateDroppingExpenseController,
+  voidDroppingExpenseController,
 } from './container-jobs.controller.js';
 
 export const containerJobRoutes = [
@@ -61,6 +64,24 @@ export const containerJobRoutes = [
     path: '/api/container-jobs/:id/expenses/:expenseId/proof',
     permission: 'container_job.update',
     handler: updateContainerJobExpenseProofController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/expenses/:expenseId',
+    permission: 'container_job.update',
+    handler: updateDroppingExpenseController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/expenses/:expenseId/move',
+    permission: 'container_job.update',
+    handler: moveDroppingExpenseController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/expenses/:expenseId/void',
+    permission: 'container_job.update',
+    handler: voidDroppingExpenseController,
   },
   {
     method: 'PATCH',

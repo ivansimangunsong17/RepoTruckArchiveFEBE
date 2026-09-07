@@ -24,6 +24,8 @@ const joinedJobColumns = `
   cj.entry_source, cj.historical_period, cj.historical_notes,
   cj.has_driver_commission, cj.driver_commission_amount,
   cj.driver_commission_source_destination_id, cj.driver_commission_note,
+  cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
+  cj.commission_locked_amount, cj.commission_locked_at, cj.commission_status,
   so.so_number, so.accurate_so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
@@ -177,6 +179,72 @@ async function ensureSufficientOperationalFundBalance(client, batch, expenseId, 
     error.code = 'OPERATIONAL_FUND_INSUFFICIENT_BALANCE';
     throw error;
   }
+}
+
+async function ensureOperationalFundBatchOpenForExpense(client, expenseId) {
+  const result = await client.query(
+    `
+      select batch.id, batch.batch_date, batch.status
+      from operational_fund_transactions oft
+      join operational_fund_batches batch on batch.id = oft.batch_id
+      where oft.container_job_expense_id = $1
+        and oft.transaction_type = 'debit'
+        and oft.status = 'posted'
+      limit 1
+      for update of batch
+    `,
+    [expenseId],
+  );
+  const batch = result.rows[0];
+  if (batch && batch.status === 'closed') {
+    const error = new Error('Batch rekening dropping tanggal ini sudah ditutup.');
+    error.statusCode = 409;
+    error.code = 'OPERATIONAL_FUND_BATCH_CLOSED';
+    throw error;
+  }
+  return batch || null;
+}
+
+function ensureTransactionNotFinanceChecked(existing) {
+  if (existing.finance_check_status === 'belum_dicek') return;
+  const error = new Error('Transaksi ini sudah diproses Finance. Perubahan hanya bisa lewat Finance (Klarifikasi) atau Admin.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_EXPENSE_FINANCE_LOCKED';
+  throw error;
+}
+
+function ensureExpenseNotVoid(existing) {
+  if (existing.payment_status !== 'batal') return;
+  const error = new Error('Transaksi ini sudah dibatalkan/void.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_EXPENSE_ALREADY_VOID';
+  throw error;
+}
+
+async function ensureSalesOrderBillingNotAdvanced(client, salesOrderId) {
+  if (!salesOrderId) return;
+  const soResult = await client.query(
+    'select invoice_number, billing_status, debit_note_document_uploaded_at from sales_orders where id = $1',
+    [salesOrderId],
+  );
+  const so = soResult.rows[0];
+  if (!so) return;
+  const advancedByOrder = Boolean(String(so.invoice_number || '').trim())
+    || String(so.billing_status || 'belum_invoice') !== 'belum_invoice'
+    || Boolean(so.debit_note_document_uploaded_at);
+  let advanced = advancedByOrder;
+  if (!advanced) {
+    const paymentResult = await client.query(
+      'select 1 from sales_order_payments where sales_order_id = $1 and voided_at is null limit 1',
+      [salesOrderId],
+    );
+    advanced = paymentResult.rows.length > 0;
+  }
+  if (!advanced) return;
+  const error = new Error('Sales Order terkait sudah masuk proses invoice/debit note/pembayaran. Perubahan hanya lewat Finance/Admin.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_EXPENSE_BILLING_ADVANCED';
+  throw error;
 }
 
 const NON_BLOCKING_AUTO_UJ_OPERATIONAL_FUND_CODES = new Set([
@@ -529,6 +597,34 @@ function normalizeEntrySource(value) {
 function normalizeOptionalText(value) {
   const normalized = String(value ?? '').trim();
   return normalized || null;
+}
+
+function buildCommissionDriverSnapshot(assignment = {}) {
+  if (!assignment?.driver) return {};
+  return {
+    driver: assignment.driver || null,
+    driverPaymentMethod: assignment.driverPaymentMethod || 'bank',
+    driverBankName: assignment.driverBankName || null,
+    driverBankAccountNumber: assignment.driverBankAccountNumber || null,
+    driverBankAccountHolder: assignment.driverBankAccountHolder || null,
+    driverEmoneyProvider: assignment.driverEmoneyProvider || null,
+    driverEmoneyNumber: assignment.driverEmoneyNumber || null,
+  };
+}
+
+function resolveCommissionStatus({
+  currentStatus = 'pending',
+  jobStatus = 'received',
+  hasCommission = false,
+  amount = 0,
+  driverId = null,
+  driverName = '',
+} = {}) {
+  if (!hasCommission) return 'without_commission';
+  if (Number(amount || 0) <= 0) return 'needs_review';
+  if (!driverId && !String(driverName || '').trim()) return 'needs_review';
+  if (jobStatus === 'completed') return 'with_commission';
+  return currentStatus === 'needs_review' ? 'pending' : currentStatus || 'pending';
 }
 
 function normalizeNonNegativeAmount(value, label) {
@@ -1584,27 +1680,154 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
   });
 }
 
+async function fetchDroppingExpenseForUpdate(client, id, expenseId) {
+  const existingResult = await client.query(
+    `
+      select expense.*, cj.container_number, cj.assignment_snapshot, cj.status as job_status,
+             so.so_number, so.do_number, so.customer_name, cj.destination
+      from container_job_expenses expense
+      join container_jobs cj on cj.id = expense.container_job_id
+      join sales_orders so on so.id = cj.sales_order_id
+      where expense.id = $1 and expense.container_job_id = $2
+      limit 1
+    `,
+    [expenseId, id],
+  );
+  const existing = existingResult.rows[0];
+  if (!existing) {
+    const error = new Error('Transaksi biaya Container Job tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
+    throw error;
+  }
+  return existing;
+}
+
+async function applyDroppingExpenseFieldsUpdate(client, { id, expenseId, existing, payload, resultingFinanceCheckStatus }) {
+  await client.query(
+    `
+      update container_job_expenses
+      set category = $1,
+          amount = $2,
+          description = $3,
+          recipient_type = $4,
+          recipient_name = $5,
+          payment_status = $6,
+          paid_at = case
+            when $6 = 'sudah_dibayar' then coalesce($7::timestamptz, paid_at, now())
+            else null
+          end,
+          paid_by_name = case
+            when $6 = 'sudah_dibayar' then coalesce($8, paid_by_name)
+            else null
+          end,
+          proof_attachment_id = coalesce($9, proof_attachment_id),
+          finance_check_status = $10,
+          finance_checked_by_name = null,
+          finance_checked_at = null,
+          updated_by_name = $11,
+          updated_at = now()
+      where id = $12
+    `,
+    [
+      payload.category,
+      payload.amount,
+      payload.description || null,
+      payload.recipientType || 'driver',
+      payload.recipientName || null,
+      payload.paymentStatus || 'belum_dibayar',
+      payload.paidAt || null,
+      payload.paidByName || null,
+      payload.proofAttachmentId || null,
+      resultingFinanceCheckStatus,
+      payload.actorName || 'Operational',
+      expenseId,
+    ],
+  );
+
+  if (payload.paymentStatus === 'sudah_dibayar') {
+    const batchDate = payload.paidAt ? String(payload.paidAt).slice(0, 10) : null;
+    const batch = await ensureOperationalFundBatch(client, batchDate, payload.actorName || 'Operational');
+    await ensureSufficientOperationalFundBalance(client, batch, expenseId, payload.amount);
+    await client.query(
+      `
+        insert into operational_fund_transactions (
+          batch_id,
+          container_job_id,
+          container_job_expense_id,
+          transaction_date,
+          transaction_type,
+          category,
+          amount,
+          description,
+          proof_attachment_id,
+          top_name,
+          driver_name,
+          do_number,
+          customer_name,
+          source,
+          source_ref_id,
+          created_by_name,
+          updated_by_name
+        )
+        values ($1, $2, $3, coalesce($4::date, current_date), 'debit', $5, $6, $7, $8, $9, $10, $11, $12, 'container_job_expense', $14, $13, $13)
+        on conflict (container_job_expense_id)
+          where container_job_expense_id is not null
+            and transaction_type = 'debit'
+            and status = 'posted'
+        do update set
+          transaction_date = excluded.transaction_date,
+          amount = excluded.amount,
+          description = excluded.description,
+          proof_attachment_id = excluded.proof_attachment_id,
+          top_name = excluded.top_name,
+          driver_name = excluded.driver_name,
+          do_number = excluded.do_number,
+          customer_name = excluded.customer_name,
+          batch_id = excluded.batch_id,
+          source = excluded.source,
+          source_ref_id = excluded.source_ref_id,
+          updated_by_name = excluded.updated_by_name,
+          updated_at = now()
+      `,
+      [
+        batch.id,
+        id,
+        expenseId,
+        batchDate,
+        operationalFundCategoryFromExpense(payload.category),
+        payload.amount,
+        payload.description || `${existing.so_number || '-'} ${existing.container_number || ''}`.trim(),
+        payload.proofAttachmentId || existing.proof_attachment_id || null,
+        payload.actorName || 'Operational',
+        payload.recipientName || existing.assignment_snapshot?.driver || null,
+        existing.do_number || existing.destination || null,
+        existing.customer_name || null,
+        payload.actorName || 'Operational',
+        String(expenseId),
+      ],
+    );
+  } else {
+    await client.query(
+      `
+        update operational_fund_transactions
+        set status = 'void',
+            updated_by_name = $1,
+            updated_at = now()
+        where container_job_expense_id = $2
+          and transaction_type = 'debit'
+          and status = 'posted'
+      `,
+      [payload.actorName || 'Operational', expenseId],
+    );
+  }
+
+  return getMappedExpenseById(client, expenseId);
+}
+
 export async function correctContainerJobExpenseRecord(id, expenseId, payload = {}) {
   return withTransaction(async (client) => {
-    const existingResult = await client.query(
-      `
-        select expense.*, cj.container_number, cj.assignment_snapshot,
-               so.so_number, so.do_number, so.customer_name, cj.destination
-        from container_job_expenses expense
-        join container_jobs cj on cj.id = expense.container_job_id
-        join sales_orders so on so.id = cj.sales_order_id
-        where expense.id = $1 and expense.container_job_id = $2
-        limit 1
-      `,
-      [expenseId, id],
-    );
-    const existing = existingResult.rows[0];
-    if (!existing) {
-      const error = new Error('Transaksi biaya Container Job tidak ditemukan.');
-      error.statusCode = 404;
-      error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
-      throw error;
-    }
+    const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     if (existing.finance_check_status !== 'perlu_klarifikasi') {
       const error = new Error('Transaksi biaya hanya bisa dikoreksi setelah Finance meminta klarifikasi.');
       error.statusCode = 409;
@@ -1617,123 +1840,138 @@ export async function correctContainerJobExpenseRecord(id, expenseId, payload = 
       error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
       throw error;
     }
+    return applyDroppingExpenseFieldsUpdate(client, {
+      id, expenseId, existing, payload, resultingFinanceCheckStatus: 'dikoreksi',
+    });
+  });
+}
+
+export async function updateDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
+    ensureExpenseNotVoid(existing);
+    ensureTransactionNotFinanceChecked(existing);
+    await ensureOperationalFundBatchOpenForExpense(client, expenseId);
+    await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
+    if (payload.paymentStatus === 'sudah_dibayar' && !payload.proofAttachmentId && !existing.proof_attachment_id) {
+      const error = new Error('Bukti pembayaran wajib diupload untuk biaya yang sudah dibayar.');
+      error.statusCode = 400;
+      error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
+      throw error;
+    }
+    return applyDroppingExpenseFieldsUpdate(client, {
+      id, expenseId, existing, payload, resultingFinanceCheckStatus: 'belum_dicek',
+    });
+  });
+}
+
+export async function moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord(id, expenseId, targetJobId, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
+    ensureExpenseNotVoid(existing);
+    ensureTransactionNotFinanceChecked(existing);
+    await ensureOperationalFundBatchOpenForExpense(client, expenseId);
+    await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
+
+    const normalizedTargetJobId = String(targetJobId || '').trim();
+    if (!normalizedTargetJobId || normalizedTargetJobId === id) {
+      const error = new Error('Ritasi tujuan tidak valid.');
+      error.statusCode = 409;
+      error.code = 'CONTAINER_JOB_EXPENSE_MOVE_TARGET_INVALID';
+      throw error;
+    }
+    const targetResult = await client.query(
+      `
+        select cj.id, cj.sales_order_id, cj.status, cj.container_number, cj.assignment_snapshot, cj.destination,
+               so.so_number, so.do_number, so.customer_name
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.id = $1
+      `,
+      [normalizedTargetJobId],
+    );
+    const targetJob = targetResult.rows[0];
+    if (!targetJob) {
+      const error = new Error('Ritasi tujuan tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_EXPENSE_MOVE_TARGET_NOT_FOUND';
+      throw error;
+    }
+    if (targetJob.status === 'cancelled') {
+      const error = new Error('Ritasi tujuan sudah dibatalkan, tidak bisa dipakai untuk pindah transaksi.');
+      error.statusCode = 409;
+      error.code = 'CONTAINER_JOB_EXPENSE_MOVE_TARGET_INVALID';
+      throw error;
+    }
 
     await client.query(
       `
         update container_job_expenses
-        set category = $1,
-            amount = $2,
-            description = $3,
-            recipient_type = $4,
-            recipient_name = $5,
-            payment_status = $6,
-            paid_at = case
-              when $6 = 'sudah_dibayar' then coalesce($7::timestamptz, paid_at, now())
-              else null
-            end,
-            paid_by_name = case
-              when $6 = 'sudah_dibayar' then coalesce($8, paid_by_name)
-              else null
-            end,
-            proof_attachment_id = coalesce($9, proof_attachment_id),
-            finance_check_status = 'dikoreksi',
-            finance_checked_by_name = null,
-            finance_checked_at = null,
-            updated_by_name = $10,
+        set container_job_id = $1,
+            sales_order_id = $2,
+            updated_by_name = $3,
             updated_at = now()
-        where id = $11
+        where id = $4
+      `,
+      [targetJob.id, targetJob.sales_order_id, payload.actorName || 'Operational', expenseId],
+    );
+    await client.query(
+      `
+        update operational_fund_transactions
+        set container_job_id = $1,
+            driver_name = $2,
+            do_number = $3,
+            customer_name = $4,
+            updated_by_name = $5,
+            updated_at = now()
+        where container_job_expense_id = $6
+          and transaction_type = 'debit'
+          and status = 'posted'
       `,
       [
-        payload.category,
-        payload.amount,
-        payload.description || null,
-        payload.recipientType || 'driver',
-        payload.recipientName || null,
-        payload.paymentStatus || 'belum_dibayar',
-        payload.paidAt || null,
-        payload.paidByName || null,
-        payload.proofAttachmentId || null,
+        targetJob.id,
+        existing.recipient_name || targetJob.assignment_snapshot?.driver || null,
+        targetJob.do_number || targetJob.destination || null,
+        targetJob.customer_name || null,
         payload.actorName || 'Operational',
         expenseId,
       ],
     );
 
-    if (payload.paymentStatus === 'sudah_dibayar') {
-      const batchDate = payload.paidAt ? String(payload.paidAt).slice(0, 10) : null;
-      const batch = await ensureOperationalFundBatch(client, batchDate, payload.actorName || 'Operational');
-      await ensureSufficientOperationalFundBalance(client, batch, expenseId, payload.amount);
-      await client.query(
-        `
-          insert into operational_fund_transactions (
-            batch_id,
-            container_job_id,
-            container_job_expense_id,
-            transaction_date,
-            transaction_type,
-            category,
-            amount,
-            description,
-            proof_attachment_id,
-            top_name,
-            driver_name,
-            do_number,
-            customer_name,
-            source,
-            source_ref_id,
-            created_by_name,
-            updated_by_name
-          )
-          values ($1, $2, $3, coalesce($4::date, current_date), 'debit', $5, $6, $7, $8, $9, $10, $11, $12, 'container_job_expense', $14, $13, $13)
-          on conflict (container_job_expense_id)
-            where container_job_expense_id is not null
-              and transaction_type = 'debit'
-              and status = 'posted'
-          do update set
-            transaction_date = excluded.transaction_date,
-            amount = excluded.amount,
-            description = excluded.description,
-            proof_attachment_id = excluded.proof_attachment_id,
-            top_name = excluded.top_name,
-            driver_name = excluded.driver_name,
-            do_number = excluded.do_number,
-            customer_name = excluded.customer_name,
-            batch_id = excluded.batch_id,
-            source = excluded.source,
-            source_ref_id = excluded.source_ref_id,
-            updated_by_name = excluded.updated_by_name,
+    return getMappedExpenseById(client, expenseId);
+  });
+}
+
+export async function voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
+    ensureExpenseNotVoid(existing);
+    ensureTransactionNotFinanceChecked(existing);
+    await ensureOperationalFundBatchOpenForExpense(client, expenseId);
+    await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
+
+    await client.query(
+      `
+        update container_job_expenses
+        set payment_status = 'batal',
+            updated_by_name = $1,
             updated_at = now()
-        `,
-        [
-          batch.id,
-          id,
-          expenseId,
-          batchDate,
-          operationalFundCategoryFromExpense(payload.category),
-          payload.amount,
-          payload.description || `${existing.so_number || '-'} ${existing.container_number || ''}`.trim(),
-          payload.proofAttachmentId || existing.proof_attachment_id || null,
-          payload.actorName || 'Operational',
-          payload.recipientName || existing.assignment_snapshot?.driver || null,
-          existing.do_number || existing.destination || null,
-          existing.customer_name || null,
-          payload.actorName || 'Operational',
-          String(expenseId),
-        ],
-      );
-    } else {
-      await client.query(
-        `
-          update operational_fund_transactions
-          set status = 'void',
-              updated_by_name = $1,
-              updated_at = now()
-          where container_job_expense_id = $2
-            and transaction_type = 'debit'
-            and status = 'posted'
-        `,
-        [payload.actorName || 'Operational', expenseId],
-      );
-    }
+        where id = $2
+      `,
+      [payload.actorName || 'Operational', expenseId],
+    );
+    await client.query(
+      `
+        update operational_fund_transactions
+        set status = 'void',
+            updated_by_name = $1,
+            updated_at = now()
+        where container_job_expense_id = $2
+          and transaction_type = 'debit'
+          and status = 'posted'
+      `,
+      [payload.actorName || 'Operational', expenseId],
+    );
 
     return getMappedExpenseById(client, expenseId);
   });
@@ -1741,35 +1979,10 @@ export async function correctContainerJobExpenseRecord(id, expenseId, payload = 
 
 export async function updateContainerJobExpenseProofRecord(id, expenseId, payload = {}) {
   return withTransaction(async (client) => {
-    const existingResult = await client.query(
-      `
-        select expense.*, cj.container_number, cj.assignment_snapshot,
-               so.so_number, so.do_number, so.customer_name, cj.destination
-        from container_job_expenses expense
-        join container_jobs cj on cj.id = expense.container_job_id
-        join sales_orders so on so.id = cj.sales_order_id
-        where expense.id = $1 and expense.container_job_id = $2
-        limit 1
-      `,
-      [expenseId, id],
-    );
-    const existing = existingResult.rows[0];
-    if (!existing) {
-      const error = new Error('Transaksi biaya Container Job tidak ditemukan.');
-      error.statusCode = 404;
-      error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
-      throw error;
-    }
-    if (existing.finance_check_status === 'sudah_dicek') {
-      const error = new Error('Transaksi biaya yang sudah dicek Finance tidak bisa diubah langsung.');
-      error.statusCode = 409;
-      error.code = 'CONTAINER_JOB_EXPENSE_ALREADY_RECONCILED';
-      throw error;
-    }
-
-    const nextFinanceStatus = existing.finance_check_status === 'perlu_klarifikasi'
-      ? 'dikoreksi'
-      : existing.finance_check_status || 'belum_dicek';
+    const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
+    ensureExpenseNotVoid(existing);
+    ensureTransactionNotFinanceChecked(existing);
+    await ensureOperationalFundBatchOpenForExpense(client, expenseId);
 
     await client.query(
       `
@@ -1778,18 +1991,17 @@ export async function updateContainerJobExpenseProofRecord(id, expenseId, payloa
             paid_at = coalesce($1::timestamptz, paid_at, now()),
             paid_by_name = coalesce($2, paid_by_name),
             proof_attachment_id = $3,
-            finance_check_status = $4,
+            finance_check_status = 'belum_dicek',
             finance_checked_by_name = null,
             finance_checked_at = null,
-            updated_by_name = $5,
+            updated_by_name = $4,
             updated_at = now()
-        where id = $6
+        where id = $5
       `,
       [
         payload.paidAt || null,
         payload.paidByName || null,
         payload.proofAttachmentId,
-        nextFinanceStatus,
         payload.actorName || 'Operational',
         expenseId,
       ],
@@ -1894,6 +2106,8 @@ async function updateContainerJobTransaction(id, form) {
                cj.entry_source, cj.historical_period, cj.historical_notes,
                cj.has_driver_commission, cj.driver_commission_amount,
                cj.driver_commission_source_destination_id, cj.driver_commission_note,
+               cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
+               cj.commission_locked_amount, cj.commission_locked_at, cj.commission_status,
                cj.uj_amount_snapshot, cj.uj_source_destination_id, cj.uj_snapshot_at, cj.uj_snapshot_source,
                so.so_number, so.do_number, so.customer_name, cj.destination,
                so.trip_date, so.finance_verification_status
@@ -2143,6 +2357,36 @@ async function updateContainerJobTransaction(id, form) {
       driverIdentityChanging ? driver : null,
       vehicleIdentityChanging ? vehicle : null,
     );
+    const shouldCaptureCommissionDriver = ['running', 'completed'].includes(nextStatus)
+      && !existing.rows[0].commission_driver_id
+      && !normalizeOptionalText(existing.rows[0].commission_driver_name)
+      && (nextDriverId || nextAssignmentSnapshot.driver);
+    const nextCommissionDriverId = existing.rows[0].commission_driver_id || (shouldCaptureCommissionDriver ? nextDriverId : null);
+    const nextCommissionDriverName = normalizeOptionalText(
+      existing.rows[0].commission_driver_name || (shouldCaptureCommissionDriver ? nextAssignmentSnapshot.driver : null),
+    );
+    const nextCommissionDriverSnapshot = existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
+      ? existing.rows[0].commission_driver_snapshot
+      : (shouldCaptureCommissionDriver ? buildCommissionDriverSnapshot(nextAssignmentSnapshot) : {});
+    const completedAtForUpdate = nextStatus === 'completed' ? form.completedAt || new Date().toISOString() : null;
+    const shouldRefreshCommissionLock = nextStatus === 'completed'
+      && nextHasDriverCommission
+      && nextDriverCommissionAmount > 0
+      && (!existing.rows[0].commission_locked_amount || (allowAdminCorrection && hasDriverCommissionInput(form)));
+    const nextCommissionLockedAmount = shouldRefreshCommissionLock
+      ? nextDriverCommissionAmount
+      : existing.rows[0].commission_locked_amount;
+    const nextCommissionLockedAt = shouldRefreshCommissionLock
+      ? completedAtForUpdate || new Date().toISOString()
+      : existing.rows[0].commission_locked_at;
+    const nextCommissionStatus = resolveCommissionStatus({
+      currentStatus: existing.rows[0].commission_status,
+      jobStatus: nextStatus,
+      hasCommission: nextHasDriverCommission,
+      amount: nextStatus === 'completed' ? nextCommissionLockedAmount || nextDriverCommissionAmount : nextDriverCommissionAmount,
+      driverId: nextCommissionDriverId || nextDriverId,
+      driverName: nextCommissionDriverName || nextAssignmentSnapshot.driver,
+    });
 
     await client.query(
       `
@@ -2189,19 +2433,25 @@ async function updateContainerJobTransaction(id, form) {
             driver_commission_amount = $36,
             driver_commission_source_destination_id = $37::uuid,
             driver_commission_note = $38,
-            destination = $39,
-            inap_started_at = $40,
-            inap_ended_at = $41,
-            inap_reason = $42,
-            inap_notes = $43,
-            inap_created_by_name = $44,
-            uj_amount_snapshot = $45,
-            uj_source_destination_id = $46::uuid,
-            uj_snapshot_at = $47,
-            uj_snapshot_source = $48,
-            updated_by_name = $49,
+            commission_driver_id = $39::uuid,
+            commission_driver_name = $40,
+            commission_driver_snapshot = $41::jsonb,
+            commission_locked_amount = $42,
+            commission_locked_at = $43,
+            commission_status = $44,
+            destination = $45,
+            inap_started_at = $46,
+            inap_ended_at = $47,
+            inap_reason = $48,
+            inap_notes = $49,
+            inap_created_by_name = $50,
+            uj_amount_snapshot = $51,
+            uj_source_destination_id = $52::uuid,
+            uj_snapshot_at = $53,
+            uj_snapshot_source = $54,
+            updated_by_name = $55,
             updated_at = now()
-        where id = $50
+        where id = $56
       `,
       [
         nextContainerNumber,
@@ -2219,7 +2469,7 @@ async function updateContainerJobTransaction(id, form) {
         nextTilaGatepassDocument,
         nextStatus,
         runningAt,
-        nextStatus === 'completed' ? form.completedAt || new Date().toISOString() : null,
+        completedAtForUpdate,
         cancelledAt,
         cancelReason,
         cancelSource,
@@ -2242,6 +2492,12 @@ async function updateContainerJobTransaction(id, form) {
         nextDriverCommissionAmount,
         nextDriverCommissionSourceDestinationId,
         nextDriverCommissionNote,
+        nextCommissionDriverId,
+        nextCommissionDriverName,
+        JSON.stringify(nextCommissionDriverSnapshot),
+        nextCommissionLockedAmount,
+        nextCommissionLockedAt,
+        nextCommissionStatus,
         nextDestination,
         nextInapStartedAt,
         nextInapEndedAt,

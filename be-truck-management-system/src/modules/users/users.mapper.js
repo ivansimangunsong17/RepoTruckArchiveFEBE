@@ -1,4 +1,4 @@
-const observerPermissions = ['sales_order.read', 'sales_order.customer_outstanding.read', 'container_job.read', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'report.read', 'activity_log.read'];
+const observerPermissions = ['sales_order.read', 'sales_order.customer_outstanding.read', 'container_job.read', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'report.read', 'activity_log.read', 'telematics.vehicle_position.read'];
 
 export const ROLE_PERMISSIONS = {
   admin: [
@@ -76,9 +76,12 @@ export const ROLE_PERMISSIONS = {
     'operations.fleet_assignment.read',
     'operations.fleet_assignment.driver.update',
     'operations.fleet_assignment.chassis.update',
+    'telematics.hino.read',
+    'telematics.hino.sync',
+    'telematics.vehicle_position.read',
   ],
-  sales: ['sales_order.read', 'sales_order.customer_outstanding.read', 'sales_order.create', 'sales_order.update', 'sales_order.cancel', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'document.upload'],
-  operational: ['sales_order.read', 'sales_order.cancel_review', 'container_job.read', 'container_job.assign', 'container_job.update', 'container_job.update_status', 'container_job.complete', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'vehicle_document.create', 'vehicle_document.update', 'document.read', 'document.upload', 'finance.operational_fund.read', 'finance.operational_fund.request', 'operations.truck_default_driver.update', 'operations.fleet_assignment.read', 'operations.fleet_assignment.driver.update', 'operations.fleet_assignment.chassis.update'],
+  sales: ['sales_order.read', 'sales_order.customer_outstanding.read', 'sales_order.create', 'sales_order.update', 'sales_order.cancel', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'document.upload', 'telematics.vehicle_position.read'],
+  operational: ['sales_order.read', 'sales_order.cancel_review', 'container_job.read', 'container_job.assign', 'container_job.update', 'container_job.update_status', 'container_job.complete', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'vehicle_document.create', 'vehicle_document.update', 'document.read', 'document.upload', 'finance.operational_fund.read', 'finance.operational_fund.request', 'operations.truck_default_driver.update', 'operations.fleet_assignment.read', 'operations.fleet_assignment.driver.update', 'operations.fleet_assignment.chassis.update', 'telematics.hino.read', 'telematics.hino.sync', 'telematics.vehicle_position.read'],
   pengamat: observerPermissions,
   observer: observerPermissions,
   finance: [
@@ -114,6 +117,7 @@ export const ROLE_PERMISSIONS = {
     'finance.correction.request',
     'finance.driver_commission.deduction.manage',
     'document.read',
+    'telematics.vehicle_position.read',
   ],
 };
 

@@ -261,6 +261,7 @@ describe('SalesOrdersPage billing status flow', () => {
           rpujStatus: 'submitted',
           rpujRequestedAt: '2026-07-20T08:00:00.000Z',
         }],
+        canRevise: false,
       }],
       total: 1,
       summary: {
@@ -276,20 +277,20 @@ describe('SalesOrdersPage billing status flow', () => {
     render(<SalesOrdersPage />);
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
 
-    expect(screen.getByText(/SO terkunci karena RPUJ sudah dikirim/i)).toBeInTheDocument();
+    expect(screen.getByText(/sudah diproses Operational\/Finance lanjutan/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit Sales Order/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Hapus Sales Order/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Ajukan Batal/i })).not.toBeInTheDocument();
   });
 
-  it('mengunci edit dan pembatalan Sales setelah nomor SO Finance terbit', async () => {
+  it('tetap mengizinkan Sales merevisi dan membatalkan order meski nomor SO Finance sudah terbit, selama belum diproses lanjutan', async () => {
     const user = userEvent.setup();
     useAuth.mockReturnValue({
       user: { id: 'user-1', role: 'sales', fullName: 'Sales A' },
     });
     fetchSalesOrdersPage.mockResolvedValue({
       rows: [{
-        id: 'order-finance-locked',
+        id: 'order-finance-safe',
         soNumber: 'SO-FIN-001',
         financeVerificationStatus: 'verified',
         customer: 'PT Bernomor',
@@ -300,12 +301,13 @@ describe('SalesOrdersPage billing status flow', () => {
         salesName: 'Sales A',
         quantity: 1,
         containers: [{
-          id: 'job-finance-locked',
+          id: 'job-finance-safe',
           size: '20FT',
           type: 'Dry',
           status: 'received',
           rpujStatus: 'pending',
         }],
+        canRevise: true,
       }],
       total: 1,
       summary: {
@@ -321,10 +323,9 @@ describe('SalesOrdersPage billing status flow', () => {
     render(<SalesOrdersPage />);
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
 
-    expect(screen.getByText(/SO terkunci karena Finance sudah menerbitkan nomor SO/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Edit Sales Order/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Hapus Sales Order/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Ajukan Batal/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/sudah diproses Operational\/Finance lanjutan/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Edit Sales Order/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hapus Sales Order/i })).toBeInTheDocument();
   });
 
   it('tetap mengizinkan Sales mengedit order meski nomor SO internal sudah otomatis dibuat sistem', async () => {
@@ -351,6 +352,7 @@ describe('SalesOrdersPage billing status flow', () => {
           status: 'waiting',
           rpujStatus: 'pending',
         }],
+        canRevise: true,
       }],
       total: 1,
       summary: {
@@ -366,8 +368,7 @@ describe('SalesOrdersPage billing status flow', () => {
     render(<SalesOrdersPage />);
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
 
-    expect(screen.queryByText(/SO terkunci karena Finance sudah menerbitkan nomor SO/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/SO terkunci karena RPUJ sudah dikirim/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sudah diproses Operational\/Finance lanjutan/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Edit Sales Order/i })).toBeInTheDocument();
   });
 

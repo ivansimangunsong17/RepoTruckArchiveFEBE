@@ -154,6 +154,7 @@ describe('TodayTruckDashboard', () => {
           plateNumber: 'B 2000 OK',
           unitCode: 'TRK-020',
           capacity: '20FT',
+          chassisSize: '20FT',
           status: 'Aktif',
         },
         {
@@ -195,6 +196,7 @@ describe('TodayTruckDashboard', () => {
           plateNumber: 'B 2300 RP',
           unitCode: 'TRK-023',
           capacity: '20FT',
+          chassisSize: '20FT',
           status: 'Aktif',
         },
       ],
@@ -221,5 +223,49 @@ describe('TodayTruckDashboard', () => {
     expect(screen.getByLabelText('Notifikasi container titip')).toHaveTextContent('CONT-REPO');
     expect(screen.getByLabelText('Notifikasi container titip')).toHaveTextContent('Depo Marunda');
     expect(within(screen.getByRole('table')).queryByText('CONT-REPO')).not.toBeInTheDocument();
+  });
+
+  it('truck aktif tanpa chassis tampil "Belum Ada Chassis" dan tidak dihitung ke summary 20FT/40FT walau ukuran master truck 20FT', async () => {
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [
+        {
+          id: 'truck-no-chassis',
+          plateNumber: 'B 3000 NC',
+          unitCode: 'TRK-030',
+          capacity: '20FT',
+          chassisSize: '',
+          status: 'Aktif',
+        },
+      ],
+      activeJobs: [],
+    });
+
+    render(<TodayTruckDashboard />);
+
+    expect(await screen.findByRole('cell', { name: 'Belum Ada Chassis' })).toBeInTheDocument();
+    const availabilityRegion = screen.getByLabelText('Ketersediaan Truck Hari Ini');
+    expect(within(availabilityRegion).getByText('20FT').closest('article')).toHaveTextContent('0 Unit');
+    expect(within(availabilityRegion).getByText('40FT').closest('article')).toHaveTextContent('0 Unit');
+  });
+
+  it('truck maintenance tanpa chassis tetap tampil status Maintenance dan size "Belum Ada Chassis"', async () => {
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [
+        {
+          id: 'truck-maintenance-no-chassis',
+          plateNumber: 'B 3100 MT',
+          unitCode: 'TRK-031',
+          capacity: '40FT',
+          chassisSize: '',
+          status: 'Maintenance',
+        },
+      ],
+      activeJobs: [],
+    });
+
+    render(<TodayTruckDashboard />);
+
+    expect((await screen.findAllByText('Maintenance')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('cell', { name: 'Belum Ada Chassis' })).toBeInTheDocument();
   });
 });

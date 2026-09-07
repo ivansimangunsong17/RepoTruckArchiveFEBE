@@ -375,6 +375,31 @@ async function refreshOrderStatus(client, salesOrderId) {
   );
 }
 
+async function findActiveSalesOrderExpenses(db, id) {
+  return db.query(
+    `
+      select coalesce(count(*), 0)::int as count, coalesce(sum(amount), 0)::numeric as total
+      from container_job_expenses
+      where sales_order_id = $1
+        and payment_status <> 'batal'
+    `,
+    [id],
+  );
+}
+
+export async function hasActiveSalesOrderExpenses(id) {
+  const result = await findActiveSalesOrderExpenses({ query }, id);
+  return Number(result.rows[0].count) > 0;
+}
+
+export async function hasSalesOrderDebitNoteDocument(id) {
+  const result = await query(
+    'select exists(select 1 from sales_orders where id = $1 and debit_note_document_uploaded_at is not null) as exists',
+    [id],
+  );
+  return Boolean(result.rows[0].exists);
+}
+
 async function ensureSalesOrderCanBeCancelled(client, id) {
   const jobs = await client.query('select status from container_jobs where sales_order_id = $1', [id]);
   if (jobs.rows.some((job) => job.status !== 'received')) {
@@ -384,15 +409,7 @@ async function ensureSalesOrderCanBeCancelled(client, id) {
     throw error;
   }
 
-  const activeExpenses = await client.query(
-    `
-      select coalesce(count(*), 0)::int as count, coalesce(sum(amount), 0)::numeric as total
-      from container_job_expenses
-      where sales_order_id = $1
-        and payment_status <> 'batal'
-    `,
-    [id],
-  );
+  const activeExpenses = await findActiveSalesOrderExpenses(client, id);
   if (Number(activeExpenses.rows[0].count) > 0) {
     const error = new Error(`Sales Order tidak bisa dibatalkan karena masih ada ${activeExpenses.rows[0].count} biaya operasional aktif (total Rp ${Number(activeExpenses.rows[0].total).toLocaleString('id-ID')}) yang sudah tercatat. Batalkan atau alihkan biaya tersebut ke job lain terlebih dahulu sebelum membatalkan Sales Order.`);
     error.statusCode = 409;

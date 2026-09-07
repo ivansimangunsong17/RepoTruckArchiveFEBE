@@ -1,5 +1,6 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
+import { recordVehicleAssignmentHistory } from '../operations/fleet-assignment/fleet-assignment.repository.js';
 import {
   calculateDestinationUj,
   getMasterRow,
@@ -82,6 +83,13 @@ export async function updateMasterController(request, response) {
   const before = await getMasterRow(request.params.resource, request.params.id);
   const saved = await saveMasterRow(request.params.resource, request.body, request.params.id);
   const names = resourceActionNames(request.params.resource, { before, after: saved });
+
+  // Chassis truck bisa berubah lewat Master Truck (form Admin) atau Assignment Armada -- keduanya
+  // wajib tercatat dengan "source" yang beda supaya jejak audit jelas dari halaman mana perubahan
+  // berasal, walau mekanisme attach/detach-nya sama (updateVehicleChassis di master.repository.js).
+  const chassisChanged = request.params.resource === 'trucks'
+    && (before.currentChassisId || null) !== (saved.currentChassisId || null);
+
   await safeRecordActivityLog(request, {
     action: names.update,
     module: names.entityType === 'vehicle' ? 'vehicles' : 'master_data',
@@ -89,7 +97,36 @@ export async function updateMasterController(request, response) {
     entityId: saved.id,
     beforeData: before,
     afterData: saved,
+    ...(chassisChanged ? {
+      metadata: {
+        source: 'master_truck',
+        vehicleId: saved.id,
+        previousChassisId: before.currentChassisId,
+        previousChassisCode: before.currentChassisCode,
+        nextChassisId: saved.currentChassisId,
+        nextChassisCode: saved.currentChassisCode,
+      },
+    } : {}),
   });
+
+  if (chassisChanged) {
+    try {
+      await recordVehicleAssignmentHistory({
+        vehicleId: saved.id,
+        changeType: 'chassis',
+        source: 'master_truck',
+        previousChassisId: before.currentChassisId,
+        previousChassisCode: before.currentChassisCode,
+        nextChassisId: saved.currentChassisId,
+        nextChassisCode: saved.currentChassisCode,
+        actorName: request.user?.name || '',
+        actorRole: request.user?.role || '',
+      });
+    } catch (error) {
+      console.error('Gagal mencatat vehicle_assignment_history dari Master Truck', error);
+    }
+  }
+
   sendSuccess(response, saved, 'Data master berhasil diperbarui.');
 }
 

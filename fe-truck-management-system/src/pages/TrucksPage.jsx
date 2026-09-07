@@ -636,7 +636,6 @@ async function prepareTruckSave({ payload, editingId, rows, confirmAction, chass
   const assignedTrucks = findDriverAssignedTrucks(rows, normalizedPayload.defaultDriver, editingId);
   const chassisAssignedTrucks = findChassisAssignedTrucks(rows, normalizedPayload.kirChassisNumber, editingId, chassisRows);
   let driverRelatedRows = [];
-  let chassisRelatedRows = [];
 
   if (assignedTrucks.length) {
     const truckList = assignedTrucks
@@ -655,6 +654,10 @@ async function prepareTruckSave({ payload, editingId, rows, confirmAction, chass
     }));
   }
 
+  // Backend (updateVehicleChassis, dipakai bareng dengan Assignment Armada) yang sekarang
+  // melepas chassis dari truck lama secara atomic saat truck ini disimpan -- dialog konfirmasi
+  // di sini murni informasional untuk Admin, TIDAK lagi mem-PATCH truck lama secara manual dari
+  // frontend (jalur lama ini non-atomic dan tidak menyentuh current_chassis_id/current_chassis_code).
   if (chassisAssignedTrucks.length) {
     const chassisLabel = normalizedPayload.kirChassisNumber || 'chassis ini';
     const truckList = chassisAssignedTrucks
@@ -667,15 +670,11 @@ async function prepareTruckSave({ payload, editingId, rows, confirmAction, chass
     });
 
     if (!approved) return null;
-    chassisRelatedRows = chassisAssignedTrucks.map((truck) => ({
-      id: truck.id,
-      row: { ...truck, kirChassisNumber: '', capacity: '' },
-    }));
   }
 
   return {
     payload: normalizedPayload,
-    relatedRows: mergeRelatedRows(driverRelatedRows, chassisRelatedRows),
+    relatedRows: mergeRelatedRows(driverRelatedRows),
   };
 }
 

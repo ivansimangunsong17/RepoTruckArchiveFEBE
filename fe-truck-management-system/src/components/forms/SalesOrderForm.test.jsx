@@ -617,7 +617,7 @@ describe('SalesOrderForm', () => {
     expect(screen.queryByText(/outstanding customer ini/i)).not.toBeInTheDocument();
   });
 
-  it('mengunci edit SO yang sudah diverifikasi Finance untuk non-admin', async () => {
+  it('mengunci edit SO untuk Sales kalau backend menandai sudah diproses lanjutan (canRevise: false)', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     const order = {
@@ -629,7 +629,8 @@ describe('SalesOrderForm', () => {
       accurateSoNumber: 'SO-LOCKED-001',
       financeVerificationStatus: 'verified',
       lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 100000 }],
-      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'running', rpujStatus: 'pending' }],
+      canRevise: false,
     };
 
     render(
@@ -644,13 +645,49 @@ describe('SalesOrderForm', () => {
       />,
     );
 
-    expect(screen.getByText(/Sales Order ini terkunci karena sudah diverifikasi Finance/i)).toBeInTheDocument();
+    expect(screen.getByText(/sudah diproses Operational\/Finance lanjutan/i)).toBeInTheDocument();
     expect(screen.queryByText(/Mode koreksi admin/i)).not.toBeInTheDocument();
 
     await openReview(user, true);
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByText(/Revisi hanya dapat dilakukan oleh Admin/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Revisi hanya bisa dilakukan oleh Admin\/Koreksi/i).length).toBeGreaterThan(0);
+  });
+
+  it('tetap mengizinkan Sales submit SO yang nomor SO Finance-nya sudah terbit selama backend menandai canRevise: true', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const order = {
+      id: 'so-safe',
+      soNumber: 'SO-SAFE-001',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      accurateSoNumber: 'SO-SAFE-001',
+      financeVerificationStatus: 'verified',
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 100000 }],
+      containers: [{ id: 'job-1', size: '20FT', type: 'Dry', status: 'received', rpujStatus: 'pending' }],
+      canRevise: true,
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        currentUser={{ role: 'sales' }}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.queryByText(/sudah diproses Operational\/Finance lanjutan/i)).not.toBeInTheDocument();
+
+    await openReview(user, true);
+    await confirmReview(user, true);
+
+    expect(onSubmit).toHaveBeenCalled();
   });
 
   it('admin wajib mengisi alasan koreksi minimal 8 karakter untuk mengedit SO yang terkunci', async () => {

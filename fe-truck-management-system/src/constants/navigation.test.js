@@ -85,6 +85,7 @@ describe('navigationGroups', () => {
     expect(viewerItems.map((item) => item.to)).toEqual([
       '/order-running',
       '/reports',
+      '/input-monitoring',
       '/viewer/clients',
       '/viewer/end-users',
       '/viewer/drivers',

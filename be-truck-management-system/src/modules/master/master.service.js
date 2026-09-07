@@ -5,6 +5,7 @@ import {
   findMasterRowById,
   findMasterRows,
   findMasterViewerNotes,
+  updateVehicleChassis,
   updateVehicleDefaultDriver,
   upsertMasterRow,
   upsertMasterViewerNote,
@@ -99,6 +100,33 @@ function driverIdentityNames(...drivers) {
   ]);
 }
 
+// Chassis truck sengaja DIPISAH dari generic upsertMasterRow -- kir_chassis_number (teks lama)
+// harus disinkronkan lewat updateVehicleChassis (fungsi yang sama dipakai Assignment Armada) supaya
+// validasi eligibility & exclusivity (lepas dari truck lain) selalu jalan, bukan cuma tulis teks
+// bebas seperti sebelumnya. Setelah sinkron, kirChassisNumber di payload diisi ulang dengan nilai
+// yang SUDAH benar supaya generic update field lain (plat, status, dokumen, dst) tidak menimpanya
+// balik dengan nilai basi.
+async function saveTruckRow(payload, id) {
+  const hasChassisField = Object.prototype.hasOwnProperty.call(payload, 'kirChassisNumber');
+
+  if (!id) {
+    if (!hasChassisField || !String(payload.kirChassisNumber || '').trim()) {
+      return upsertMasterRow('trucks', payload, id);
+    }
+    const { kirChassisNumber, ...restPayload } = payload;
+    const created = await upsertMasterRow('trucks', restPayload, id);
+    const { after } = await updateVehicleChassis(created.id, kirChassisNumber);
+    return after;
+  }
+
+  if (!hasChassisField) {
+    return upsertMasterRow('trucks', payload, id);
+  }
+
+  const { after } = await updateVehicleChassis(id, payload.kirChassisNumber);
+  return upsertMasterRow('trucks', { ...payload, kirChassisNumber: after.kirChassisNumber }, id);
+}
+
 export async function saveMasterRow(resource, payload, id) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload master data harus berupa object.');
@@ -108,7 +136,9 @@ export async function saveMasterRow(resource, payload, id) {
   }
   const currentDriver = resource === 'drivers' && id ? await findMasterRowById(resource, id) : null;
   const normalizedPayload = await normalizePayloadForResource(resource, payload);
-  const saved = await upsertMasterRow(resource, normalizedPayload, id);
+  const saved = resource === 'trucks'
+    ? await saveTruckRow(normalizedPayload, id)
+    : await upsertMasterRow(resource, normalizedPayload, id);
 
   if (resource === 'drivers' && shouldDetachDriverFromUnit(saved.status)) {
     await clearVehicleDefaultDriverByNames(driverIdentityNames(currentDriver, saved));

@@ -1,4 +1,4 @@
-import { BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, FileText, RefreshCw, Send, UserRound, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, FileText, RefreshCw, Send, UserRound, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -26,10 +26,14 @@ const emptyReport = {
     unsubmittedItems: 0,
     submittedItems: 0,
     paidItems: 0,
+    reviewItems: 0,
+    noCommissionItems: 0,
     paidAmount: 0,
     unpaidAmount: 0,
   },
   drivers: [],
+  reviewRows: [],
+  noCommissionCount: 0,
 };
 
 const statusLabels = {
@@ -129,6 +133,7 @@ function buildCommissionPeriodOptions(batches = [], selectedReport = null) {
       periodStart: selectedReport.periodStart,
       periodEnd: selectedReport.periodEnd,
       status: activeBatch.status || selectedReport.status || byPeriod.get(key)?.status || 'draft',
+      rejectionNote: activeBatch.rejectionNote || byPeriod.get(key)?.rejectionNote || '',
       totalItems: selectedReport.summary?.totalItems ?? activeBatch.totalItems ?? byPeriod.get(key)?.totalItems ?? 0,
       totalAmount: selectedReport.summary?.totalAmount ?? activeBatch.totalAmount ?? byPeriod.get(key)?.totalAmount ?? 0,
     });
@@ -259,6 +264,9 @@ function BatchCommissionDropdown({ periods, selectedPeriodStart, selectedPeriodE
               <div className="min-w-0">
                 <strong className="block truncate text-xs font-black text-slate-900">{formatDate(period.periodStart)} - {formatDate(period.periodEnd)}</strong>
                 <small className="mt-0.5 block text-[11px] font-semibold text-slate-500">{period.totalItems || 0} job</small>
+                {period.status === 'rejected' && period.rejectionNote ? (
+                  <small className="mt-1 block truncate text-[11px] font-bold text-rose-600">Ditolak: {period.rejectionNote}</small>
+                ) : null}
               </div>
               <StatusPill status={period.status} />
             </button>
@@ -394,6 +402,11 @@ function BatchPickerModal({ open, onClose, onSelectBatch, selectedPeriodStart, s
                     <small className="mt-0.5 block break-words text-[11px] text-slate-500">
                       {batch.totalItems || 0} job | {formatCurrency(batch.totalAmount || 0)} | Diajukan {batch.submittedByName || '-'} | {formatDateTime(batch.submittedAt)}
                     </small>
+                    {batch.status === 'rejected' && batch.rejectionNote ? (
+                      <small className="mt-1 block break-words text-[11px] font-bold text-rose-600">
+                        Ditolak Finance: {batch.rejectionNote}
+                      </small>
+                    ) : null}
                   </div>
                   <StatusPill status={batch.status} />
                 </button>
@@ -554,11 +567,15 @@ function DriverCommissionOperationalPage() {
   const canSubmit = hasPermission(user, 'operations.update');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
+  const reviewRows = report.reviewRows || [];
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const activeBatch = report.activeBatch || null;
   const hasActiveBatch = Boolean(activeBatch?.id);
+  const selectedPeriodOption = periodOptions.find((period) => commissionPeriodKey(period) === commissionPeriodKey({ periodStart, periodEnd })) || null;
+  const financeRejectionNote = activeBatch?.rejectionNote || selectedPeriodOption?.rejectionNote || '';
+  const showFinanceRejection = Boolean(financeRejectionNote && (activeBatch?.status === 'rejected' || selectedPeriodOption?.status === 'rejected' || report.status === 'rejected'));
   const validBatchPeriod = isWeeklyCommissionPeriod(periodStart, periodEnd);
-  const submitDisabled = saving || loading || !summary.unsubmittedItems || hasActiveBatch || !validBatchPeriod;
+  const submitDisabled = saving || loading || !summary.unsubmittedItems || hasActiveBatch || !validBatchPeriod || reviewRows.length > 0;
 
   const loadReport = useCallback(async (nextPeriodStart, nextPeriodEnd) => {
     setLoading(true);
@@ -594,6 +611,10 @@ function DriverCommissionOperationalPage() {
     }
     if (hasActiveBatch) {
       notify({ type: 'error', title: 'Sudah diajukan', message: 'Periode ini sudah memiliki batch aktif di Finance.' });
+      return;
+    }
+    if (reviewRows.length) {
+      notify({ type: 'error', title: 'Masih ada yang perlu dicek', message: 'Beresi dulu ritasi di panel Perlu Cek sebelum submit batch komisi.' });
       return;
     }
     if (!validBatchPeriod) {
@@ -656,7 +677,7 @@ function DriverCommissionOperationalPage() {
         </div>
       </header>
 
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           icon={CalendarDays}
           label="Periode"
@@ -667,8 +688,70 @@ function DriverCommissionOperationalPage() {
         />
         <MetricCard icon={UserRound} label="Sopir" tone="sky" value={`${summary.totalDrivers || 0} sopir`} helper={`${summary.totalItems || 0} job komisi`} />
         <MetricCard icon={CircleDollarSign} label="Total Komisi" tone="amber" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.unpaidAmount || 0)} belum dibayar`} />
+        <MetricCard icon={AlertTriangle} label="Perlu Cek" tone="amber" value={`${summary.reviewItems || reviewRows.length || 0} ritasi`} helper={`${summary.noCommissionItems || report.noCommissionCount || 0} ritasi tanpa komisi`} />
         <MetricCard icon={BadgeCheck} label="Status" tone="emerald" pill value={<StatusPill status={report.status} />} helper={activeBatch ? `Diajukan ${formatDateTime(activeBatch.submittedAt)}` : 'Belum masuk batch Finance.'} />
       </section>
+
+      {showFinanceRejection ? (
+        <section className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 shrink-0" size={17} />
+            <div>
+              <h2 className="text-sm font-black text-rose-900">Batch Ditolak Finance</h2>
+              <p className="mt-1 font-semibold leading-relaxed">{financeRejectionNote}</p>
+              <p className="mt-1 text-xs font-semibold text-rose-700">Perbaiki data yang disebutkan, lalu ajukan ulang batch komisi.</p>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {reviewRows.length ? (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 shadow-sm">
+          <div className="border-b border-amber-200 px-4 py-3">
+            <h2 className="text-base font-black text-amber-900">Ritasi Perlu Cek</h2>
+            <p className="mt-1 text-xs font-semibold text-amber-700">
+              Data di bawah ini belum bisa ikut batch komisi. Perbaiki dulu sopir penerima komisi, nominal, atau status komisinya.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] divide-y divide-amber-200 text-left text-sm">
+              <thead className="bg-amber-100/70 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                <tr>
+                  <th className="px-4 py-3">No</th>
+                  <th className="px-4 py-3">Tanggal Selesai</th>
+                  <th className="px-4 py-3">SO / Container</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Sopir Komisi</th>
+                  <th className="px-4 py-3 text-right">Nominal</th>
+                  <th className="px-4 py-3">Masalah</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-100 bg-white">
+                {reviewRows.map((row, index) => (
+                  <tr key={row.containerJobId || `${row.soNumber}-${index}`} className="hover:bg-amber-50/70">
+                    <td className="px-4 py-3 text-xs font-black text-slate-700">{index + 1}</td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-700">{formatDate(row.completedDate)}</td>
+                    <td className="px-4 py-3">
+                      <strong className="block text-xs text-slate-950">{row.accurateSoNumber || row.soNumber || '-'}</strong>
+                      <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{row.containerNumber || '-'} | {row.containerSize || '-'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-700">{row.customerName || '-'}</td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-700">{row.driverName || '-'}</td>
+                    <td className="px-4 py-3 text-right text-xs font-black text-slate-900">{formatCurrency(row.amount || 0)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {(row.reviewReasons || ['Perlu dicek']).map((reason) => (
+                          <span key={reason} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-700">{reason}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -683,6 +766,7 @@ function DriverCommissionOperationalPage() {
                   <Send size={16} /> Ajukan ke Finance
                 </button>
                 {!validBatchPeriod ? <small className="text-xs font-semibold text-amber-700">Periode submit wajib Kamis-Rabu.</small> : null}
+                {reviewRows.length ? <small className="text-xs font-semibold text-amber-700">Submit dikunci karena masih ada ritasi perlu cek.</small> : null}
               </div>
             ) : null}
           </div>
@@ -692,12 +776,14 @@ function DriverCommissionOperationalPage() {
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] divide-y divide-slate-200 text-left text-sm">
+            <table className="w-full min-w-[1060px] divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Sopir</th>
                   <th className="px-4 py-3 text-right">Job</th>
-                  <th className="px-4 py-3 text-right">Total Komisi</th>
+                  <th className="px-4 py-3 text-right">Komisi Bruto</th>
+                  <th className="px-4 py-3 text-right">Potongan Finance</th>
+                  <th className="px-4 py-3 text-right">Net Dibayar</th>
                   <th className="px-4 py-3 text-right">Belum Dibayar</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Detail</th>
@@ -719,7 +805,9 @@ function DriverCommissionOperationalPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700">{driver.totalItems}</td>
-                    <td className="px-4 py-3 text-right text-xs font-semibold text-amber-700">{formatCurrency(driver.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-amber-700">{formatCurrency(driver.grossAmount ?? driver.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{driver.deductionAmount ? formatCurrency(driver.deductionAmount) : '-'}</td>
+                    <td className="px-4 py-3 text-right text-xs font-semibold text-emerald-700">{formatCurrency(driver.netAmount ?? driver.totalAmount)}</td>
                     <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{formatCurrency(driver.unpaidAmount)}</td>
                     <td className="px-4 py-3"><StatusPill status={driverPaymentStatus(driver)} /></td>
                     <td className="px-4 py-3 text-right">
@@ -739,7 +827,7 @@ function DriverCommissionOperationalPage() {
                 })}
                 {!drivers.length ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={6}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
+                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={8}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
                   </tr>
                 ) : null}
               </tbody>

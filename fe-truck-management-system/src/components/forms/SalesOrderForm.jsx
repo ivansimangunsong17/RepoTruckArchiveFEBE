@@ -428,8 +428,10 @@ function SalesOrderForm({
   const [error, setError] = useState('');
   const [reviewPayload, setReviewPayload] = useState(null);
   const editing = Boolean(order);
+  const isSalesActor = String(currentUser?.role || '').toLowerCase() === 'sales';
   const requiresAdminCorrection = editing && !historicalMode && isOrderLockedForCorrection(order);
   const canAccessAdminCorrection = requiresAdminCorrection && String(currentUser?.role || '').toLowerCase() === 'admin';
+  const salesRevisionBlocked = editing && !historicalMode && isSalesActor && !order?.canRevise;
 
   useEffect(() => {
     setForm(createFormDraft());
@@ -616,7 +618,12 @@ function SalesOrderForm({
       setReviewPayload(null);
       return setError(validationError);
     }
-    if (requiresAdminCorrection) {
+    if (isSalesActor) {
+      if (salesRevisionBlocked) {
+        setReviewPayload(null);
+        return setError('Order ini sudah diproses Operational/Finance lanjutan. Revisi hanya bisa dilakukan oleh Admin/Koreksi.');
+      }
+    } else if (requiresAdminCorrection) {
       if (!canAccessAdminCorrection) {
         setReviewPayload(null);
         return setError('Sales Order ini terkunci karena sudah diverifikasi Finance atau RPUJ sudah dikirim. Revisi hanya dapat dilakukan oleh Admin.');
@@ -701,7 +708,13 @@ function SalesOrderForm({
           <div className="sales-order-form-content">
           {error ? <div className="alert error sales-order-error">{error}</div> : null}
 
-          {requiresAdminCorrection ? (
+          {isSalesActor ? (
+            salesRevisionBlocked ? (
+              <div className="alert warning">
+                Order ini sudah diproses Operational/Finance lanjutan. Revisi hanya bisa dilakukan oleh Admin/Koreksi.
+              </div>
+            ) : null
+          ) : requiresAdminCorrection ? (
             canAccessAdminCorrection ? (
               <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
                 <label className="flex items-start gap-2 font-bold">

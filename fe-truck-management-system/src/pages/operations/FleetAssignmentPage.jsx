@@ -26,7 +26,6 @@ const SIZE_OPTIONS = [
   { value: '', label: 'Semua Ukuran' },
   { value: '20FT', label: '20FT' },
   { value: '40FT', label: '40FT' },
-  { value: 'COMBO', label: 'COMBO' },
 ];
 
 const CONDITION_OPTIONS = [
@@ -36,17 +35,20 @@ const CONDITION_OPTIONS = [
   { value: 'no_chassis', label: 'Belum ada chassis' },
 ];
 
-const REASON_MIN_LENGTH = 8;
+function formatUnitNumber(unitCode) {
+  const code = String(unitCode || '').trim();
+  const dashIndex = code.indexOf('-');
+  if (dashIndex === -1) return code;
+  return code.slice(dashIndex + 1);
+}
 
 function ChangeDriverModal({ vehicle, drivers, driversOnActiveTrip, onClose, onSave }) {
   const [driverId, setDriverId] = useState('');
-  const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const eligibleDrivers = drivers.filter((driver) => !['Blacklist', 'Cuti', 'Tidak Aktif'].includes(driver.status));
-  const reasonValid = reason.trim().length >= REASON_MIN_LENGTH;
   const isOnActiveTrip = Boolean(driverId) && driversOnActiveTrip.includes(driverId);
 
   async function handleSubmit(event) {
@@ -55,14 +57,10 @@ function ChangeDriverModal({ vehicle, drivers, driversOnActiveTrip, onClose, onS
       setError('Sopir baru wajib dipilih.');
       return;
     }
-    if (!reasonValid) {
-      setError(`Alasan wajib diisi minimal ${REASON_MIN_LENGTH} karakter.`);
-      return;
-    }
     setSaving(true);
     setError('');
     try {
-      await onSave({ defaultDriverId: driverId, reason: reason.trim(), note: note.trim() });
+      await onSave({ defaultDriverId: driverId, note: note.trim() });
     } catch (requestError) {
       setError(requestError.message || 'Gagal menyimpan perubahan sopir.');
     } finally {
@@ -72,12 +70,12 @@ function ChangeDriverModal({ vehicle, drivers, driversOnActiveTrip, onClose, onS
 
   return (
     <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
-      <section className="master-modal w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="fleet-change-driver-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="master-modal w-full max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="fleet-change-driver-title" onMouseDown={(event) => event.stopPropagation()}>
         <form className="master-form" onSubmit={handleSubmit}>
           <div className="master-form-heading">
             <div className="min-w-0">
               <span>Assignment Armada</span>
-              <h2 id="fleet-change-driver-title">Ganti Sopir - {vehicle.unitCode}</h2>
+              <h2 id="fleet-change-driver-title">Ganti Sopir - {formatUnitNumber(vehicle.unitCode)}</h2>
               <p>Plat {vehicle.plateNumber}</p>
             </div>
             <button className="modal-close-button" disabled={saving} onClick={onClose} type="button" aria-label="Tutup ganti sopir">
@@ -110,17 +108,6 @@ function ChangeDriverModal({ vehicle, drivers, driversOnActiveTrip, onClose, onS
               </p>
             ) : null}
 
-            <label className="grid gap-1 text-xs font-bold text-slate-700" htmlFor="fleet-change-driver-reason">
-              Alasan Perubahan (wajib, minimal {REASON_MIN_LENGTH} karakter)
-              <textarea
-                className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
-                id="fleet-change-driver-reason"
-                rows={2}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </label>
-
             <label className="grid gap-1 text-xs font-bold text-slate-700" htmlFor="fleet-change-driver-note">
               Catatan Tambahan (opsional)
               <textarea
@@ -137,7 +124,7 @@ function ChangeDriverModal({ vehicle, drivers, driversOnActiveTrip, onClose, onS
 
           <div className="master-form-actions">
             <button className="secondary-button" disabled={saving} onClick={onClose} type="button">Batal</button>
-            <button className="primary-button" disabled={saving || !driverId || !reasonValid} type="submit">
+            <button className="primary-button" disabled={saving || !driverId} type="submit">
               {saving ? 'Menyimpan...' : 'Simpan'}
             </button>
           </div>
@@ -149,13 +136,11 @@ function ChangeDriverModal({ vehicle, drivers, driversOnActiveTrip, onClose, onS
 
 function MoveChassisModal({ vehicle, chassisOptions, onClose, onSave }) {
   const [chassisId, setChassisId] = useState('');
-  const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const eligibleChassis = chassisOptions.filter((chassis) => !['Tidak Aktif', 'Perlu Perpanjang'].includes(chassis.status));
-  const reasonValid = reason.trim().length >= REASON_MIN_LENGTH;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -163,14 +148,10 @@ function MoveChassisModal({ vehicle, chassisOptions, onClose, onSave }) {
       setError('Chassis baru wajib dipilih.');
       return;
     }
-    if (!reasonValid) {
-      setError(`Alasan wajib diisi minimal ${REASON_MIN_LENGTH} karakter.`);
-      return;
-    }
     setSaving(true);
     setError('');
     try {
-      await onSave({ chassisId, reason: reason.trim(), note: note.trim() });
+      await onSave({ chassisId, note: note.trim() });
     } catch (requestError) {
       setError(requestError.message || 'Gagal menyimpan perubahan chassis.');
     } finally {
@@ -180,12 +161,12 @@ function MoveChassisModal({ vehicle, chassisOptions, onClose, onSave }) {
 
   return (
     <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
-      <section className="master-modal w-full max-w-lg" role="dialog" aria-modal="true" aria-labelledby="fleet-move-chassis-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="master-modal w-full max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="fleet-move-chassis-title" onMouseDown={(event) => event.stopPropagation()}>
         <form className="master-form" onSubmit={handleSubmit}>
           <div className="master-form-heading">
             <div className="min-w-0">
               <span>Assignment Armada</span>
-              <h2 id="fleet-move-chassis-title">Pindahkan Chassis - {vehicle.unitCode}</h2>
+              <h2 id="fleet-move-chassis-title">Pindahkan Chassis - {formatUnitNumber(vehicle.unitCode)}</h2>
               <p>Plat {vehicle.plateNumber}</p>
             </div>
             <button className="modal-close-button" disabled={saving} onClick={onClose} type="button" aria-label="Tutup pindah chassis">
@@ -216,17 +197,6 @@ function MoveChassisModal({ vehicle, chassisOptions, onClose, onSave }) {
               Perubahan chassis hanya berlaku untuk ritasi baru berikutnya, ritasi yang sedang berjalan tidak berubah.
             </p>
 
-            <label className="grid gap-1 text-xs font-bold text-slate-700" htmlFor="fleet-move-chassis-reason">
-              Alasan Perubahan (wajib, minimal {REASON_MIN_LENGTH} karakter)
-              <textarea
-                className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
-                id="fleet-move-chassis-reason"
-                rows={2}
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </label>
-
             <label className="grid gap-1 text-xs font-bold text-slate-700" htmlFor="fleet-move-chassis-note">
               Catatan Tambahan (opsional)
               <textarea
@@ -243,7 +213,7 @@ function MoveChassisModal({ vehicle, chassisOptions, onClose, onSave }) {
 
           <div className="master-form-actions">
             <button className="secondary-button" disabled={saving} onClick={onClose} type="button">Batal</button>
-            <button className="primary-button" disabled={saving || !chassisId || !reasonValid} type="submit">
+            <button className="primary-button" disabled={saving || !chassisId} type="submit">
               {saving ? 'Menyimpan...' : 'Simpan'}
             </button>
           </div>
@@ -339,6 +309,9 @@ function FleetAssignmentPage() {
   const drivers = archive.masters?.drivers || [];
   const canUpdateDriver = hasPermission(user, 'operations.fleet_assignment.driver.update');
   const canUpdateChassis = hasPermission(user, 'operations.fleet_assignment.chassis.update');
+  const sortedRows = [...rows].sort((a, b) => (
+    formatUnitNumber(a.unitCode).localeCompare(formatUnitNumber(b.unitCode), undefined, { numeric: true, sensitivity: 'base' })
+  ));
 
   useEffect(() => {
     fetchMaster('kir-chassis')
@@ -429,31 +402,29 @@ function FleetAssignmentPage() {
             <thead>
               <tr>
                 <th>No</th>
-                <th>Unit / Head</th>
                 <th>Plat</th>
                 <th>Size</th>
-                <th>Sopir Default</th>
-                <th>Chassis Terpasang</th>
+                <th>Sopir</th>
+                <th>Chassis</th>
                 <th>Status</th>
                 <th>Aksi</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8}><div className="empty-state">Memuat data assignment armada...</div></td></tr>
+                <tr><td colSpan={7}><div className="empty-state">Memuat data assignment armada...</div></td></tr>
               ) : null}
               {!loading && error ? (
-                <tr><td colSpan={8}><div className="empty-state">{error}</div></td></tr>
+                <tr><td colSpan={7}><div className="empty-state">{error}</div></td></tr>
               ) : null}
               {!loading && !error && !rows.length ? (
-                <tr><td colSpan={8}><div className="empty-state">Data tidak ditemukan.</div></td></tr>
+                <tr><td colSpan={7}><div className="empty-state">Data tidak ditemukan.</div></td></tr>
               ) : null}
-              {!loading && !error ? rows.map((row, index) => (
+              {!loading && !error ? sortedRows.map((row) => (
                 <tr key={row.id}>
-                  <td>{index + 1}</td>
-                  <td>{row.unitCode}</td>
+                  <td>{formatUnitNumber(row.unitCode)}</td>
                   <td>{row.plateNumber}</td>
-                  <td>{row.containerSize}</td>
+                  <td>{['20FT', '40FT'].includes(row.containerSize) ? row.containerSize : <span className="text-slate-400">-</span>}</td>
                   <td>{row.defaultDriverName || <span className="text-slate-400">Belum ada sopir</span>}</td>
                   <td>{row.currentChassisCode || <span className="text-slate-400">Belum ada chassis</span>}</td>
                   <td>{row.status}</td>

@@ -1,4 +1,4 @@
-import { BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, FileText, RefreshCw, Upload, UserRound, X, XCircle } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, FileText, RefreshCw, Upload, UserRound, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DocumentLink from '../../components/common/DocumentLink';
@@ -173,6 +173,9 @@ function BatchCommissionDropdown({ batches, selectedPeriodStart, selectedPeriodE
               <div className="min-w-0">
                 <strong className="block truncate text-xs font-black text-slate-900">{formatDate(batch.periodStart)} - {formatDate(batch.periodEnd)}</strong>
                 <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{batch.totalItems || 0} job | {formatCurrency(batch.totalAmount || 0)}</span>
+                {batch.status === 'rejected' && batch.rejectionNote ? (
+                  <span className="mt-1 block truncate text-[11px] font-bold text-rose-600">Catatan: {batch.rejectionNote}</span>
+                ) : null}
               </div>
               <StatusPill status={batch.status} />
             </button>
@@ -524,6 +527,19 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
         </div>
 
         <div className="overflow-y-auto p-5">
+          {deductionAmount > 0 ? (
+            <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+                <div>
+                  <strong className="block">Ada potongan Finance untuk sopir ini</strong>
+                  <p className="mt-0.5 font-semibold">
+                    Net dibayar {formatCurrency(netAmount)} dari bruto {formatCurrency(grossAmount)} setelah potongan {formatCurrency(deductionAmount)}. Catatan potongan akan terlihat di Operational.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-3 md:grid-cols-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <span className="block text-[11px] font-black uppercase text-slate-400">Status</span>
@@ -805,6 +821,11 @@ function BatchPickerModal({ open, onClose, onSelectBatch, selectedBatchId }) {
                     <small className="mt-0.5 block break-words text-[11px] text-slate-500">
                       {batch.totalItems || 0} job | {formatCurrency(batch.totalAmount || 0)} | Diajukan {batch.submittedByName || '-'} | {formatDateTime(batch.submittedAt)}
                     </small>
+                    {batch.status === 'rejected' && batch.rejectionNote ? (
+                      <small className="mt-1 block break-words text-[11px] font-bold text-rose-600">
+                        Ditolak Finance: {batch.rejectionNote}
+                      </small>
+                    ) : null}
                   </div>
                   <StatusPill status={batch.status} />
                 </button>
@@ -830,6 +851,95 @@ function BatchPickerModal({ open, onClose, onSelectBatch, selectedBatchId }) {
   );
 }
 
+function RejectBatchModal({ batch, saving, onClose, onConfirm }) {
+  const [note, setNote] = useState(batch?.rejectionNote || '');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!batch) return undefined;
+
+    setNote(batch.rejectionNote || '');
+    setError('');
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [batch, onClose]);
+
+  if (!batch) return null;
+
+  function submitReject(event) {
+    event.preventDefault();
+    const trimmedNote = note.trim();
+    if (trimmedNote.length < 8) {
+      setError('Catatan minimal 8 karakter agar Operational tahu bagian yang harus diperbaiki.');
+      return;
+    }
+    onConfirm(batch, trimmedNote);
+  }
+
+  return (
+    <ModalPortal>
+    <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        className="master-modal flex max-h-[90vh] w-full max-w-2xl flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reject-driver-commission-title"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={submitReject}
+      >
+        <div className="master-form-heading">
+          <div className="min-w-0">
+            <span>Reject Batch Komisi</span>
+            <h2 id="reject-driver-commission-title">Catatan untuk Operational</h2>
+            <p>{formatDate(batch.periodStart)} - {formatDate(batch.periodEnd)} | {batch.totalItems || 0} job | {formatCurrency(batch.totalAmount || 0)}</p>
+          </div>
+          <button className="modal-close-button" type="button" onClick={onClose} aria-label="Tutup reject batch">
+            <X size={17} />
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-5">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold leading-relaxed text-rose-800">
+            Batch akan dikembalikan ke Operational. Isi catatan yang jelas, misalnya nama sopir, ritasi, atau nominal yang perlu diperbaiki.
+          </div>
+          <label className="grid gap-1.5 text-xs font-black uppercase tracking-wide text-slate-500">
+            Alasan Penolakan
+            <textarea
+              autoFocus
+              className="min-h-28 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium normal-case text-slate-900 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+              disabled={saving}
+              onChange={(event) => {
+                setNote(event.target.value);
+                setError('');
+              }}
+              placeholder="Contoh: Komisi Driver Andi tanggal 28 Agustus perlu dicek karena nominal kasbon belum dipotong."
+              value={note}
+            />
+          </label>
+          {error ? <p className="text-xs font-semibold text-rose-700">{error}</p> : null}
+        </div>
+
+        <div className="master-form-actions">
+          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">Batal</button>
+          <button className="rounded-md bg-rose-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60" disabled={saving || note.trim().length < 8} type="submit">
+            {saving ? 'Menolak...' : 'Reject Batch'}
+          </button>
+        </div>
+      </form>
+    </div>
+    </ModalPortal>
+  );
+}
+
 function DriverCommissionPage() {
   const { user } = useAuth();
   const { notify, confirmAction } = useFeedback();
@@ -846,6 +956,7 @@ function DriverCommissionPage() {
   const [saving, setSaving] = useState(false);
   const [voidBusyId, setVoidBusyId] = useState('');
   const [voidError, setVoidError] = useState('');
+  const [rejectBatch, setRejectBatch] = useState(null);
 
   const canFinance = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
   const canVoidPayment = user?.role === USER_ROLES.ADMIN;
@@ -965,15 +1076,17 @@ function DriverCommissionPage() {
     }
   }
 
-  async function handleReject(batch) {
-    const rejectionNote = window.prompt('Catatan penolakan komisi:', batch.rejectionNote || '');
-    if (rejectionNote === null) return;
+  function handleReject(batch) {
+    setRejectBatch(batch);
+  }
 
+  async function confirmReject(batch, rejectionNote) {
     setSaving(true);
     try {
       const updated = await rejectDriverCommissionBatch(batch.id, rejectionNote);
       notify({ title: 'Komisi ditolak', message: 'Item batch dibuka agar Operational bisa mengajukan ulang.' });
       setSelectedBatch(updated);
+      setRejectBatch(null);
       await loadData(updated.id);
     } catch (error) {
       notify({ type: 'error', title: 'Reject gagal', message: error.message });
@@ -1110,6 +1223,17 @@ function DriverCommissionPage() {
               Belum ada batch aktif dari Operational untuk periode ini.
             </div>
           ) : null}
+          {selectedBatch?.status === 'rejected' && selectedBatch.rejectionNote ? (
+            <div className="border-b border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+                <div>
+                  <strong className="block">Batch ditolak Finance</strong>
+                  <p className="mt-0.5 font-semibold">{selectedBatch.rejectionNote}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1120px] divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
@@ -1129,7 +1253,16 @@ function DriverCommissionPage() {
                   const driverKey = driver.driverKey || driver.driverId || driver.driverName;
                   return (
                   <tr key={driverKey} className="align-middle hover:bg-slate-50/70">
-                    <td className="px-4 py-3 text-xs font-bold text-slate-950">{driver.driverName}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-950">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {driver.driverName}
+                        {driver.deductionAmount > 0 ? (
+                          <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] font-black uppercase text-rose-700">
+                            Ada Potongan
+                          </span>
+                        ) : null}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="flex items-center gap-2 text-xs font-semibold text-slate-700"><CreditCard size={15} /> {paymentAccountLabel(driver)}</span>
                     </td>
@@ -1186,6 +1319,13 @@ function DriverCommissionPage() {
         onSelectBatch={(batchId) => openBatch(batchId)}
         open={batchPickerOpen}
         selectedBatchId={selectedBatch?.id}
+      />
+
+      <RejectBatchModal
+        batch={rejectBatch}
+        saving={saving}
+        onClose={() => setRejectBatch(null)}
+        onConfirm={confirmReject}
       />
 
       <DriverFinanceDetailModal

@@ -31,6 +31,8 @@ function mapEligibleRow(row = {}) {
     amount: toNumber(row.amount),
     sourceDestinationId: row.source_destination_id || null,
     commissionNote: row.commission_note || '',
+    commissionStatus: row.commission_status || '',
+    reviewReasons: Array.isArray(row.review_reasons) ? row.review_reasons.filter(Boolean) : [],
     entrySource: row.entry_source || 'realtime',
     historicalPeriod: row.historical_period || '',
   };
@@ -288,10 +290,12 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
     totalAmount: 0,
     unsubmittedItems: 0,
     submittedItems: 0,
-    approvedItems: 0,
-    paidItems: 0,
-    unpaidAmount: 0,
-    paidAmount: 0,
+      approvedItems: 0,
+      paidItems: 0,
+      reviewItems: 0,
+      noCommissionItems: 0,
+      unpaidAmount: 0,
+      paidAmount: 0,
   };
 
   for (const row of rows) {
@@ -433,33 +437,35 @@ async function findEligibleRows(period, db = { query }) {
         cj.destination,
         (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
         cj.completed_at,
-        cj.driver_id,
-        coalesce(nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
+        coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
+        coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
         case
-          when coalesce(nullif(cj.assignment_snapshot->>'driverPaymentMethod', ''), nullif(d.payment_method, ''), 'bank') = 'emoney' then 'emoney'
+          when coalesce(nullif(cj.commission_driver_snapshot->>'driverPaymentMethod', ''), nullif(cj.assignment_snapshot->>'driverPaymentMethod', ''), nullif(d.payment_method, ''), 'bank') = 'emoney' then 'emoney'
           else 'bank'
         end as payment_method,
-        coalesce(nullif(cj.assignment_snapshot->>'driverBankName', ''), nullif(d.bank_name, '')) as bank_name,
-        coalesce(nullif(cj.assignment_snapshot->>'driverBankAccountNumber', ''), nullif(d.bank_account_number, '')) as bank_account_number,
-        coalesce(nullif(cj.assignment_snapshot->>'driverBankAccountHolder', ''), nullif(d.bank_account_holder, '')) as bank_account_holder,
-        coalesce(nullif(cj.assignment_snapshot->>'driverEmoneyProvider', ''), nullif(d.emoney_provider, '')) as emoney_provider,
-        coalesce(nullif(cj.assignment_snapshot->>'driverEmoneyNumber', ''), nullif(d.emoney_number, '')) as emoney_number,
-        coalesce(nullif(cj.assignment_snapshot->>'driverEmoneyAccountHolder', ''), nullif(d.emoney_account_holder, '')) as emoney_account_holder,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankName', ''), nullif(cj.assignment_snapshot->>'driverBankName', ''), nullif(d.bank_name, '')) as bank_name,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankAccountNumber', ''), nullif(cj.assignment_snapshot->>'driverBankAccountNumber', ''), nullif(d.bank_account_number, '')) as bank_account_number,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankAccountHolder', ''), nullif(cj.assignment_snapshot->>'driverBankAccountHolder', ''), nullif(d.bank_account_holder, '')) as bank_account_holder,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyProvider', ''), nullif(cj.assignment_snapshot->>'driverEmoneyProvider', ''), nullif(d.emoney_provider, '')) as emoney_provider,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyNumber', ''), nullif(cj.assignment_snapshot->>'driverEmoneyNumber', ''), nullif(d.emoney_number, '')) as emoney_number,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyAccountHolder', ''), nullif(cj.assignment_snapshot->>'driverEmoneyAccountHolder', ''), nullif(d.emoney_account_holder, '')) as emoney_account_holder,
         cj.assignment_snapshot->>'plateNumber' as truck_plate_number,
-        cj.driver_commission_amount as amount,
+        coalesce(cj.commission_locked_amount, cj.driver_commission_amount) as amount,
         cj.driver_commission_source_destination_id as source_destination_id,
         cj.driver_commission_note as commission_note,
+        cj.commission_status,
         coalesce(cj.entry_source, 'realtime') as entry_source,
         cj.historical_period
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
-      left join drivers d on d.id = cj.driver_id and d.archived_at is null
+      left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
       where cj.status = 'completed'
         and cj.completed_at is not null
         and (cj.completed_at at time zone 'Asia/Jakarta')::date <= $1::date
         and coalesce(cj.has_driver_commission, false)
-        and coalesce(cj.driver_commission_amount, 0) > 0
-        and nullif(coalesce(d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
+        and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
+        and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
+        and coalesce(cj.commission_status, 'with_commission') = 'with_commission'
         and so.status <> 'cancelled'
         and not exists (
           select 1
@@ -475,19 +481,115 @@ async function findEligibleRows(period, db = { query }) {
   return result.rows.map(mapEligibleRow);
 }
 
+async function findCommissionReviewRows(period, db = { query }) {
+  const result = await db.query(
+    `
+      with review_rows as (
+        select
+          cj.id as container_job_id,
+          cj.sales_order_id,
+          so.so_number,
+          so.accurate_so_number,
+          cj.container_number,
+          cj.container_size,
+          so.customer_name,
+          cj.destination,
+          (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
+          cj.completed_at,
+          coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
+          coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
+          'bank' as payment_method,
+          null::text as bank_name,
+          null::text as bank_account_number,
+          null::text as bank_account_holder,
+          null::text as emoney_provider,
+          null::text as emoney_number,
+          null::text as emoney_account_holder,
+          cj.assignment_snapshot->>'plateNumber' as truck_plate_number,
+          coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) as amount,
+          cj.driver_commission_source_destination_id as source_destination_id,
+          cj.driver_commission_note as commission_note,
+          coalesce(cj.commission_status, 'pending') as commission_status,
+          array_remove(array[
+            case when coalesce(cj.has_driver_commission, false) and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) <= 0 then 'Nominal komisi belum valid' end,
+            case when coalesce(cj.has_driver_commission, false) and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is null then 'Sopir penerima komisi belum terkunci' end,
+            case when coalesce(cj.has_driver_commission, false) and coalesce(cj.commission_status, 'pending') <> 'with_commission' then 'Status komisi perlu dicek' end
+          ], null) as review_reasons,
+          coalesce(cj.entry_source, 'realtime') as entry_source,
+          cj.historical_period
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
+        where cj.status = 'completed'
+          and cj.completed_at is not null
+          and (cj.completed_at at time zone 'Asia/Jakarta')::date <= $1::date
+          and coalesce(cj.has_driver_commission, false)
+          and so.status <> 'cancelled'
+          and not exists (
+            select 1
+            from driver_commission_items dci
+            where dci.container_job_id = cj.id
+              and dci.voided_at is null
+          )
+      )
+      select *
+      from review_rows
+      where array_length(review_reasons, 1) > 0
+      order by completed_date asc, so_number asc, container_number asc nulls last
+      limit 200
+    `,
+    [period.periodEnd],
+  );
+
+  return result.rows.map(mapEligibleRow);
+}
+
+async function countNoCommissionRows(period, db = { query }) {
+  const result = await db.query(
+    `
+      select count(*)::int as total
+      from container_jobs cj
+      join sales_orders so on so.id = cj.sales_order_id
+      where cj.status = 'completed'
+        and cj.completed_at is not null
+        and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+        and not coalesce(cj.has_driver_commission, false)
+        and so.status <> 'cancelled'
+    `,
+    [period.periodStart, period.periodEnd],
+  );
+  return Number(result.rows[0]?.total || 0);
+}
+
+export async function hasActiveCommissionItemsForSalesOrder(salesOrderId) {
+  const result = await query(
+    'select exists(select 1 from driver_commission_items where sales_order_id = $1 and voided_at is null) as exists',
+    [salesOrderId],
+  );
+  return Boolean(result.rows[0].exists);
+}
+
 export async function findEligibleDriverCommissions(period) {
-  const rows = await findEligibleRows(period);
+  const [rows, reviewRows, noCommissionCount] = await Promise.all([
+    findEligibleRows(period),
+    findCommissionReviewRows(period),
+    countNoCommissionRows(period),
+  ]);
   return {
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
     summary: summarizeEligibleRows(rows),
     rows,
+    reviewRows,
+    noCommissionCount,
   };
 }
 
 export async function findDriverCommissionPeriodReport(period) {
-  const [eligibleRows, submittedResult, batchesResult] = await Promise.all([
+  const [eligibleRows, reviewRows, noCommissionCount, submittedResult, batchesResult] = await Promise.all([
     findEligibleRows(period),
+    findCommissionReviewRows(period),
+    countNoCommissionRows(period),
     query(
       `
         select
@@ -542,6 +644,8 @@ export async function findDriverCommissionPeriodReport(period) {
     ...submittedResult.rows.map(mapReportSubmittedRow),
   ];
   const grouped = summarizeDriverCommissionPeriodRows(rows);
+  grouped.summary.reviewItems = reviewRows.length;
+  grouped.summary.noCommissionItems = noCommissionCount;
   const deductionsByPayment = await findDeductionsByPaymentIds(
     { query },
     grouped.drivers.map((driver) => driver.paymentId),
@@ -556,6 +660,8 @@ export async function findDriverCommissionPeriodReport(period) {
     periodEnd: period.periodEnd,
     status: activeBatch?.status || (rows.length ? 'draft' : 'empty'),
     activeBatch,
+    reviewRows,
+    noCommissionCount,
     ...grouped,
   };
 }
@@ -673,6 +779,19 @@ export async function createDriverCommissionBatch(period, actor = {}) {
     }
 
     const eligibleRows = await findEligibleRows(period, client);
+    const reviewRows = await findCommissionReviewRows(period, client);
+    if (reviewRows.length) {
+      const error = new Error('Masih ada ritasi komisi yang perlu dicek sebelum batch diajukan.');
+      error.statusCode = 409;
+      error.code = 'DRIVER_COMMISSION_NEEDS_REVIEW';
+      error.details = reviewRows.map((row) => ({
+        containerJobId: row.containerJobId,
+        soNumber: row.soNumber,
+        containerNumber: row.containerNumber,
+        reviewReasons: row.reviewReasons,
+      }));
+      throw error;
+    }
     if (!eligibleRows.length) {
       const error = new Error('Tidak ada komisi sopir yang eligible untuk periode ini.');
       error.statusCode = 400;

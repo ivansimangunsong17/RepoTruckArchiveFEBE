@@ -645,12 +645,7 @@ export async function getDashboardReport() {
              v.operational_status, v.kir_chassis_number,
              kc.chassis_code, kc.container_size as chassis_size
       from vehicles v
-      left join kir_chassis kc on lower(trim(v.kir_chassis_number)) in (
-        lower(kc.id::text),
-        lower(kc.chassis_code),
-        lower(coalesce(kc.kir_number, '')),
-        lower(coalesce(kc.plate_number, ''))
-      )
+      left join kir_chassis kc on kc.id = v.current_chassis_id
       where v.archived_at is null
       order by v.unit_code asc, v.plate_number asc
     `),
@@ -1623,6 +1618,215 @@ export async function getDriverPerformanceReport(options = {}) {
       label: new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' })
         .format(new Date(`${row.value}-01T00:00:00`)),
     })),
+  };
+}
+
+function normalizeMonitoringLimit(options = {}) {
+  const limit = Math.max(10, Math.min(200, Number(options.limit || 100)));
+  return Number.isFinite(limit) ? limit : 100;
+}
+
+function mapInputMonitoringRow(row = {}) {
+  return {
+    id: row.id,
+    salesOrderId: row.sales_order_id || row.id,
+    containerJobId: row.container_job_id || '',
+    internalSoNumber: row.so_number || '',
+    accurateSoNumber: row.accurate_so_number || '',
+    invoiceNumber: row.invoice_number || '',
+    customer: row.customer_name || '-',
+    salesName: row.sales_name || row.created_by_name || '-',
+    orderDate: row.so_date || row.trip_date || row.created_at,
+    tripDate: row.trip_date,
+    completedAt: row.completed_at,
+    containerNumber: row.container_number || '',
+    containerSize: row.container_size || '',
+    driverName: row.driver_name || row.assignment_snapshot?.driver || '',
+    plateNumber: row.plate_number || row.assignment_snapshot?.plateNumber || '',
+    destination: row.destination || '-',
+    status: row.status || '',
+    rpujStatus: row.rpuj_status || '',
+    billingStatus: row.billing_status || '',
+    amount: Number(row.total_amount || row.billing_amount || 0),
+    quantity: Number(row.quantity || row.container_count || 0),
+    missingItems: Array.isArray(row.missing_items) ? row.missing_items.filter(Boolean) : [],
+    team: row.team || '',
+    ageDays: Number(row.age_days || 0),
+    totalCount: Number(row.total_count || 0),
+  };
+}
+
+function getMonitoringTotal(rows = []) {
+  return Number(rows[0]?.totalCount || rows.length || 0);
+}
+
+export async function getInputMonitoringReport(options = {}) {
+  const limit = normalizeMonitoringLimit(options);
+  const activeOrderSql = "so.status <> 'cancelled'";
+  const activeJobSql = "cj.status not in ('cancelled', 'repo_stored')";
+
+  const [
+    missingSoNumber,
+    missingAssignment,
+    missingCost,
+    missingInvoice,
+    missingDocuments,
+  ] = await Promise.all([
+    query(
+      `
+        select so.id, so.so_number, so.accurate_so_number, so.customer_name,
+               so.sales_name, so.created_by_name, so.so_date, so.trip_date,
+               so.destination, so.status, so.quantity, so.total_amount,
+               'Finance' as team,
+               greatest(0, current_date - coalesce(so.so_date, so.trip_date, so.created_at::date))::int as age_days,
+               count(*) over()::int as total_count
+        from sales_orders so
+        where ${activeOrderSql}
+          and nullif(btrim(coalesce(so.accurate_so_number, '')), '') is null
+        order by coalesce(so.so_date, so.trip_date, so.created_at::date) asc, so.created_at asc
+        limit $1
+      `,
+      [limit],
+    ),
+    query(
+      `
+        select cj.id as container_job_id, so.id as sales_order_id, so.so_number,
+               so.accurate_so_number, so.customer_name, so.sales_name, so.created_by_name,
+               so.trip_date, so.destination, cj.container_number, cj.container_size,
+               cj.status, cj.rpuj_status, cj.assignment_snapshot,
+               nullif(cj.assignment_snapshot->>'driver', '') as driver_name,
+               nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
+               array_remove(array[
+                 case when cj.driver_id is null and nullif(cj.assignment_snapshot->>'driver', '') is null then 'Sopir' end,
+                 case when cj.vehicle_id is null and nullif(cj.assignment_snapshot->>'plateNumber', '') is null then 'Truck' end,
+                 case when nullif(btrim(coalesce(cj.container_number, '')), '') is null then 'No Container' end
+               ], null) as missing_items,
+               'Operational' as team,
+               greatest(0, current_date - coalesce(so.trip_date, cj.created_at::date))::int as age_days,
+               count(*) over()::int as total_count
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where ${activeOrderSql}
+          and ${activeJobSql}
+          and (
+            (cj.driver_id is null and nullif(cj.assignment_snapshot->>'driver', '') is null)
+            or (cj.vehicle_id is null and nullif(cj.assignment_snapshot->>'plateNumber', '') is null)
+            or nullif(btrim(coalesce(cj.container_number, '')), '') is null
+          )
+        order by coalesce(so.trip_date, cj.created_at::date) asc, cj.created_at asc
+        limit $1
+      `,
+      [limit],
+    ),
+    query(
+      `
+        select cj.id as container_job_id, so.id as sales_order_id, so.so_number,
+               so.accurate_so_number, so.customer_name, so.sales_name, so.created_by_name,
+               so.trip_date, so.destination, cj.container_number, cj.container_size,
+               cj.status, cj.rpuj_status, cj.assignment_snapshot,
+               nullif(cj.assignment_snapshot->>'driver', '') as driver_name,
+               nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
+               array_remove(array[
+                 case when coalesce(cj.rpuj_status, 'pending') = 'pending' then 'Belum diajukan' end,
+                 case when coalesce(cj.rpuj_status, 'pending') = 'submitted' then 'Menunggu cek Finance' end,
+                 case when coalesce(cj.rpuj_status, 'pending') = 'rejected' then 'Perlu revisi' end
+               ], null) as missing_items,
+               case when coalesce(cj.rpuj_status, 'pending') = 'submitted' then 'Finance' else 'Operational' end as team,
+               greatest(0, current_date - coalesce(cj.running_at::date, so.trip_date, cj.created_at::date))::int as age_days,
+               count(*) over()::int as total_count
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where ${activeOrderSql}
+          and ${activeJobSql}
+          and coalesce(cj.rpuj_status, 'pending') in ('pending', 'submitted', 'rejected')
+        order by coalesce(cj.running_at::date, so.trip_date, cj.created_at::date) asc, cj.created_at asc
+        limit $1
+      `,
+      [limit],
+    ),
+    query(
+      `
+        select so.id, so.so_number, so.accurate_so_number, so.invoice_number,
+               so.customer_name, so.sales_name, so.created_by_name, so.destination,
+               so.status, so.billing_status, so.total_amount,
+               max(cj.completed_at) as completed_at,
+               count(cj.id)::int as container_count,
+               'Finance' as team,
+               greatest(0, current_date - coalesce(max(cj.completed_at)::date, so.updated_at::date, so.trip_date))::int as age_days,
+               count(*) over()::int as total_count
+        from sales_orders so
+        join container_jobs cj on cj.sales_order_id = so.id
+        where ${activeOrderSql}
+          and so.status = 'completed'
+          and nullif(btrim(coalesce(so.invoice_number, '')), '') is null
+        group by so.id
+        order by coalesce(max(cj.completed_at)::date, so.updated_at::date, so.trip_date) asc
+        limit $1
+      `,
+      [limit],
+    ),
+    query(
+      `
+        with attachment_flags as (
+          select entity_id,
+                 bool_or(category = 'eirDocument') as has_eir_file,
+                 bool_or(category = 'travelDocumentFile') as has_travel_file,
+                 bool_or(category in ('loadingVoucherDocument', 'unloadingVoucherDocument')) as has_loading_file,
+                 bool_or(category = 'tilaGatepassDocumentFile') as has_tila_file
+          from attachments
+          where entity_type = 'container_job'
+          group by entity_id
+        ),
+        document_rows as (
+          select cj.id as container_job_id, so.id as sales_order_id, so.so_number,
+                 so.accurate_so_number, so.customer_name, so.sales_name, so.created_by_name,
+                 so.trip_date, so.destination, cj.container_number, cj.container_size,
+                 cj.status, cj.rpuj_status, cj.assignment_snapshot, cj.completed_at,
+                 nullif(cj.assignment_snapshot->>'driver', '') as driver_name,
+                 nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
+                 array_remove(array[
+                   case when nullif(btrim(coalesce(cj.eir_number, '')), '') is null and not coalesce(af.has_eir_file, false) then 'EIR' end,
+                   case when nullif(btrim(coalesce(cj.travel_document_number, '')), '') is null and not coalesce(af.has_travel_file, false) then 'Surat Jalan' end,
+                   case when nullif(btrim(coalesce(cj.loading_voucher_number, cj.unloading_voucher_number, '')), '') is null and not coalesce(af.has_loading_file, false) then 'Bon Muat/Bongkar' end,
+                   case when nullif(btrim(coalesce(cj.tila_gatepass_document_number, cj.weighing_document_number, '')), '') is null and not coalesce(af.has_tila_file, false) then 'TILA/Gatepass' end
+                 ], null) as missing_items,
+                 'Operational' as team,
+                 greatest(0, current_date - coalesce(cj.completed_at::date, so.trip_date, cj.created_at::date))::int as age_days
+          from container_jobs cj
+          join sales_orders so on so.id = cj.sales_order_id
+          left join attachment_flags af on af.entity_id = cj.id
+          where ${activeOrderSql}
+            and cj.status = 'completed'
+        )
+        select *, count(*) over()::int as total_count
+        from document_rows
+        where array_length(missing_items, 1) > 0
+        order by coalesce(completed_at::date, trip_date) asc
+        limit $1
+      `,
+      [limit],
+    ),
+  ]);
+
+  const categories = {
+    missingSoNumber: missingSoNumber.rows.map(mapInputMonitoringRow),
+    missingAssignment: missingAssignment.rows.map(mapInputMonitoringRow),
+    missingCost: missingCost.rows.map(mapInputMonitoringRow),
+    missingInvoice: missingInvoice.rows.map(mapInputMonitoringRow),
+    missingDocuments: missingDocuments.rows.map(mapInputMonitoringRow),
+  };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    limit,
+    summary: {
+      missingSoNumber: getMonitoringTotal(categories.missingSoNumber),
+      missingAssignment: getMonitoringTotal(categories.missingAssignment),
+      missingCost: getMonitoringTotal(categories.missingCost),
+      missingInvoice: getMonitoringTotal(categories.missingInvoice),
+      missingDocuments: getMonitoringTotal(categories.missingDocuments),
+    },
+    categories,
   };
 }
 

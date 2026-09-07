@@ -22,15 +22,17 @@ function destinationText(job) {
 }
 
 function normalizeTruck(truck) {
-  const chassisSize = normalizeSize(truck.chassisSize || truck.chassis_size);
   return {
     id: truck.id || truck.plateNumber,
     plateNumber: truck.plateNumber,
     unitCode: truck.unitCode,
     status: truck.status || truck.operationalStatus || truck.operational_status || 'Aktif',
-    capacity: chassisSize || normalizeSize(truck.capacity || truck.containerSize || truck.size || truck.defaultSize || '20FT'),
+    // "capacity" adalah ukuran master truck sendiri (vehicles.container_size) -- TIDAK boleh dipakai
+    // sebagai pengganti ukuran chassis yang benar-benar terpasang (chassisSize). Dashboard ini cuma
+    // boleh menampilkan ukuran operasional (chassis terpasang), bukan ukuran default master truck.
+    capacity: normalizeSize(truck.capacity || truck.containerSize || truck.size || truck.defaultSize || '20FT'),
     chassisCode: truck.chassisCode || truck.chassis_code || truck.kirChassisNumber || truck.kir_chassis_number || '',
-    chassisSize,
+    chassisSize: normalizeSize(truck.chassisSize || truck.chassis_size),
     driver: truck.defaultDriver || truck.default_driver_name || truck.defaultDriverName || truck.lastDriver || '-',
   };
 }
@@ -73,14 +75,17 @@ function getTruckSortKey(unitCode) {
 }
 
 function getTruckSizeSortKey(truck) {
-  const size = normalizeSize(truck?.capacity || truck?.chassisSize);
+  const size = normalizeSize(truck?.chassisSize);
   if (size === '20FT') return 0;
   if (size === '40FT') return 1;
   return 2;
 }
 
 function chassisSizeLabel(truck) {
-  return truck?.chassisSize || truck?.capacity || '-';
+  const size = normalizeSize(truck?.chassisSize);
+  if (size === '20FT') return '20FT';
+  if (size === '40FT') return '40FT';
+  return 'Belum Ada Chassis';
 }
 
 function documentSummary(job) {
@@ -129,8 +134,10 @@ function getAvailability(trucks, activeJobs) {
     '40FT': { total: 0, activePlates: new Set() },
   };
 
+  // Hitung berdasarkan ukuran chassis yang BENAR-BENAR terpasang (chassisSize), bukan ukuran
+  // default master truck (capacity) -- truck aktif tanpa chassis sengaja tidak masuk bucket manapun.
   availableTrucks.forEach((truck) => {
-    const truckSize = normalizeSize(truck.capacity);
+    const truckSize = normalizeSize(truck.chassisSize);
     if (summary[truckSize]) summary[truckSize].total += 1;
   });
 
@@ -139,7 +146,7 @@ function getAvailability(trucks, activeJobs) {
     if (!plateNumber) return;
     const truck = availableTrucks.find((item) => item.plateNumber === plateNumber);
     if (!truck) return;
-    const activeSize = normalizeSize(truck?.capacity || job.size);
+    const activeSize = normalizeSize(truck?.chassisSize);
     if (summary[activeSize]) summary[activeSize].activePlates.add(plateNumber);
   });
 

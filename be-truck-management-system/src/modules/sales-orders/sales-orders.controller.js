@@ -186,6 +186,29 @@ export async function updateSalesOrderController(request, response) {
       metadata: historicalMetadata(saved),
     });
   }
+  if (request.user?.role === 'sales' && String(before.accurateSoNumber || '').trim()) {
+    const beforeIds = new Set((before.containers || []).map((container) => container.id));
+    const afterIds = new Set((saved.containers || []).map((container) => container.id));
+    await safeRecordActivityLog(request, {
+      action: 'SALES_REVISION_AFTER_FINANCE_SO',
+      module: 'sales_orders',
+      entityType: 'sales_order',
+      entityId: saved.id,
+      beforeData: before,
+      afterData: saved,
+      metadata: {
+        salesOrderId: saved.id,
+        internalSoNumber: saved.soNumber,
+        financeSoNumber: saved.accurateSoNumber,
+        quantityBefore: (before.containers || []).length,
+        quantityAfter: (saved.containers || []).length,
+        addedContainerJobIds: (saved.containers || []).filter((container) => !beforeIds.has(container.id)).map((container) => container.id),
+        removedContainerJobIds: (before.containers || []).filter((container) => !afterIds.has(container.id)).map((container) => container.id),
+        note: request.body?.note || request.body?.reason || '',
+      },
+    });
+  }
+
   const beforeContainerIds = new Set((before.containers || []).map((container) => container.id));
   await Promise.all((saved.containers || [])
     .filter((container) => !beforeContainerIds.has(container.id))

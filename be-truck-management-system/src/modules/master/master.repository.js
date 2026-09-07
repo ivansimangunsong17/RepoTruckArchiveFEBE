@@ -233,6 +233,116 @@ export async function updateVehicleDefaultDriver(vehicleId, driverId) {
   });
 }
 
+// Dipakai BERSAMA oleh Master Truck (form Admin, chassisIdentifier berupa teks chassis_code/kir_number
+// lama) dan Assignment Armada (chassisIdentifier berupa uuid kir_chassis.id) -- satu fungsi supaya
+// validasi eligibility, exclusivity (lepas dari truck lain), dan sinkronisasi kir_chassis_number
+// lama cuma ada di SATU tempat, tidak dobel logic di dua modul.
+export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
+  return withTransaction(async (client) => {
+    const vehicleResult = await client.query(
+      'select * from vehicles where id = $1 and archived_at is null for update',
+      [vehicleId],
+    );
+    const vehicle = vehicleResult.rows[0];
+    if (!vehicle) {
+      const error = new Error('Unit tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'FLEET_ASSIGNMENT_VEHICLE_NOT_FOUND';
+      throw error;
+    }
+    if (['Maintenance', 'Tidak Aktif'].includes(vehicle.operational_status)) {
+      const error = new Error(`Unit ${vehicle.plate_number} sedang ${vehicle.operational_status} dan chassis-nya tidak bisa diubah.`);
+      error.statusCode = 409;
+      error.code = 'FLEET_ASSIGNMENT_VEHICLE_NOT_ELIGIBLE';
+      throw error;
+    }
+
+    const identifier = String(chassisIdentifier || '').trim();
+    if (!identifier) {
+      const cleared = await client.query(
+        `
+          update vehicles
+          set current_chassis_id = null,
+              current_chassis_code = null,
+              kir_chassis_number = null,
+              updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [vehicleId],
+      );
+      return {
+        before: getResourceConfig('trucks').toApi(vehicle),
+        after: getResourceConfig('trucks').toApi(cleared.rows[0]),
+      };
+    }
+
+    const chassisResult = await client.query(
+      `
+        select * from kir_chassis
+        where archived_at is null
+          and (
+            id::text = $1
+            or lower(chassis_code) = lower($1)
+            or lower(coalesce(kir_number, '')) = lower($1)
+            or lower(coalesce(plate_number, '')) = lower($1)
+          )
+        limit 1
+      `,
+      [identifier],
+    );
+    const chassis = chassisResult.rows[0];
+    if (!chassis) {
+      const error = new Error('Chassis tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'FLEET_ASSIGNMENT_CHASSIS_NOT_FOUND';
+      throw error;
+    }
+    // Chassis tidak punya status "Maintenance" seperti truck -- padanan paling dekat adalah
+    // "Perlu Perpanjang" (KIR mendekati/sudah kedaluwarsa, secara legal tidak layak jalan), jadi
+    // ikut ditolak selain "Tidak Aktif".
+    if (['Tidak Aktif', 'Perlu Perpanjang'].includes(chassis.operational_status)) {
+      const error = new Error(`Chassis ${chassis.chassis_code} sedang ${chassis.operational_status} dan tidak bisa dipasang.`);
+      error.statusCode = 409;
+      error.code = 'FLEET_ASSIGNMENT_CHASSIS_NOT_ELIGIBLE';
+      throw error;
+    }
+
+    // Satu chassis cuma boleh terpasang di satu unit -- lepas dari unit lain yang masih
+    // memegangnya (termasuk kir_chassis_number lama-nya) supaya tidak ada dua unit yang sama-sama
+    // menganggap chassis ini terpasang.
+    await client.query(
+      `
+        update vehicles
+        set current_chassis_id = null,
+            current_chassis_code = null,
+            kir_chassis_number = null,
+            updated_at = now()
+        where current_chassis_id = $1 and id <> $2
+      `,
+      [chassis.id, vehicleId],
+    );
+
+    const updated = await client.query(
+      `
+        update vehicles
+        set current_chassis_id = $2,
+            current_chassis_code = $3,
+            kir_chassis_number = $3,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [vehicleId, chassis.id, chassis.chassis_code],
+    );
+
+    return {
+      before: getResourceConfig('trucks').toApi(vehicle),
+      after: getResourceConfig('trucks').toApi(updated.rows[0]),
+    };
+  });
+}
+
 export async function archiveMasterRow(resource, id) {
   const config = getResourceConfig(resource);
   const result = await query(

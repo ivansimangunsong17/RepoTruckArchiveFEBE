@@ -18,6 +18,7 @@ import { salesOrderRoutes } from './modules/sales-orders/sales-orders.routes.js'
 import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { storageRoutes } from './modules/storage/storage.routes.js';
 import { isStorageBackupInProgress } from './modules/storage/storage-files.js';
+import { hinoTelematicsRoutes } from './modules/telematics/hino.routes.js';
 import { userRoutes } from './modules/users/users.routes.js';
 import { utilizationNoteRoutes } from './modules/utilization-notes/utilization-notes.routes.js';
 import { vehicleDocumentRoutes } from './modules/vehicle-documents/vehicle-documents.routes.js';
@@ -61,6 +62,7 @@ const routes = [
   ...masterRoutes,
   ...vehicleDocumentRoutes,
   ...reportRoutes,
+  ...hinoTelematicsRoutes,
   ...utilizationNoteRoutes,
   ...storageRoutes,
   ...settingsRoutes,

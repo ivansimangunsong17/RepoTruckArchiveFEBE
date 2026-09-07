@@ -2025,11 +2025,11 @@ export function MonthlyUtilizationModal({
 
                   const { truck } = item;
                   return (
-                    <tr key={truck.rowKey || truck.plateNumber} className="odd:bg-white even:bg-slate-50/80">
-                      <td className="sticky left-0 z-10 min-w-[34px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-700 shadow-[inset_0_-1px_0_#94a3b8]">
+                    <tr key={truck.rowKey || truck.plateNumber} className="group odd:bg-white even:bg-slate-50/80 transition-colors duration-150 ease-out hover:bg-sky-50/90">
+                      <td className="sticky left-0 z-10 min-w-[34px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-700 shadow-[inset_0_-1px_0_#94a3b8] transition-colors duration-150 ease-out group-hover:bg-sky-50">
                         {item.number}
                       </td>
-                      <th className="sticky z-10 min-w-[130px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-left font-black text-slate-900 shadow-[inset_0_-1px_0_#94a3b8]" style={{ left: truckLeftOffset }}>
+                      <th className="sticky z-10 min-w-[130px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1.5 py-0.5 text-left font-black text-slate-900 shadow-[inset_0_-1px_0_#94a3b8] transition-colors duration-150 ease-out group-hover:bg-sky-50" style={{ left: truckLeftOffset }}>
                         <span className="grid w-[116px] grid-cols-[74px_34px] items-center gap-2">
                           <span className="block min-w-0 truncate" title={`${truck.plateNumber}${truck.segmentBadge ? ` - ${truck.segmentBadge}` : ''}`}>
                             {truck.plateNumber}
@@ -2049,7 +2049,9 @@ export function MonthlyUtilizationModal({
                         <td
                           key={day.key}
                           className={`h-6 max-w-[38px] border-x border-b border-b-slate-400 px-0.5 py-0 text-center align-middle shadow-[inset_0_-1px_0_#94a3b8] ${
-                            day.isRedDate ? 'border-x-red-200 bg-red-50/80' : 'border-x-slate-200'
+                            day.isRedDate
+                              ? 'border-x-red-200 bg-red-50/80 transition-colors duration-150 ease-out group-hover:bg-rose-50'
+                              : 'border-x-slate-200 transition-colors duration-150 ease-out group-hover:bg-sky-50'
                           }`}
                         >
                           <PivotCell
@@ -2073,7 +2075,7 @@ export function MonthlyUtilizationModal({
                           />
                         </td>
                       ))}
-                      <td className="sticky right-0 z-10 border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-950 shadow-[inset_0_-1px_0_#94a3b8]">
+                      <td className="sticky right-0 z-10 border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-950 shadow-[inset_0_-1px_0_#94a3b8] transition-colors duration-150 ease-out group-hover:bg-sky-50">
                         {truck.totalTrips}
                       </td>
                     </tr>

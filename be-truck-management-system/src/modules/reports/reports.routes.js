@@ -3,6 +3,7 @@ import {
   dashboardReportController,
   documentReportController,
   driverPerformanceReportController,
+  inputMonitoringReportController,
   monthlyComparisonReportController,
   monthlyRevenueReportController,
   operationReportController,
@@ -64,5 +65,11 @@ export const reportRoutes = [
     path: '/api/reports/driver-performance',
     permission: 'report.read',
     handler: driverPerformanceReportController,
+  },
+  {
+    method: 'GET',
+    path: '/api/reports/input-monitoring',
+    permission: 'report.read',
+    handler: inputMonitoringReportController,
   },
 ];

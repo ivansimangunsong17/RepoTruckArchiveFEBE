@@ -129,6 +129,46 @@ export async function correctContainerJobExpense(id, expenseId, payload = {}) {
   });
 }
 
+export async function updateDroppingExpense(id, expenseId, payload = {}) {
+  let proofAttachment = null;
+  const proofFile = getRawFile(payload.proofFile);
+  if (proofFile) {
+    proofAttachment = await uploadAttachmentFile({
+      entityType: 'container_job',
+      entityId: id,
+      category: 'expensePaymentProof',
+      file: proofFile,
+      notes: payload.description || payload.category || 'Bukti pembayaran biaya',
+      uploadedByName: payload.updatedBy || 'Operational',
+    });
+  }
+
+  return httpClient.patch(`/container-jobs/${id}/expenses/${expenseId}`, {
+    category: payload.category,
+    amount: payload.amount,
+    description: payload.description,
+    recipientType: payload.recipientType,
+    recipientName: payload.recipientName,
+    paymentStatus: payload.paymentStatus,
+    proofAttachmentId: proofAttachment?.id || proofAttachment?.path || payload.proofAttachmentId || null,
+    updatedBy: payload.updatedBy || 'Operational',
+  });
+}
+
+export function moveDroppingExpense(id, expenseId, payload = {}) {
+  return httpClient.patch(`/container-jobs/${id}/expenses/${expenseId}/move`, {
+    targetContainerJobId: payload.targetContainerJobId,
+    updatedBy: payload.updatedBy || 'Operational',
+  });
+}
+
+export function voidDroppingExpense(id, expenseId, payload = {}) {
+  return httpClient.patch(`/container-jobs/${id}/expenses/${expenseId}/void`, {
+    voidReason: payload.voidReason || '',
+    updatedBy: payload.updatedBy || 'Operational',
+  });
+}
+
 export async function uploadContainerJobExpenseProof(id, expenseId, payload = {}) {
   const proofFile = getRawFile(payload.proofFile);
   if (!proofFile) {

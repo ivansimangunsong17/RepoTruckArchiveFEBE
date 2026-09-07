@@ -29,6 +29,7 @@ export async function updateFleetDefaultDriverController(request, response) {
   await safeRecordVehicleAssignmentHistory({
     vehicleId: after.id,
     changeType: 'default_driver',
+    source: 'fleet_assignment',
     previousDriverId: before.defaultDriverId,
     previousDriverName: before.defaultDriver,
     nextDriverId: after.defaultDriverId,
@@ -47,6 +48,7 @@ export async function updateFleetDefaultDriverController(request, response) {
     beforeData: { defaultDriverId: before.defaultDriverId, defaultDriver: before.defaultDriver },
     afterData: { defaultDriverId: after.defaultDriverId, defaultDriver: after.defaultDriver },
     metadata: {
+      source: 'fleet_assignment',
       vehicleId: after.id,
       plateNumber: after.plateNumber,
       unitCode: after.unitCode,
@@ -70,6 +72,7 @@ export async function updateFleetChassisController(request, response) {
   await safeRecordVehicleAssignmentHistory({
     vehicleId: after.id,
     changeType: 'chassis',
+    source: 'fleet_assignment',
     previousChassisId: before.currentChassisId,
     previousChassisCode: before.currentChassisCode,
     nextChassisId: after.currentChassisId,
@@ -88,6 +91,7 @@ export async function updateFleetChassisController(request, response) {
     beforeData: { currentChassisId: before.currentChassisId, currentChassisCode: before.currentChassisCode },
     afterData: { currentChassisId: after.currentChassisId, currentChassisCode: after.currentChassisCode },
     metadata: {
+      source: 'fleet_assignment',
       vehicleId: after.id,
       previousChassisId: before.currentChassisId,
       previousChassisCode: before.currentChassisCode,

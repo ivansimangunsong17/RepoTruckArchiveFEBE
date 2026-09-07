@@ -343,23 +343,6 @@ function canCancelOrderBeforeOperational(order) {
   return getOrderContainers(order).every((container) => isWaitingStatus(container.status));
 }
 
-function hasSentRpuj(order) {
-  return getOrderContainers(order).some((container) => {
-    const rpujStatus = String(container.rpujStatus || container.rpuj_status || '').trim().toLowerCase();
-    return Boolean(
-      container.rpujRequestedAt
-      || container.rpuj_requested_at
-      || ['submitted', 'approved', 'paid', 'rejected'].includes(rpujStatus)
-    );
-  });
-}
-
-function isNumberedByFinance(order) {
-  const accurateSoNumber = String(order?.accurateSoNumber || order?.accurate_so_number || '').trim();
-  const verificationStatus = String(order?.financeVerificationStatus || order?.finance_verification_status || '').trim().toLowerCase();
-  return Boolean(accurateSoNumber || verificationStatus === 'verified');
-}
-
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '', customerDocumentsOnly = false) {
   if (!selectedStatus && customerDocumentsOnly) return order.status === 'completed' && Boolean(String(invoiceNumber || '').trim());
   if (!selectedStatus) return true;
@@ -503,9 +486,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const canCreateOrder = !customerDocumentsOnly && user?.role === USER_ROLES.SALES && hasPermission(user, 'orders.create');
   const canUpdateOrder = hasPermission(user, 'orders.update');
   const canViewCommercial = hasPermission(user, 'commercial.read');
-  const selectedOrderLockedByFinanceForSales = user?.role === USER_ROLES.SALES && isNumberedByFinance(selectedOrder);
-  const selectedOrderLockedByRpujForSales = user?.role === USER_ROLES.SALES && hasSentRpuj(selectedOrder);
-  const selectedOrderLockedForSales = selectedOrderLockedByFinanceForSales || selectedOrderLockedByRpujForSales;
+  const selectedOrderLockedForSales = user?.role === USER_ROLES.SALES && !selectedOrder?.canRevise;
   const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN
     || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder) && !selectedOrderLockedForSales);
   const canUpdateContainerJob = hasPermission(user, 'operations.update');
@@ -516,7 +497,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const canModifyOrder = (order) => {
     if (!order || !canUpdateOrder) return false;
     if (user?.role === USER_ROLES.ADMIN) return true;
-    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && !isNumberedByFinance(order) && !hasSentRpuj(order);
+    if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && Boolean(order.canRevise);
     return false;
   };
   const canModifySelectedOrder = canModifyOrder(selectedOrder);
@@ -1131,15 +1112,10 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                 </div>
               </div>
 
-              {selectedOrderLockedByFinanceForSales ? (
+              {selectedOrderLockedForSales ? (
                 <div className="sales-order-cancelled-note">
                   <Clock3 size={16} />
-                  <span>SO terkunci karena Finance sudah menerbitkan nomor SO. Revisi dan pembatalan hanya dapat dilakukan oleh Admin.</span>
-                </div>
-              ) : selectedOrderLockedByRpujForSales ? (
-                <div className="sales-order-cancelled-note">
-                  <Clock3 size={16} />
-                  <span>SO terkunci karena RPUJ sudah dikirim. Revisi dan pembatalan hanya dapat dilakukan oleh Admin.</span>
+                  <span>Order ini sudah diproses Operational/Finance lanjutan. Revisi hanya bisa dilakukan oleh Admin/Koreksi.</span>
                 </div>
               ) : null}
 

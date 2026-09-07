@@ -16,6 +16,7 @@ const OperationsPage = lazy(() => import('../pages/operations/OperationsPage'));
 const OperationalDroppingAccountPage = lazy(() => import('../pages/operations/OperationalDroppingAccountPage'));
 const DriverCommissionOperationalPage = lazy(() => import('../pages/operations/DriverCommissionOperationalPage'));
 const FleetAssignmentPage = lazy(() => import('../pages/operations/FleetAssignmentPage'));
+const HinoTelematicsPage = lazy(() => import('../pages/operations/HinoTelematicsPage'));
 const TrucksPage = lazy(() => import('../pages/TrucksPage'));
 const ClientsPage = lazy(() => import('../pages/admin/ClientsPage'));
 const EndUsersPage = lazy(() => import('../pages/admin/EndUsersPage'));
@@ -30,6 +31,7 @@ const ActivityLogPage = lazy(() => import('../pages/system/ActivityLogPage'));
 const ProfilePage = lazy(() => import('../pages/system/ProfilePage'));
 const ReportsPage = lazy(() => import('../pages/reports/ReportsPage'));
 const DocumentMonitoringPage = lazy(() => import('../pages/monitoring/DocumentMonitoringPage'));
+const InputMonitoringPage = lazy(() => import('../pages/monitoring/InputMonitoringPage'));
 const FinanceOrderVerificationPage = lazy(() => import('../pages/finance/FinanceOrderVerificationPage'));
 const FinanceRpujApprovalPage = lazy(() => import('../pages/finance/FinanceRpujApprovalPage'));
 const FinanceInvoiceNumberPage = lazy(() => import('../pages/finance/FinanceInvoiceNumberPage'));
@@ -97,6 +99,7 @@ export const router = createBrowserRouter([
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },
         { path: 'operations/driver-commissions', children: [guardedPage(operationalRoles, <LazyPage><DriverCommissionOperationalPage /></LazyPage>)] },
         { path: 'operations/fleet-assignment', children: [guardedPage(operationalRoles, <LazyPage><FleetAssignmentPage /></LazyPage>)] },
+        { path: 'operations/hino-connect', children: [guardedPage(operationalRoles, <LazyPage><HinoTelematicsPage /></LazyPage>)] },
         { path: 'driver-commissions', children: [guardedPage(driverCommissionRoles, <DriverCommissionRedirect />)] },
         { path: 'trucks', children: [guardedPage(adminRoles, <LazyPage><TrucksPage /></LazyPage>)] },
         { path: 'drivers', children: [guardedPage(adminRoles, <LazyPage><DriversPage /></LazyPage>)] },
@@ -119,6 +122,7 @@ export const router = createBrowserRouter([
         { path: 'activity-log', children: [guardedPage(adminRoles, <LazyPage><ActivityLogPage /></LazyPage>)] },
         { path: 'audit-trail', element: <Navigate to="/activity-log" replace /> },
         { path: 'document-monitoring', children: [guardedPage(observerRoles, <LazyPage><DocumentMonitoringPage /></LazyPage>)] },
+        { path: 'input-monitoring', children: [guardedPage(reportsPageRoles, <LazyPage><InputMonitoringPage /></LazyPage>)] },
         { path: 'reports', children: [guardedPage(reportsPageRoles, <LazyPage><ReportsPage /></LazyPage>)] },
         { path: 'finance', element: <Navigate to="/finance/order-verification" replace /> },
         { path: 'finance/order-verification', children: [guardedPage(financeRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },

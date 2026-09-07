@@ -2,6 +2,8 @@ function statusClass(value) {
   if (String(value).includes('Lunas')) return 'border-slate-200 bg-slate-100 text-slate-700';
   if (String(value).includes('Menunggu')) return 'border-slate-200 bg-slate-50 text-slate-600';
   if (String(value).includes('Batal')) return 'border-red-200 bg-red-50 text-red-700';
+  if (String(value).includes('Klarifikasi')) return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (String(value).includes('Dikoreksi')) return 'border-sky-200 bg-sky-50 text-sky-700';
   if (String(value).includes('Ditolak') || String(value).includes('Revisi') || String(value).includes('Belum') || String(value).includes('Butuh')) return 'border-slate-200 bg-white text-slate-600';
   if (String(value).includes('Terbit') || String(value).includes('Disetujui') || String(value).includes('Diupload') || String(value).includes('Siap')) return 'border-slate-200 bg-white text-slate-700';
   return 'border-slate-200 bg-slate-50 text-slate-600';

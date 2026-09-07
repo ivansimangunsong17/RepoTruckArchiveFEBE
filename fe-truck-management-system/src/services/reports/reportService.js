@@ -45,3 +45,7 @@ export function fetchDocumentReport(params = {}) {
 export function fetchDriverPerformanceReport(params = {}) {
   return httpClient.get(`/reports/driver-performance${buildQuery(params)}`);
 }
+
+export function fetchInputMonitoringReport(params = {}) {
+  return httpClient.get(`/reports/input-monitoring${buildQuery(params)}`);
+}

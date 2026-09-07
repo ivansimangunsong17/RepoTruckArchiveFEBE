@@ -10,6 +10,12 @@ function mapAttachmentFile(attachment) {
     : null;
 }
 
+export function canOperationalEditDroppingTransaction(expense = {}) {
+  const financeCheckStatus = expense.finance_check_status || expense.financeCheckStatus || 'belum_dicek';
+  const paymentStatus = expense.payment_status || expense.paymentStatus || 'belum_dibayar';
+  return financeCheckStatus === 'belum_dicek' && paymentStatus !== 'batal';
+}
+
 export function mapContainerJobExpense(row = {}) {
   const proofAttachment = row.proofAttachment || row.proof_attachment || (
     row.proof_attachment_id
@@ -43,6 +49,7 @@ export function mapContainerJobExpense(row = {}) {
     financeCheckedByName: row.finance_checked_by_name || row.financeCheckedByName || '',
     financeCheckedAt: row.finance_checked_at || row.financeCheckedAt || null,
     financeNote: row.finance_note || row.financeNote || '',
+    canEdit: canOperationalEditDroppingTransaction(row),
     source: row.source || 'manual',
     sourceRefId: row.source_ref_id || row.sourceRefId || '',
     createdByName: row.created_by_name || row.createdByName || '',
@@ -124,6 +131,12 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     driverCommissionAmount: Number(row.driver_commission_amount || 0),
     driverCommissionSourceDestinationId: row.driver_commission_source_destination_id || '',
     driverCommissionNote: row.driver_commission_note || '',
+    commissionDriverId: row.commission_driver_id || '',
+    commissionDriverName: row.commission_driver_name || '',
+    commissionDriverSnapshot: row.commission_driver_snapshot || {},
+    commissionLockedAmount: row.commission_locked_amount == null ? null : Number(row.commission_locked_amount),
+    commissionLockedAt: row.commission_locked_at || null,
+    commissionStatus: row.commission_status || (row.has_driver_commission ? 'pending' : 'without_commission'),
     rpujRequestedBy: row.rpuj_requested_by_name || '',
     rpujRequestedAt: row.rpuj_requested_at,
     rpujReviewedBy: row.rpuj_reviewed_by_name || '',

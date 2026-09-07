@@ -3,6 +3,7 @@ import {
   normalizeInvoiceDocumentDeliveryMethod,
   normalizeInvoiceDocumentStatus,
 } from './sales-orders.invoice-documents.js';
+import { isSalesOrderLockedByFinanceNumber, isSalesOrderLockedByRpuj } from './sales-orders.rpuj-lock.js';
 
 function normalizeContainerSize(size) {
   const normalized = String(size || '20FT').toUpperCase().replace(/\s/g, '');
@@ -318,6 +319,14 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     cancelReviewedAt: row.cancel_reviewed_at,
     cancelReviewNote: row.cancel_review_note || '',
     containers,
+    // Aproksimasi murah (tanpa query biaya/pembayaran/komisi) untuk visibilitas tombol Edit di FE —
+    // keputusan final ada di ensureSalesOrderStillSafeForSalesRevision saat submit. Order yang belum
+    // terkunci sama sekali (belum ada nomor SO Finance/RPUJ) selalu boleh, sama seperti sebelumnya.
+    canRevise: !isSalesOrderLockedByFinanceNumber(row) && !isSalesOrderLockedByRpuj({ containers })
+      ? true
+      : !isSalesOrderLockedByRpuj({ containers })
+        && containers.every((container) => container.status === 'received')
+        && !String(row.invoice_number || '').trim(),
     referenceDocuments,
   };
 }
