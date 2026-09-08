@@ -133,6 +133,13 @@ function shouldEnforceOperationalLock(actor, payload = {}) {
   return ['operational', 'admin'].includes(normalizeRole(actor)) && !canUseAdminCorrection(actor, payload);
 }
 
+function isDocumentOnlyActor(actor) {
+  return actorHasPermission(actor, 'container_job.document.update')
+    && !actorHasPermission(actor, 'container_job.update')
+    && !actorHasPermission(actor, 'container_job.update_status')
+    && !actorHasPermission(actor, 'container_job.assign');
+}
+
 function hasRpujNotesInput(payload = {}) {
   return Boolean(String(payload.rpujNotes || '').trim());
 }
@@ -779,19 +786,26 @@ export async function saveContainerJob(id, payload, actor) {
   );
   ensureRepoPickupOtherCostLocked(actor, currentJob, normalizedPayload);
   ensureRepoHistoryCanCancel(actor, currentJob, normalizedPayload);
+  const documentOnlyUpdate = isDocumentOnlyActor(actor);
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
-  ensureRepoStoragePayload(currentJob, payloadForUpdate);
-  ensureInapPayload(currentJob, payloadForUpdate);
-  ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
-  ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
-  ensureOperationalCanInputDriverCommission(actor, currentJob, payloadForUpdate);
-  ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
-  ensureAssignmentChangeReasonRequired(actor, currentJob, payloadForUpdate);
+  if (!documentOnlyUpdate) {
+    ensureRepoStoragePayload(currentJob, payloadForUpdate);
+    ensureInapPayload(currentJob, payloadForUpdate);
+    ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
+    ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
+    ensureOperationalCanInputDriverCommission(actor, currentJob, payloadForUpdate);
+    ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
+    ensureAssignmentChangeReasonRequired(actor, currentJob, payloadForUpdate);
+    ensureOperationalCanEditCompletedTimeline(actor, currentJob, payloadForUpdate);
+  }
   ensureOperationalCanEditDocuments(actor, currentJob, payloadForUpdate);
-  ensureOperationalCanEditCompletedTimeline(actor, currentJob, payloadForUpdate);
 
-  return updateContainerJob(id, { ...payloadForUpdate, actorRole: actor?.role || '' });
+  return updateContainerJob(id, {
+    ...payloadForUpdate,
+    actorRole: actor?.role || '',
+    documentOnlyUpdate,
+  });
 }
 
 export function createContainerJobSpk(id, payload = {}) {

@@ -241,6 +241,91 @@ test('auto UJ saat closing tidak menggagalkan ritasi jika batch rekening droppin
   assert.equal(reviewUpdate.params[2], 'expense-1');
 });
 
+test('auto UJ memakai tanggal running_at WIB untuk batch walau trip_date berbeda', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (sql.includes("coalesce(source, 'manual') <> 'auto_uj_order'")) return { rows: [] };
+      if (sql.includes('left join operational_fund_transactions oft')) return { rows: [] };
+      if (sql.includes('insert into container_job_expenses')) return { rows: [{ id: 'expense-uj-running' }] };
+      if (sql.includes('insert into operational_fund_batches')) {
+        return { rows: [{ id: 'batch-running', batch_date: params[0], status: 'open' }] };
+      }
+      if (sql.includes('insert into operational_fund_transactions')) return { rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  await syncAutoJourneyMoneyExpense(client, {
+    job: {
+      id: 'job-running',
+      sales_order_id: 'order-running',
+      customer_name: 'MILENIA ARMADA EKSPRES',
+      destination: 'Dadap',
+      container_size: '40FT',
+      trip_date: '2026-09-07',
+      uj_amount_snapshot: 950000,
+      rpuj_status: 'draft',
+      assignment_snapshot: { plateNumber: 'B 9207 BEL' },
+    },
+    nextStatus: 'running',
+    nextEntrySource: 'realtime',
+    nextDriverId: 'driver-agus',
+    runningAt: '2026-09-07T17:00:00.000Z',
+    assignment: { driver: 'AGUS SOPIAN', plateNumber: 'B 9207 BEL' },
+    actorName: 'Operational Test',
+  });
+
+  const batchInsert = calls.find((call) => call.sql.includes('insert into operational_fund_batches'));
+  assert.equal(batchInsert.params[0], '2026-09-08');
+  const ledgerInsert = calls.find((call) => call.sql.includes('insert into operational_fund_transactions'));
+  assert.equal(ledgerInsert.params[3], '2026-09-08');
+});
+
+test('auto UJ saat completed tetap memakai running_at, bukan completed_at atau trip_date', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (sql.includes("coalesce(source, 'manual') <> 'auto_uj_order'")) return { rows: [] };
+      if (sql.includes('left join operational_fund_transactions oft')) return { rows: [] };
+      if (sql.includes('insert into container_job_expenses')) return { rows: [{ id: 'expense-uj-completed' }] };
+      if (sql.includes('insert into operational_fund_batches')) {
+        return { rows: [{ id: 'batch-completed', batch_date: params[0], status: 'open' }] };
+      }
+      if (sql.includes('insert into operational_fund_transactions')) return { rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+
+  await syncAutoJourneyMoneyExpense(client, {
+    job: {
+      id: 'job-completed',
+      sales_order_id: 'order-completed',
+      customer_name: 'MILENIA ARMADA EKSPRES',
+      destination: 'Dadap',
+      container_size: '40FT',
+      trip_date: '2026-09-07',
+      completed_at: '2026-09-09T03:00:00.000Z',
+      uj_amount_snapshot: 950000,
+      rpuj_status: 'draft',
+      assignment_snapshot: { plateNumber: 'B 9207 BEL' },
+    },
+    nextStatus: 'completed',
+    nextEntrySource: 'realtime',
+    nextDriverId: 'driver-agus',
+    runningAt: '2026-09-07T17:00:00.000Z',
+    assignment: { driver: 'AGUS SOPIAN', plateNumber: 'B 9207 BEL' },
+    actorName: 'Operational Test',
+  });
+
+  const batchInsert = calls.find((call) => call.sql.includes('insert into operational_fund_batches'));
+  assert.equal(batchInsert.params[0], '2026-09-08');
+  const ledgerInsert = calls.find((call) => call.sql.includes('insert into operational_fund_transactions'));
+  assert.equal(ledgerInsert.params[3], '2026-09-08');
+});
+
 test('data lama tidak mengunci mismatch ukuran truck dan container', () => {
   assert.equal(shouldValidateVehicleContainerSize({ entrySource: 'historical' }, { entry_source: 'realtime' }), false);
   assert.equal(shouldValidateVehicleContainerSize({}, { entry_source: 'historical' }), false);

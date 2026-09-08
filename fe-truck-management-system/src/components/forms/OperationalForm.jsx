@@ -515,9 +515,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       || (!['running', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid')
   );
   const isCompletedDocumentFollowUp = !canReviseLockedFields && form.status === 'completed';
-  const canEditDocumentValue = (field) => canUpdateDocuments && (!isCompletedDocumentFollowUp || !String(container[field] || '').trim());
-  const canEditDocumentFile = (field) => canUpdateDocuments && (!isCompletedDocumentFollowUp || !container[field]);
-  const canEditOtherDocuments = canUpdateDocuments && !isCompletedDocumentFollowUp;
+  const canEditDocumentValue = (field) => canUpdateDocuments && (isDocumentOnlyMode || !isCompletedDocumentFollowUp || !String(container[field] || '').trim());
+  const canEditDocumentFile = (field) => canUpdateDocuments && (isDocumentOnlyMode || !isCompletedDocumentFollowUp || !container[field]);
+  const canEditOtherDocuments = canUpdateDocuments && (isDocumentOnlyMode || !isCompletedDocumentFollowUp);
   const canEditTimeline = canUpdateOperational && (canReviseLockedFields || container.status !== 'completed');
   const canStartTrip = canUpdateOperational && (hasCompleteAssignment || canReviseLockedFields);
   const availableStatusOptions = statusOptions.filter((option) => {
@@ -1466,7 +1466,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                 </div>
               </div>
               {isCompletedDocumentFollowUp ? (
-                <p className="mb-3 text-[11px] font-medium text-amber-700">Pekerjaan sudah selesai. Operational hanya dapat melengkapi data atau file yang masih kosong; revisi dokumen tersimpan hanya dapat dilakukan Admin.</p>
+                <p className="mb-3 text-[11px] font-medium text-amber-700">{isDocumentOnlyMode ? 'Mode dokumen: perubahan di sini hanya menyimpan dokumen dan tidak mengubah status perjalanan.' : 'Pekerjaan sudah selesai. Operational hanya dapat melengkapi data atau file yang masih kosong; revisi dokumen tersimpan hanya dapat dilakukan Admin.'}</p>
               ) : null}
               <div className="order-form-grid">
                 {hasRepoHistory ? (

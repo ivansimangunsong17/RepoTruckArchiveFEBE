@@ -81,6 +81,19 @@ const expenseColumns = `
   proof.file_size as proof_file_size
 `;
 
+const jakartaDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Jakarta',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function toJakartaDateKey(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return jakartaDateFormatter.format(new Date());
+  return jakartaDateFormatter.format(date);
+}
+
 function parsePage(options = {}) {
   const page = Math.max(1, Number(options.page || 1));
   const pageSize = Math.max(1, Math.min(100, Number(options.pageSize || 20)));
@@ -785,6 +798,7 @@ export async function syncAutoJourneyMoneyExpense(client, {
   if (amount <= 0) return;
 
   const paidAt = runningAt || new Date().toISOString();
+  const batchDate = toJakartaDateKey(paidAt);
   const description = buildAutoJourneyMoneyDescription(job, assignment);
   const sourceRefId = job.id;
   const existingAutoLedger = await client.query(
@@ -866,7 +880,6 @@ export async function syncAutoJourneyMoneyExpense(client, {
     ],
   );
   const expenseId = expenseResult.rows[0].id;
-  const batchDate = paidAt ? String(paidAt).slice(0, 10) : null;
   let batch;
   try {
     batch = await ensureOperationalFundBatch(client, batchDate, actorName || 'Operational');
@@ -2184,16 +2197,19 @@ async function updateContainerJobTransaction(id, form) {
     ensureSalesOrderVerifiedForOperational(existing.rows[0]);
 
     const currentJob = existing.rows[0];
+    const documentOnlyUpdate = normalizeBooleanFlag(form.documentOnlyUpdate);
     const allowHistoricalBackfill = isHistoricalBackfill(form, currentJob);
     const allowAdminCorrection = normalizeBooleanFlag(form.adminCorrectionMode);
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
-    assertDriverAssignable(driver, currentJob.driver_id);
-    assertVehicleAssignable(vehicle, currentJob.vehicle_id);
-    if (shouldValidateVehicleContainerSize(form, currentJob)) {
+    if (!documentOnlyUpdate) {
+      assertDriverAssignable(driver, currentJob.driver_id);
+      assertVehicleAssignable(vehicle, currentJob.vehicle_id);
+    }
+    if (!documentOnlyUpdate && shouldValidateVehicleContainerSize(form, currentJob)) {
       assertVehicleMatchesContainer(vehicle, currentJob.container_size);
     }
-    const nextStatus = form.status || currentJob.status || 'received';
+    const nextStatus = documentOnlyUpdate ? currentJob.status || 'received' : form.status || currentJob.status || 'received';
     if (nextStatus === 'cancelled' && currentJob.status === 'completed' && !allowAdminCorrection) {
       throw validationError(
         'Container Job yang sudah selesai tidak dapat dibatalkan.',
@@ -2220,7 +2236,7 @@ async function updateContainerJobTransaction(id, form) {
       }
     }
     const nextRpujStatus = normalizeRpujStatusForOperational(currentJob, form.rpujStatus);
-    if (nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(currentJob.rpuj_status)) {
+    if (!documentOnlyUpdate && nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(currentJob.rpuj_status)) {
       requireCompleteOperationalAssignment(
         form,
         driver,
@@ -2229,7 +2245,7 @@ async function updateContainerJobTransaction(id, form) {
         'RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    if (['running', 'completed'].includes(nextStatus)) {
+    if (!documentOnlyUpdate && ['running', 'completed'].includes(nextStatus)) {
       requireCompleteOperationalAssignment(
         form,
         driver,
@@ -2238,8 +2254,10 @@ async function updateContainerJobTransaction(id, form) {
         'Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
-    if (nextStatus === 'completed') {
+    if (!documentOnlyUpdate) {
+      await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
+    }
+    if (!documentOnlyUpdate && nextStatus === 'completed') {
       await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill, allowAdminCorrection });
     }
     const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
@@ -2269,7 +2287,9 @@ async function updateContainerJobTransaction(id, form) {
     const nextUjSnapshotSource = allowAdminCorrection && hasOwnInput(form, 'ujAmountSnapshot')
       ? 'admin_correction'
       : existing.rows[0].uj_snapshot_source;
-    const runningAt = nextStatus === 'cancelled'
+    const runningAt = documentOnlyUpdate
+      ? existing.rows[0].running_at
+      : nextStatus === 'cancelled'
       ? existing.rows[0].running_at
       : nextStatus === 'repo_stored'
         ? form.runningAt || existing.rows[0].running_at
@@ -2426,7 +2446,11 @@ async function updateContainerJobTransaction(id, form) {
     const nextCommissionDriverSnapshot = existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
       ? existing.rows[0].commission_driver_snapshot
       : (shouldCaptureCommissionDriver ? buildCommissionDriverSnapshot(nextAssignmentSnapshot) : {});
-    const completedAtForUpdate = nextStatus === 'completed' ? form.completedAt || new Date().toISOString() : null;
+    const completedAtForUpdate = documentOnlyUpdate
+      ? existing.rows[0].completed_at
+      : nextStatus === 'completed'
+        ? form.completedAt || new Date().toISOString()
+        : null;
     const shouldRefreshCommissionLock = nextStatus === 'completed'
       && nextHasDriverCommission
       && nextDriverCommissionAmount > 0
@@ -2610,7 +2634,10 @@ async function updateContainerJobTransaction(id, form) {
     }
 
     const updateWarnings = [];
-    if (nextStatus === 'cancelled') {
+    if (documentOnlyUpdate) {
+      // Document-only users (Sales) may complete missing/customer documents without changing
+      // operational status, assignment, timeline, auto UJ, or resource availability.
+    } else if (nextStatus === 'cancelled') {
       await voidAutoJourneyMoneyExpense(client, id, actorName);
     } else {
       const autoUjWarning = await syncAutoJourneyMoneyExpense(client, {
@@ -2626,10 +2653,12 @@ async function updateContainerJobTransaction(id, form) {
       if (autoUjWarning) updateWarnings.push(autoUjWarning);
     }
 
-    await syncResourceAssignmentStatus(client, existing.rows[0], {
-      driverId: nextDriverId,
-      vehicleId: nextVehicleId,
-    }, nextStatus, nextEntrySource);
+    if (!documentOnlyUpdate) {
+      await syncResourceAssignmentStatus(client, existing.rows[0], {
+        driverId: nextDriverId,
+        vehicleId: nextVehicleId,
+      }, nextStatus, nextEntrySource);
+    }
     await refreshOrderStatus(client, existing.rows[0].sales_order_id);
     const updated = await client.query(
       `
