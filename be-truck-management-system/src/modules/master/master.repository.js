@@ -343,6 +343,42 @@ export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
   });
 }
 
+// Diagnostik saja -- vehicles.container_size adalah field legacy yang tidak lagi jadi sumber utama
+// tampilan operasional (lihat updateVehicleChassis di atas), tapi tetap berguna untuk admin melihat
+// truck mana yang datanya "menganggur" tidak sinkron dengan chassis yang sebenarnya terpasang, supaya
+// bisa dirapikan manual lewat form Master Truck kalau perlu. Hasil query ini TIDAK memengaruhi
+// tampilan operasional mana pun (Master Truck, Assignment Armada, Dashboard, Laporan Utilisasi).
+export async function findVehicleChassisSizeMismatches() {
+  const result = await query(
+    `
+      select
+        v.id,
+        v.unit_code,
+        v.plate_number,
+        v.container_size as vehicle_container_size,
+        kc.id as chassis_id,
+        kc.chassis_code,
+        kc.container_size as chassis_container_size
+      from vehicles v
+      join kir_chassis kc on kc.id = v.current_chassis_id
+      where v.archived_at is null
+        and kc.archived_at is null
+        and v.container_size is distinct from kc.container_size
+      order by v.unit_code asc, v.plate_number asc
+    `,
+  );
+
+  return result.rows.map((row) => ({
+    vehicleId: row.id,
+    unitCode: row.unit_code,
+    plateNumber: row.plate_number,
+    vehicleContainerSize: row.vehicle_container_size,
+    chassisId: row.chassis_id,
+    chassisCode: row.chassis_code,
+    chassisContainerSize: row.chassis_container_size,
+  }));
+}
+
 export async function archiveMasterRow(resource, id) {
   const config = getResourceConfig(resource);
   const result = await query(

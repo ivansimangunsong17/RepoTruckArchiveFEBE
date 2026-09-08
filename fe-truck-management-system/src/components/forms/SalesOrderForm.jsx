@@ -695,7 +695,7 @@ function SalesOrderForm({
         <header>
           <div>
             <p className="eyebrow">{editing ? 'Edit Sales' : 'Input Sales'}</p>
-            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber || 'Order Tanpa Nomor Internal'}` : 'Sales Order Baru'}</h2>
+            <h2 id="sales-order-title">{editing ? `Edit ${order.soNumber || order.doNumber || 'Order'}` : 'Sales Order Baru'}</h2>
             <span>Lengkapi customer, rincian order, dan dokumen referensi.</span>
           </div>
 
@@ -797,18 +797,18 @@ function SalesOrderForm({
             <p className="section-helper-text">
               {historicalMode
                 ? 'Nomor SO lama boleh langsung diisi Admin sesuai data arsip.'
-                : 'Nomor SO internal dibuat otomatis saat order disimpan.'}
+                : 'Nomor SO Finance akan diisi oleh Finance setelah order dicek.'}
             </p>
 
             <div className="order-form-grid">
               {editing || historicalMode ? (
                 <label>
-                  No. Sales Order
+                  {historicalMode ? 'No. Sales Order Arsip' : 'No. SO Finance'}
                   <input
                     name="soNumber"
-                    value={historicalMode ? form.soNumber : form.soNumber || 'Otomatis dibuat sistem'}
+                    value={historicalMode ? form.soNumber : form.soNumber || 'Menunggu Finance'}
                     onChange={historicalMode ? updateField : undefined}
-                    placeholder={historicalMode ? 'SO-ARM-000' : undefined}
+                    placeholder={historicalMode ? '26/080/ARM/00054' : undefined}
                     readOnly={!historicalMode}
                   />
                 </label>

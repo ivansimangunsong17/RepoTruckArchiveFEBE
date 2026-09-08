@@ -6,7 +6,9 @@ process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters'
 const {
   adminCorrectionChanges,
   adminCorrectionMetadata,
+  assertDocumentOnlyPayload,
   isAdminCorrectionPayload,
+  isDocumentOnlyActor,
 } = await import('./container-jobs.controller.js');
 
 test('mengenali payload koreksi admin', () => {
@@ -64,4 +66,35 @@ test('audit koreksi admin hanya mencatat field penting yang berubah', () => {
       },
     ],
   );
+});
+
+test('sales dengan akses dokumen hanya boleh mengirim payload dokumen operational', () => {
+  const salesActor = { role: 'sales' };
+  assert.equal(isDocumentOnlyActor(salesActor), true);
+
+  assert.doesNotThrow(() => assertDocumentOnlyPayload(salesActor, {
+    updatedBy: 'Sales A',
+    eirNumber: 'EIR-001',
+    eirDocument: { name: 'eir.pdf' },
+    loadingVoucher: 'BM-001',
+    otherDocuments: [{ name: 'Foto bongkar', file: { name: 'foto.jpg' } }],
+  }));
+
+  assert.throws(
+    () => assertDocumentOnlyPayload(salesActor, {
+      updatedBy: 'Sales A',
+      status: 'completed',
+      plateNumber: 'B 1000 AA',
+    }),
+    /hanya boleh mengubah dokumen/i,
+  );
+});
+
+test('operational tetap bukan mode dokumen saja karena punya akses update job penuh', () => {
+  const operationalActor = { role: 'operational' };
+  assert.equal(isDocumentOnlyActor(operationalActor), false);
+  assert.doesNotThrow(() => assertDocumentOnlyPayload(operationalActor, {
+    status: 'running',
+    plateNumber: 'B 1000 AA',
+  }));
 });

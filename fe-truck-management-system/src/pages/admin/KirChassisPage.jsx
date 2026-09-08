@@ -19,10 +19,21 @@ function getChassisCandidates(row = {}) {
     .map(normalizeName);
 }
 
-function findConnectedTruck(chassis, trucks = []) {
+export function findConnectedTruck(chassis, trucks = []) {
+  const list = trucks || [];
+
+  // Kode chassis adalah identitas resmi yang ditulis updateVehicleChassis() ke kir_chassis_number
+  // truck -- dicek lebih dulu secara eksklusif supaya chassis ini tidak "mengklaim" truck yang
+  // sebenarnya terpasang ke chassis LAIN, hanya karena nomor KIR/plat chassis ini kebetulan sama
+  // teksnya dengan kode chassis lain (data legacy).
+  const normalizedCode = normalizeName(chassis?.chassisCode);
+  if (normalizedCode) {
+    return list.find((truck) => normalizeName(truck.kirChassisNumber) === normalizedCode) || null;
+  }
+
   const candidates = getChassisCandidates(chassis);
   if (!candidates.length) return null;
-  return (trucks || []).find((truck) => candidates.includes(normalizeName(truck.kirChassisNumber))) || null;
+  return list.find((truck) => candidates.includes(normalizeName(truck.kirChassisNumber))) || null;
 }
 
 function ConnectedTruckPlate({ row, trucks }) {

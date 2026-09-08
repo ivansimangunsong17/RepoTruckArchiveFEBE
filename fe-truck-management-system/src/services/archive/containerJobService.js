@@ -169,6 +169,26 @@ export function voidDroppingExpense(id, expenseId, payload = {}) {
   });
 }
 
+export async function uploadUjTransferProof(id, expenseId, payload = {}) {
+  const proofFile = getRawFile(payload.proofFile);
+  if (!proofFile) {
+    throw new Error('Bukti transfer UJ wajib dipilih.');
+  }
+
+  const proofAttachment = await uploadAttachmentFile({
+    entityType: 'container_job',
+    entityId: id,
+    category: 'ujTransferProof',
+    file: proofFile,
+    notes: 'Bukti transfer UJ Perjalanan',
+    uploadedByName: payload.updatedBy || 'Operational',
+  });
+
+  return httpClient.patch(`/container-jobs/${id}/expenses/${expenseId}/uj-transfer-proof`, {
+    proofAttachmentId: proofAttachment?.id || proofAttachment?.path || null,
+  });
+}
+
 export async function uploadContainerJobExpenseProof(id, expenseId, payload = {}) {
   const proofFile = getRawFile(payload.proofFile);
   if (!proofFile) {

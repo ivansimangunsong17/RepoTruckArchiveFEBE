@@ -14,6 +14,7 @@ import {
   updateContainerJobExpenseProofRecord,
   updateContainerJob,
   updateDroppingExpenseBeforeFinanceCheckRecord,
+  uploadAutoJourneyMoneyProofRecord,
   voidDroppingExpenseBeforeFinanceCheckRecord,
 } from './container-jobs.repository.js';
 export { canOperationalEditDroppingTransaction } from './container-jobs.mapper.js';
@@ -714,6 +715,19 @@ export function moveDroppingExpenseToAnotherJobBeforeFinanceCheck(id, expenseId,
 export function voidDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {}, actor) {
   return voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, {
     voidReason: normalizeExpenseText(payload.voidReason || payload.reason, 'Alasan void', 500),
+    actorName: getActorName(actor),
+  });
+}
+
+export function uploadAutoJourneyMoneyProof(id, expenseId, payload = {}, actor) {
+  if (!payload.proofAttachmentId) {
+    const error = new Error('Bukti transfer UJ wajib diupload.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
+    throw error;
+  }
+  return uploadAutoJourneyMoneyProofRecord(id, expenseId, {
+    proofAttachmentId: payload.proofAttachmentId,
     actorName: getActorName(actor),
   });
 }

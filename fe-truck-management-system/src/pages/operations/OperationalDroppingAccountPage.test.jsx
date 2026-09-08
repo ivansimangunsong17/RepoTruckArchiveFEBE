@@ -11,6 +11,7 @@ import {
   moveDroppingExpense,
   updateDroppingExpense,
   uploadContainerJobExpenseProof,
+  uploadUjTransferProof,
   voidDroppingExpense,
 } from '../../services/archive/containerJobService';
 import { fetchOperationalFundBatches, fetchOperationalFundTransactions } from '../../services/finance/financeService';
@@ -39,6 +40,7 @@ vi.mock('../../services/archive/containerJobService', () => ({
   moveDroppingExpense: vi.fn(),
   updateDroppingExpense: vi.fn(),
   uploadContainerJobExpenseProof: vi.fn(),
+  uploadUjTransferProof: vi.fn(),
   voidDroppingExpense: vi.fn(),
 }));
 
@@ -210,6 +212,15 @@ describe('OperationalDroppingAccountPage', () => {
       amount: 125000,
       paymentStatus: 'batal',
       financeCheckStatus: 'belum_dicek',
+    });
+    uploadUjTransferProof.mockResolvedValue({
+      id: 'expense-uj-1',
+      containerJobId: 'job-1',
+      category: 'uj_awal',
+      amount: 75000,
+      paymentStatus: 'sudah_dibayar',
+      financeCheckStatus: 'sudah_dicek',
+      proofAttachment: { name: 'transfer-uj.pdf', path: 'attachment-uj-proof-1' },
     });
   });
 
@@ -484,5 +495,54 @@ describe('OperationalDroppingAccountPage', () => {
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /pindah ritasi/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^void$/i })).not.toBeInTheDocument();
+  });
+
+  it('menampilkan tombol upload bukti transfer untuk UJ Perjalanan otomatis yang belum ada buktinya', async () => {
+    const user = userEvent.setup();
+    fetchContainerJobExpenseLedger.mockResolvedValue({
+      rows: [
+        {
+          id: 'expense-uj-1',
+          jobId: 'job-1',
+          soNumber: 'SO-ARM-202608-0001',
+          containerNumber: 'CONT-001',
+          customer: 'PT Sumber Logistik',
+          destination: 'Cikarang',
+          driver: 'Andi Pratama',
+          plateNumber: 'B 1234 XYZ',
+          tripDate: '2026-08-20',
+          category: 'uj_awal',
+          amount: 75000,
+          description: 'UJ PT Sumber Logistik Cikarang 20FT B 1234 XYZ',
+          paymentStatus: 'sudah_dibayar',
+          financeCheckStatus: 'sudah_dicek',
+          proofAttachment: null,
+          createdAt: '2026-08-20T02:00:00.000Z',
+        },
+      ],
+      total: 1,
+      summary: { totalAmount: 75000, needProof: 0, needCorrection: 0, waitingFinance: 0, checked: 1 },
+    });
+
+    render(<OperationalDroppingAccountPage />);
+
+    await user.selectOptions(screen.getByLabelText('Filter status rekening dropping'), 'checked');
+    await screen.findByText('UJ PT Sumber Logistik Cikarang 20FT B 1234 XYZ');
+    expect(screen.getByText(/bukti transfer uj belum diupload/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /upload bukti transfer/i }));
+    const dialog = await screen.findByRole('dialog', { name: /upload bukti transfer uj/i });
+    const proofFile = new File(['proof'], 'transfer-uj.pdf', { type: 'application/pdf' });
+    await user.upload(within(dialog).getByLabelText(/pilih bukti/i), proofFile);
+    await user.click(within(dialog).getByRole('button', { name: /simpan bukti/i }));
+
+    await waitFor(() => {
+      expect(uploadUjTransferProof).toHaveBeenCalledWith('job-1', 'expense-uj-1', expect.objectContaining({
+        proofFile,
+        updatedBy: 'Fitri Operational',
+      }));
+    });
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Bukti transfer UJ tersimpan' }));
   });
 });

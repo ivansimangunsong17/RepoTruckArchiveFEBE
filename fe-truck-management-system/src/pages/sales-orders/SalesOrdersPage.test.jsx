@@ -328,7 +328,7 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(screen.getByRole('button', { name: /Hapus Sales Order/i })).toBeInTheDocument();
   });
 
-  it('tetap mengizinkan Sales mengedit order meski nomor SO internal sudah otomatis dibuat sistem', async () => {
+  it('tetap mengizinkan Sales mengedit order sebelum ada proses operational/finance lanjutan', async () => {
     const user = userEvent.setup();
     useAuth.mockReturnValue({
       user: { id: 'user-1', role: 'sales', fullName: 'Sales A' },

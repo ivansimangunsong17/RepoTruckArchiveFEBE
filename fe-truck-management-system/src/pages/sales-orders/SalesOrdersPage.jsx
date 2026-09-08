@@ -489,7 +489,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const selectedOrderLockedForSales = user?.role === USER_ROLES.SALES && !selectedOrder?.canRevise;
   const canRequestCancelContainer = user?.role === USER_ROLES.ADMIN
     || (user?.role === USER_ROLES.SALES && isSalesOrderOwner(user, selectedOrder) && !selectedOrderLockedForSales);
-  const canUpdateContainerJob = hasPermission(user, 'operations.update');
+  const canUpdateContainerJob = hasPermission(user, 'operations.update') || hasPermission(user, 'documents.operational.update');
   const activeJobsForContainerUpdate = useMemo(
     () => archive.orders.flatMap((order) => getOrderContainers(order)),
     [archive.orders],
@@ -740,9 +740,10 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       applyContainerUpdateToSelectedOrder(saved);
       setEditingContainer(null);
       archive.refresh?.();
+      const savedStatus = saved?.status || form.status || editingContainer.status;
       notify({
-        title: 'Proses Operational diperbarui',
-        message: `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
+        title: hasPermission(user, 'operations.update') ? 'Proses Operational diperbarui' : 'Dokumen operational diperbarui',
+        message: `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(savedStatus)}.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });

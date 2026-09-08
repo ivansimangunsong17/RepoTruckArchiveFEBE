@@ -232,6 +232,8 @@ test('auto UJ saat closing tidak menggagalkan ritasi jika batch rekening droppin
 
   assert.equal(result.code, 'AUTO_UJ_PENDING_FINANCE_REVIEW');
   assert.match(result.message, /belum masuk Catatan Saldo/);
+  const insertExpense = calls.find((call) => call.sql.includes('insert into container_job_expenses'));
+  assert.ok(insertExpense.sql.includes("'belum_dicek', null, null"));
   assert.equal(calls.some((call) => call.sql.includes('insert into operational_fund_transactions')), false);
   const reviewUpdate = calls.find((call) => call.sql.includes("set finance_check_status = 'perlu_klarifikasi'"));
   assert.ok(reviewUpdate);

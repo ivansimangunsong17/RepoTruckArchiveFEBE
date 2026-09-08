@@ -343,6 +343,36 @@ describe('OperationalForm', () => {
     expect(screen.getByText(/hanya dapat melengkapi data atau file yang masih kosong/i)).toBeInTheDocument();
   });
 
+  it('membatasi Sales ke mode dokumen operational saja', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, status: 'running', eirNumber: '', loadingVoucher: '' }}
+        currentUser={{ role: 'sales', fullName: 'Sales A' }}
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.queryByRole('tab', { name: /persiapan job/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Dokumen Operasional')).toBeInTheDocument();
+    expect(screen.getByLabelText('No. EIR')).toBeEnabled();
+    expect(screen.getByLabelText(/status pekerjaan/i)).toBeDisabled();
+
+    await user.type(screen.getByLabelText('No. EIR'), 'EIR-SALES-001');
+    await user.click(screen.getByRole('button', { name: /simpan container job - simpan dokumen/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      eirNumber: 'EIR-SALES-001',
+      updatedBy: 'Sales A',
+    }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('status');
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('plateNumber');
+  });
+
   it('memulai perjalanan secara eksplisit dari tahap closing ketika UJ dan SPK siap', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

@@ -72,8 +72,8 @@ const expensePaymentStatusLabels = {
 };
 
 const expenseFinanceStatusLabels = {
-  belum_dicek: 'Belum Dicek',
-  sudah_dicek: 'Sudah Dicek',
+  belum_dicek: 'Menunggu Validasi Finance',
+  sudah_dicek: 'Sudah Divalidasi',
   perlu_klarifikasi: 'Perlu Klarifikasi',
   dikoreksi: 'Dikoreksi',
 };

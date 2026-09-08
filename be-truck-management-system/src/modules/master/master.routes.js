@@ -6,6 +6,7 @@ import {
   getMasterViewerNoteController,
   listMasterController,
   listMasterPageController,
+  listVehicleChassisSizeMismatchesController,
   updateMasterViewerNoteController,
   updateMasterController,
   updateVehicleDefaultDriverController,
@@ -23,6 +24,14 @@ export const masterRoutes = [
     path: '/api/master/:resource/page',
     permission: 'master_data.read',
     handler: listMasterPageController,
+  },
+  {
+    // Path spesifik ini harus terdaftar SEBELUM GET /api/master/:resource/:id (di bawah) --
+    // kalau tidak, "chassis-size-mismatches" akan tertangkap sebagai :id di bawah resource "trucks".
+    method: 'GET',
+    path: '/api/master/trucks/chassis-size-mismatches',
+    permission: 'master_data.read',
+    handler: listVehicleChassisSizeMismatchesController,
   },
   {
     method: 'POST',

@@ -127,7 +127,7 @@ function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
     event.preventDefault();
     const soNumber = String(soModalValue || '').trim().toUpperCase();
     if (!soNumber) {
-      setSoModalError('Nomor SO Accurate wajib diisi.');
+      setSoModalError('Nomor SO Finance wajib diisi.');
       return;
     }
 
@@ -141,7 +141,7 @@ function useFinanceOrderVerification({ activeTab, query, initialOrderRows }) {
       setSoModalId('');
       setSoModalValue('');
     } catch (error) {
-      setSoModalError(error.message || 'Nomor SO Accurate gagal disimpan.');
+      setSoModalError(error.message || 'Nomor SO Finance gagal disimpan.');
     } finally {
       setSavingSoId('');
     }

@@ -557,16 +557,19 @@ function TruckTaxPaymentDate({ row }) {
   return <span className="master-plain-cell strong">{formatDisplayDate(row.taxPaymentDate)}</span>;
 }
 
-function getChassisRow(rows, chassisValue) {
+export function getChassisRow(rows, chassisValue) {
   if (!chassisValue) return null;
   const normalizedValue = String(chassisValue).trim().toLowerCase();
-  return (rows || []).find((row) => {
-    const candidates = [
-      row.id,
-      row.chassisCode,
-      row.kirNumber,
-      row.plateNumber,
-    ]
+  const list = rows || [];
+
+  // Kode chassis adalah identitas resmi yang ditulis updateVehicleChassis() ke kir_chassis_number
+  // truck -- dicek lebih dulu secara eksklusif supaya tidak salah tangkap chassis LAIN yang nomor
+  // KIR atau platnya kebetulan sama teksnya dengan kode chassis yang sedang dicari (data legacy).
+  const exactCodeMatch = list.find((row) => String(row.chassisCode || '').trim().toLowerCase() === normalizedValue);
+  if (exactCodeMatch) return exactCodeMatch;
+
+  return list.find((row) => {
+    const candidates = [row.id, row.kirNumber, row.plateNumber]
       .filter(Boolean)
       .map((value) => String(value).trim().toLowerCase());
 

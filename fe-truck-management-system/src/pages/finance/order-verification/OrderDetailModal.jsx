@@ -86,8 +86,8 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
           <div className="mt-2 grid gap-2 xl:grid-cols-[1fr_240px]">
             <DetailField label="Catatan Order" value={order.notes} />
             <div className="grid gap-2">
-              <DetailField label="Nomor SO Internal" value={order.internalSoNumber || '-'} />
-              <DetailField label="Nomor SO Accurate" value={order.soNumber || '-'} />
+              <DetailField label="Nomor Order" value={order.internalSoNumber || '-'} />
+              <DetailField label="Nomor SO Finance" value={order.soNumber || '-'} />
             </div>
           </div>
           {!isCancelled && order.soNumber ? (

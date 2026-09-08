@@ -76,7 +76,7 @@ export async function updateOrderVerificationSoNumberController(request, respons
     afterData: result,
     metadata: { soNumber: result.soNumber },
   });
-  sendSuccess(response, result, 'Nomor SO Accurate berhasil disimpan.');
+  sendSuccess(response, result, 'Nomor SO Finance berhasil disimpan.');
 }
 
 export async function rpujRequestsController(request, response) {

@@ -13,6 +13,7 @@ import {
   updateContainerJobController,
   updateContainerJobExpenseProofController,
   updateDroppingExpenseController,
+  uploadAutoJourneyMoneyProofController,
   voidDroppingExpenseController,
 } from './container-jobs.controller.js';
 
@@ -85,8 +86,14 @@ export const containerJobRoutes = [
   },
   {
     method: 'PATCH',
+    path: '/api/container-jobs/:id/expenses/:expenseId/uj-transfer-proof',
+    permission: 'container_job.update',
+    handler: uploadAutoJourneyMoneyProofController,
+  },
+  {
+    method: 'PATCH',
     path: '/api/container-jobs/:id',
-    permissions: ['container_job.update', 'container_job.update_status'],
+    permissions: ['container_job.update', 'container_job.update_status', 'container_job.document.update'],
     handler: updateContainerJobController,
   },
   {
@@ -122,7 +129,7 @@ export const containerJobRoutes = [
   {
     method: 'PUT',
     path: '/api/container-jobs/:id',
-    permissions: ['container_job.update', 'container_job.update_status'],
+    permissions: ['container_job.update', 'container_job.update_status', 'container_job.document.update'],
     handler: updateContainerJobController,
   },
 ];

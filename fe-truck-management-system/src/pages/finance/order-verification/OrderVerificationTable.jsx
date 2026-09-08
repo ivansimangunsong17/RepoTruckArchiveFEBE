@@ -149,10 +149,10 @@ function OrderVerificationTable({
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table finance-order-table min-w-[1320px]">
+        <table className="data-table master-table finance-master-table finance-order-table min-w-[1240px]">
           <thead>
             <tr>
-              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Customer', 'Alasan Batal', 'Nomor SO Internal', 'Nomor SO Accurate', 'Aksi'].map((column) => (
+              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Customer', 'Alasan Batal', 'Nomor Order', 'Nomor SO Finance', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -197,11 +197,11 @@ function OrderVerificationTable({
                           <span className="text-slate-300">-</span>
                         )}
                       </td>
-                      <td className="px-2 py-1" data-label="Nomor SO Internal">
+                      <td className="px-2 py-1" data-label="Nomor Order">
                         <span className="block text-[11px] font-black text-slate-900">{row.internalSoNumber || '-'}</span>
-                        <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Nomor kerja</span>
+                        <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Referensi sistem</span>
                       </td>
-                      <td className="px-2 py-1" data-label="Nomor SO Accurate">
+                      <td className="px-2 py-1" data-label="Nomor SO Finance">
                         {activeOrderTab === 'need-so' && !isCancelled ? (
                           <button
                             className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40"
@@ -219,7 +219,7 @@ function OrderVerificationTable({
                         ) : (
                           <div>
                             <span className="block text-[11px] font-black text-slate-900">{row.soNumber}</span>
-                            <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Nomor SO sudah terisi</span>
+                            <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Nomor SO Finance sudah terisi</span>
                           </div>
                         )}
                       </td>

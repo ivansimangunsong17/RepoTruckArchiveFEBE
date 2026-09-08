@@ -79,7 +79,7 @@ const orderRow = {
   destination: 'Cikarang',
   runningDate: '2026-07-20',
   verificationStatus: 'pending_so',
-  internalSoNumber: 'SO-ARM-202607-0001',
+  internalSoNumber: 'ORD-0001',
   soNumber: '',
   price: 2600000,
   totalAmount: 5200000,
@@ -98,7 +98,7 @@ const cancelledOrderRow = {
   status: 'SO Batal',
   verificationStatus: 'cancelled',
   operationalStatus: 'cancelled',
-  internalSoNumber: 'SO-ARM-202607-0002',
+  internalSoNumber: 'ORD-0002',
   soNumber: 'SO-CANCEL-001',
   cancelReason: 'Customer membatalkan pengiriman setelah nomor SO terbit.',
   cancelledAt: '2026-07-19T08:30:00.000Z',
@@ -365,7 +365,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     const orderRows = Array.from({ length: 20 }, (_, index) => ({
       ...orderRow,
       id: `order-${index + 1}`,
-      internalSoNumber: `SO-ARM-202608-${String(index + 1).padStart(4, '0')}`,
+      internalSoNumber: `ORD-${String(index + 1).padStart(4, '0')}`,
     }));
     fetchFinanceOrderVerifications.mockResolvedValue({
       rows: orderRows,
@@ -404,9 +404,11 @@ describe('FinanceWorkflowPage validation modals', () => {
 
     render(<FinanceWorkflowPage initialTabId="order-verification" />);
 
-    expect(await screen.findByRole('tab', { name: /Belum Ada Nomor SO/i })).toHaveTextContent('47');
-    expect(screen.getByRole('tab', { name: /SO Terisi/i })).toHaveTextContent('318');
-    expect(screen.getByRole('tab', { name: /SO Batal/i })).toHaveTextContent('9');
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: /Belum Ada Nomor SO/i })).toHaveTextContent('47');
+      expect(screen.getByRole('tab', { name: /SO Terisi/i })).toHaveTextContent('318');
+      expect(screen.getByRole('tab', { name: /SO Batal/i })).toHaveTextContent('9');
+    });
   });
 
   it('tidak menampilkan flow approval RPUJ legacy di Rekening Dropping Finance', async () => {
@@ -414,7 +416,7 @@ describe('FinanceWorkflowPage validation modals', () => {
 
     expect(await screen.findByText('Batch Dropping Harian')).toBeInTheDocument();
     expect(screen.getByText('Catatan Saldo')).toBeInTheDocument();
-    expect(screen.getByText('Perlu Dicek Finance')).toBeInTheDocument();
+    expect(screen.getByText('Antrian Validasi Finance')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Butuh Approval/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /Siap Transfer/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /UJ Dikirim/i })).not.toBeInTheDocument();
@@ -735,11 +737,11 @@ describe('FinanceWorkflowPage validation modals', () => {
 
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
-    expect(await screen.findByText('Perlu Dicek Finance')).toBeInTheDocument();
+    expect(await screen.findByText('Menunggu Validasi Finance')).toBeInTheDocument();
     expect(screen.getByText('Tol Cikampek')).toBeInTheDocument();
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole('button', { name: 'Dicek' }));
+    await user.click(screen.getByRole('button', { name: 'Validasi' }));
 
     expect(await screen.findByText('Validasi Cek Biaya Lapangan')).toBeInTheDocument();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
@@ -1111,8 +1113,8 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="order-verification" />);
 
     await user.click(await screen.findByRole('button', { name: 'Input Nomor SO' }));
-    expect(screen.getByRole('dialog')).toHaveTextContent('Input Nomor SO Accurate');
-    await user.type(screen.getByLabelText('Nomor SO Accurate'), 'so-202607-019');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Input Nomor SO Finance');
+    await user.type(screen.getByLabelText('Nomor SO Finance'), 'so-202607-019');
     await user.click(screen.getByRole('button', { name: 'Simpan Nomor SO' }));
 
     expect(updateFinanceOrderSoNumber).toHaveBeenCalledWith('order-1', 'SO-202607-019');

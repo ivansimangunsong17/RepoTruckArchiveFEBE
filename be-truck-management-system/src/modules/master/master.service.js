@@ -5,6 +5,7 @@ import {
   findMasterRowById,
   findMasterRows,
   findMasterViewerNotes,
+  findVehicleChassisSizeMismatches,
   updateVehicleChassis,
   updateVehicleDefaultDriver,
   upsertMasterRow,
@@ -149,6 +150,10 @@ export async function saveMasterRow(resource, payload, id) {
 
 export function removeMasterRow(resource, id) {
   return archiveMasterRow(resource, id);
+}
+
+export function listVehicleChassisSizeMismatches() {
+  return findVehicleChassisSizeMismatches();
 }
 
 // Aksi sadar terpisah dari edit master truck biasa -- Operational cuma boleh mengubah field ini

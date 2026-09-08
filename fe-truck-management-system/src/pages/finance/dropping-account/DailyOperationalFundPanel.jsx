@@ -70,10 +70,13 @@ function DailyOperationalFundPanel({
   };
   const normalizedExpenseSummary = {
     belumDicek: Number(expenseSummary.belumDicek || 0),
+    sudahDicek: Number(expenseSummary.sudahDicek || 0),
     perluKlarifikasi: Number(expenseSummary.perluKlarifikasi || 0),
     dikoreksi: Number(expenseSummary.dikoreksi || 0),
     pendingAmount: Number(expenseSummary.pendingAmount || 0),
   };
+  const expenseNeedProofCount = expenseRows.filter((row) => row.paymentStatus === 'sudah_dibayar' && !row.proofAttachment).length;
+  const expenseQueueCount = normalizedExpenseSummary.belumDicek + normalizedExpenseSummary.dikoreksi;
   const pendingFundRows = fundRows.filter((row) => row.status === 'submitted');
   const hasActionRows = pendingFundRows.length > 0 || expenseRows.length > 0;
   const normalizedBatch = { ...defaultOperationalFundBatch, ...batch };
@@ -283,10 +286,31 @@ function DailyOperationalFundPanel({
         <div className="border-t border-slate-100 px-4 py-3">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h4 className="text-xs font-black text-slate-950">Perlu Dicek Finance</h4>
-              <p className="mt-0.5 text-[11px] font-medium text-slate-500">Biaya dari Operational yang belum ditutup atau perlu klarifikasi.</p>
+              <h4 className="text-xs font-black text-slate-950">Antrian Validasi Finance</h4>
+              <p className="mt-0.5 text-[11px] font-medium text-slate-500">Cek bukti, nominal, dan catatan biaya sebelum batch dropping ditutup.</p>
             </div>
-            <StatusPill value={`${normalizedExpenseSummary.perluKlarifikasi} klarifikasi`} />
+            <div className="flex flex-wrap gap-1.5">
+              <StatusPill value={`${expenseQueueCount} menunggu`} />
+              <StatusPill value={`${normalizedExpenseSummary.perluKlarifikasi} klarifikasi`} />
+            </div>
+          </div>
+          <div className="mb-3 grid gap-2 md:grid-cols-4">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Menunggu Validasi</span>
+              <strong className="mt-1 block text-base font-black text-slate-950">{expenseQueueCount} transaksi</strong>
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-amber-700">Belum Ada Bukti</span>
+              <strong className="mt-1 block text-base font-black text-amber-900">{expenseNeedProofCount} transaksi</strong>
+            </div>
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-rose-700">Perlu Klarifikasi</span>
+              <strong className="mt-1 block text-base font-black text-rose-900">{normalizedExpenseSummary.perluKlarifikasi} transaksi</strong>
+            </div>
+            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2">
+              <span className="block text-[10px] font-black uppercase tracking-wide text-sky-700">Nominal Pending</span>
+              <strong className="mt-1 block text-base font-black text-sky-900">{formatCurrency(normalizedExpenseSummary.pendingAmount)}</strong>
+            </div>
           </div>
           {!expenseLoading && !expenseError && !expenseRows.length ? (
             <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold text-slate-500">
@@ -342,10 +366,17 @@ function DailyOperationalFundPanel({
                               file={row.proofAttachment}
                               label="Bukti"
                             />
+                          ) : row.paymentStatus === 'sudah_dibayar' ? (
+                            <span className="mt-1 inline-flex rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-black text-amber-800">
+                              Belum ada bukti
+                            </span>
                           ) : null}
                         </td>
                         <td className="px-3 py-2">
                           <StatusPill value={readableLabel(expenseFinanceStatusLabels, row.financeCheckStatus)} />
+                          {row.financeCheckStatus === 'belum_dicek' ? (
+                            <span className="mt-1 block text-[10px] font-semibold text-slate-500">Normal: menunggu Finance validasi.</span>
+                          ) : null}
                           {row.financeNote ? <span className="mt-1 line-clamp-2 block text-[10px] font-medium text-slate-500">{row.financeNote}</span> : null}
                         </td>
                         <td className="px-3 py-2">
@@ -356,7 +387,7 @@ function DailyOperationalFundPanel({
                               onClick={() => onOpenExpenseCheckConfirm(row.id)}
                               type="button"
                             >
-                              Dicek
+                              Validasi
                             </button>
                             <button
                               className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 bg-white px-2 text-[10px] font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40"

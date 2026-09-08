@@ -1,4 +1,5 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
+import { actorHasPermission } from '../../utils/permissions.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
   correctContainerJobExpense,
@@ -16,6 +17,7 @@ import {
   saveContainerJob,
   updateContainerJobExpenseProof,
   updateDroppingExpenseBeforeFinanceCheck,
+  uploadAutoJourneyMoneyProof,
   voidDroppingExpenseBeforeFinanceCheck,
 } from './container-jobs.service.js';
 
@@ -52,6 +54,40 @@ const adminCorrectionAuditFields = {
   tilaGatepassDocument: 'TILA/Gatepass',
   travelDocument: 'Surat Jalan',
 };
+
+const documentOnlyPayloadFields = new Set([
+  'updatedBy',
+  'eirNumber',
+  'eirDocument',
+  'repoEirNumber',
+  'repoEirDocument',
+  'loadingVoucher',
+  'loadingVoucherDocument',
+  'tilaGatepassDocument',
+  'tilaGatepassDocumentFile',
+  'travelDocument',
+  'travelDocumentFile',
+  'otherDocuments',
+]);
+
+export function isDocumentOnlyActor(actor) {
+  return actorHasPermission(actor, 'container_job.document.update')
+    && !actorHasPermission(actor, 'container_job.update')
+    && !actorHasPermission(actor, 'container_job.update_status')
+    && !actorHasPermission(actor, 'container_job.assign');
+}
+
+export function assertDocumentOnlyPayload(actor, payload = {}) {
+  if (!isDocumentOnlyActor(actor)) return;
+  const disallowedFields = Object.keys(payload || {}).filter((field) => !documentOnlyPayloadFields.has(field));
+  if (disallowedFields.length) {
+    const error = new Error('Akses ini hanya boleh mengubah dokumen operational.');
+    error.statusCode = 403;
+    error.code = 'CONTAINER_JOB_DOCUMENT_UPDATE_ONLY';
+    error.details = { disallowedFields };
+    throw error;
+  }
+}
 
 export function isAdminCorrectionPayload(payload = {}) {
   return payload.adminCorrectionMode === true || String(payload.adminCorrectionMode || '').toLowerCase() === 'true';
@@ -227,11 +263,30 @@ export async function voidDroppingExpenseController(request, response) {
   sendSuccess(response, result, 'Transaksi biaya berhasil dibatalkan.');
 }
 
+export async function uploadAutoJourneyMoneyProofController(request, response) {
+  const before = await getContainerJobExpense(request.params.expenseId);
+  const result = await uploadAutoJourneyMoneyProof(request.params.id, request.params.expenseId, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'OPERATIONAL_UPLOAD_UJ_TRANSFER_PROOF',
+    module: 'container_jobs',
+    entityType: 'container_job_expense',
+    entityId: request.params.expenseId,
+    beforeData: before,
+    afterData: result,
+    metadata: {
+      containerJobId: request.params.id,
+      proofAttachmentId: result.proofAttachmentId,
+    },
+  });
+  sendSuccess(response, result, 'Bukti transfer UJ berhasil diupload.');
+}
+
 export async function updateContainerJobController(request, response) {
   const before = await getContainerJob(request.params.id);
+  assertDocumentOnlyPayload(request.user, request.body);
   const saved = await saveContainerJob(request.params.id, request.body, request.user);
   await safeRecordActivityLog(request, {
-    action: 'UPDATE_CONTAINER_JOB',
+    action: isDocumentOnlyActor(request.user) ? 'UPDATE_CONTAINER_JOB_DOCUMENTS' : 'UPDATE_CONTAINER_JOB',
     module: 'container_jobs',
     entityType: 'container_job',
     entityId: saved.id,

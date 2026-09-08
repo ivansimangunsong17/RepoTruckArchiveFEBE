@@ -240,11 +240,13 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
   const parsedLineItems = parseLineItems(row.line_items);
   const lineItems = parsedLineItems.length ? parsedLineItems : fallbackLineItems(row);
 
+  const systemOrderNumber = getDisplayOrderNumber(row);
+
   return {
     id: row.id,
     customerId: row.customer_id,
-    soNumber: row.so_number,
-    internalSoNumber: row.so_number,
+    soNumber: row.accurate_so_number || '',
+    internalSoNumber: systemOrderNumber,
     accurateSoNumber: row.accurate_so_number || '',
     financeVerificationStatus: row.finance_verification_status || (row.accurate_so_number ? 'verified' : 'pending_so'),
     financeVerifiedBy: row.finance_verified_by_name || '',
@@ -329,6 +331,17 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
         && !String(row.invoice_number || '').trim(),
     referenceDocuments,
   };
+}
+
+function isGeneratedInternalSoNumber(value) {
+  return /^SO-ARM-\d{6}-\d{4}$/i.test(String(value || '').trim());
+}
+
+function getDisplayOrderNumber(row = {}) {
+  const rawNumber = String(row.order_number || row.internal_order_number || row.so_number || '').trim();
+  if (rawNumber && !isGeneratedInternalSoNumber(rawNumber)) return rawNumber;
+  const id = String(row.id || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  return id ? `ORD-${id.slice(0, 8)}` : '';
 }
 
 export function toSalesOrderDb(form, customer) {

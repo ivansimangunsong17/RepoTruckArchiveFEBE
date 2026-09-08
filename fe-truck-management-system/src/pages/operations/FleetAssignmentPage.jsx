@@ -346,6 +346,10 @@ function FleetAssignmentPage() {
 
   async function handleSaveDriver(payload) {
     const saved = await updateFleetDefaultDriver(changeDriverTarget.id, payload);
+    // Endpoint ini menulis ke vehicles lewat modul fleet-assignment, bukan lewat Master Truck --
+    // refresh archive supaya halaman lain yang baca archive.masters.trucks (mis. Daftar Truck)
+    // ikut lihat data terbaru tanpa perlu reload manual.
+    archive.refresh();
     notify({ title: 'Assignment armada diperbarui', message: 'Assignment armada diperbarui. Berlaku untuk ritasi baru berikutnya.' });
     setChangeDriverTarget(null);
     setListVersion((value) => value + 1);
@@ -354,6 +358,10 @@ function FleetAssignmentPage() {
 
   async function handleSaveChassis(payload) {
     const saved = await updateFleetChassis(moveChassisTarget.id, payload);
+    // Sama seperti handleSaveDriver -- updateVehicleChassis() menulis current_chassis_id,
+    // current_chassis_code, dan kir_chassis_number, tapi archive.masters.trucks yang dipakai
+    // Daftar Truck tidak ikut ter-update kalau tidak di-refresh eksplisit di sini.
+    archive.refresh();
     notify({ title: 'Assignment armada diperbarui', message: 'Assignment armada diperbarui. Berlaku untuk ritasi baru berikutnya.' });
     setMoveChassisTarget(null);
     setListVersion((value) => value + 1);

@@ -79,8 +79,8 @@ const EXPENSE_PAYMENT_STATUS_OPTIONS = [
   { value: 'dipakai_job_berikutnya', label: 'Dipakai Job Berikutnya' },
 ];
 const EXPENSE_FINANCE_STATUS_OPTIONS = [
-  { value: 'belum_dicek', label: 'Belum Dicek' },
-  { value: 'sudah_dicek', label: 'Sudah Dicek' },
+  { value: 'belum_dicek', label: 'Menunggu Validasi Finance' },
+  { value: 'sudah_dicek', label: 'Sudah Divalidasi' },
   { value: 'perlu_klarifikasi', label: 'Perlu Klarifikasi' },
   { value: 'dikoreksi', label: 'Dikoreksi' },
 ];

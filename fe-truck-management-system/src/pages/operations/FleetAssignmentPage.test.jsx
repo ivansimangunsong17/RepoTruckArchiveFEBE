@@ -48,12 +48,13 @@ const chassisList = [
 
 function setup({ role = 'operational' } = {}) {
   const notify = vi.fn();
+  const refresh = vi.fn();
   useAuth.mockReturnValue({ user: { id: 'user-1', role } });
   useFeedback.mockReturnValue({ notify });
-  useArchiveData.mockReturnValue({ masters: { drivers: driverList, trucks: [] } });
+  useArchiveData.mockReturnValue({ masters: { drivers: driverList, trucks: [] }, refresh });
   fetchMaster.mockResolvedValue(chassisList);
   fetchFleetAssignments.mockResolvedValue({ rows: [baseRow], driversOnActiveTrip: [] });
-  return { notify };
+  return { notify, refresh };
 }
 
 describe('FleetAssignmentPage', () => {
@@ -121,7 +122,7 @@ describe('FleetAssignmentPage', () => {
 
   it('modal ganti sopir bisa simpan tanpa alasan, catatan opsional terkirim jika diisi', async () => {
     const user = userEvent.setup();
-    const { notify } = setup();
+    const { notify, refresh } = setup();
     updateFleetDefaultDriver.mockResolvedValue({ id: 'vehicle-1', defaultDriverId: 'driver-new', defaultDriver: 'Sopir Baru' });
     render(<FleetAssignmentPage />);
 
@@ -142,6 +143,7 @@ describe('FleetAssignmentPage', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({
       message: expect.stringContaining('Berlaku untuk ritasi baru berikutnya'),
     }));
+    expect(refresh).toHaveBeenCalled();
   });
 
   it('menampilkan warning saat sopir yang dipilih sedang dipakai di ritasi berjalan', async () => {
@@ -160,7 +162,7 @@ describe('FleetAssignmentPage', () => {
 
   it('modal pindah chassis bisa simpan tanpa alasan', async () => {
     const user = userEvent.setup();
-    setup();
+    const { refresh } = setup();
     updateFleetChassis.mockResolvedValue({ id: 'vehicle-1', currentChassisId: 'chassis-new', currentChassisCode: 'CHS-NEW' });
     render(<FleetAssignmentPage />);
 
@@ -176,6 +178,7 @@ describe('FleetAssignmentPage', () => {
       chassisId: 'chassis-new',
       note: '',
     }));
+    expect(refresh).toHaveBeenCalled();
   });
 
   it('tombol Simpan tetap disabled sebelum sopir/chassis baru dipilih', async () => {

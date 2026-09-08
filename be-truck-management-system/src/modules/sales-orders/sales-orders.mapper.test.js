@@ -88,7 +88,7 @@ test('sales order mapper membaca dan menyimpan metadata input historis', () => {
   assert.equal(row.historical_notes, 'Input dari arsip Juli.');
 });
 
-test('sales order mapper memisahkan nomor internal dan nomor SO Accurate', () => {
+test('sales order mapper memisahkan nomor order sistem dan nomor SO Finance', () => {
   const pending = mapSalesOrder({
     id: 'order-auto-1',
     so_number: 'SO-ARM-202608-0001',
@@ -101,8 +101,8 @@ test('sales order mapper memisahkan nomor internal dan nomor SO Accurate', () =>
     total_amount: 0,
   });
 
-  assert.equal(pending.soNumber, 'SO-ARM-202608-0001');
-  assert.equal(pending.internalSoNumber, 'SO-ARM-202608-0001');
+  assert.equal(pending.soNumber, '');
+  assert.equal(pending.internalSoNumber, 'ORD-ORDERAUT');
   assert.equal(pending.accurateSoNumber, '');
   assert.equal(pending.financeVerificationStatus, 'pending_so');
 

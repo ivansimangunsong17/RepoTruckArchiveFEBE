@@ -91,6 +91,10 @@ function normalizeBooleanFlag(value) {
   return value === true || String(value || '').toLowerCase() === 'true' || value === '1';
 }
 
+function orderNumberSearchSql(alias = 'so') {
+  return `concat('ORD-', upper(left(regexp_replace(${alias}.id::text, '[^a-zA-Z0-9]', '', 'g'), 8)))`;
+}
+
 async function findExpenseRowsByJobId(executeQuery, id) {
   const result = await executeQuery(
     `
@@ -329,7 +333,6 @@ function buildJobWhere({
 } = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
-    "nullif(btrim(so.so_number), '') is not null",
   ];
   const params = [];
   const cleanKeyword = keyword.trim();
@@ -341,6 +344,7 @@ function buildJobWhere({
     clauses.push(`(
       so.so_number ilike $${params.length}
       or so.accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchSql('so')} ilike $${params.length}
       or so.do_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or cj.container_number ilike $${params.length}
@@ -562,11 +566,12 @@ async function refreshOrderStatus(client, salesOrderId) {
 }
 
 function ensureSalesOrderVerifiedForOperational(row) {
-  if (String(row?.so_number || '').trim()) return;
-  const error = new Error('Order belum memiliki Nomor SO internal. Operational baru bisa memproses setelah nomor kerja dibuat sistem.');
-  error.statusCode = 409;
-  error.code = 'SALES_ORDER_INTERNAL_SO_REQUIRED';
-  throw error;
+  if (!row) {
+    const error = new Error('Order tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'SALES_ORDER_NOT_FOUND';
+    throw error;
+  }
 }
 
 function normalizeRpujStatusForOperational(existing, nextStatus) {
@@ -820,7 +825,7 @@ export async function syncAutoJourneyMoneyExpense(client, {
         created_by_name,
         updated_by_name
       )
-      values ($1, $2, $3, 'uj_awal', 'operational', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'sudah_dicek', $8, now(), 'auto_uj_order', $9, $8, $8)
+      values ($1, $2, $3, 'uj_awal', 'operational', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'belum_dicek', null, null, 'auto_uj_order', $9, $8, $8)
       on conflict (source, source_ref_id)
         where source = 'auto_uj_order' and source_ref_id is not null
       do update set
@@ -833,9 +838,9 @@ export async function syncAutoJourneyMoneyExpense(client, {
         payment_status = 'sudah_dibayar',
         paid_at = excluded.paid_at,
         paid_by_name = excluded.paid_by_name,
-        finance_check_status = 'sudah_dicek',
-        finance_checked_by_name = excluded.finance_checked_by_name,
-        finance_checked_at = now(),
+        finance_check_status = 'belum_dicek',
+        finance_checked_by_name = null,
+        finance_checked_at = null,
         updated_by_name = excluded.updated_by_name,
         updated_at = now()
       returning id
@@ -1412,6 +1417,8 @@ export async function findContainerJobExpenseLedger(options = {}) {
     params.push(`%${options.query}%`);
     clauses.push(`(
       so.so_number ilike $${params.length}
+      or so.accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchSql('so')} ilike $${params.length}
       or cj.container_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or cj.destination ilike $${params.length}
@@ -1971,6 +1978,44 @@ export async function voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId,
           and status = 'posted'
       `,
       [payload.actorName || 'Operational', expenseId],
+    );
+
+    return getMappedExpenseById(client, expenseId);
+  });
+}
+
+export async function uploadAutoJourneyMoneyProofRecord(id, expenseId, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
+    if (existing.source !== 'auto_uj_order') {
+      const error = new Error('Bukti transfer ini hanya berlaku untuk transaksi UJ Perjalanan otomatis.');
+      error.statusCode = 409;
+      error.code = 'CONTAINER_JOB_EXPENSE_NOT_AUTO_UJ';
+      throw error;
+    }
+    ensureExpenseNotVoid(existing);
+
+    await client.query(
+      `
+        update container_job_expenses
+        set proof_attachment_id = $1,
+            updated_by_name = $2,
+            updated_at = now()
+        where id = $3
+      `,
+      [payload.proofAttachmentId, payload.actorName || 'Operational', expenseId],
+    );
+    await client.query(
+      `
+        update operational_fund_transactions
+        set proof_attachment_id = $1,
+            updated_by_name = $2,
+            updated_at = now()
+        where container_job_expense_id = $3
+          and transaction_type = 'debit'
+          and status = 'posted'
+      `,
+      [payload.proofAttachmentId, payload.actorName || 'Operational', expenseId],
     );
 
     return getMappedExpenseById(client, expenseId);

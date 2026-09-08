@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, Eye, X } from 'lucide-react';
 import { createAttachmentDownloadUrl, downloadAttachmentFile } from '../../services/files/fileService';
 
@@ -78,35 +79,37 @@ function DocumentLink({ file, className = 'document-link', download = false, lab
     }
   }
 
+  const previewModal = preview ? (
+    <div className="document-preview-backdrop" role="presentation" onMouseDown={() => setPreview(null)}>
+      <section className="document-preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${preview.fileName}`} onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <span>Preview Dokumen</span>
+            <h2>{preview.fileName}</h2>
+          </div>
+          <button type="button" aria-label="Tutup preview dokumen" onClick={() => setPreview(null)}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="document-preview-body">
+          {preview.isImage ? (
+            <div className="document-preview-image-scroll">
+              <img src={preview.url} alt={preview.fileName} />
+            </div>
+          ) : (
+            <iframe title={preview.fileName} src={preview.url} />
+          )}
+        </div>
+      </section>
+    </div>
+  ) : null;
+
   return (
     <>
       <button aria-label={accessibleLabel} className={className} type="button" onClick={openDocument} disabled={!file.path && !file.url && !file.dataUrl && !file.rawFile && !(file instanceof File)} title={accessibleLabel}>
         <ActionIcon size={14} /> {iconOnly ? null : label || fileName}
       </button>
-      {preview ? (
-        <div className="document-preview-backdrop" role="presentation" onMouseDown={() => setPreview(null)}>
-          <section className="document-preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${preview.fileName}`} onMouseDown={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <span>Preview Dokumen</span>
-                <h2>{preview.fileName}</h2>
-              </div>
-              <button type="button" aria-label="Tutup preview dokumen" onClick={() => setPreview(null)}>
-                <X size={18} />
-              </button>
-            </header>
-            <div className="document-preview-body">
-              {preview.isImage ? (
-                <div className="document-preview-image-scroll">
-                  <img src={preview.url} alt={preview.fileName} />
-                </div>
-              ) : (
-                <iframe title={preview.fileName} src={preview.url} />
-              )}
-            </div>
-          </section>
-        </div>
-      ) : null}
+      {previewModal ? createPortal(previewModal, document.body) : null}
     </>
   );
 }

@@ -37,8 +37,8 @@ const financeTabs = [
     label: 'Verifikasi Order',
     icon: CheckCircle2,
     badge: 'Sales Order',
-    description: 'Lihat request order yang akan dijalankan, lalu input Nomor SO resmi dari Accurate agar bisa dicari dan diproses.',
-    statusFlow: ['Request Order Masuk', 'Input Nomor SO Accurate', 'Siap Diproses Operational'],
+    description: 'Lihat request order yang akan dijalankan, lalu input Nomor SO Finance agar bisa dicari dan diproses.',
+    statusFlow: ['Request Order Masuk', 'Input Nomor SO Finance', 'Siap Diproses Operational'],
   },
   {
     id: 'rpuj-approval',
@@ -76,7 +76,7 @@ const initialOrderRows = [
     depo: 'MTCON',
     document: 'DO-DPW-1607.pdf',
     notes: 'Prioritas jalan besok pagi. Customer minta update setelah keluar terminal.',
-    status: 'Menunggu No. SO Accurate',
+    status: 'Menunggu No. SO Finance',
     soNumber: '',
   },
   {
@@ -116,7 +116,7 @@ const initialOrderRows = [
     depo: 'MTCON',
     document: '-',
     notes: 'Menunggu konfirmasi final DO dari customer.',
-    status: 'Menunggu No. SO Accurate',
+    status: 'Menunggu No. SO Finance',
     soNumber: '',
   },
 ];

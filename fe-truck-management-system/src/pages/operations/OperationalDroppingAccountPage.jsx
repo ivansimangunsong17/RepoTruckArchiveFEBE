@@ -16,6 +16,7 @@ import {
   moveDroppingExpense,
   updateDroppingExpense,
   uploadContainerJobExpenseProof,
+  uploadUjTransferProof,
   voidDroppingExpense,
 } from '../../services/archive/containerJobService';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -43,8 +44,8 @@ const paymentStatusLabels = {
 };
 
 const financeStatusLabels = {
-  belum_dicek: 'Belum Dicek',
-  sudah_dicek: 'Sudah Dicek',
+  belum_dicek: 'Menunggu Validasi Finance',
+  sudah_dicek: 'Sudah Divalidasi',
   perlu_klarifikasi: 'Perlu Klarifikasi',
   dikoreksi: 'Dikoreksi',
 };
@@ -116,7 +117,7 @@ const filterOptions = [
   { value: 'need_proof', label: 'Belum Ada Bukti' },
   { value: 'need_correction', label: 'Perlu Koreksi' },
   { value: 'waiting_finance', label: 'Menunggu Finance' },
-  { value: 'checked', label: 'Sudah Dicek' },
+  { value: 'checked', label: 'Sudah Divalidasi' },
 ];
 
 function ModalPortal({ children }) {
@@ -327,7 +328,7 @@ function EditDroppingExpenseModal({ expense, onClose, onSave }) {
               <div>
                 <span>{expense.soNumber}</span>
                 <h2>Edit Transaksi</h2>
-                <p>{expense.containerNumber} - Belum Dicek Finance, masih bisa diperbaiki sendiri.</p>
+                <p>{expense.containerNumber} - Menunggu validasi Finance, masih bisa diperbaiki sendiri.</p>
               </div>
               <button className="modal-close-button" type="button" aria-label="Tutup edit transaksi" onClick={onClose} disabled={saving}>
                 <X size={17} />
@@ -619,6 +620,8 @@ function OperationalDroppingAccountPage() {
   const [editExpenseTarget, setEditExpenseTarget] = useState(null);
   const [moveExpenseTarget, setMoveExpenseTarget] = useState(null);
   const [voidExpenseTarget, setVoidExpenseTarget] = useState(null);
+  const [ujProofTarget, setUjProofTarget] = useState(null);
+  const [ujProofFile, setUjProofFile] = useState(null);
   const [addExpenseOpen, setAddExpenseOpen] = useState(false);
   const [addExpenseValidationOpen, setAddExpenseValidationOpen] = useState(false);
   const [jobOptions, setJobOptions] = useState([]);
@@ -886,6 +889,12 @@ function OperationalDroppingAccountPage() {
     setVoidExpenseTarget(row);
   }
 
+  function openUjProof(row) {
+    setUjProofTarget(row);
+    setUjProofFile(null);
+    setFileError('');
+  }
+
   function openAddExpense() {
     if (batchStatus === 'closed') {
       setFileError('Batch rekening dropping tanggal ini sudah ditutup.');
@@ -1064,6 +1073,33 @@ function OperationalDroppingAccountPage() {
     notify?.({ title: 'Transaksi dibatalkan', message: `${voidExpenseTarget.soNumber} - ${voidExpenseTarget.containerNumber}` });
   }
 
+  async function submitUjProof(event) {
+    event.preventDefault();
+    if (!ujProofTarget || saving) return;
+    if (!ujProofFile) {
+      setFileError('Bukti transfer UJ wajib dipilih.');
+      return;
+    }
+
+    setSaving(true);
+    setFileError('');
+    try {
+      const actorName = user?.fullName || user?.name || user?.email || 'Operational';
+      const saved = await uploadUjTransferProof(ujProofTarget.jobId, actionExpenseId(ujProofTarget), {
+        proofFile: ujProofFile,
+        updatedBy: actorName,
+      });
+      updateExpenseRow(ujProofTarget, saved);
+      setUjProofTarget(null);
+      setRefreshVersion((value) => value + 1);
+      notify?.({ title: 'Bukti transfer UJ tersimpan', message: `${ujProofTarget.soNumber} - ${ujProofTarget.containerNumber}` });
+    } catch (submitError) {
+      setFileError(submitError.message || 'Bukti transfer UJ gagal diupload.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function submitAddExpense(event) {
     event.preventDefault();
     if (saving) return;
@@ -1143,10 +1179,12 @@ function OperationalDroppingAccountPage() {
         )}
       />
 
-      <section className="grid gap-3 md:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
         <MetricCard icon={Banknote} label="Saldo Aktif" value={formatCurrency(summary.balance)} helper={`${totalRows} mutasi`} tone="text-emerald-700" />
         <MetricCard icon={ArrowDownLeft} label="Uang Masuk" value={formatCurrency(summary.moneyIn)} helper="Dropping dari Finance" />
         <MetricCard icon={ArrowUpRight} label="Uang Keluar" value={formatCurrency(summary.moneyOut)} helper="UJ dan biaya lapangan" />
+        <MetricCard icon={FileUp} label="Belum Ada Bukti" value={`${expenseSummary.needProof || 0} transaksi`} helper="Upload bukti jika uang sudah keluar" tone="text-amber-700" />
+        <MetricCard icon={CheckCircle2} label="Validasi Finance" value={`${expenseSummary.waitingFinance || 0} menunggu`} helper={`${expenseSummary.needCorrection || 0} perlu klarifikasi`} tone="text-sky-700" />
       </section>
 
       {batchDate === todayDate && pendingCloseBatches.length ? (
@@ -1247,6 +1285,7 @@ function OperationalDroppingAccountPage() {
                   const isVoided = row.paymentStatus === 'batal';
                   const hasExpenseAction = Boolean(row.jobId && actionExpenseId(row));
                   const canOperationalEdit = hasExpenseAction && Boolean(row.canEdit) && batchStatus === 'open' && !isVoided;
+                  const needsUjTransferProof = hasExpenseAction && row.category === 'uj_awal' && !row.proofAttachment && !isVoided;
                   const secondaryInfo = [row.soNumber, row.containerNumber !== '-' ? row.containerNumber : '', row.driverName || row.driver || '', row.customerName || row.customer || '']
                     .filter(Boolean)
                     .filter((value) => value !== '-')
@@ -1269,7 +1308,10 @@ function OperationalDroppingAccountPage() {
                           </span>
                         ) : <span className="text-slate-300">-</span>}
                         {canOperationalEdit ? (
-                          <span className="mt-1 block text-[10px] font-medium normal-case text-slate-400">Belum Dicek Finance, masih bisa diperbaiki.</span>
+                          <span className="mt-1 block text-[10px] font-medium normal-case text-slate-400">Menunggu validasi Finance, masih bisa diperbaiki.</span>
+                        ) : null}
+                        {needsUjTransferProof ? (
+                          <span className="mt-1 block text-[10px] font-medium normal-case text-amber-600">Bukti transfer UJ belum diupload.</span>
                         ) : null}
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-700">{row.moneyIn ? formatCurrency(row.moneyIn) : <span className="text-slate-300">-</span>}</td>
@@ -1302,6 +1344,11 @@ function OperationalDroppingAccountPage() {
                           {canOperationalEdit ? (
                             <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-600 hover:bg-rose-50" type="button" onClick={() => openVoidExpense(row)}>
                               <Ban size={13} /> Void
+                            </button>
+                          ) : null}
+                          {needsUjTransferProof ? (
+                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100" type="button" onClick={() => openUjProof(row)}>
+                              <FileUp size={13} /> Upload Bukti Transfer
                             </button>
                           ) : null}
                           {hasExpenseAction && row.financeCheckStatus === 'perlu_klarifikasi' ? (
@@ -1398,6 +1445,50 @@ function OperationalDroppingAccountPage() {
           onClose={() => setVoidExpenseTarget(null)}
           onSave={submitVoidExpense}
         />
+      ) : null}
+
+      {ujProofTarget ? (
+        <ModalPortal>
+        <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) setUjProofTarget(null); }}>
+          <section className="master-modal max-w-2xl" role="dialog" aria-modal="true" aria-label="Upload bukti transfer UJ" onMouseDown={(event) => event.stopPropagation()}>
+            <form className="master-form" onSubmit={submitUjProof}>
+              <div className="master-form-heading">
+                <div>
+                  <span>{ujProofTarget.soNumber}</span>
+                  <h2>Upload Bukti Transfer UJ</h2>
+                  <p>{ujProofTarget.containerNumber} - UJ Perjalanan {formatCurrency(ujProofTarget.amount)} ke {ujProofTarget.driverName || ujProofTarget.driver || 'driver'}.</p>
+                </div>
+                <button className="modal-close-button" type="button" aria-label="Tutup upload bukti transfer UJ" onClick={() => setUjProofTarget(null)} disabled={saving}>
+                  <X size={17} />
+                </button>
+              </div>
+              <div className="master-form-sections">
+                <AttachmentUploadField
+                  helper="PDF, JPG, PNG"
+                  id="uj-transfer-proof"
+                  label="Bukti Transfer UJ"
+                  onClear={() => setUjProofFile(null)}
+                  onSelect={(file, validationError) => {
+                    if (validationError) {
+                      setFileError(validationError);
+                      return;
+                    }
+                    setUjProofFile(file);
+                    setFileError('');
+                  }}
+                  title={ujProofFile?.name ? 'Ganti Bukti' : 'Pilih Bukti'}
+                  value={ujProofFile}
+                />
+                {fileError ? <div className="alert error">{fileError}</div> : null}
+              </div>
+              <div className="master-form-actions">
+                <button className="secondary-button" type="button" onClick={() => setUjProofTarget(null)} disabled={saving}>Batal</button>
+                <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Menyimpan...' : 'Simpan Bukti'}</button>
+              </div>
+            </form>
+          </section>
+        </div>
+        </ModalPortal>
       ) : null}
 
       {addExpenseOpen && !addExpenseValidationOpen ? (

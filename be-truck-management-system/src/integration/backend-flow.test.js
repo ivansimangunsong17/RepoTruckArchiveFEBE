@@ -518,8 +518,8 @@ if (!hasDatabase) {
         body: salesOrderPayload(),
       });
       assert.equal(createdOrder.status, 201);
-      assert.match(createdOrder.body.data.soNumber, /^SO-ARM-\d{6}-\d{4}$/);
-      assert.equal(createdOrder.body.data.internalSoNumber, createdOrder.body.data.soNumber);
+      assert.equal(createdOrder.body.data.soNumber, '');
+      assert.match(createdOrder.body.data.internalSoNumber, /^ORD-[A-Z0-9]{8}$/);
       assert.equal(createdOrder.body.data.accurateSoNumber, '');
       assert.equal(createdOrder.body.data.financeVerificationStatus, 'pending_so');
       assert.equal(createdOrder.body.data.billingStatus, 'belum_invoice');
@@ -529,7 +529,7 @@ if (!hasDatabase) {
       assert.equal(createdOrder.body.data.containers.length, 1);
       created.orderId = createdOrder.body.data.id;
       created.jobId = createdOrder.body.data.containers[0].id;
-      created.internalSoNumber = createdOrder.body.data.soNumber;
+      created.internalSoNumber = createdOrder.body.data.internalSoNumber;
 
       const visibleFromOperational = await api(`/api/container-jobs?query=${encodeURIComponent(created.internalSoNumber)}`, { token: adminToken });
       assert.equal(visibleFromOperational.status, 200);
@@ -5424,9 +5424,9 @@ if (!hasDatabase) {
           `
             insert into container_jobs (
               sales_order_id, container_number, container_size, status, completed_at,
-              has_driver_commission, driver_commission_amount, assignment_snapshot, destination
+              has_driver_commission, driver_commission_amount, assignment_snapshot, destination, commission_status
             )
-            values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 50000, $4::jsonb, $5)
+            values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 50000, $4::jsonb, $5, 'with_commission')
           `,
           [
             fewTripsSalesOrderId,
@@ -6184,9 +6184,9 @@ if (!hasDatabase) {
         `
           insert into container_jobs (
             sales_order_id, container_number, container_size, status, completed_at,
-            has_driver_commission, driver_commission_amount, driver_id, assignment_snapshot, destination
+            has_driver_commission, driver_commission_amount, driver_id, assignment_snapshot, destination, commission_status
           )
-          values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 65000, $4, $5::jsonb, 'Cikarang')
+          values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 65000, $4, $5::jsonb, 'Cikarang', 'with_commission')
         `,
         [
           dcOrderId,
@@ -6907,6 +6907,271 @@ if (!hasDatabase) {
         [jobId],
       );
       assert.equal(ledgerRows.rows.length, 0, 'tidak boleh ada baris ledger posted baru karena batch sudah closed');
+    });
+
+    await t.test('rekening dropping: Operational bisa upload bukti transfer untuk UJ Perjalanan otomatis', async () => {
+      const batchDate = '2099-03-22';
+      await resetOperationalFundBatch(batchDate);
+
+      const deposit = await api('/api/finance/operational-fund-deposits', {
+        method: 'POST',
+        token: financeToken,
+        body: {
+          requestDate: batchDate,
+          amount: 200000,
+          purpose: `Deposit test bukti transfer UJ ${runId}`,
+          fileName: `deposit-ujproof-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% deposit uj proof ${runId}\n`).toString('base64'),
+        },
+      });
+      assert.equal(deposit.status, 200);
+
+      const soNumber = `SO-UJTRANSFERPROOF-${runId}`;
+      const order = await api('/api/sales-orders', { method: 'POST', token: salesToken, body: salesOrderPayload({ soNumber }) });
+      assert.equal(order.status, 201);
+      const jobId = order.body.data.containers[0].id;
+      await query('update container_jobs set uj_amount_snapshot = $2 where id = $1', [jobId, 75000]);
+
+      const containerNumber = `${soNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`;
+      const running = await api(`/api/container-jobs/${jobId}/status`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: {
+          containerNumber,
+          driver: `Driver UJProof ${runId}`,
+          plateNumber: `B-${String(runId).slice(-4)}-UP`,
+          status: 'running',
+          runningAt: `${batchDate}T08:00:00.000Z`,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(running.status, 200, JSON.stringify(running.body));
+
+      const autoExpenseId = (await query(
+        `select id, proof_attachment_id from container_job_expenses where container_job_id = $1 and source = 'auto_uj_order'`,
+        [jobId],
+      )).rows[0];
+      assert.ok(autoExpenseId, 'UJ otomatis harus tercatat saat job jalan');
+      assert.equal(autoExpenseId.proof_attachment_id, null, 'UJ otomatis belum ada bukti transfer saat baru dibuat');
+
+      // Endpoint bukti transfer UJ menolak kalau dipakai untuk expense manual (bukan auto_uj_order).
+      const manualProofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: jobId,
+          category: 'expenseProof',
+          fileName: `expense-proof-ujtest-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% expense proof uj test ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(manualProofUpload.status, 201);
+      const manualExpense = await api(`/api/container-jobs/${jobId}/expenses`, {
+        method: 'POST',
+        token: operationalToken,
+        body: {
+          category: 'tol',
+          expenseGroup: 'operational',
+          amount: 20000,
+          description: `Tol test uj proof ${runId}`,
+          recipientType: 'vendor',
+          recipientName: 'Vendor Test',
+          paymentStatus: 'sudah_dibayar',
+          paidAt: `${batchDate}T08:00:00.000Z`,
+          proofAttachmentId: manualProofUpload.body.data.id,
+          updatedBy: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(manualExpense.status, 200);
+      const rejectedForManual = await api(`/api/container-jobs/${jobId}/expenses/${manualExpense.body.data.id}/uj-transfer-proof`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { proofAttachmentId: manualProofUpload.body.data.id },
+      });
+      assert.equal(rejectedForManual.status, 409);
+      assert.equal(rejectedForManual.body.error.code, 'CONTAINER_JOB_EXPENSE_NOT_AUTO_UJ');
+
+      // Upload bukti transfer untuk UJ otomatis hanya menyimpan file bukti.
+      // Validasi Finance tetap proses terpisah, jadi status cek tetap belum_dicek.
+      const ujTransferProofUpload = await api('/api/attachments/upload', {
+        method: 'POST',
+        token: adminToken,
+        body: {
+          entityType: 'container_job',
+          entityId: jobId,
+          category: 'ujTransferProof',
+          fileName: `uj-transfer-proof-${runId}.pdf`,
+          mimeType: 'application/pdf',
+          fileBase64: Buffer.from(`%PDF-1.4\n% uj transfer proof ${runId}\n`).toString('base64'),
+          uploadedByName: 'Sprint2C Operational',
+        },
+      });
+      assert.equal(ujTransferProofUpload.status, 201);
+      const ujProofAttachmentId = ujTransferProofUpload.body.data.id;
+
+      const ujProofSaved = await api(`/api/container-jobs/${jobId}/expenses/${autoExpenseId.id}/uj-transfer-proof`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { proofAttachmentId: ujProofAttachmentId },
+      });
+      assert.equal(ujProofSaved.status, 200, JSON.stringify(ujProofSaved.body));
+      assert.equal(ujProofSaved.body.data.proofAttachmentId, ujProofAttachmentId);
+      assert.equal(ujProofSaved.body.data.financeCheckStatus, 'belum_dicek', 'status UJ tetap menunggu cek Finance setelah upload bukti');
+
+      const ledgerProof = await query(
+        `select proof_attachment_id from operational_fund_transactions where container_job_expense_id = $1 and status = 'posted'`,
+        [autoExpenseId.id],
+      );
+      assert.equal(ledgerProof.rows[0]?.proof_attachment_id, ujProofAttachmentId, 'ledger operational_fund_transactions harus ikut tersimpan bukti transfernya');
+
+      const uploadLog = await latestActivityForEntity('OPERATIONAL_UPLOAD_UJ_TRANSFER_PROOF', autoExpenseId.id);
+      assert.ok(uploadLog, 'upload bukti transfer UJ harus tercatat di audit log');
+      assert.equal(uploadLog.metadata.proofAttachmentId, ujProofAttachmentId);
+
+      // Void dulu baru coba upload lagi -- harus ditolak karena sudah void.
+      await query('update container_job_expenses set payment_status = $2 where id = $1', [autoExpenseId.id, 'batal']);
+      const rejectedForVoided = await api(`/api/container-jobs/${jobId}/expenses/${autoExpenseId.id}/uj-transfer-proof`, {
+        method: 'PATCH',
+        token: operationalToken,
+        body: { proofAttachmentId: ujProofAttachmentId },
+      });
+      assert.equal(rejectedForVoided.status, 409);
+      assert.equal(rejectedForVoided.body.error.code, 'CONTAINER_JOB_EXPENSE_ALREADY_VOID');
+    });
+
+    // 4 test di bawah ini SENGAJA ditaruh paling akhir (pola sama seperti test rekening dropping di
+    // atas) supaya sales_orders/container_jobs baru yang dibuat lewat SQL langsung di sini tidak ikut
+    // mendorong row lain keluar dari halaman pertama GET /api/reports/sales-orders yang dipakai test
+    // "reports: dashboard, sales-orders, ..." sebelumnya.
+    await t.test('sinkronisasi ukuran truck/chassis: laporan operasi baca ukuran dari chassis aktif, bukan vehicles.container_size', async () => {
+      const chassis40 = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '40FT', 'Aktif') returning id`,
+        [`CHS-SYNC40-${runId}`],
+      )).rows[0];
+      const chassis20 = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '20FT', 'Aktif') returning id`,
+        [`CHS-SYNC20-${runId}`],
+      )).rows[0];
+
+      // vehicles.container_size sengaja dibuat BERTOLAK BELAKANG dengan chassis yang benar-benar
+      // terpasang, supaya test ini gagal kalau ada kode yang diam-diam fallback ke vehicles.container_size.
+      const vehicleWith40ftChassis = (await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status, current_chassis_id)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif', $3)
+          returning id
+        `,
+        [`TRK-SYNC1-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-SY1`, chassis40.id],
+      )).rows[0];
+      const vehicleWith20ftChassis = (await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status, current_chassis_id)
+          values ($1, $2, 'Hino', 'FG', '40FT', 'Aktif', $3)
+          returning id
+        `,
+        [`TRK-SYNC2-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-SY2`, chassis20.id],
+      )).rows[0];
+      const vehicleNoChassis = (await query(
+        `
+          insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status)
+          values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif')
+          returning id
+        `,
+        [`TRK-SYNC3-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-SY3`],
+      )).rows[0];
+
+      async function completedJobFor(vehicleId, soSuffix, jobContainerSize) {
+        const soNumber = `SO-SYNC-${soSuffix}-${runId}`;
+        const so = (await query(
+          `insert into sales_orders (so_number, customer_name, shipment_type, origin, destination, status) values ($1, $2, 'import', 'Tanjung Priok', 'Cikarang', 'completed') returning id`,
+          [soNumber, `Customer Sync ${soSuffix} ${runId}`],
+        )).rows[0];
+        await query(
+          `
+            insert into container_jobs (sales_order_id, container_number, container_size, status, completed_at, vehicle_id, destination)
+            values ($1, $2, $3, 'completed', now(), $4, 'Cikarang')
+          `,
+          [so.id, `${soNumber}CNTR`, jobContainerSize, vehicleId],
+        );
+        return soNumber;
+      }
+
+      const soWith40ftChassis = await completedJobFor(vehicleWith40ftChassis.id, 'A', '40FT');
+      const soWith20ftChassis = await completedJobFor(vehicleWith20ftChassis.id, 'B', '20FT');
+      const soNoChassis = await completedJobFor(vehicleNoChassis.id, 'C', '20FT');
+
+      // Query per so_number (bukan cuma runId) supaya hasilnya presisi 1 baris -- runId sendiri
+      // juga muncul di ratusan sales order lain yang dibuat test-test sebelumnya di file ini, jadi
+      // mencari cuma pakai runId berisiko baris yang dicari kepental ke halaman berikutnya.
+      async function fetchOperationsRow(soNumber) {
+        const result = await api(`/api/reports/operations?query=${encodeURIComponent(soNumber)}&status=completed`, { token: observerToken });
+        assert.equal(result.status, 200);
+        return result.body.data.rows.find((row) => row.soNumber === soNumber);
+      }
+
+      const rowWith40ftChassis = await fetchOperationsRow(soWith40ftChassis);
+      const rowWith20ftChassis = await fetchOperationsRow(soWith20ftChassis);
+      const rowNoChassis = await fetchOperationsRow(soNoChassis);
+      assert.ok(rowWith40ftChassis, 'ritasi dengan truck ber-chassis 40FT harus muncul di laporan operasi');
+      assert.ok(rowWith20ftChassis, 'ritasi dengan truck ber-chassis 20FT harus muncul di laporan operasi');
+      assert.ok(rowNoChassis, 'ritasi dengan truck tanpa chassis harus tetap muncul di laporan operasi');
+      assert.equal(rowWith40ftChassis.chassisSize, '40FT', 'chassisSize harus ikut chassis 40FT yang benar-benar terpasang, bukan vehicles.container_size (20FT)');
+      assert.equal(rowWith20ftChassis.chassisSize, '20FT', 'chassisSize harus ikut chassis 20FT yang benar-benar terpasang, bukan vehicles.container_size (40FT)');
+      assert.equal(rowNoChassis.chassisSize, '20FT', 'truck tanpa chassis terpasang fallback ke ukuran container ritasi itu sendiri (cj.container_size), bukan container_size master truck');
+
+      const mismatches = await api('/api/master/trucks/chassis-size-mismatches', { token: adminToken });
+      assert.equal(mismatches.status, 200);
+      const mismatchIds = mismatches.body.data.map((row) => row.vehicleId);
+      assert.ok(mismatchIds.includes(vehicleWith40ftChassis.id), 'truck dengan container_size (20FT) berbeda dari chassisnya (40FT) harus terdeteksi mismatch');
+      assert.ok(mismatchIds.includes(vehicleWith20ftChassis.id), 'truck dengan container_size (40FT) berbeda dari chassisnya (20FT) harus terdeteksi mismatch');
+      assert.ok(!mismatchIds.includes(vehicleNoChassis.id), 'truck tanpa chassis terpasang tidak relevan untuk cek mismatch');
+      const mismatchRow = mismatches.body.data.find((row) => row.vehicleId === vehicleWith40ftChassis.id);
+      assert.equal(mismatchRow.vehicleContainerSize, '20FT');
+      assert.equal(mismatchRow.chassisContainerSize, '40FT');
+    });
+
+    await t.test('sinkronisasi ukuran truck/chassis: chassis yang dipindahkan ke truck lain otomatis lepas dari truck lama', async () => {
+      const movableChassis = (await query(
+        `insert into kir_chassis (chassis_code, container_size, operational_status) values ($1, '40FT', 'Aktif') returning id, chassis_code`,
+        [`CHS-MOVE-${runId}`],
+      )).rows[0];
+      const oldTruck = (await query(
+        `insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status) values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif') returning id`,
+        [`TRK-MOVEOLD-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-MV1`],
+      )).rows[0];
+      const newTruck = (await query(
+        `insert into vehicles (unit_code, plate_number, brand, vehicle_type, container_size, operational_status) values ($1, $2, 'Hino', 'FG', '20FT', 'Aktif') returning id`,
+        [`TRK-MOVENEW-${String(runId).slice(-4)}`, `B-${String(runId).slice(-4)}-MV2`],
+      )).rows[0];
+
+      const assignToOld = await api(`/api/operations/fleet-assignment/${oldTruck.id}/chassis`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { chassisId: movableChassis.chassis_code },
+      });
+      assert.equal(assignToOld.status, 200, JSON.stringify(assignToOld.body));
+      assert.equal(assignToOld.body.data.currentChassisCode, movableChassis.chassis_code);
+
+      // Pindahkan chassis yang sama ke truck baru lewat Assignment Armada -- truck lama harus
+      // otomatis lepas (current_chassis_id/current_chassis_code/kir_chassis_number kosong semua),
+      // memakai fungsi updateVehicleChassis yang sama dengan Master Truck (satu sumber kebenaran).
+      const assignToNew = await api(`/api/operations/fleet-assignment/${newTruck.id}/chassis`, {
+        method: 'PATCH',
+        token: adminToken,
+        body: { chassisId: movableChassis.chassis_code },
+      });
+      assert.equal(assignToNew.status, 200, JSON.stringify(assignToNew.body));
+      assert.equal(assignToNew.body.data.currentChassisCode, movableChassis.chassis_code);
+
+      const oldTruckAfter = await api(`/api/master/trucks/${oldTruck.id}`, { token: adminToken });
+      assert.equal(oldTruckAfter.status, 200);
+      assert.equal(oldTruckAfter.body.data.currentChassisId, null, 'truck lama harus lepas current_chassis_id setelah chassis dipindah ke truck baru');
+      assert.equal(oldTruckAfter.body.data.currentChassisCode, '', 'truck lama harus lepas current_chassis_code setelah chassis dipindah ke truck baru');
+      assert.equal(oldTruckAfter.body.data.kirChassisNumber, '', 'truck lama harus lepas kir_chassis_number setelah chassis dipindah ke truck baru');
     });
   });
 

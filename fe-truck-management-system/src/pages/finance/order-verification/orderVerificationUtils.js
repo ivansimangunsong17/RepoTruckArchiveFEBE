@@ -22,6 +22,17 @@ function isVerifiedFinanceOrder(row = {}) {
   return !isCancelledFinanceOrder(row) && (row.verificationStatus === 'verified' || Boolean(row.accurateSoNumber || row.soNumber));
 }
 
+function isGeneratedInternalSoNumber(value) {
+  return /^SO-ARM-\d{6}-\d{4}$/i.test(String(value || '').trim());
+}
+
+function getDisplayOrderNumber(row = {}) {
+  const rawNumber = String(row.internalSoNumber || row.systemSoNumber || '').trim();
+  if (rawNumber && !isGeneratedInternalSoNumber(rawNumber)) return rawNumber;
+  const id = String(row.id || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  return id ? `ORD-${id.slice(0, 8)}` : '';
+}
+
 function orderVerificationStatusParam(tabId) {
   if (tabId === 'running') return 'verified';
   if (tabId === 'cancelled') return 'cancelled';
@@ -30,9 +41,8 @@ function orderVerificationStatusParam(tabId) {
 
 function normalizeFinanceOrderRow(row = {}) {
   const isCancelled = isCancelledFinanceOrder(row);
-  const soNumber = row.soNumber || '';
-  const accurateSoNumber = row.accurateSoNumber || soNumber;
-  const internalSoNumber = row.internalSoNumber || row.systemSoNumber || '';
+  const accurateSoNumber = row.accurateSoNumber || row.soNumber || '';
+  const orderNumber = getDisplayOrderNumber(row);
   const lineItems = Array.isArray(row.lineItems)
     ? row.lineItems.map((item) => ({
       serviceName: item.serviceName || item.service_name || item.name || '-',
@@ -63,11 +73,11 @@ function normalizeFinanceOrderRow(row = {}) {
     depo: row.depo || row.origin || '-',
     document: row.document || '-',
     notes: row.notes || '-',
-    status: isCancelled ? 'SO Batal' : row.status || (accurateSoNumber ? 'No. SO Terisi' : 'Menunggu No. SO Accurate'),
-    soNumber,
-    internalSoNumber,
+    status: isCancelled ? 'SO Batal' : row.status || (accurateSoNumber ? 'No. SO Terisi' : 'Menunggu No. SO Finance'),
+    soNumber: accurateSoNumber,
+    internalSoNumber: orderNumber,
     accurateSoNumber,
-    soNumberDraft: soNumber,
+    soNumberDraft: accurateSoNumber,
     verificationStatus: isCancelled ? 'cancelled' : row.verificationStatus || (accurateSoNumber ? 'verified' : 'pending_so'),
     operationalStatus: row.operationalStatus || '',
     cancelReason: row.cancelReason || row.cancelReviewNote || row.cancelRequestNote || '',

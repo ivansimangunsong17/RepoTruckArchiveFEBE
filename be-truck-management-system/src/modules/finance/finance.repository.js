@@ -47,6 +47,32 @@ function normalizeVerificationStatus(row) {
   return row.finance_verification_status === 'verified' && row.accurate_so_number ? 'verified' : 'pending_so';
 }
 
+function isGeneratedInternalSoNumber(value) {
+  return /^SO-ARM-\d{6}-\d{4}$/i.test(String(value || '').trim());
+}
+
+function getDisplayOrderNumber(row = {}) {
+  const rawNumber = String(row.order_number || row.internal_order_number || row.internal_so_number || row.so_number || '').trim();
+  if (rawNumber && !isGeneratedInternalSoNumber(rawNumber)) return rawNumber;
+  const id = String(row.sales_order_id || row.id || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  return id ? `ORD-${id.slice(0, 8)}` : '';
+}
+
+function getDisplayFinanceSoNumber(row = {}) {
+  const accurateSoNumber = String(row.accurate_so_number || '').trim();
+  if (accurateSoNumber) return accurateSoNumber;
+  const legacySoNumber = String(row.so_number || '').trim();
+  return isGeneratedInternalSoNumber(legacySoNumber) ? '' : legacySoNumber;
+}
+
+function orderNumberSearchSql(alias = 'so') {
+  return orderNumberSearchFromColumnSql(`${alias}.id`);
+}
+
+function orderNumberSearchFromColumnSql(column = 'id') {
+  return `concat('ORD-', upper(left(regexp_replace(${column}::text, '[^a-zA-Z0-9]', '', 'g'), 8)))`;
+}
+
 // UJ dibaca dari snapshot dulu (dibekukan container-jobs.repository.js syncAutoJourneyMoneyExpense
 // saat job pertama kali jalan) -- master destination_locations cuma fallback untuk job LAMA yang
 // belum pernah punya snapshot (dibuat sebelum kolom ini ada), supaya UJ job yang sudah lama selesai
@@ -153,10 +179,10 @@ function mapOrderVerificationRow(row) {
     depo: row.origin,
     document: referenceDocuments[0]?.file?.name || referenceDocuments[0]?.referenceNumber || '-',
     notes: row.notes || row.job_description || '',
-    status: isCancelled ? 'SO Batal' : verificationStatus === 'verified' ? 'No. SO Terisi' : 'Menunggu No. SO Accurate',
+    status: isCancelled ? 'SO Batal' : verificationStatus === 'verified' ? 'No. SO Terisi' : 'Menunggu No. SO Finance',
     verificationStatus: isCancelled ? 'cancelled' : verificationStatus,
-    soNumber: row.accurate_so_number || '',
-    internalSoNumber: row.so_number || '',
+    soNumber: getDisplayFinanceSoNumber(row),
+    internalSoNumber: getDisplayOrderNumber(row),
     accurateSoNumber: row.accurate_so_number || '',
     cancelReason,
     cancelRequestStatus: row.cancel_request_status || 'none',
@@ -541,6 +567,7 @@ function buildFinanceFilters(options = {}) {
     clauses.push(`(
       so_number ilike $${params.length}
       or accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchFromColumnSql('sales_order_id')} ilike $${params.length}
       or do_number ilike $${params.length}
       or spk_number ilike $${params.length}
       or container_number ilike $${params.length}
@@ -582,6 +609,7 @@ function buildOrderVerificationFilters(options = {}) {
     clauses.push(`(
       so.so_number ilike $${params.length}
       or so.accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchSql('so')} ilike $${params.length}
       or so.do_number ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or so.destination ilike $${params.length}
@@ -601,7 +629,6 @@ function buildOrderVerificationFilters(options = {}) {
 function buildRpujFilters(options = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
-    "nullif(btrim(so.so_number), '') is not null",
     "cj.rpuj_status <> 'pending'",
   ];
   const params = [];
@@ -631,6 +658,7 @@ function buildRpujFilters(options = {}) {
     clauses.push(`(
       so.so_number ilike $${params.length}
       or so.accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchSql('so')} ilike $${params.length}
       or so.customer_name ilike $${params.length}
       or cj.destination ilike $${params.length}
       or cj.container_number ilike $${params.length}
@@ -716,6 +744,7 @@ function buildInvoiceFilters(options = {}) {
     clauses.push(`(
       so_number ilike $${params.length}
       or accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchFromColumnSql('invoice_orders.id')} ilike $${params.length}
       or invoice_number ilike $${params.length}
       or debit_note_number ilike $${params.length}
       or customer_name ilike $${params.length}
@@ -824,8 +853,8 @@ function mapFinanceRow(row) {
     id: row.id,
     orderId: row.sales_order_id,
     completedDate: row.completed_at,
-    soNumber: row.so_number,
-    internalSoNumber: row.internal_so_number || row.so_number,
+    soNumber: getDisplayFinanceSoNumber(row),
+    internalSoNumber: getDisplayOrderNumber(row),
     accurateSoNumber: row.accurate_so_number || '',
     doNumber: row.do_number,
     spkNumber: row.spk_number,
@@ -956,8 +985,8 @@ function mapRpujRequestRow(row) {
   return {
     id: row.id,
     orderId: row.sales_order_id,
-    soNumber: row.so_number,
-    internalSoNumber: row.internal_so_number || row.so_number,
+    soNumber: getDisplayFinanceSoNumber(row),
+    internalSoNumber: getDisplayOrderNumber(row),
     accurateSoNumber: row.accurate_so_number || '',
     jobNumber: row.container_number || `JOB-${String(row.id || '').slice(0, 8).toUpperCase()}`,
     containerNumber: row.container_number || '',
@@ -1170,7 +1199,7 @@ function mapInvoiceOrderRow(row) {
   return {
     id: row.id,
     orderId: row.id,
-    soNumber: row.so_number || '-',
+    soNumber: getDisplayFinanceSoNumber(row) || '-',
     invoiceNumber,
     invoiceDate: row.invoice_issued_at,
     invoiceDocumentStatus: row.invoice_document_status || 'belum_upload',
@@ -1200,7 +1229,7 @@ function mapInvoiceOrderRow(row) {
     dueDate: row.due_date,
     billingItems: billingItems.length ? billingItems : ['Rincian tagihan belum tersedia'],
     documentChecklist: [
-      { label: 'Nomor SO', ready: Boolean(row.so_number) },
+      { label: 'Nomor SO', ready: Boolean(row.accurate_so_number || getDisplayFinanceSoNumber(row)) },
       { label: 'Job selesai', ready: Boolean(row.completed_at) },
       { label: 'Surat Jalan', ready: Boolean(row.has_travel_document) },
       { label: 'Bon Muat/Bongkar', ready: Boolean(row.has_loading_document) },
@@ -1853,7 +1882,7 @@ export async function getOrderVerificationsPage(options = {}) {
 export async function updateOrderVerificationSoNumber(id, payload = {}) {
   const soNumber = String(payload.soNumber || '').trim();
   if (!soNumber) {
-    const error = new Error('Nomor SO Accurate wajib diisi.');
+    const error = new Error('Nomor SO Finance wajib diisi.');
     error.statusCode = 400;
     error.code = 'VALIDATION_ERROR';
     throw error;
@@ -1878,7 +1907,7 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
     }
 
     if (String(existing.rows[0].accurate_so_number || '').trim()) {
-      const error = new Error('Nomor SO Accurate sudah pernah diinput. Gunakan fitur ajukan koreksi nomor SO untuk mengubahnya.');
+      const error = new Error('Nomor SO Finance sudah pernah diinput. Gunakan fitur ajukan koreksi nomor SO untuk mengubahnya.');
       error.statusCode = 409;
       error.code = 'FINANCE_SO_NUMBER_ALREADY_ASSIGNED';
       throw error;
@@ -1896,7 +1925,7 @@ export async function updateOrderVerificationSoNumber(id, payload = {}) {
     );
 
     if (duplicate.rows[0]) {
-      const error = new Error('Nomor SO Accurate sudah digunakan oleh order lain.');
+      const error = new Error('Nomor SO Finance sudah digunakan oleh order lain.');
       error.statusCode = 409;
       error.code = 'SO_NUMBER_DUPLICATE';
       throw error;
@@ -3237,7 +3266,7 @@ function mapOperationalFundTransactionRow(row) {
     proofAttachmentId: row.proof_attachment_id || '',
     proofAttachment,
     requestDate: row.request_date || null,
-    soNumber: row.so_number || '',
+    soNumber: getDisplayFinanceSoNumber(row),
     customer: row.customer_name || '',
     destination: row.destination || '',
     containerNumber: row.container_number || '',
@@ -3455,8 +3484,8 @@ function mapFinanceContainerJobExpenseRow(row) {
     id: row.id,
     salesOrderId: row.sales_order_id || '',
     containerJobId: row.container_job_id || '',
-    soNumber: row.so_number || '',
-    internalSoNumber: row.internal_so_number || row.so_number || '',
+    soNumber: getDisplayFinanceSoNumber(row),
+    internalSoNumber: getDisplayOrderNumber(row),
     accurateSoNumber: row.accurate_so_number || '',
     customer: row.customer_name || '',
     destination: row.destination || '',
@@ -3935,6 +3964,7 @@ function buildOutstandingFilters(options = {}) {
     clauses.push(`(
       so_number ilike $${params.length}
       or accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchFromColumnSql('id')} ilike $${params.length}
       or invoice_number ilike $${params.length}
       or customer_name ilike $${params.length}
       or destination ilike $${params.length}
@@ -3969,7 +3999,7 @@ function appendOutstandingAgingBucketFilter(clauses, params, agingBucket) {
 function mapOutstandingOrderRow(row) {
   return {
     id: row.id,
-    soNumber: row.so_number || '-',
+    soNumber: getDisplayFinanceSoNumber(row) || '-',
     invoiceNumber: row.invoice_number || '',
     customer: row.customer_name || '-',
     destination: row.destination || '-',
@@ -5204,6 +5234,8 @@ function buildDebitNoteFilters(options = {}) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`(
       so_number ilike $${params.length}
+      or accurate_so_number ilike $${params.length}
+      or ${orderNumberSearchFromColumnSql('id')} ilike $${params.length}
       or debit_note_number ilike $${params.length}
       or customer_name ilike $${params.length}
       or destination ilike $${params.length}
@@ -5219,7 +5251,7 @@ function buildDebitNoteFilters(options = {}) {
 function mapDebitNoteOrderRow(row) {
   return {
     id: row.id,
-    soNumber: row.so_number || '-',
+    soNumber: getDisplayFinanceSoNumber(row) || '-',
     customer: row.customer_name || '-',
     destination: row.destination || '-',
     destinations: Array.isArray(row.destinations) ? row.destinations.filter(Boolean) : [],
@@ -5428,7 +5460,7 @@ function buildDebitNoteOutstandingFilters(options = {}) {
 function mapDebitNoteOutstandingRow(row) {
   return {
     id: row.id,
-    soNumber: row.so_number || '-',
+    soNumber: getDisplayFinanceSoNumber(row) || '-',
     debitNoteNumber: row.debit_note_number || '',
     customer: row.customer_name || '-',
     destination: row.destination || '-',

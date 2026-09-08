@@ -1379,12 +1379,19 @@ export async function getOperationReport(options = {}) {
                coalesce(cj.vehicle_id, snapshot_vehicle.id) as display_vehicle_id,
                coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number, snapshot_vehicle.plate_number) as plate_number,
                coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code,
-               coalesce(v.container_size, snapshot_vehicle.container_size) as vehicle_chassis_size
+               -- Ukuran operasional truck HARUS ikut chassis yang benar-benar terpasang (kir_chassis.container_size
+               -- via current_chassis_id), bukan vehicles.container_size yang statis dan tidak ikut berubah saat
+               -- chassis diganti. vehicles.container_size sengaja TIDAK dipakai di sini lagi -- fallback terakhir
+               -- kalau truck sama sekali belum/tidak lagi punya chassis terpasang adalah cj.container_size (ukuran
+               -- container ritasi ini sendiri), bukan data master truck.
+               coalesce(v_chassis.container_size, snapshot_chassis.container_size) as vehicle_chassis_size
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         left join vehicles v on v.id = cj.vehicle_id
+        left join kir_chassis v_chassis on v_chassis.id = v.current_chassis_id
         left join vehicles snapshot_vehicle on snapshot_vehicle.archived_at is null
           and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
+        left join kir_chassis snapshot_chassis on snapshot_chassis.id = snapshot_vehicle.current_chassis_id
         ${whereSql}
         ${orderBySql}
         limit $${limitIndex} offset $${offsetIndex}

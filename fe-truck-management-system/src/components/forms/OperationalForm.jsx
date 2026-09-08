@@ -458,7 +458,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     adminCorrectionMode: false,
     adminCorrectionReason: '',
   });
-  const [activePhase, setActivePhase] = useState(initialPhase);
+  const canUpdateOperational = !currentUser || hasPermission(currentUser, 'operations.update');
+  const canUpdateDocuments = hasPermission(currentUser, 'documents.operational.update') || canUpdateOperational;
+  const isDocumentOnlyMode = canUpdateDocuments && !canUpdateOperational;
+  const [activePhase, setActivePhase] = useState(() => (isDocumentOnlyMode ? 'closing' : initialPhase));
   const [error, setError] = useState('');
   const [notification, setNotification] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -474,7 +477,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const requiresFinanceApprovalForSpk = false;
   const hasCompleteAssignment = Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
   const financeApprovedForSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
-  const canGenerateSpk = !isRepoPickupMode && financeApprovedForSpk && hasCompleteAssignment;
+  const canGenerateSpk = canUpdateOperational && !isRepoPickupMode && financeApprovedForSpk && hasCompleteAssignment;
   const assignmentRequirementMessage = 'Lengkapi truck dan driver terlebih dahulu.';
   const spkRequirementMessage = !form.spkNumber && !hasCompleteAssignment
     ? 'SPK bisa dibuat setelah truck dan driver lengkap.'
@@ -483,9 +486,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       : '';
   const canAccessAdminCorrection = String(currentUser?.role || '').toLowerCase() === 'admin';
   const canReviseLockedFields = canAccessAdminCorrection && Boolean(form.adminCorrectionMode);
-  const canEditDriverCommission = !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
-  const canFillMissingAssignment = !hasCompleteAssignment && form.status !== 'completed';
-  const canEditAssignment = canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed');
+  const canEditDriverCommission = canUpdateOperational && !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
+  const canFillMissingAssignment = canUpdateOperational && !hasCompleteAssignment && form.status !== 'completed';
+  const canEditAssignment = canUpdateOperational && (canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed'));
   const originalAssignedDriver = String(container.driver || '').trim();
   const originalAssignedPlate = String(container.plateNumber || '').trim();
   const hadCompleteAssignmentBefore = Boolean(originalAssignedDriver && originalAssignedPlate);
@@ -495,7 +498,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     && hadCompleteAssignmentBefore
     && assignmentIdentityChanged
     && form.status !== 'received';
-  const canSetTruckDefaultDriver = hasPermission(currentUser, 'operations.truck_default_driver.update');
+  const canSetTruckDefaultDriver = canUpdateOperational && hasPermission(currentUser, 'operations.truck_default_driver.update');
   const selectedTruckForDefault = trucks.find((truck) => truck.plateNumber === form.plateNumber) || null;
   const canTriggerSetDefaultDriver = Boolean(
     canSetTruckDefaultDriver
@@ -506,18 +509,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   );
   const hasSavedContainerNumber = Boolean(String(container.containerNumber || '').trim());
   const canFillInitialContainerNumber = !hasSavedContainerNumber && !['completed', 'cancelled'].includes(container.status);
-  const canEditContainerNumber = !isRepoPickupMode && (
+  const canEditContainerNumber = canUpdateOperational && !isRepoPickupMode && (
     canReviseLockedFields
       || canFillInitialContainerNumber
       || (!['running', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid')
   );
   const isCompletedDocumentFollowUp = !canReviseLockedFields && form.status === 'completed';
-  const canEditDocumentValue = (field) => !isCompletedDocumentFollowUp || !String(container[field] || '').trim();
-  const canEditDocumentFile = (field) => !isCompletedDocumentFollowUp || !container[field];
-  const canEditOtherDocuments = !isCompletedDocumentFollowUp;
-  const canEditTimeline = canReviseLockedFields || container.status !== 'completed';
-  const canStartTrip = hasCompleteAssignment || canReviseLockedFields;
+  const canEditDocumentValue = (field) => canUpdateDocuments && (!isCompletedDocumentFollowUp || !String(container[field] || '').trim());
+  const canEditDocumentFile = (field) => canUpdateDocuments && (!isCompletedDocumentFollowUp || !container[field]);
+  const canEditOtherDocuments = canUpdateDocuments && !isCompletedDocumentFollowUp;
+  const canEditTimeline = canUpdateOperational && (canReviseLockedFields || container.status !== 'completed');
+  const canStartTrip = canUpdateOperational && (hasCompleteAssignment || canReviseLockedFields);
   const availableStatusOptions = statusOptions.filter((option) => {
+    if (isDocumentOnlyMode) return option.value === form.status;
     if (canReviseLockedFields) return true;
     if (container.status === 'completed') return option.value === 'completed';
     if (container.status === 'running') return option.value !== 'received';
@@ -532,7 +536,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     && hasCompleteAssignment
     && canStartTrip
     && hasSpkDocument;
-  const primaryActionLabel = activePhase === 'preparation'
+  const primaryActionLabel = isDocumentOnlyMode
+    ? 'Simpan Dokumen'
+    : activePhase === 'preparation'
     ? 'Simpan Assignment'
     : activePhase === 'rpuj'
       ? 'Simpan Biaya & SPK'
@@ -1066,6 +1072,24 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     return { submitForm, hasRpujRequest, driverCommissionAmount };
   }
 
+  function buildDocumentOnlySubmitForm() {
+    const updatedBy = currentUser?.fullName || currentUser?.name || form.updatedBy || 'Sales';
+    return {
+      updatedBy,
+      eirNumber: form.eirNumber,
+      eirDocument: form.eirDocument,
+      repoEirNumber: form.repoEirNumber,
+      repoEirDocument: form.repoEirDocument,
+      loadingVoucher: form.loadingVoucher,
+      loadingVoucherDocument: form.loadingVoucherDocument,
+      tilaGatepassDocument: form.tilaGatepassDocument,
+      tilaGatepassDocumentFile: form.tilaGatepassDocumentFile,
+      travelDocument: form.travelDocument,
+      travelDocumentFile: form.travelDocumentFile,
+      otherDocuments: form.otherDocuments,
+    };
+  }
+
   async function submitOnce(submitForm) {
     if (submitInFlightRef.current) return;
     submitInFlightRef.current = true;
@@ -1086,6 +1110,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   async function handleSubmit(event) {
     event.preventDefault();
     if (submitInFlightRef.current) return;
+    if (isDocumentOnlyMode) {
+      setError('');
+      await submitOnce(buildDocumentOnlySubmitForm());
+      return;
+    }
     const { submitForm, error: submitError } = buildSubmitForm({
       forceRpujStatus: activePhase === 'rpuj' ? 'submitted' : undefined,
     });
@@ -1230,6 +1259,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             </div>
           </div>
 
+          {!isDocumentOnlyMode ? (
           <div className="operational-phase-tabs" role="tablist" aria-label="Phase Operational">
             {operationalPhaseOptions.map((phase, index) => (
               <button
@@ -1246,6 +1276,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               </button>
             ))}
           </div>
+          ) : null}
 
           <div className="operational-form-content">
           {activePhase === 'preparation' ? (
@@ -1610,7 +1641,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <div className="operational-timeline-grid">
                 <label className="operational-status-field">
                   Status Pekerjaan
-                  <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle} disabled={!canReviseLockedFields && container.status === 'completed'}>
+                  <select name="status" value={form.status} onChange={updateStatus} style={activeStatusOption.selectStyle} disabled={isDocumentOnlyMode || (!canReviseLockedFields && container.status === 'completed')}>
                     {availableStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                   <span className={`mt-1 inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${activeStatusOption.tone}`}>

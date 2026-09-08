@@ -7,6 +7,7 @@ import {
   getMasterViewerNote,
   listMasterRows,
   listMasterRowsPage,
+  listVehicleChassisSizeMismatches,
   removeMasterRow,
   saveMasterRow,
   saveMasterViewerNote,
@@ -166,6 +167,11 @@ export async function archiveMasterController(request, response) {
     afterData: null,
   });
   sendSuccess(response, { id: request.params.id }, 'Data master berhasil diarsipkan.');
+}
+
+export async function listVehicleChassisSizeMismatchesController(request, response) {
+  const rows = await listVehicleChassisSizeMismatches();
+  sendSuccess(response, rows);
 }
 
 export async function calculateDestinationUjController(request, response) {
