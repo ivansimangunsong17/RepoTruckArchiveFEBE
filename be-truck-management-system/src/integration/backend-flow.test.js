@@ -584,7 +584,7 @@ if (!hasDatabase) {
       assert.equal(salesScopedList.status, 200);
       assert.equal(salesScopedList.body.data.rows.some((row) => row.id === created.orderId), true);
 
-      // Filter tanggal (dateFrom/dateTo) di daftar Sales Order -- pakai Tanggal SO yang jauh di luar
+      // Filter tanggal (dateFrom/dateTo) di daftar Sales Order -- pakai Tanggal Jalan yang jauh di luar
       // rentang tanggal fixture lain di suite ini supaya tidak bentrok dengan data test lain.
       const dateFilterSoNumber = `${created.orderSoNumber}-DATEFILTER`;
       const dateFilterOrder = await api('/api/sales-orders', {
@@ -613,7 +613,7 @@ if (!hasDatabase) {
       assert.equal(beforeDateRange.body.data.rows.some((row) => row.id === dateFilterOrder.body.data.id), false);
 
       const afterDateRange = await api(`/api/sales-orders?query=${dateFilterQuery}&dateFrom=2019-03-06`, { token: adminToken });
-      assert.equal(afterDateRange.body.data.rows.some((row) => row.id === dateFilterOrder.body.data.id), false);
+      assert.equal(afterDateRange.body.data.rows.some((row) => row.id === dateFilterOrder.body.data.id), true);
 
       const historicalOrder = await api('/api/sales-orders', {
         method: 'POST',

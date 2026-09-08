@@ -13,7 +13,8 @@ function mapAttachmentFile(attachment) {
 export function canOperationalEditDroppingTransaction(expense = {}) {
   const financeCheckStatus = expense.finance_check_status || expense.financeCheckStatus || 'belum_dicek';
   const paymentStatus = expense.payment_status || expense.paymentStatus || 'belum_dibayar';
-  return financeCheckStatus === 'belum_dicek' && paymentStatus !== 'batal';
+  const source = expense.source || 'manual';
+  return source !== 'auto_uj_order' && financeCheckStatus === 'belum_dicek' && paymentStatus !== 'batal';
 }
 
 export function mapContainerJobExpense(row = {}) {

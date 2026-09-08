@@ -49,6 +49,8 @@ describe('SalesOrdersPage billing status flow', () => {
         shipment: 'import',
         status: 'completed',
         soDate: '2026-07-19',
+        tripDate: '2026-07-20',
+        destination: 'Cikarang',
         receivedAt: '2026-07-20T10:21:00.000Z',
         invoiceNumber: 'INV-001',
         invoiceIssuedAt: '2026-07-21T08:00:00.000Z',
@@ -111,6 +113,7 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(await screen.findByText('Pembayaran: Tempo 14 hari')).toBeInTheDocument();
     expect(screen.getByText('Waktu Input Sistem')).toBeInTheDocument();
     expect(screen.getByText('Tanggal SO: 19 Juli 2026')).toBeInTheDocument();
+    expect(screen.getByText('Tanggal Jalan: 20 Juli 2026')).toBeInTheDocument();
     expect(screen.getByText('Lama Pelunasan')).toBeInTheDocument();
     expect(screen.getByText(/Belum dikirim customer/i)).toBeInTheDocument();
     expect(screen.getByText('Riwayat Dokumen')).toBeInTheDocument();

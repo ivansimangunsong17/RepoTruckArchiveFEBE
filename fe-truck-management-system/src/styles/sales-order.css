@@ -785,7 +785,7 @@
 .sales-order-group .order-card:last-child { border-bottom: 0; }
 .order-summary {
   display: grid;
-  grid-template-columns: 38px minmax(104px, .92fr) minmax(140px, 1.16fr) minmax(86px, .6fr) minmax(112px, .72fr) minmax(96px, .62fr) minmax(96px, .64fr) minmax(86px, .46fr);
+  grid-template-columns: 38px minmax(104px, .88fr) minmax(130px, 1.08fr) minmax(82px, .55fr) minmax(112px, .74fr) minmax(104px, .7fr) minmax(92px, .58fr) minmax(94px, .62fr) minmax(86px, .46fr);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -1196,6 +1196,7 @@
   }
 
   .sales-orders-page .order-shipment-summary,
+  .sales-orders-page .order-destination-summary,
   .sales-orders-page .order-container-summary,
   .sales-orders-page .order-billing-summary,
   .sales-orders-page .order-document-summary {
@@ -1208,6 +1209,7 @@
   }
 
   .sales-orders-page .order-shipment-summary,
+  .sales-orders-page .order-destination-summary,
   .sales-orders-page .order-billing-summary {
     grid-column: auto;
   }
@@ -2449,6 +2451,7 @@
   }
 
   .sales-orders-page .order-shipment-summary,
+  .sales-orders-page .order-destination-summary,
   .sales-orders-page .order-container-summary,
   .sales-orders-page .order-billing-summary,
   .sales-orders-page .order-document-summary {

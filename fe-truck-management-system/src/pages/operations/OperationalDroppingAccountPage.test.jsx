@@ -8,11 +8,9 @@ import {
   createContainerJobExpense,
   fetchContainerJobExpenseLedger,
   fetchContainerJobsPage,
-  moveDroppingExpense,
   updateDroppingExpense,
   uploadContainerJobExpenseProof,
   uploadUjTransferProof,
-  voidDroppingExpense,
 } from '../../services/archive/containerJobService';
 import { fetchOperationalFundBatches, fetchOperationalFundTransactions } from '../../services/finance/financeService';
 
@@ -37,11 +35,9 @@ vi.mock('../../services/archive/containerJobService', () => ({
   createContainerJobExpense: vi.fn(),
   fetchContainerJobExpenseLedger: vi.fn(),
   fetchContainerJobsPage: vi.fn(),
-  moveDroppingExpense: vi.fn(),
   updateDroppingExpense: vi.fn(),
   uploadContainerJobExpenseProof: vi.fn(),
   uploadUjTransferProof: vi.fn(),
-  voidDroppingExpense: vi.fn(),
 }));
 
 vi.mock('../../services/finance/financeService', () => ({
@@ -196,30 +192,13 @@ describe('OperationalDroppingAccountPage', () => {
       paymentStatus: 'sudah_dibayar',
       financeCheckStatus: 'belum_dicek',
     });
-    moveDroppingExpense.mockResolvedValue({
-      id: 'expense-1',
-      containerJobId: 'job-2',
-      soNumber: 'SO-ARM-202608-0002',
-      category: 'tol',
-      amount: 125000,
-      paymentStatus: 'sudah_dibayar',
-      financeCheckStatus: 'belum_dicek',
-    });
-    voidDroppingExpense.mockResolvedValue({
-      id: 'expense-1',
-      containerJobId: 'job-1',
-      category: 'tol',
-      amount: 125000,
-      paymentStatus: 'batal',
-      financeCheckStatus: 'belum_dicek',
-    });
     uploadUjTransferProof.mockResolvedValue({
       id: 'expense-uj-1',
       containerJobId: 'job-1',
       category: 'uj_awal',
       amount: 75000,
       paymentStatus: 'sudah_dibayar',
-      financeCheckStatus: 'sudah_dicek',
+      financeCheckStatus: 'belum_dicek',
       proofAttachment: { name: 'transfer-uj.pdf', path: 'attachment-uj-proof-1' },
     });
   });
@@ -440,46 +419,18 @@ describe('OperationalDroppingAccountPage', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Transaksi tersimpan' }));
   });
 
-  it('memindahkan transaksi biaya ke ritasi lain selama belum dicek Finance', async () => {
-    const user = userEvent.setup();
-    fetchContainerJobsPage.mockResolvedValue({
-      rows: [
-        { id: 'job-1', status: 'running', soNumber: 'SO-ARM-202608-0001', containerNumber: 'CONT-001', customer: 'PT Sumber Logistik', destination: 'Cikarang' },
-        { id: 'job-2', status: 'running', soNumber: 'SO-ARM-202608-0002', containerNumber: 'CONT-002', customer: 'PT Nusantara Cargo', destination: 'Bekasi' },
-      ],
-    });
+  it('tidak menampilkan tombol pindah ritasi untuk Operational', async () => {
     render(<OperationalDroppingAccountPage />);
 
     await screen.findByText('Tol Cikampek');
-    await user.click(screen.getByRole('button', { name: /pindah ritasi/i }));
-    const dialog = await screen.findByRole('dialog', { name: /pindah ritasi transaksi biaya/i });
-    await user.click(await within(dialog).findByRole('button', { name: /SO-ARM-202608-0002/i }));
-    await user.click(within(dialog).getByRole('button', { name: /^pindahkan$/i }));
-
-    await waitFor(() => {
-      expect(moveDroppingExpense).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
-        targetContainerJobId: 'job-2',
-        updatedBy: 'Fitri Operational',
-      }));
-    });
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Ritasi dipindahkan' }));
+    expect(screen.queryByRole('button', { name: /pindah ritasi/i })).not.toBeInTheDocument();
   });
 
-  it('membatalkan (void) transaksi biaya sendiri selama belum dicek Finance', async () => {
-    const user = userEvent.setup();
+  it('tidak menampilkan tombol void untuk Operational', async () => {
     render(<OperationalDroppingAccountPage />);
 
     await screen.findByText('Tol Cikampek');
-    await user.click(screen.getByRole('button', { name: /^void$/i }));
-    const dialog = await screen.findByRole('dialog', { name: /void transaksi biaya/i });
-    await user.click(within(dialog).getByRole('button', { name: /ya, void transaksi/i }));
-
-    await waitFor(() => {
-      expect(voidDroppingExpense).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
-        updatedBy: 'Fitri Operational',
-      }));
-    });
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Transaksi dibatalkan' }));
+    expect(screen.queryByRole('button', { name: /^void$/i })).not.toBeInTheDocument();
   });
 
   it('tidak menampilkan tombol edit/pindah ritasi/void kalau batch tanggal ini sudah closed', async () => {
@@ -514,24 +465,26 @@ describe('OperationalDroppingAccountPage', () => {
           category: 'uj_awal',
           amount: 75000,
           description: 'UJ PT Sumber Logistik Cikarang 20FT B 1234 XYZ',
+          source: 'auto_uj_order',
+          sourceRefId: 'job-1',
           paymentStatus: 'sudah_dibayar',
-          financeCheckStatus: 'sudah_dicek',
+          financeCheckStatus: 'belum_dicek',
           proofAttachment: null,
           createdAt: '2026-08-20T02:00:00.000Z',
         },
       ],
       total: 1,
-      summary: { totalAmount: 75000, needProof: 0, needCorrection: 0, waitingFinance: 0, checked: 1 },
+      summary: { totalAmount: 75000, needProof: 1, needCorrection: 0, waitingFinance: 1, checked: 0 },
     });
 
     render(<OperationalDroppingAccountPage />);
 
-    await user.selectOptions(screen.getByLabelText('Filter status rekening dropping'), 'checked');
+    await user.selectOptions(screen.getByLabelText('Filter status rekening dropping'), 'waiting_finance');
     await screen.findByText('UJ PT Sumber Logistik Cikarang 20FT B 1234 XYZ');
-    expect(screen.getByText(/bukti transfer uj belum diupload/i)).toBeInTheDocument();
+    expect(screen.getByText(/bukti pembayaran belum diupload/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /upload bukti transfer/i }));
+    await user.click(screen.getByRole('button', { name: /upload bukti/i }));
     const dialog = await screen.findByRole('dialog', { name: /upload bukti transfer uj/i });
     const proofFile = new File(['proof'], 'transfer-uj.pdf', { type: 'application/pdf' });
     await user.upload(within(dialog).getByLabelText(/pilih bukti/i), proofFile);

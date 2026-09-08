@@ -16,7 +16,7 @@
   .report-filters select { min-height: 39px; }
   .breadcrumb { display: none; }
   .dashboard-grid.main { grid-template-columns: 1fr; }
-  .order-summary { grid-template-columns: 42px minmax(130px, 1fr) minmax(160px, 1.1fr) minmax(105px, .72fr) minmax(105px, .62fr) minmax(115px, .7fr) 108px; }
+  .order-summary { grid-template-columns: 42px minmax(120px, .95fr) minmax(140px, 1fr) minmax(92px, .62fr) minmax(110px, .72fr) minmax(105px, .62fr) minmax(115px, .7fr) 108px; }
   .order-summary-actions { justify-content: end; }
   .container-form-card { grid-template-columns: 28px 1fr 100px 120px 34px; }
   .container-form-card label:nth-of-type(4) { grid-column: 2 / 5; }

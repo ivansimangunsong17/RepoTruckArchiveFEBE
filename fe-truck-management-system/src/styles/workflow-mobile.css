@@ -142,6 +142,7 @@
   }
 
   .sales-orders-page .order-shipment-summary,
+  .sales-orders-page .order-destination-summary,
   .sales-orders-page .order-container-summary,
   .sales-orders-page .order-billing-summary,
   .sales-orders-page .order-document-summary {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Ban, Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileUp, Pencil, Plus, RefreshCw, Search, X } from 'lucide-react';
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, CheckCircle2, ChevronLeft, ChevronRight, Download, FileUp, Pencil, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import PageHeader from '../../components/common/PageHeader';
 import EmptyState from '../../components/common/EmptyState';
@@ -127,6 +127,14 @@ function ModalPortal({ children }) {
 
 function canOperationalEditRow(financeCheckStatus, paymentStatus) {
   return (financeCheckStatus || 'belum_dicek') === 'belum_dicek' && paymentStatus !== 'batal';
+}
+
+function isAutoJourneyMoneyRow(row = {}) {
+  return row.source === 'auto_uj_order' || row.sourceRefId === row.jobId && row.category === 'uj_awal';
+}
+
+function isManualOperationalExpenseRow(row = {}) {
+  return Boolean(row.jobId && actionExpenseId(row)) && !isAutoJourneyMoneyRow(row);
 }
 
 function normalizeExpenseRow(job, expense) {
@@ -881,14 +889,6 @@ function OperationalDroppingAccountPage() {
     setEditExpenseTarget(row);
   }
 
-  function openMoveExpense(row) {
-    setMoveExpenseTarget(row);
-  }
-
-  function openVoidExpense(row) {
-    setVoidExpenseTarget(row);
-  }
-
   function openUjProof(row) {
     setUjProofTarget(row);
     setUjProofFile(null);
@@ -1284,8 +1284,10 @@ function OperationalDroppingAccountPage() {
                 {filteredRows.map((row) => {
                   const isVoided = row.paymentStatus === 'batal';
                   const hasExpenseAction = Boolean(row.jobId && actionExpenseId(row));
-                  const canOperationalEdit = hasExpenseAction && Boolean(row.canEdit) && batchStatus === 'open' && !isVoided;
-                  const needsUjTransferProof = hasExpenseAction && row.category === 'uj_awal' && !row.proofAttachment && !isVoided;
+                  const isAutoUj = isAutoJourneyMoneyRow(row);
+                  const canChangeBeforeFinance = hasExpenseAction && canOperationalEditRow(row.financeCheckStatus, row.expensePaymentStatus || row.paymentStatus) && batchStatus === 'open' && !isVoided;
+                  const canManualEdit = canChangeBeforeFinance && Boolean(row.canEdit) && isManualOperationalExpenseRow(row);
+                  const canUploadProof = canChangeBeforeFinance && !row.proofAttachment;
                   const secondaryInfo = [row.soNumber, row.containerNumber !== '-' ? row.containerNumber : '', row.driverName || row.driver || '', row.customerName || row.customer || '']
                     .filter(Boolean)
                     .filter((value) => value !== '-')
@@ -1307,11 +1309,11 @@ function OperationalDroppingAccountPage() {
                             {isVoided ? 'Void/Batal' : financeStatusLabels[row.financeCheckStatus] || row.financeCheckStatus}
                           </span>
                         ) : <span className="text-slate-300">-</span>}
-                        {canOperationalEdit ? (
+                        {canManualEdit ? (
                           <span className="mt-1 block text-[10px] font-medium normal-case text-slate-400">Menunggu validasi Finance, masih bisa diperbaiki.</span>
                         ) : null}
-                        {needsUjTransferProof ? (
-                          <span className="mt-1 block text-[10px] font-medium normal-case text-amber-600">Bukti transfer UJ belum diupload.</span>
+                        {canUploadProof ? (
+                          <span className="mt-1 block text-[10px] font-medium normal-case text-amber-600">Bukti pembayaran belum diupload.</span>
                         ) : null}
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-700">{row.moneyIn ? formatCurrency(row.moneyIn) : <span className="text-slate-300">-</span>}</td>
@@ -1326,29 +1328,14 @@ function OperationalDroppingAccountPage() {
                               label="View"
                             />
                           ) : null}
-                          {canOperationalEdit ? (
+                          {canManualEdit ? (
                             <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => openEditExpense(row)}>
                               <Pencil size={13} /> Edit
                             </button>
                           ) : null}
-                          {canOperationalEdit ? (
-                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => openUpload(row)}>
-                              <FileUp size={13} /> {row.proofAttachment ? 'Ganti' : 'Upload'}
-                            </button>
-                          ) : null}
-                          {canOperationalEdit ? (
-                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => openMoveExpense(row)}>
-                              <ArrowRightLeft size={13} /> Pindah Ritasi
-                            </button>
-                          ) : null}
-                          {canOperationalEdit ? (
-                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 text-xs font-semibold text-rose-600 hover:bg-rose-50" type="button" onClick={() => openVoidExpense(row)}>
-                              <Ban size={13} /> Void
-                            </button>
-                          ) : null}
-                          {needsUjTransferProof ? (
-                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-800 hover:bg-amber-100" type="button" onClick={() => openUjProof(row)}>
-                              <FileUp size={13} /> Upload Bukti Transfer
+                          {canUploadProof ? (
+                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => (isAutoUj ? openUjProof(row) : openUpload(row))}>
+                              <FileUp size={13} /> Upload Bukti
                             </button>
                           ) : null}
                           {hasExpenseAction && row.financeCheckStatus === 'perlu_klarifikasi' ? (

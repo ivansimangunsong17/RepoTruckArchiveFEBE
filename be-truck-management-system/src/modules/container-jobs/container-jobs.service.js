@@ -56,6 +56,14 @@ function getActorName(actor) {
   return actor?.name || actor?.email || 'System';
 }
 
+function ensureNotOperationalRole(actor, actionLabel) {
+  if (actor?.role !== 'operational') return;
+  const error = new Error(`${actionLabel} tidak tersedia untuk Operational. Gunakan Edit sebelum Finance validasi, atau minta koreksi ke Finance/Admin.`);
+  error.statusCode = 403;
+  error.code = 'OPERATIONAL_DROPPING_ACTION_DISABLED';
+  throw error;
+}
+
 function canSalesAccessOrder(actor, order) {
   if (actor?.role !== 'sales') return true;
   if (!order) return false;
@@ -700,6 +708,7 @@ export function updateDroppingExpenseBeforeFinanceCheck(id, expenseId, payload =
 }
 
 export function moveDroppingExpenseToAnotherJobBeforeFinanceCheck(id, expenseId, payload = {}, actor) {
+  ensureNotOperationalRole(actor, 'Pindah ritasi');
   const targetContainerJobId = normalizeExpenseText(payload.targetContainerJobId, 'Ritasi tujuan', 100);
   if (!targetContainerJobId) {
     const error = new Error('Ritasi tujuan wajib dipilih.');
@@ -713,6 +722,7 @@ export function moveDroppingExpenseToAnotherJobBeforeFinanceCheck(id, expenseId,
 }
 
 export function voidDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {}, actor) {
+  ensureNotOperationalRole(actor, 'Void transaksi');
   return voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, {
     voidReason: normalizeExpenseText(payload.voidReason || payload.reason, 'Alasan void', 500),
     actorName: getActorName(actor),

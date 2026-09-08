@@ -565,8 +565,8 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const localOrders = archive.orders;
   const activeLocalOrders = useMemo(() => localOrders.filter((order) => order.status !== 'cancelled'), [localOrders]);
   const matchesLocalDateRange = useCallback((order) => (
-    (!dateFrom || String(order.soDate || '').slice(0, 10) >= dateFrom)
-    && (!dateTo || String(order.soDate || '').slice(0, 10) <= dateTo)
+    (!dateFrom || String(order.tripDate || order.plannedDate || order.soDate || '').slice(0, 10) >= dateFrom)
+    && (!dateTo || String(order.tripDate || order.plannedDate || order.soDate || '').slice(0, 10) <= dateTo)
   ), [dateFrom, dateTo]);
   const queryMatchedLocalOrders = useMemo(() => activeLocalOrders.filter((order) =>
     (!query || [order.soNumber, order.doNumber, order.customer].some((value) =>
@@ -805,8 +805,8 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       <section className="panel">
         <div className="filter-bar">
           <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={customerDocumentsOnly ? 'Cari SO, customer, atau tujuan...' : 'Cari SO, DO, atau customer...'} /></label>
-          <label className="report-date-field"><span>Dari</span><input aria-label="Tanggal SO dari" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
-          <label className="report-date-field"><span>Sampai</span><input aria-label="Tanggal SO sampai" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+          <label className="report-date-field"><span>Dari</span><input aria-label="Tanggal jalan dari" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
+          <label className="report-date-field"><span>Sampai</span><input aria-label="Tanggal jalan sampai" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
         </div>
         <nav className="sales-order-status-nav" aria-label={customerDocumentsOnly ? 'Navigasi dokumen customer' : 'Navigasi status Sales Order'}>
           {visibleStatusNavigation.map((item) => {
@@ -878,6 +878,10 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                       <div className="order-shipment-summary">
                         <span>Jenis Order</span>
                         <strong>{shipmentLabel}</strong>
+                      </div>
+                      <div className="order-destination-summary">
+                        <span>Tujuan</span>
+                        <strong>{order.destination || '-'}</strong>
                       </div>
                       <div className="order-container-summary">
                         <span>Container</span>
@@ -985,6 +989,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                   <span>Informasi Order</span><strong>{formatShipmentLabel(selectedOrder.shipment)}</strong>
                   <small>Nama Kapal: {selectedOrder.vesselName || '-'}</small>
                   <small>Tanggal SO: {formatDate(selectedOrder.soDate)}</small>
+                  <small>Tanggal Jalan: {formatDate(selectedOrder.tripDate || selectedOrder.plannedDate || selectedOrder.soDate)}</small>
                   <small>Pembayaran: {getPaymentTermLabel(selectedOrder)}</small>
                   <small>No. Invoice: {getOrderInvoiceNumber(selectedOrder) || '-'}</small>
                   <small>{selectedOrder.jobDescription || selectedOrder.notes || '-'}</small>

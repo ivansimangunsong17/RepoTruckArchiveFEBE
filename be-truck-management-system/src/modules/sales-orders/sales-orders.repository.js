@@ -194,12 +194,12 @@ function buildOrderWhere({
 
   if (dateFrom) {
     params.push(dateFrom);
-    clauses.push(`so_date >= $${params.length}`);
+    clauses.push(`trip_date >= $${params.length}`);
   }
 
   if (dateTo) {
     params.push(dateTo);
-    clauses.push(`so_date <= $${params.length}`);
+    clauses.push(`trip_date <= $${params.length}`);
   }
 
   if (status === 'waiting_operational') {

@@ -225,6 +225,14 @@ function ensureExpenseNotVoid(existing) {
   throw error;
 }
 
+function ensureManualOperationalExpense(existing) {
+  if (existing.source !== 'auto_uj_order') return;
+  const error = new Error('UJ otomatis tidak bisa diedit, dipindahkan, atau dibatalkan oleh Operational. Jika ada kesalahan, ajukan klarifikasi ke Finance/Admin.');
+  error.statusCode = 409;
+  error.code = 'CONTAINER_JOB_EXPENSE_AUTO_UJ_LOCKED';
+  throw error;
+}
+
 async function ensureSalesOrderBillingNotAdvanced(client, salesOrderId) {
   if (!salesOrderId) return;
   const soResult = await client.query(
@@ -1857,6 +1865,7 @@ export async function updateDroppingExpenseBeforeFinanceCheckRecord(id, expenseI
   return withTransaction(async (client) => {
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
+    ensureManualOperationalExpense(existing);
     ensureTransactionNotFinanceChecked(existing);
     await ensureOperationalFundBatchOpenForExpense(client, expenseId);
     await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
@@ -1876,6 +1885,7 @@ export async function moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord(id
   return withTransaction(async (client) => {
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
+    ensureManualOperationalExpense(existing);
     ensureTransactionNotFinanceChecked(existing);
     await ensureOperationalFundBatchOpenForExpense(client, expenseId);
     await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
@@ -1953,6 +1963,7 @@ export async function voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId,
   return withTransaction(async (client) => {
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
+    ensureManualOperationalExpense(existing);
     ensureTransactionNotFinanceChecked(existing);
     await ensureOperationalFundBatchOpenForExpense(client, expenseId);
     await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
@@ -1994,6 +2005,8 @@ export async function uploadAutoJourneyMoneyProofRecord(id, expenseId, payload =
       throw error;
     }
     ensureExpenseNotVoid(existing);
+    ensureTransactionNotFinanceChecked(existing);
+    await ensureOperationalFundBatchOpenForExpense(client, expenseId);
 
     await client.query(
       `
