@@ -44,11 +44,13 @@ const paymentStatusLabels = {
 };
 
 const financeStatusLabels = {
-  belum_dicek: 'Menunggu Validasi Finance',
-  sudah_dicek: 'Sudah Divalidasi',
+  belum_dicek: 'Menunggu Finance',
+  sudah_dicek: 'Sudah Valid',
   perlu_klarifikasi: 'Perlu Klarifikasi',
   dikoreksi: 'Dikoreksi',
 };
+
+const proofStatusBadgeTone = 'border-amber-200 bg-amber-50 text-amber-700';
 
 const financeStatusBadgeTone = {
   belum_dicek: 'border-slate-200 bg-slate-50 text-slate-600',
@@ -1305,15 +1307,12 @@ function OperationalDroppingAccountPage() {
                       </td>
                       <td className="px-4 py-3">
                         {hasExpenseAction ? (
-                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${isVoided ? 'border-rose-200 bg-rose-50 text-rose-700' : financeStatusBadgeTone[row.financeCheckStatus] || financeStatusBadgeTone.belum_dicek}`}>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold normal-case ${isVoided ? 'border-rose-200 bg-rose-50 text-rose-700' : financeStatusBadgeTone[row.financeCheckStatus] || financeStatusBadgeTone.belum_dicek}`}>
                             {isVoided ? 'Void/Batal' : financeStatusLabels[row.financeCheckStatus] || row.financeCheckStatus}
                           </span>
                         ) : <span className="text-slate-300">-</span>}
-                        {canManualEdit ? (
-                          <span className="mt-1 block text-[10px] font-medium normal-case text-slate-400">Menunggu validasi Finance, masih bisa diperbaiki.</span>
-                        ) : null}
                         {canUploadProof ? (
-                          <span className="mt-1 block text-[10px] font-medium normal-case text-amber-600">Bukti pembayaran belum diupload.</span>
+                          <span className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold normal-case ${proofStatusBadgeTone}`}>Belum Ada Bukti</span>
                         ) : null}
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-emerald-700">{row.moneyIn ? formatCurrency(row.moneyIn) : <span className="text-slate-300">-</span>}</td>

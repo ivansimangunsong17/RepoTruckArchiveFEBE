@@ -481,7 +481,7 @@ describe('OperationalDroppingAccountPage', () => {
 
     await user.selectOptions(screen.getByLabelText('Filter status rekening dropping'), 'waiting_finance');
     await screen.findByText('UJ PT Sumber Logistik Cikarang 20FT B 1234 XYZ');
-    expect(screen.getByText(/bukti pembayaran belum diupload/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Belum Ada Bukti').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /upload bukti/i }));
