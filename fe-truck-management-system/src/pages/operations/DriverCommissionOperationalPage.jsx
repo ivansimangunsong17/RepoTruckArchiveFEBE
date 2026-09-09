@@ -73,7 +73,7 @@ function addDateKeyDays(value, days) {
 
 function isWeeklyCommissionPeriod(periodStart, periodEnd) {
   const start = parseDateKeyUtc(periodStart);
-  return Boolean(start && start.getUTCDay() === 4 && addDateKeyDays(periodStart, 6) === periodEnd);
+  return Boolean(start && start.getUTCDay() === 6 && addDateKeyDays(periodStart, 6) === periodEnd);
 }
 
 function addDays(date, days) {
@@ -85,23 +85,23 @@ function addDays(date, days) {
 function defaultCompletedCommissionPeriod() {
   const today = new Date();
   const day = today.getDay();
-  const daysSinceThursday = (day - 4 + 7) % 7;
-  const currentThursday = addDays(today, -daysSinceThursday);
-  const previousThursday = addDays(currentThursday, -7);
+  const daysSinceSaturday = (day - 6 + 7) % 7;
+  const currentSaturday = addDays(today, -daysSinceSaturday);
+  const previousSaturday = addDays(currentSaturday, -7);
   return {
-    periodStart: dateKey(previousThursday),
-    periodEnd: dateKey(addDays(previousThursday, 6)),
+    periodStart: dateKey(previousSaturday),
+    periodEnd: dateKey(addDays(previousSaturday, 6)),
   };
 }
 
 function currentCommissionPeriod() {
   const today = new Date();
   const day = today.getDay();
-  const daysSinceThursday = (day - 4 + 7) % 7;
-  const currentThursday = addDays(today, -daysSinceThursday);
+  const daysSinceSaturday = (day - 6 + 7) % 7;
+  const currentSaturday = addDays(today, -daysSinceSaturday);
   return {
-    periodStart: dateKey(currentThursday),
-    periodEnd: dateKey(addDays(currentThursday, 6)),
+    periodStart: dateKey(currentSaturday),
+    periodEnd: dateKey(addDays(currentSaturday, 6)),
   };
 }
 
@@ -618,7 +618,7 @@ function DriverCommissionOperationalPage() {
       return;
     }
     if (!validBatchPeriod) {
-      notify({ type: 'error', title: 'Periode belum sesuai', message: 'Pengajuan komisi wajib Kamis sampai Rabu.' });
+      notify({ type: 'error', title: 'Periode belum sesuai', message: 'Pengajuan komisi wajib Sabtu sampai Jumat.' });
       return;
     }
 
@@ -651,7 +651,7 @@ function DriverCommissionOperationalPage() {
             <p className="text-xs font-black uppercase tracking-wide text-slate-500">Operational</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">Report Komisi Sopir</h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-              Cek komisi per sopir sebelum diajukan ke Finance untuk periode Kamis sampai Rabu.
+              Cek komisi per sopir sebelum diajukan ke Finance untuk periode Sabtu sampai Jumat.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:min-w-[420px] sm:flex-row sm:items-end">
@@ -668,7 +668,7 @@ function DriverCommissionOperationalPage() {
                 selectedPeriodStart={periodStart}
                 selectedStatus={report.status}
               />
-              <small className="mt-1 block text-xs font-semibold normal-case tracking-normal text-slate-500">Periode otomatis Kamis sampai Rabu. Menampilkan minggu berjalan dan batch yang sudah diajukan dalam 2 bulan terakhir.</small>
+              <small className="mt-1 block text-xs font-semibold normal-case tracking-normal text-slate-500">Periode otomatis Sabtu sampai Jumat. Target pembayaran hari Rabu.</small>
             </div>
             <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={() => loadReport(periodStart, periodEnd)} disabled={loading}>
               <RefreshCw size={16} /> Refresh
@@ -765,7 +765,7 @@ function DriverCommissionOperationalPage() {
                 <button className="primary-button inline-flex items-center justify-center gap-2" type="button" disabled={submitDisabled} onClick={handleSubmitBatch}>
                   <Send size={16} /> Ajukan ke Finance
                 </button>
-                {!validBatchPeriod ? <small className="text-xs font-semibold text-amber-700">Periode submit wajib Kamis-Rabu.</small> : null}
+                {!validBatchPeriod ? <small className="text-xs font-semibold text-amber-700">Periode submit wajib Sabtu-Jumat.</small> : null}
                 {reviewRows.length ? <small className="text-xs font-semibold text-amber-700">Submit dikunci karena masih ada ritasi perlu cek.</small> : null}
               </div>
             ) : null}

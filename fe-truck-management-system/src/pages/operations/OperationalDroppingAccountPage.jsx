@@ -1283,7 +1283,7 @@ function OperationalDroppingAccountPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredRows.map((row) => {
+                {filteredRows.map((row, index) => {
                   const isVoided = row.paymentStatus === 'batal';
                   const hasExpenseAction = Boolean(row.jobId && actionExpenseId(row));
                   const isAutoUj = isAutoJourneyMoneyRow(row);
@@ -1297,7 +1297,12 @@ function OperationalDroppingAccountPage() {
                   return (
                     <tr key={row.id} className="align-middle hover:bg-slate-50/70">
                       <td className="px-4 py-3 text-xs font-medium text-slate-700">
-                        {formatDate(row.transactionDate || row.paidAt || row.createdAt)}
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[11px] font-black text-slate-700">
+                            {(page - 1) * 25 + index + 1}
+                          </span>
+                          <span>{formatDate(row.transactionDate || row.paidAt || row.createdAt)}</span>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <strong className="block text-sm font-semibold text-slate-950">{row.description || fundCategoryLabels[row.fundCategory] || expenseCategoryLabels[row.category] || '-'}</strong>

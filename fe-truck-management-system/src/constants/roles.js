@@ -114,6 +114,13 @@ export const ROLE_PERMISSIONS = {
     'vehicle_document.read',
     'reports.read',
     'reports.export',
+    'finance.read',
+    'finance.order_verification.read',
+    'finance.rpuj_approval.read',
+    'finance.operational_fund.read',
+    'finance.invoice.read',
+    'finance.debit_note.read',
+    'finance.correction.read',
   ],
   finance: [
     'reports.read',

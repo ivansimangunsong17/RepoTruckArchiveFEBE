@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, Eye, X } from 'lucide-react';
+import { Download, ExternalLink, Eye, X } from 'lucide-react';
 import { createAttachmentDownloadUrl, downloadAttachmentFile } from '../../services/files/fileService';
 
 function triggerDownload(url, fileName) {
@@ -39,6 +39,12 @@ function DocumentLink({ file, className = 'document-link', download = false, lab
   function showPreview(url, { revokeOnClose = false } = {}) {
     if (!url) return;
     setPreview({ fileName, isImage, revokeOnClose, url });
+  }
+
+  function openPreviewInNewTab() {
+    if (!preview?.url) return;
+    const previewWindow = window.open(preview.url, '_blank', 'noopener,noreferrer');
+    if (previewWindow) previewWindow.opener = null;
   }
 
   async function openDocument() {
@@ -83,13 +89,23 @@ function DocumentLink({ file, className = 'document-link', download = false, lab
     <div className="document-preview-backdrop" role="presentation" onMouseDown={() => setPreview(null)}>
       <section className="document-preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${preview.fileName}`} onMouseDown={(event) => event.stopPropagation()}>
         <header>
-          <div>
+          <div className="document-preview-title">
             <span>Preview Dokumen</span>
             <h2>{preview.fileName}</h2>
           </div>
-          <button type="button" aria-label="Tutup preview dokumen" onClick={() => setPreview(null)}>
-            <X size={18} />
-          </button>
+          <div className="document-preview-actions">
+            <button type="button" className="document-preview-action" aria-label={`Unduh ${preview.fileName}`} onClick={() => triggerDownload(preview.url, preview.fileName)}>
+              <Download size={15} />
+              <span>Unduh</span>
+            </button>
+            <button type="button" className="document-preview-action" aria-label={`Buka ${preview.fileName} di tab baru`} onClick={openPreviewInNewTab}>
+              <ExternalLink size={15} />
+              <span>Buka</span>
+            </button>
+            <button type="button" className="document-preview-close" aria-label="Tutup preview dokumen" onClick={() => setPreview(null)}>
+              <X size={18} />
+            </button>
+          </div>
         </header>
         <div className="document-preview-body">
           {preview.isImage ? (

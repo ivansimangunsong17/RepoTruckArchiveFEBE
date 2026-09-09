@@ -20,4 +20,12 @@ describe('hasPermission', () => {
     expect(hasPermission({ role: USER_ROLES.FINANCE }, 'reports.read')).toBe(true);
     expect(hasPermission(USER_ROLES.FINANCE, 'reports.read')).toBe(true);
   });
+
+  it('memberikan viewer akses Finance read only', () => {
+    expect(hasPermission({ role: USER_ROLES.OBSERVER }, 'finance.read')).toBe(true);
+    expect(hasPermission({ role: USER_ROLES.OBSERVER }, 'finance.invoice.read')).toBe(true);
+    expect(hasPermission({ role: USER_ROLES.OBSERVER }, 'finance.order_verification.update')).toBe(false);
+    expect(hasPermission({ role: USER_ROLES.OBSERVER }, 'finance.transfer_proof.upload')).toBe(false);
+    expect(hasPermission({ role: USER_ROLES.OBSERVER }, 'finance.rpuj_approval.approve')).toBe(false);
+  });
 });

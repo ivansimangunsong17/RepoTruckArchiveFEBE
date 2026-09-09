@@ -31,8 +31,8 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
 }));
 
 const reportFixture = {
-  periodStart: '2026-08-13',
-  periodEnd: '2026-08-19',
+  periodStart: '2026-08-08',
+  periodEnd: '2026-08-14',
   status: 'draft',
   activeBatch: null,
   summary: {
@@ -78,7 +78,7 @@ const reportFixture = {
           customerName: 'PT A',
           destination: 'Cikarang',
           truckPlateNumber: 'B 1000 AA',
-          completedDate: '2026-08-13',
+          completedDate: '2026-08-08',
           amount: 50000,
           paymentStatus: 'unsubmitted',
         },
@@ -115,15 +115,15 @@ const reportFixture = {
 
 const previousPeriodReport = {
   ...reportFixture,
-  periodStart: '2026-08-06',
-  periodEnd: '2026-08-12',
+  periodStart: '2026-08-01',
+  periodEnd: '2026-08-07',
   status: 'submitted',
   activeBatch: {
     id: 'batch-previous',
-    periodStart: '2026-08-06',
-    periodEnd: '2026-08-12',
+    periodStart: '2026-08-01',
+    periodEnd: '2026-08-07',
     status: 'submitted',
-    submittedAt: '2026-08-13T03:00:00.000Z',
+    submittedAt: '2026-08-08T03:00:00.000Z',
   },
   summary: {
     totalDrivers: 1,
@@ -155,7 +155,7 @@ const previousPeriodReport = {
           customerName: 'PT C',
           destination: 'Bekasi',
           truckPlateNumber: 'B 3000 CC',
-          completedDate: '2026-08-06',
+          completedDate: '2026-08-01',
           amount: 100000,
           paymentStatus: 'pending',
         },
@@ -204,8 +204,8 @@ describe('DriverCommissionOperationalPage', () => {
       rows: [
         {
           id: 'batch-previous',
-          periodStart: '2026-08-06',
-          periodEnd: '2026-08-12',
+          periodStart: '2026-08-01',
+          periodEnd: '2026-08-07',
           status: 'submitted',
           totalItems: 1,
           totalAmount: 100000,
@@ -213,19 +213,19 @@ describe('DriverCommissionOperationalPage', () => {
       ],
     });
     fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => (
-      Promise.resolve(periodStart === '2026-08-06' ? previousPeriodReport : reportFixture)
+      Promise.resolve(periodStart === '2026-08-01' ? previousPeriodReport : reportFixture)
     ));
 
     render(<DriverCommissionOperationalPage />);
 
     const batchTrigger = await screen.findByLabelText('Pilih batch komisi');
     await user.click(batchTrigger);
-    await user.click(await screen.findByRole('button', { name: /06 agustus 2026 - 12 agustus 2026/i }));
+    await user.click(await screen.findByRole('button', { name: /01 agustus 2026 - 07 agustus 2026/i }));
 
     await waitFor(() => {
       expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
-        periodStart: '2026-08-06',
-        periodEnd: '2026-08-12',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-08-07',
       });
     });
     expect(await screen.findByText('Asep')).toBeInTheDocument();
@@ -237,8 +237,8 @@ describe('DriverCommissionOperationalPage', () => {
       rows: [
         {
           id: 'batch-previous',
-          periodStart: '2026-08-06',
-          periodEnd: '2026-08-12',
+          periodStart: '2026-08-01',
+          periodEnd: '2026-08-07',
           status: 'submitted',
           totalItems: 1,
           totalAmount: 100000,
@@ -247,7 +247,7 @@ describe('DriverCommissionOperationalPage', () => {
       pagination: { page: 1, pageSize: 20, total: 1 },
     });
     fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => (
-      Promise.resolve(periodStart === '2026-08-06' ? previousPeriodReport : reportFixture)
+      Promise.resolve(periodStart === '2026-08-01' ? previousPeriodReport : reportFixture)
     ));
 
     render(<DriverCommissionOperationalPage />);
@@ -256,12 +256,12 @@ describe('DriverCommissionOperationalPage', () => {
     await user.click(screen.getByRole('button', { name: /periode/i }));
 
     const dialog = await screen.findByRole('dialog', { name: /riwayat batch yang sudah diajukan/i });
-    await user.click(within(dialog).getByText(/06 Agustus 2026 - 12 Agustus 2026/i));
+    await user.click(within(dialog).getByText(/01 Agustus 2026 - 07 Agustus 2026/i));
 
     await waitFor(() => {
       expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
-        periodStart: '2026-08-06',
-        periodEnd: '2026-08-12',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-08-07',
       });
     });
     expect(screen.queryByRole('dialog', { name: /riwayat batch yang sudah diajukan/i })).not.toBeInTheDocument();
@@ -274,8 +274,8 @@ describe('DriverCommissionOperationalPage', () => {
       rows: [
         {
           id: 'batch-previous',
-          periodStart: '2026-08-06',
-          periodEnd: '2026-08-12',
+          periodStart: '2026-08-01',
+          periodEnd: '2026-08-07',
           status: 'submitted',
           totalItems: 1,
           totalAmount: 100000,
@@ -331,7 +331,7 @@ describe('DriverCommissionOperationalPage', () => {
 
     expect(screen.queryByLabelText('Dari')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Sampai')).not.toBeInTheDocument();
-    expect(screen.getByText(/otomatis kamis sampai rabu/i)).toBeInTheDocument();
+    expect(screen.getByText(/otomatis sabtu sampai jumat/i)).toBeInTheDocument();
   });
 
   it('menampilkan badge "Ada Potongan Finance" untuk sopir yang komisinya dipotong', async () => {

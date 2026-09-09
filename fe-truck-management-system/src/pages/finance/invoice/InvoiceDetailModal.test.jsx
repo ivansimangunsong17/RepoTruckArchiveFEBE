@@ -30,6 +30,12 @@ function renderModal(invoice, extraProps = {}) {
       onLoadDebitNotePayments={vi.fn()}
       onConfirmDebitNotePayment={vi.fn()}
       onVoidDebitNotePayment={vi.fn()}
+      canRecordDebitNotePayment
+      canRequestCorrection
+      canUpdateInvoiceNumber
+      canUploadInvoiceDocument
+      canUpdateInvoiceDeliveryStatus
+      canManageRevenueLine
       {...extraProps}
     />,
   );
@@ -109,6 +115,12 @@ describe('InvoiceDetailModal input nomor invoice', () => {
         onLoadDebitNotePayments={vi.fn()}
         onConfirmDebitNotePayment={vi.fn()}
         onVoidDebitNotePayment={vi.fn()}
+        canRecordDebitNotePayment
+        canRequestCorrection
+        canUpdateInvoiceNumber
+        canUploadInvoiceDocument
+        canUpdateInvoiceDeliveryStatus
+        canManageRevenueLine
       />,
     );
 

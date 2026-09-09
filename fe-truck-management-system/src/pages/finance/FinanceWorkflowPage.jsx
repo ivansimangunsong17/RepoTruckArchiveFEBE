@@ -345,9 +345,13 @@ function FinanceTable({
   operationalFundError,
   operationalFundLoading,
   operationalFundBusyId,
+  canUpdateSoNumber,
   canRequestOperationalFund,
   canDepositOperationalFund,
+  canReconcileOperationalFund,
   canReopenOperationalFundBatch,
+  canUpdateInvoiceNumber,
+  canUploadInvoiceDocument,
   operationalFundTransactionError,
   operationalFundTransactionLoading,
   expenseReconciliationError,
@@ -434,6 +438,7 @@ function FinanceTable({
           query={query}
           rows={orderRows}
           savingSoId={savingSoId}
+          canUpdateSoNumber={canUpdateSoNumber}
           summary={orderSummary}
           total={orderTotal}
           totalPages={orderTotalPages}
@@ -449,6 +454,7 @@ function FinanceTable({
           batchLoading={operationalFundBatchLoading}
           canRequest={canRequestOperationalFund}
           canDeposit={canDepositOperationalFund}
+          canReconcile={canReconcileOperationalFund}
           canReopen={canReopenOperationalFundBatch}
           pendingCloseBatches={pendingCloseBatches}
           expenseBusyId={expenseReconciliationBusyId}
@@ -492,6 +498,8 @@ function FinanceTable({
           invoiceDateTo={invoiceDateTo}
           invoiceFilterMonth={invoiceFilterMonth}
           invoiceBusyId={invoiceBusyId}
+          canUpdateInvoiceNumber={canUpdateInvoiceNumber}
+          canUploadInvoiceDocument={canUploadInvoiceDocument}
           onSaveInvoiceNumberInline={handlers.onSaveInvoiceNumberInline}
           query={query}
           rows={invoiceRows}
@@ -510,8 +518,16 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
   const { user } = useAuth();
   const canRequestOperationalFund = hasPermission(user, 'finance.operational_fund.request');
   const canDepositOperationalFund = hasPermission(user, 'finance.operational_fund.deposit');
+  const canReconcileOperationalFund = hasPermission(user, 'finance.operational_fund.reconcile');
   const canVoidDebitNotePayment = hasPermission(user, 'finance.debit_note.payment.void');
   const canReopenOperationalFundBatch = hasPermission(user, 'finance.operational_fund.reopen');
+  const canUpdateSoNumber = hasPermission(user, 'finance.order_verification.update');
+  const canRequestFinanceCorrection = hasPermission(user, 'finance.correction.request');
+  const canUpdateInvoiceNumber = hasPermission(user, 'finance.invoice.update_number');
+  const canUploadInvoiceDocument = hasPermission(user, 'finance.invoice.upload');
+  const canRecordDebitNotePayment = hasPermission(user, 'finance.debit_note.payment.record');
+  const canUpdateInvoiceDeliveryStatus = hasPermission(user, 'finance.invoice.delivery_status.update');
+  const canManageRevenueLine = hasPermission(user, 'finance.invoice.revenue_line.create');
   const [query, setQuery] = useState('');
   const activeTab = useMemo(
     () => financeTabs.find((tab) => tab.id === initialTabId) || financeTabs[0],
@@ -759,9 +775,13 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         operationalFundBatchDate={operationalFundBatchDate}
         operationalFundBatchError={operationalFundBatchError}
         operationalFundBatchLoading={operationalFundBatchLoading}
+        canUpdateSoNumber={canUpdateSoNumber}
         canRequestOperationalFund={canRequestOperationalFund}
         canDepositOperationalFund={canDepositOperationalFund}
+        canReconcileOperationalFund={canReconcileOperationalFund}
         canReopenOperationalFundBatch={canReopenOperationalFundBatch}
+        canUpdateInvoiceNumber={canUpdateInvoiceNumber}
+        canUploadInvoiceDocument={canUploadInvoiceDocument}
         operationalFundError={operationalFundError}
         operationalFundLoading={operationalFundLoading}
         operationalFundRows={operationalFundRows}
@@ -808,6 +828,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         corrections={correctionHistory}
         correctionsError={correctionHistoryError}
         correctionsLoading={correctionHistoryLoading}
+        canRequestCorrection={canRequestFinanceCorrection}
         onClose={orderVerification.closeOrderDetail}
         onOpenCorrection={openCorrectionModal}
         order={selectedOrder}
@@ -822,6 +843,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         debitNotePaymentsLoading={debitNotePaymentsLoading}
         debitNotePaymentSaving={debitNotePaymentSaving}
         debitNotePaymentError={debitNotePaymentError}
+        canRecordDebitNotePayment={canRecordDebitNotePayment}
         canVoidDebitNotePayment={canVoidDebitNotePayment}
         debitNotePaymentVoidBusyId={debitNotePaymentVoidBusyId}
         debitNotePaymentVoidError={debitNotePaymentVoidError}
@@ -838,6 +860,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         revenueLineVoidError={revenueLineVoidError}
         loading={invoiceDetailLoading}
         onClose={invoiceWorkflow.closeInvoiceDetail}
+        canRequestCorrection={canRequestFinanceCorrection}
+        canUpdateInvoiceNumber={canUpdateInvoiceNumber}
+        canUploadInvoiceDocument={canUploadInvoiceDocument}
+        canUpdateInvoiceDeliveryStatus={canUpdateInvoiceDeliveryStatus}
+        canManageRevenueLine={canManageRevenueLine}
         onOpenCorrection={openCorrectionModal}
         onUploadInvoiceDocument={handleUploadInvoiceDocument}
         onSaveDebitNoteNumber={submitDebitNoteNumber}

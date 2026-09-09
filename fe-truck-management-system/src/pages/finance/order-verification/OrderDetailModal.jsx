@@ -3,7 +3,7 @@ import CorrectionHistoryList from '../shared/CorrectionHistoryList';
 import DetailField from '../shared/DetailField';
 import { isCancelledFinanceOrder } from './orderVerificationUtils';
 
-function OrderDetailModal({ order, corrections = [], correctionsLoading = false, correctionsError = '', onClose, onOpenCorrection }) {
+function OrderDetailModal({ order, corrections = [], correctionsLoading = false, correctionsError = '', canRequestCorrection = false, onClose, onOpenCorrection }) {
   if (!order) return null;
 
   const isCancelled = isCancelledFinanceOrder(order);
@@ -97,9 +97,11 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
                   <h4 className="text-xs font-black text-slate-950">Koreksi Nomor SO</h4>
                   <p className="mt-0.5 text-[11px] font-medium text-slate-500">Gunakan alur koreksi jika nomor SO sudah pernah diinput.</p>
                 </div>
-                <button className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800" onClick={() => onOpenCorrection(order, 'so_number')} type="button">
-                  Ajukan Koreksi
-                </button>
+                {canRequestCorrection ? (
+                  <button className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800" onClick={() => onOpenCorrection(order, 'so_number')} type="button">
+                    Ajukan Koreksi
+                  </button>
+                ) : null}
               </div>
               <div className="mt-2">
                 <CorrectionHistoryList corrections={corrections} error={correctionsError} loading={correctionsLoading} />

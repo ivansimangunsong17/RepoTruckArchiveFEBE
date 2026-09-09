@@ -8,12 +8,12 @@ function groupItems(label) {
 }
 
 describe('navigationGroups', () => {
-  it('menampilkan menu finance untuk admin dan finance', () => {
+  it('menampilkan menu finance untuk admin, finance, dan viewer', () => {
     const financeItems = groupItems('Finance').filter((item) => item.to.startsWith('/finance'));
 
     expect(financeItems).toHaveLength(5);
     financeItems.forEach((item) => {
-      expect(item.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.FINANCE]);
+      expect(item.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
     });
   });
 
@@ -51,7 +51,7 @@ describe('navigationGroups', () => {
     expect(operationalCommission?.label).toBe('Report Komisi');
     expect(operationalCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
     expect(financeCommission?.label).toBe('Pembayaran Komisi');
-    expect(financeCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.FINANCE]);
+    expect(financeCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
   });
 
   it('menampilkan Dokumen Customer hanya untuk admin dan sales', () => {
@@ -94,6 +94,11 @@ describe('navigationGroups', () => {
       '/viewer/depots',
       '/viewer/terminals',
       '/viewer/destinations',
+      '/finance/order-verification',
+      '/finance/rpuj-approval',
+      '/finance/driver-commissions',
+      '/finance/invoices',
+      '/finance/outstanding',
     ]);
     expect(viewerItems.map((item) => item.to)).not.toContain('/document-monitoring');
   });

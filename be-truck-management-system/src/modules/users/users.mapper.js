@@ -1,4 +1,4 @@
-const observerPermissions = ['sales_order.read', 'sales_order.customer_outstanding.read', 'container_job.read', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'report.read', 'activity_log.read', 'telematics.vehicle_position.read'];
+const observerPermissions = ['sales_order.read', 'sales_order.customer_outstanding.read', 'container_job.read', 'master_data.read', 'vehicle.read', 'vehicle_document.read', 'document.read', 'report.read', 'activity_log.read', 'finance.read', 'finance.order_verification.read', 'finance.rpuj_approval.read', 'finance.operational_fund.read', 'finance.invoice.read', 'finance.debit_note.read', 'finance.correction.read', 'telematics.vehicle_position.read'];
 
 export const ROLE_PERMISSIONS = {
   admin: [

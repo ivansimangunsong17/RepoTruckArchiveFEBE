@@ -8,30 +8,30 @@ const {
   normalizeCommissionPeriod,
 } = await import('./driver-commissions.period.js');
 
-test('buildCommissionPeriod builds Thursday to Wednesday period', () => {
-  assert.deepEqual(buildCommissionPeriod('2026-08-13'), {
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
+test('buildCommissionPeriod builds Saturday to Friday period', () => {
+  assert.deepEqual(buildCommissionPeriod('2026-08-08'), {
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
+  });
+
+  assert.deepEqual(buildCommissionPeriod('2026-08-10'), {
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
   });
 
   assert.deepEqual(buildCommissionPeriod('2026-08-14'), {
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
-  });
-
-  assert.deepEqual(buildCommissionPeriod('2026-08-19'), {
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
   });
 });
 
 test('normalizeCommissionPeriod accepts explicit date range', () => {
   assert.deepEqual(normalizeCommissionPeriod({
-    periodStart: '2026-08-06',
-    periodEnd: '2026-08-12',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
   }), {
-    periodStart: '2026-08-06',
-    periodEnd: '2026-08-12',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
   });
 });
 
@@ -43,8 +43,8 @@ test('normalizeCommissionPeriod rejects invalid dates and inverted ranges', () =
   );
 });
 
-test('isCommissionWeekPeriod hanya menerima periode Kamis sampai Rabu', () => {
-  assert.equal(isCommissionWeekPeriod({ periodStart: '2026-08-13', periodEnd: '2026-08-19' }), true);
-  assert.equal(isCommissionWeekPeriod({ periodStart: '2026-08-13', periodEnd: '2026-08-18' }), false);
-  assert.equal(isCommissionWeekPeriod({ periodStart: '2026-08-14', periodEnd: '2026-08-20' }), false);
+test('isCommissionWeekPeriod hanya menerima periode Sabtu sampai Jumat', () => {
+  assert.equal(isCommissionWeekPeriod({ periodStart: '2026-08-08', periodEnd: '2026-08-14' }), true);
+  assert.equal(isCommissionWeekPeriod({ periodStart: '2026-08-08', periodEnd: '2026-08-13' }), false);
+  assert.equal(isCommissionWeekPeriod({ periodStart: '2026-08-09', periodEnd: '2026-08-15' }), false);
 });

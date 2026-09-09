@@ -23,6 +23,13 @@ async function openOperationalPhase(user, name) {
   await user.click(screen.getByRole('tab', { name }));
 }
 
+async function chooseDriver(user, driverName) {
+  const input = screen.getByLabelText('Sopir Aktual Ritasi');
+  await user.clear(input);
+  await user.type(input, driverName);
+  await user.click(await screen.findByRole('option', { name: new RegExp(driverName, 'i') }));
+}
+
 function expectedDateTimeLocalValue(value) {
   const date = new Date(value);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
@@ -1103,7 +1110,7 @@ describe('OperationalForm', () => {
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     expect(screen.getByLabelText('Sopir Aktual Ritasi')).toHaveValue('Driver Aktif');
 
-    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await chooseDriver(user, 'Driver Cadangan');
     expect(screen.getByLabelText('Truck')).toHaveValue('B 1000 AA');
 
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
@@ -1142,7 +1149,7 @@ describe('OperationalForm', () => {
       />,
     );
 
-    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Baru');
+    await chooseDriver(user, 'Driver Baru');
     expect(screen.getByText(/alasan perubahan sopir\/truck wajib diisi/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
@@ -1283,7 +1290,7 @@ describe('OperationalForm', () => {
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeDisabled();
 
-    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await chooseDriver(user, 'Driver Cadangan');
     expect(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' })).toBeEnabled();
   });
 
@@ -1306,7 +1313,7 @@ describe('OperationalForm', () => {
     );
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
-    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await chooseDriver(user, 'Driver Cadangan');
     await user.click(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' }));
 
     expect(screen.getByText(/Ini akan mengubah default sopir untuk B 1000 AA menjadi Driver Cadangan/)).toBeInTheDocument();
@@ -1336,7 +1343,7 @@ describe('OperationalForm', () => {
     );
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
-    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await chooseDriver(user, 'Driver Cadangan');
     await user.click(screen.getByRole('button', { name: 'Jadikan sopir ini default truck' }));
     await user.type(screen.getByPlaceholderText(/sopir tetap truck ini memang diganti/i), 'Sopir tetap truck ini resmi diganti sesuai kesepakatan baru');
     await user.click(screen.getByRole('button', { name: 'Konfirmasi' }));
@@ -1387,7 +1394,7 @@ describe('OperationalForm', () => {
     );
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
-    await user.selectOptions(screen.getByLabelText('Sopir Aktual Ritasi'), 'Driver Cadangan');
+    await chooseDriver(user, 'Driver Cadangan');
     await user.click(screen.getByRole('button', { name: /simpan container job/i }));
 
     expect(onSetTruckDefaultDriver).not.toHaveBeenCalled();

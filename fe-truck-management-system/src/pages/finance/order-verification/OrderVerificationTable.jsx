@@ -19,6 +19,7 @@ function OrderVerificationTable({
   onSelectOrder,
   onOpenSoModal,
   savingSoId,
+  canUpdateSoNumber = false,
   orderFilterMonth,
   orderDateFrom,
   orderDateTo,
@@ -202,7 +203,7 @@ function OrderVerificationTable({
                         <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Referensi sistem</span>
                       </td>
                       <td className="px-2 py-1" data-label="Nomor SO Finance">
-                        {activeOrderTab === 'need-so' && !isCancelled ? (
+                        {activeOrderTab === 'need-so' && !isCancelled && canUpdateSoNumber ? (
                           <button
                             className="inline-flex h-8 items-center rounded-md bg-slate-900 px-3 text-[10px] font-bold text-white hover:bg-slate-800 disabled:opacity-40"
                             disabled={savingSoId === row.id}
@@ -211,6 +212,11 @@ function OrderVerificationTable({
                           >
                             {savingSoId === row.id ? 'Menyimpan...' : 'Input Nomor SO'}
                           </button>
+                        ) : activeOrderTab === 'need-so' && !isCancelled ? (
+                          <div>
+                            <span className="block text-[11px] font-black text-slate-400">-</span>
+                            <span className="mt-0.5 block text-[9px] font-semibold text-slate-500">Menunggu input Finance</span>
+                          </div>
                         ) : isCancelled ? (
                           <div>
                             <span className="block text-[11px] font-black text-slate-900">{row.soNumber || '-'}</span>

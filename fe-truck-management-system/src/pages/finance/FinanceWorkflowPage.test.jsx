@@ -586,7 +586,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     expect(await screen.findByText('Catatan Saldo')).toBeInTheDocument();
-    expect(screen.getByText('Uang Masuk')).toBeInTheDocument();
+    expect(await screen.findByText('Uang Masuk')).toBeInTheDocument();
     expect(screen.getByText('Uang Keluar')).toBeInTheDocument();
     expect(screen.queryByText('Driver / DO')).not.toBeInTheDocument();
     expect(screen.queryByText('TOP')).not.toBeInTheDocument();

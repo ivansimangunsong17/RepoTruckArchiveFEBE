@@ -37,6 +37,8 @@ function renderTable(rows, overrides = {}) {
       onInvoiceDateToChange={vi.fn()}
       onResetInvoiceDateFilter={vi.fn()}
       onSelectInvoice={vi.fn()}
+      canUpdateInvoiceNumber
+      canUploadInvoiceDocument
       {...overrides}
     />,
   );

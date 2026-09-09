@@ -57,6 +57,7 @@ const statusOptions = [
 ];
 
 const OPERATIONAL_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
+const DRIVER_SEARCH_MAX_RESULTS = 8;
 
 function getMasterData(storageKey, fallback) {
   try {
@@ -180,6 +181,61 @@ function dateTimeInputToIso(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toISOString();
+}
+
+function SearchableDriverInput({ value, drivers = [], disabled = false, onChange, currentDriverExists = true }) {
+  const [open, setOpen] = useState(false);
+  const query = normalizeName(value);
+  const matches = drivers
+    .filter((driver) => {
+      if (!query) return true;
+      return normalizeName(`${driver.name || ''} ${driver.nickname || ''}`).includes(query);
+    })
+    .slice(0, DRIVER_SEARCH_MAX_RESULTS);
+
+  function selectDriver(driverName) {
+    onChange({ target: { name: 'driver', value: driverName } });
+    setOpen(false);
+  }
+
+  return (
+    <div className="searchable-input operational-driver-search">
+      <input
+        aria-label="Sopir Aktual Ritasi"
+        autoComplete="off"
+        disabled={disabled}
+        name="driver"
+        onBlur={() => window.setTimeout(() => setOpen(false), 140)}
+        onChange={(event) => {
+          onChange(event);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setOpen(false);
+        }}
+        placeholder="Ketik nama sopir..."
+        value={value}
+      />
+      {open && !disabled ? (
+        <div className="searchable-input-results operational-driver-search-results" role="listbox">
+          {value && !currentDriverExists ? (
+            <button type="button" role="option" onMouseDown={() => selectDriver(value)}>
+              {value}
+            </button>
+          ) : null}
+          {matches.length ? matches.map((driver) => (
+            <button key={driver.id || driver.name} type="button" role="option" onMouseDown={() => selectDriver(driver.name)}>
+              <strong>{driver.nickname || driver.name}</strong>
+              {driver.nickname ? <span>{driver.name}</span> : null}
+            </button>
+          )) : (
+            <span className="searchable-input-empty">Sopir tidak ditemukan</span>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function generateSpkNumber() {
@@ -1287,7 +1343,16 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             <div className="order-form-grid">
               <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'}</option>)}</select></label>
               <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
-              <label>Sopir Aktual Ritasi<select name="driver" value={form.driver} onChange={updateDriver} disabled={!canEditAssignment}><option value="">Pilih sopir</option>{form.driver && !currentDriverExists ? <option value={form.driver}>{form.driver}</option> : null}{availableDrivers.map((driver) => <option key={driver.id || driver.name} value={driver.name}>{driver.nickname ? `${driver.name} (${driver.nickname})` : driver.name}</option>)}</select></label>
+              <label>
+                Sopir Aktual Ritasi
+                <SearchableDriverInput
+                  currentDriverExists={currentDriverExists}
+                  disabled={!canEditAssignment}
+                  drivers={availableDrivers}
+                  onChange={updateDriver}
+                  value={form.driver}
+                />
+              </label>
               <label>Pembayaran UJ Driver<input value={form.driverBankAccount || 'Belum diisi di master driver'} readOnly /></label>
               <label>Detail Truck<input value={form.chassis} readOnly /></label>
               <label>Alasan Perubahan{assignmentChangeReasonRequired ? ' *' : ''}<input name="assignmentChangeReason" value={form.assignmentChangeReason} onChange={updateField} disabled={!canEditAssignment} placeholder="Contoh: sopir sakit, truck rusak di jalan" /></label>

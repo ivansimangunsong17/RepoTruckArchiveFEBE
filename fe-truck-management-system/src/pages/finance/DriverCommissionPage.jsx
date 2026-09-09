@@ -69,23 +69,23 @@ function addDays(date, days) {
 function defaultCompletedCommissionPeriod() {
   const today = new Date();
   const day = today.getDay();
-  const daysSinceThursday = (day - 4 + 7) % 7;
-  const currentThursday = addDays(today, -daysSinceThursday);
-  const previousThursday = addDays(currentThursday, -7);
+  const daysSinceSaturday = (day - 6 + 7) % 7;
+  const currentSaturday = addDays(today, -daysSinceSaturday);
+  const previousSaturday = addDays(currentSaturday, -7);
   return {
-    periodStart: dateKey(previousThursday),
-    periodEnd: dateKey(addDays(previousThursday, 6)),
+    periodStart: dateKey(previousSaturday),
+    periodEnd: dateKey(addDays(previousSaturday, 6)),
   };
 }
 
 function currentCommissionPeriod() {
   const today = new Date();
   const day = today.getDay();
-  const daysSinceThursday = (day - 4 + 7) % 7;
-  const currentThursday = addDays(today, -daysSinceThursday);
+  const daysSinceSaturday = (day - 6 + 7) % 7;
+  const currentSaturday = addDays(today, -daysSinceSaturday);
   return {
-    periodStart: dateKey(currentThursday),
-    periodEnd: dateKey(addDays(currentThursday, 6)),
+    periodStart: dateKey(currentSaturday),
+    periodEnd: dateKey(addDays(currentSaturday, 6)),
   };
 }
 
@@ -1164,7 +1164,7 @@ function DriverCommissionPage() {
             <p className="text-xs font-black uppercase tracking-wide text-slate-500">Finance</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">Pembayaran Komisi Sopir</h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-              Cek pengajuan Operational per sopir, approve batch, lalu catat pembayaran mingguan.
+              Cek pengajuan Operational per sopir, approve batch Sabtu-Jumat, lalu catat pembayaran mingguan target Rabu.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:min-w-[420px] sm:flex-row sm:items-end">

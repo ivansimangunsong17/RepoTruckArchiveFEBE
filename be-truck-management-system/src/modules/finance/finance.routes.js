@@ -146,7 +146,7 @@ export const financeRoutes = [
   {
     method: 'GET',
     path: '/api/finance/container-job-expenses',
-    permission: 'finance.operational_fund.reconcile',
+    permission: 'finance.operational_fund.read',
     handler: containerJobExpenseReconciliationController,
   },
   {

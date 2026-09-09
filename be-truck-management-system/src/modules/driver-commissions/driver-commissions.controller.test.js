@@ -11,8 +11,8 @@ const {
 test('audit snapshot batch komisi ringkas tanpa detail item container', () => {
   const snapshot = driverCommissionBatchAuditSnapshot({
     id: 'batch-1',
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
     status: 'submitted',
     totalItems: 2,
     totalAmount: 125000,
@@ -40,8 +40,8 @@ test('audit snapshot batch komisi ringkas tanpa detail item container', () => {
 test('audit snapshot payment komisi hanya memuat batch ringkas dan payment terkait', () => {
   const snapshot = driverCommissionPaymentAuditSnapshot({
     id: 'batch-1',
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
     status: 'approved',
     totalItems: 3,
     totalAmount: 175000,
@@ -53,8 +53,8 @@ test('audit snapshot payment komisi hanya memuat batch ringkas dan payment terka
 
   assert.deepEqual(snapshot.batch, {
     id: 'batch-1',
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
     status: 'approved',
     totalItems: 3,
     totalAmount: 175000,

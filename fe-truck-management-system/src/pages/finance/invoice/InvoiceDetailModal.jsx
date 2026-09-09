@@ -411,6 +411,7 @@ function InvoiceDetailModal({
   debitNotePaymentsLoading = false,
   debitNotePaymentSaving = false,
   debitNotePaymentError = '',
+  canRecordDebitNotePayment = false,
   canVoidDebitNotePayment = false,
   debitNotePaymentVoidBusyId = '',
   debitNotePaymentVoidError = '',
@@ -421,6 +422,11 @@ function InvoiceDetailModal({
   revenueLineError = '',
   revenueLineVoidBusyId = '',
   revenueLineVoidError = '',
+  canRequestCorrection = false,
+  canUpdateInvoiceNumber = false,
+  canUploadInvoiceDocument = false,
+  canUpdateInvoiceDeliveryStatus = false,
+  canManageRevenueLine = false,
   onClose,
   onOpenCorrection,
   onUploadInvoiceDocument,
@@ -585,7 +591,7 @@ function InvoiceDetailModal({
     try {
       await onSaveDebitNoteNumber?.(invoice.id, debitNoteNumberDraft);
       setDebitNoteNumberDraft('');
-    } catch (saveError) {
+    } catch {
       // Error sudah ditampilkan lewat prop debitNoteNumberError.
     }
   }
@@ -665,7 +671,7 @@ function InvoiceDetailModal({
         idempotencyKey: debitNotePaymentForm.idempotencyKey,
       }, debitNotePaymentForm.proofFile);
       setDebitNotePaymentOpen(false);
-    } catch (paymentError) {
+    } catch {
       // Error sudah ditampilkan lewat prop debitNotePaymentError.
     }
   }
@@ -742,7 +748,7 @@ function InvoiceDetailModal({
               ))}
             </section>
 
-            {!invoice.invoiceNumber ? (
+            {!invoice.invoiceNumber && canUpdateInvoiceNumber ? (
               <section className={`rounded-lg border px-3 py-2.5 ${invoiceNumberDraft.trim() ? 'border-sky-200 bg-sky-50' : 'border-amber-200 bg-amber-50'}`}>
                 <div className="flex flex-wrap items-end gap-2.5">
                   <label className={`grid min-w-[220px] flex-1 gap-1 text-[10px] font-black uppercase tracking-wide ${invoiceNumberDraft.trim() ? 'text-sky-800' : 'text-amber-800'}`}>
@@ -772,7 +778,7 @@ function InvoiceDetailModal({
               </section>
             ) : null}
 
-            {invoice.invoiceNumber && invoice.billingStatus !== 'lunas' ? (
+            {invoice.invoiceNumber && invoice.billingStatus !== 'lunas' && canUpdateInvoiceDeliveryStatus ? (
               <section className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Status Pengiriman Invoice</p>
                 <div className="mt-1.5 flex flex-wrap items-end gap-2.5">
@@ -906,7 +912,7 @@ function InvoiceDetailModal({
                               <strong className={`text-xs font-black text-slate-900 ${line.status === 'void' ? 'line-through opacity-60' : ''}`}>{formatCurrency(line.totalAmount)}</strong>
                               {line.status === 'void' ? (
                                 <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
-                              ) : (
+                              ) : canManageRevenueLine ? (
                                 <button
                                   className="rounded-md border border-rose-200 px-2 py-1 text-[10px] font-black uppercase text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
                                   disabled={revenueLineVoidBusyId === line.id}
@@ -915,13 +921,13 @@ function InvoiceDetailModal({
                                 >
                                   Batalkan
                                 </button>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                           {line.status === 'void' ? (
                             <p className="mt-1 text-[10px] font-semibold text-rose-600">Alasan: {line.voidReason} &middot; oleh {line.voidedByName}</p>
                           ) : null}
-                          {voidingRevenueLineId === line.id ? (
+                          {canManageRevenueLine && voidingRevenueLineId === line.id ? (
                             <div className="mt-2 grid gap-1.5 rounded-md border border-rose-200 bg-rose-100/40 p-2">
                               <textarea
                                 className="w-full rounded-md border border-rose-200 px-2 py-1.5 text-xs"
@@ -949,16 +955,18 @@ function InvoiceDetailModal({
                     </div>
                   ) : null}
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5">
-                    <button
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-2.5 text-[10px] font-black uppercase tracking-wide text-white shadow-sm hover:bg-slate-800"
-                      onClick={() => openRevenueLineForm('inap')}
-                      type="button"
-                    >
-                      <PlusCircle size={13} />
-                      Tambah Revenue Manual
-                    </button>
-                  </div>
+                  {canManageRevenueLine ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2.5">
+                      <button
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-2.5 text-[10px] font-black uppercase tracking-wide text-white shadow-sm hover:bg-slate-800"
+                        onClick={() => openRevenueLineForm('inap')}
+                        type="button"
+                      >
+                        <PlusCircle size={13} />
+                        Tambah Revenue Manual
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="finance-invoice-detail-card">
@@ -1026,16 +1034,18 @@ function InvoiceDetailModal({
                               </span>
                             </div>
                           </div>
-                          <button
-                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 text-[10px] font-black text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
-                            disabled={Number(invoice.debitNoteOutstandingAmount) <= 0}
-                            onClick={openDebitNotePaymentModal}
-                            type="button"
-                          >
-                            Catat Pembayaran
-                          </button>
+                          {canRecordDebitNotePayment ? (
+                            <button
+                              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 text-[10px] font-black text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={Number(invoice.debitNoteOutstandingAmount) <= 0}
+                              onClick={openDebitNotePaymentModal}
+                              type="button"
+                            >
+                              Catat Pembayaran
+                            </button>
+                          ) : null}
                         </div>
-                      ) : (
+                      ) : canUpdateInvoiceNumber ? (
                         <div className="flex flex-wrap items-end gap-2">
                           <label className="grid min-w-[180px] flex-1 gap-1 text-[10px] font-black uppercase text-slate-500">
                             Input Nomor Debit Note
@@ -1056,7 +1066,7 @@ function InvoiceDetailModal({
                             {debitNoteNumberSaving ? 'Menyimpan...' : 'Simpan'}
                           </button>
                         </div>
-                      )}
+                      ) : null}
                       {debitNoteNumberError ? (
                         <p className="mt-1.5 text-[10px] font-semibold text-rose-700">{debitNoteNumberError}</p>
                       ) : null}
@@ -1103,15 +1113,17 @@ function InvoiceDetailModal({
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill value={invoice.invoiceDocumentStatusLabel} />
-                  <button
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-600 px-3 text-[10px] font-black text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
-                    disabled={!hasPendingInvoiceFiles || isSavingInvoiceDocuments}
-                    onClick={savePendingInvoiceDocuments}
-                    type="button"
-                  >
-                    <CheckCircle2 size={13} />
-                    {isSavingInvoiceDocuments ? 'Menyimpan...' : 'Simpan Dokumen'}
-                  </button>
+                  {canUploadInvoiceDocument ? (
+                    <button
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-red-600 px-3 text-[10px] font-black text-white shadow-sm hover:bg-red-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
+                      disabled={!hasPendingInvoiceFiles || isSavingInvoiceDocuments}
+                      onClick={savePendingInvoiceDocuments}
+                      type="button"
+                    >
+                      <CheckCircle2 size={13} />
+                      {isSavingInvoiceDocuments ? 'Menyimpan...' : 'Simpan Dokumen'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
               {invoiceDocumentUploadError ? (
@@ -1140,7 +1152,7 @@ function InvoiceDetailModal({
                       key={slot.type}
                       onDragEnter={(event) => {
                         event.preventDefault();
-                        if (!isBusy) setDragUploadKey(busyKey);
+                        if (canUploadInvoiceDocument && !isBusy) setDragUploadKey(busyKey);
                       }}
                       onDragLeave={(event) => {
                         event.preventDefault();
@@ -1154,7 +1166,7 @@ function InvoiceDetailModal({
                       onDrop={async (event) => {
                         event.preventDefault();
                         setDragUploadKey('');
-                        if (isBusy) return;
+                        if (!canUploadInvoiceDocument || isBusy) return;
                         const file = event.dataTransfer?.files?.[0];
                         if (file) setPendingInvoiceFile(slot.type, file);
                       }}
@@ -1166,38 +1178,42 @@ function InvoiceDetailModal({
                             {isDragActive ? 'Lepas PDF di sini' : pendingFile?.name || document?.file?.name || 'Belum ada file PDF'}
                           </span>
                         </div>
-                        <label className={`inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold ${isBusy ? 'border-slate-200 bg-slate-100 text-slate-400' : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'}`}>
-                          <Upload size={13} />
-                          {isBusy ? 'Upload...' : pendingFile || document ? 'Ganti' : 'Pilih'}
-                          <input
-                            accept="application/pdf,.pdf"
-                            aria-label={`Upload ${slot.label} PDF`}
-                            className="sr-only"
-                            disabled={isBusy}
-                            onChange={async (event) => {
-                              const input = event.currentTarget;
-                              const file = input.files?.[0];
-                              try {
-                                if (file) setPendingInvoiceFile(slot.type, file);
-                              } finally {
-                                input.value = '';
-                              }
-                            }}
-                            type="file"
-                          />
-                        </label>
+                        {canUploadInvoiceDocument ? (
+                          <label className={`inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-[10px] font-bold ${isBusy ? 'border-slate-200 bg-slate-100 text-slate-400' : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                            <Upload size={13} />
+                            {isBusy ? 'Upload...' : pendingFile || document ? 'Ganti' : 'Pilih'}
+                            <input
+                              accept="application/pdf,.pdf"
+                              aria-label={`Upload ${slot.label} PDF`}
+                              className="sr-only"
+                              disabled={isBusy}
+                              onChange={async (event) => {
+                                const input = event.currentTarget;
+                                const file = input.files?.[0];
+                                try {
+                                  if (file) setPendingInvoiceFile(slot.type, file);
+                                } finally {
+                                  input.value = '';
+                                }
+                              }}
+                              type="file"
+                            />
+                          </label>
+                        ) : null}
                       </div>
-                      <div className={`mt-2 rounded-md border border-dashed px-2.5 py-2 text-[10px] font-semibold ${
+                      {canUploadInvoiceDocument ? (
+                        <div className={`mt-2 rounded-md border border-dashed px-2.5 py-2 text-[10px] font-semibold ${
                         isDragActive
                           ? 'border-sky-300 bg-white text-sky-700'
                           : 'border-slate-200 bg-slate-50 text-slate-500'
                       }`}>
-                        <div className="flex items-center gap-2">
-                          <Upload size={13} className={isDragActive ? 'text-sky-600' : 'text-slate-400'} />
-                          <span>{isDragActive ? 'Lepaskan file PDF di sini.' : 'Drag & drop PDF ke area ini, lalu klik Simpan Dokumen.'}</span>
+                          <div className="flex items-center gap-2">
+                            <Upload size={13} className={isDragActive ? 'text-sky-600' : 'text-slate-400'} />
+                            <span>{isDragActive ? 'Lepaskan file PDF di sini.' : 'Drag & drop PDF ke area ini, lalu klik Simpan Dokumen.'}</span>
+                          </div>
                         </div>
-                      </div>
-                      {pendingFile ? (
+                      ) : null}
+                      {canUploadInvoiceDocument && pendingFile ? (
                         <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold text-amber-800">
                           <span className="min-w-0 truncate">Siap disimpan: {pendingFile.name}</span>
                           <button
@@ -1309,14 +1325,16 @@ function InvoiceDetailModal({
                   <h4 className="text-xs font-black text-slate-950">Koreksi Nomor Invoice</h4>
                   <p className="mt-0.5 text-[11px] font-medium text-slate-500">Koreksi nomor invoice masuk approval Admin.</p>
                 </div>
-                <button
-                  className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
-                  disabled={!invoice.invoiceNumber}
-                  onClick={() => onOpenCorrection(invoice, 'invoice_number')}
-                  type="button"
-                >
-                  Ajukan Koreksi
-                </button>
+                {canRequestCorrection ? (
+                  <button
+                    className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-40"
+                    disabled={!invoice.invoiceNumber}
+                    onClick={() => onOpenCorrection(invoice, 'invoice_number')}
+                    type="button"
+                  >
+                    Ajukan Koreksi
+                  </button>
+                ) : null}
               </div>
               <CorrectionHistoryList corrections={corrections} error={correctionsError} loading={correctionsLoading} />
             </section>
@@ -1366,7 +1384,7 @@ function InvoiceDetailModal({
           </section>
         </div>
       ) : null}
-      {debitNotePaymentOpen ? (
+      {canRecordDebitNotePayment && debitNotePaymentOpen ? (
         <DebitNotePaymentModal
           busy={debitNotePaymentSaving}
           error={debitNotePaymentError}
@@ -1383,7 +1401,7 @@ function InvoiceDetailModal({
           paymentsLoading={debitNotePaymentsLoading}
         />
       ) : null}
-      {revenueLineFormOpen ? (
+      {canManageRevenueLine && revenueLineFormOpen ? (
         <RevenueLineModal
           draft={revenueLineDraft}
           error={revenueLineError}

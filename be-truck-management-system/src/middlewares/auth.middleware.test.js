@@ -47,6 +47,38 @@ test('ensureRoutePermission limits historical entry management to admin', () => 
   });
 });
 
+test('ensureRoutePermission mengizinkan viewer akses Finance read only', () => {
+  const readRoute = {
+    permission: 'finance.invoice.read',
+  };
+  const updateRoute = {
+    permission: 'finance.invoice.payment.record',
+  };
+  const actor = actorForRole('observer');
+
+  assert.equal(ensureRoutePermission(readRoute, actor).role, 'observer');
+  assert.throws(
+    () => ensureRoutePermission(updateRoute, actor),
+    (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+  );
+});
+
+test('ensureRoutePermission mengizinkan viewer membaca monitoring biaya dropping tanpa reconcile', () => {
+  const readRoute = {
+    permission: 'finance.operational_fund.read',
+  };
+  const reconcileRoute = {
+    permission: 'finance.operational_fund.reconcile',
+  };
+  const actor = actorForRole('observer');
+
+  assert.equal(ensureRoutePermission(readRoute, actor).role, 'observer');
+  assert.throws(
+    () => ensureRoutePermission(reconcileRoute, actor),
+    (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+  );
+});
+
 test('ensureRoutePermission memberikan admin akses ke permission baru tanpa update matrix', () => {
   const route = {
     permission: 'future.permission.manage',

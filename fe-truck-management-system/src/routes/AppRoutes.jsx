@@ -59,7 +59,7 @@ const adminRoles = [USER_ROLES.ADMIN];
 const viewerOnlyRoles = [USER_ROLES.OBSERVER];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 const reportsPageRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
-const financeRoles = [USER_ROLES.ADMIN, USER_ROLES.FINANCE];
+const financeReadOnlyRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const driverCommissionRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.FINANCE];
 
 function DriverCommissionRedirect() {
@@ -125,14 +125,14 @@ export const router = createBrowserRouter([
         { path: 'input-monitoring', children: [guardedPage(reportsPageRoles, <LazyPage><InputMonitoringPage /></LazyPage>)] },
         { path: 'reports', children: [guardedPage(reportsPageRoles, <LazyPage><ReportsPage /></LazyPage>)] },
         { path: 'finance', element: <Navigate to="/finance/order-verification" replace /> },
-        { path: 'finance/order-verification', children: [guardedPage(financeRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },
-        { path: 'finance/rpuj-approval', children: [guardedPage(financeRoles, <LazyPage><FinanceRpujApprovalPage /></LazyPage>)] },
-        { path: 'finance/invoices', children: [guardedPage(financeRoles, <LazyPage><FinanceInvoiceNumberPage /></LazyPage>)] },
+        { path: 'finance/order-verification', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceOrderVerificationPage /></LazyPage>)] },
+        { path: 'finance/rpuj-approval', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceRpujApprovalPage /></LazyPage>)] },
+        { path: 'finance/invoices', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceInvoiceNumberPage /></LazyPage>)] },
         { path: 'finance/corrections', children: [guardedPage(adminRoles, <LazyPage><FinanceCorrectionsPage /></LazyPage>)] },
-        { path: 'finance/completed-trips', children: [guardedPage(financeRoles, <LazyPage><FinanceCompletedTripsPage /></LazyPage>)] },
-        { path: 'finance/billing-readiness', children: [guardedPage(financeRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
-        { path: 'finance/driver-commissions', children: [guardedPage(financeRoles, <LazyPage><DriverCommissionPage /></LazyPage>)] },
-        { path: 'finance/outstanding', children: [guardedPage(financeRoles, <LazyPage><CustomerOutstandingPage /></LazyPage>)] },
+        { path: 'finance/completed-trips', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceCompletedTripsPage /></LazyPage>)] },
+        { path: 'finance/billing-readiness', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
+        { path: 'finance/driver-commissions', children: [guardedPage(financeReadOnlyRoles, <LazyPage><DriverCommissionPage /></LazyPage>)] },
+        { path: 'finance/outstanding', children: [guardedPage(financeReadOnlyRoles, <LazyPage><CustomerOutstandingPage /></LazyPage>)] },
         { path: 'truck-utilization', element: <Navigate to="/reports?tab=utilization" replace /> },
         { path: 'driver-performance', element: <Navigate to="/reports" replace /> },
         { path: 'unit-performance', element: <Navigate to="/reports?tab=utilization" replace /> },

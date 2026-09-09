@@ -418,9 +418,8 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
   return { summary, drivers };
 }
 
-// Diambil semua ritasi berkomisi yang belum pernah masuk batch mana pun dengan completed_date
-// SAMPAI DENGAN periodEnd (tanpa batas bawah periodStart) — supaya ritasi lama yang entah kenapa
-// belum pernah masuk batch mana pun tetap ikut muncul sebagai eligible, bukan hilang begitu saja.
+// Diambil hanya ritasi berkomisi yang selesai di periode Sabtu-Jumat yang sedang ditutup.
+// Ritasi dari periode lain harus dicek lewat periodenya masing-masing agar batch mingguan rapi.
 // Tidak ada syarat jumlah ritasi minimum: berapa pun jumlahnya (termasuk 1) langsung eligible
 // untuk diajukan ke Finance.
 async function findEligibleRows(period, db = { query }) {
@@ -461,7 +460,7 @@ async function findEligibleRows(period, db = { query }) {
       left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
       where cj.status = 'completed'
         and cj.completed_at is not null
-        and (cj.completed_at at time zone 'Asia/Jakarta')::date <= $1::date
+        and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
         and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
@@ -475,7 +474,7 @@ async function findEligibleRows(period, db = { query }) {
         )
       order by completed_date asc, driver_name asc, so.so_number asc, cj.container_number asc nulls last
     `,
-    [period.periodEnd],
+    [period.periodStart, period.periodEnd],
   );
 
   return result.rows.map(mapEligibleRow);
@@ -522,7 +521,7 @@ async function findCommissionReviewRows(period, db = { query }) {
         left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
         where cj.status = 'completed'
           and cj.completed_at is not null
-          and (cj.completed_at at time zone 'Asia/Jakarta')::date <= $1::date
+          and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           and coalesce(cj.has_driver_commission, false)
           and so.status <> 'cancelled'
           and not exists (
@@ -538,7 +537,7 @@ async function findCommissionReviewRows(period, db = { query }) {
       order by completed_date asc, so_number asc, container_number asc nulls last
       limit 200
     `,
-    [period.periodEnd],
+    [period.periodStart, period.periodEnd],
   );
 
   return result.rows.map(mapEligibleRow);

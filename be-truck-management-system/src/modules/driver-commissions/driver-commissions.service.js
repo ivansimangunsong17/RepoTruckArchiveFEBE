@@ -85,7 +85,7 @@ export async function getDriverCommissionBatch(id) {
 export async function submitDriverCommissionBatch(payload = {}, actor = {}) {
   const period = normalizeCommissionPeriod(payload);
   if (!isCommissionWeekPeriod(period)) {
-    throw validationError('Pengajuan komisi wajib memakai periode Kamis sampai Rabu.');
+    throw validationError('Pengajuan komisi wajib memakai periode Sabtu sampai Jumat.');
   }
   return createDriverCommissionBatch(period, actor);
 }

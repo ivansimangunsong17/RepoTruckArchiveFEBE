@@ -45,15 +45,15 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
 }));
 
 const periodReport = {
-  periodStart: '2026-08-13',
-  periodEnd: '2026-08-19',
+  periodStart: '2026-08-08',
+  periodEnd: '2026-08-14',
   status: 'submitted',
   activeBatch: {
     id: 'batch-1',
     status: 'submitted',
-    periodStart: '2026-08-13',
-    periodEnd: '2026-08-19',
-    submittedAt: '2026-08-20T03:00:00.000Z',
+    periodStart: '2026-08-08',
+    periodEnd: '2026-08-14',
+    submittedAt: '2026-08-15T03:00:00.000Z',
   },
   summary: {
     totalDrivers: 1,
@@ -89,7 +89,7 @@ const periodReport = {
           operationalNote: 'Komisi dipotong Rp25.000 karena ada hutang aktif. Detail ada di Finance.',
           status: 'active',
           createdByName: 'Sprint2C Finance',
-          createdAt: '2026-08-20T04:00:00.000Z',
+          createdAt: '2026-08-15T04:00:00.000Z',
         },
       ],
       items: [
@@ -102,7 +102,7 @@ const periodReport = {
           customerName: 'PT A',
           destination: 'Cikarang',
           truckPlateNumber: 'B 1000 AA',
-          completedDate: '2026-08-13',
+          completedDate: '2026-08-08',
           amount: 50000,
         },
       ],
@@ -113,11 +113,11 @@ const periodReport = {
 const batchDetail = {
   id: 'batch-1',
   status: 'submitted',
-  periodStart: '2026-08-13',
-  periodEnd: '2026-08-19',
+  periodStart: '2026-08-08',
+  periodEnd: '2026-08-14',
   totalItems: 2,
   totalAmount: 125000,
-  submittedAt: '2026-08-20T03:00:00.000Z',
+  submittedAt: '2026-08-15T03:00:00.000Z',
   submittedByName: 'Operational',
   payments: [
     {
@@ -144,7 +144,7 @@ const batchDetail = {
           operationalNote: 'Komisi dipotong Rp25.000 karena ada hutang aktif. Detail ada di Finance.',
           status: 'active',
           createdByName: 'Sprint2C Finance',
-          createdAt: '2026-08-20T04:00:00.000Z',
+          createdAt: '2026-08-15T04:00:00.000Z',
         },
       ],
       status: 'pending',
@@ -167,14 +167,14 @@ const paidBatchDetail = {
 
 const olderPeriodReport = {
   ...periodReport,
-  periodStart: '2026-08-06',
-  periodEnd: '2026-08-12',
+  periodStart: '2026-08-01',
+  periodEnd: '2026-08-07',
   activeBatch: {
     id: 'batch-2',
     status: 'approved',
-    periodStart: '2026-08-06',
-    periodEnd: '2026-08-12',
-    submittedAt: '2026-08-13T03:00:00.000Z',
+    periodStart: '2026-08-01',
+    periodEnd: '2026-08-07',
+    submittedAt: '2026-08-08T03:00:00.000Z',
   },
   summary: {
     totalDrivers: 1,
@@ -207,7 +207,7 @@ const olderPeriodReport = {
           customerName: 'PT B',
           destination: 'Karawang',
           truckPlateNumber: 'B 2000 BB',
-          completedDate: '2026-08-06',
+          completedDate: '2026-08-01',
           amount: 75000,
         },
       ],
@@ -219,11 +219,11 @@ const olderBatchDetail = {
   ...batchDetail,
   id: 'batch-2',
   status: 'approved',
-  periodStart: '2026-08-06',
-  periodEnd: '2026-08-12',
+  periodStart: '2026-08-01',
+  periodEnd: '2026-08-07',
   totalItems: 1,
   totalAmount: 75000,
-  submittedAt: '2026-08-13T03:00:00.000Z',
+  submittedAt: '2026-08-08T03:00:00.000Z',
   payments: [
     {
       id: 'payment-2',
@@ -257,8 +257,8 @@ describe('DriverCommissionPage finance', () => {
     render(<DriverCommissionPage />);
 
     expect((await screen.findAllByText('Rahmat')).length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('Pilih batch komisi')).toHaveTextContent('13 Agustus 2026');
-    expect(screen.getByLabelText('Pilih batch komisi')).toHaveTextContent('19 Agustus 2026');
+    expect(screen.getByLabelText('Pilih batch komisi')).toHaveTextContent('08 Agustus 2026');
+    expect(screen.getByLabelText('Pilih batch komisi')).toHaveTextContent('14 Agustus 2026');
     expect(screen.getAllByText(/BCA 123456/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
@@ -272,21 +272,21 @@ describe('DriverCommissionPage finance', () => {
     const user = userEvent.setup();
     fetchDriverCommissionBatches.mockResolvedValue({ rows: [batchDetail, olderBatchDetail] });
     fetchDriverCommissionBatchDetail.mockImplementation((id) => Promise.resolve(id === 'batch-2' ? olderBatchDetail : batchDetail));
-    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => Promise.resolve(periodStart === '2026-08-06' ? olderPeriodReport : periodReport));
+    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => Promise.resolve(periodStart === '2026-08-01' ? olderPeriodReport : periodReport));
 
     render(<DriverCommissionPage />);
 
     const batchTrigger = await screen.findByLabelText('Pilih batch komisi');
-    await waitFor(() => expect(batchTrigger).toHaveTextContent('13 Agustus 2026'));
+    await waitFor(() => expect(batchTrigger).toHaveTextContent('08 Agustus 2026'));
 
     await user.click(batchTrigger);
-    await user.click(await screen.findByRole('button', { name: /pilih batch 06 agustus 2026 - 12 agustus 2026/i }));
+    await user.click(await screen.findByRole('button', { name: /pilih batch 01 agustus 2026 - 07 agustus 2026/i }));
 
     await waitFor(() => {
       expect(fetchDriverCommissionBatchDetail).toHaveBeenLastCalledWith('batch-2');
       expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
-        periodStart: '2026-08-06',
-        periodEnd: '2026-08-12',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-08-07',
       });
     });
     expect(await screen.findByText('Jajam')).toBeInTheDocument();
@@ -299,7 +299,7 @@ describe('DriverCommissionPage finance', () => {
       pagination: { page: 1, pageSize: 20, total: 2 },
     });
     fetchDriverCommissionBatchDetail.mockImplementation((id) => Promise.resolve(id === 'batch-2' ? olderBatchDetail : batchDetail));
-    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => Promise.resolve(periodStart === '2026-08-06' ? olderPeriodReport : periodReport));
+    fetchDriverCommissionPeriodReport.mockImplementation(({ periodStart }) => Promise.resolve(periodStart === '2026-08-01' ? olderPeriodReport : periodReport));
 
     render(<DriverCommissionPage />);
 
@@ -307,15 +307,15 @@ describe('DriverCommissionPage finance', () => {
     await user.click(screen.getByRole('button', { name: /periode/i }));
 
     const dialog = await screen.findByRole('dialog', { name: /pilih batch komisi/i });
-    expect(within(dialog).getByText(/13 Agustus 2026 - 19 Agustus 2026/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/08 Agustus 2026 - 14 Agustus 2026/i)).toBeInTheDocument();
 
-    await user.click(within(dialog).getByText(/06 Agustus 2026 - 12 Agustus 2026/i));
+    await user.click(within(dialog).getByText(/01 Agustus 2026 - 07 Agustus 2026/i));
 
     await waitFor(() => {
       expect(fetchDriverCommissionBatchDetail).toHaveBeenLastCalledWith('batch-2');
       expect(fetchDriverCommissionPeriodReport).toHaveBeenLastCalledWith({
-        periodStart: '2026-08-06',
-        periodEnd: '2026-08-12',
+        periodStart: '2026-08-01',
+        periodEnd: '2026-08-07',
       });
     });
     expect(screen.queryByRole('dialog', { name: /pilih batch komisi/i })).not.toBeInTheDocument();

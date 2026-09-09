@@ -27,6 +27,8 @@ function InvoiceTable({
   onSelectInvoice,
   invoiceBusyId = '',
   onSaveInvoiceNumberInline,
+  canUpdateInvoiceNumber = false,
+  canUploadInvoiceDocument = false,
 }) {
   const [invoiceDrafts, setInvoiceDrafts] = useState({});
   const invoiceTabs = [
@@ -250,7 +252,7 @@ function InvoiceTable({
           <tbody>
             {paginatedRows.map((row, index) => {
               const needsInvoiceDocuments = Boolean(row.invoiceNumber && (!row.invoiceDocumentUploadedAt || !row.taxInvoiceDocumentUploadedAt));
-              const documentActionLabel = needsInvoiceDocuments ? 'Upload Dokumen' : 'Detail Dokumen';
+              const documentActionLabel = needsInvoiceDocuments && canUploadInvoiceDocument ? 'Upload Dokumen' : 'Detail Dokumen';
               const isLunas = row.billingStatus === 'lunas';
 
               return (
@@ -260,7 +262,7 @@ function InvoiceTable({
                   <td className="finance-invoice-number-cell" data-label="Nomor Invoice">
                     {row.invoiceNumber ? (
                       <span className="block truncate font-black text-slate-900" title={row.invoiceNumber}>{row.invoiceNumber}</span>
-                    ) : (
+                    ) : canUpdateInvoiceNumber ? (
                       <div className="flex min-w-0 items-center gap-1.5">
                         <input
                           aria-label={`Nomor Invoice ${row.soNumber}`}
@@ -287,6 +289,8 @@ function InvoiceTable({
                           <Save size={13} />
                         </button>
                       </div>
+                    ) : (
+                      <span className="block truncate font-black text-slate-400">-</span>
                     )}
                   </td>
                   <td className="finance-invoice-customer" data-label="Customer">
@@ -330,8 +334,8 @@ function InvoiceTable({
                         title={documentActionLabel}
                         type="button"
                       >
-                        {needsInvoiceDocuments ? <Upload size={13} /> : <Eye size={13} />}
-                        <span>{needsInvoiceDocuments ? 'Upload' : 'Detail'}</span>
+                        {needsInvoiceDocuments && canUploadInvoiceDocument ? <Upload size={13} /> : <Eye size={13} />}
+                        <span>{needsInvoiceDocuments && canUploadInvoiceDocument ? 'Upload' : 'Detail'}</span>
                       </button>
                     </div>
                   </td>

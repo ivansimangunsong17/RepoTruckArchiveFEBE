@@ -33,6 +33,7 @@ function DailyOperationalFundPanel({
   fundBusyId = '',
   canRequest = false,
   canDeposit = false,
+  canReconcile = false,
   canReopen = false,
   pendingCloseBatches = [],
   onBatchDateChange,
@@ -81,7 +82,8 @@ function DailyOperationalFundPanel({
   const hasActionRows = pendingFundRows.length > 0 || expenseRows.length > 0;
   const normalizedBatch = { ...defaultOperationalFundBatch, ...batch };
   const unresolvedBatchExpenses = Number(normalizedBatch.uncheckedCount || 0) + Number(normalizedBatch.needClarificationCount || 0);
-  const canCloseBatch = Boolean(normalizedBatch.id)
+  const canCloseBatch = canReconcile
+    && Boolean(normalizedBatch.id)
     && normalizedBatch.status !== 'closed'
     && unresolvedBatchExpenses === 0
     && !batchBusy;
@@ -119,14 +121,16 @@ function DailyOperationalFundPanel({
                 <Banknote size={15} /> Deposit Saldo
               </button>
             ) : null}
-            <button
-              className="primary-button"
-              disabled={!canCloseBatch}
-              onClick={onCloseBatch}
-              type="button"
-            >
-              <CheckCircle2 size={15} /> Close Batch
-            </button>
+            {canReconcile ? (
+              <button
+                className="primary-button"
+                disabled={!canCloseBatch}
+                onClick={onCloseBatch}
+                type="button"
+              >
+                <CheckCircle2 size={15} /> Close Batch
+              </button>
+            ) : null}
             {canRequest ? (
               <button className="secondary-button" onClick={onOpenRequest} type="button">
                 <ReceiptText size={15} /> Ajukan Saldo
@@ -380,24 +384,28 @@ function DailyOperationalFundPanel({
                           {row.financeNote ? <span className="mt-1 line-clamp-2 block text-[10px] font-medium text-slate-500">{row.financeNote}</span> : null}
                         </td>
                         <td className="px-3 py-2">
-                          <div className="grid min-w-[160px] grid-cols-2 gap-1.5">
-                            <button
-                              className="inline-flex h-8 items-center justify-center rounded-md bg-emerald-600 px-2 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-                              disabled={busy || alreadyChecked}
-                              onClick={() => onOpenExpenseCheckConfirm(row.id)}
-                              type="button"
-                            >
-                              Validasi
-                            </button>
-                            <button
-                              className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 bg-white px-2 text-[10px] font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40"
-                              disabled={busy}
-                              onClick={() => onOpenExpenseClarification(row.id)}
-                              type="button"
-                            >
-                              Klarifikasi
-                            </button>
-                          </div>
+                          {canReconcile ? (
+                            <div className="grid min-w-[160px] grid-cols-2 gap-1.5">
+                              <button
+                                className="inline-flex h-8 items-center justify-center rounded-md bg-emerald-600 px-2 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                                disabled={busy || alreadyChecked}
+                                onClick={() => onOpenExpenseCheckConfirm(row.id)}
+                                type="button"
+                              >
+                                Validasi
+                              </button>
+                              <button
+                                className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 bg-white px-2 text-[10px] font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40"
+                                disabled={busy}
+                                onClick={() => onOpenExpenseClarification(row.id)}
+                                type="button"
+                              >
+                                Klarifikasi
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-400">Read only</span>
+                          )}
                         </td>
                       </tr>
                     );
