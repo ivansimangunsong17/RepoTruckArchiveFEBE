@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, FileText, RefreshCw, Upload, UserRound, X, XCircle } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, FileText, Plus, RefreshCw, Upload, UserRound, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DocumentLink from '../../components/common/DocumentLink';
@@ -253,13 +253,13 @@ function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
 
-const emptyDeductionDraft = { deductionType: 'hutang_sopir', amount: '', reason: '', operationalNote: '' };
+const emptyDeductionDraft = { deductionType: 'hutang_sopir', amount: '', reason: '' };
 
 function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount, netAmount, canManage, paymentPaid, saving, onAddDeduction, onVoidDeduction }) {
   const [formOpen, setFormOpen] = useState(false);
   const [draft, setDraft] = useState(emptyDeductionDraft);
   const [formError, setFormError] = useState('');
-  const [voidingId, setVoidingId] = useState('');
+  const [voidingTarget, setVoidingTarget] = useState(null);
   const [voidReason, setVoidReason] = useState('');
   const [voidFormError, setVoidFormError] = useState('');
 
@@ -287,7 +287,7 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
         deductionType: draft.deductionType,
         amount,
         reason: draft.reason.trim(),
-        operationalNote: draft.operationalNote.trim(),
+        operationalNote: '',
       });
       setDraft(emptyDeductionDraft);
       setFormOpen(false);
@@ -304,7 +304,7 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
     setVoidFormError('');
     try {
       await onVoidDeduction(deductionId, voidReason.trim());
-      setVoidingId('');
+      setVoidingTarget(null);
       setVoidReason('');
     } catch (error) {
       setVoidFormError(error.message || 'Potongan gagal dibatalkan.');
@@ -315,9 +315,14 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
     <div className="mt-4 rounded-lg border border-slate-200 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-black text-slate-950">Potongan Komisi</h3>
-        {canManage && !paymentPaid && !formOpen && paymentId ? (
-          <button className="text-xs font-bold text-red-600 hover:underline" onClick={() => { setFormOpen(true); setFormError(''); }} type="button">
-            + Tambah Potongan
+        {canManage && !paymentPaid && paymentId ? (
+          <button
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-black text-rose-700 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+            onClick={() => { setFormOpen(true); setFormError(''); }}
+            type="button"
+          >
+            <Plus size={14} />
+            Tambah Potongan
           </button>
         ) : null}
       </div>
@@ -344,54 +349,85 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
       ) : null}
 
       {formOpen ? (
-        <form className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-2.5" onSubmit={submitDraft}>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="grid gap-1 text-[11px] font-bold text-slate-700">
-              Jenis Potongan
-              <select
-                className="h-9 rounded-md border border-slate-300 px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                onChange={(event) => setDraft((current) => ({ ...current, deductionType: event.target.value }))}
-                value={draft.deductionType}
-              >
-                {Object.entries(deductionTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label className="grid gap-1 text-[11px] font-bold text-slate-700">
-              Nominal Potongan
-              <input
-                className="h-9 rounded-md border border-slate-300 px-2 text-xs font-semibold text-slate-900 outline-none focus:border-slate-500"
-                min="0"
-                onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))}
-                placeholder="100000"
-                type="number"
-                value={draft.amount}
-              />
-            </label>
+        <ModalPortal>
+          <div className="master-modal-backdrop !z-[140]" role="presentation" onMouseDown={() => { if (!saving) setFormOpen(false); }}>
+            <section
+              aria-labelledby="driver-commission-deduction-title"
+              className="master-modal w-full !max-w-2xl"
+              onMouseDown={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <form className="master-form" onSubmit={submitDraft}>
+                <div className="master-form-heading">
+                  <div>
+                    <span>Potongan Komisi</span>
+                    <h2 id="driver-commission-deduction-title">Tambah Potongan</h2>
+                    <p>Catatan potongan akan terbaca oleh Finance dan Operational.</p>
+                  </div>
+                  <button
+                    aria-label="Tutup form potongan"
+                    className="modal-close-button"
+                    disabled={saving}
+                    onClick={() => { setFormOpen(false); setDraft(emptyDeductionDraft); setFormError(''); }}
+                    type="button"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="master-form-sections">
+                  {formError ? <p className="master-form-error rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{formError}</p> : null}
+                  <fieldset className="master-fieldset">
+                    <legend>Data Potongan</legend>
+                    <div className="master-form-grid">
+                      <label className="master-field">
+                        <span>Jenis Potongan</span>
+                        <select
+                          onChange={(event) => setDraft((current) => ({ ...current, deductionType: event.target.value }))}
+                          value={draft.deductionType}
+                        >
+                          {Object.entries(deductionTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                      </label>
+                      <label className="master-field">
+                        <span>Nominal Potongan</span>
+                        <input
+                          inputMode="numeric"
+                          min="0"
+                          onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))}
+                          placeholder="100000"
+                          type="number"
+                          value={draft.amount}
+                        />
+                      </label>
+                      <label className="master-field span-full">
+                        <span>Catatan Potongan</span>
+                        <textarea
+                          onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))}
+                          placeholder="Contoh: Potongan kasbon sopir sesuai catatan Finance"
+                          rows={4}
+                          value={draft.reason}
+                        />
+                        <small>Satu catatan ini dipakai sebagai keterangan Finance dan informasi untuk Operational.</small>
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+                <div className="master-form-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() => { setFormOpen(false); setDraft(emptyDeductionDraft); setFormError(''); }}
+                    type="button"
+                  >
+                    Batal
+                  </button>
+                  <button className="primary-button" disabled={saving} type="submit">{saving ? 'Menyimpan...' : 'Simpan Potongan'}</button>
+                </div>
+              </form>
+            </section>
           </div>
-          <label className="grid gap-1 text-[11px] font-bold text-slate-700">
-            Alasan Potongan
-            <textarea
-              className="min-h-14 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
-              onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))}
-              placeholder="Contoh: Potongan hutang sopir sesuai catatan Finance"
-              value={draft.reason}
-            />
-          </label>
-          <label className="grid gap-1 text-[11px] font-bold text-slate-700">
-            Catatan untuk Operational (opsional)
-            <textarea
-              className="min-h-14 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-xs font-medium text-slate-900 outline-none focus:border-slate-500"
-              onChange={(event) => setDraft((current) => ({ ...current, operationalNote: event.target.value }))}
-              placeholder="Contoh: Komisi dipotong Rp100.000 karena ada hutang aktif. Detail ada di Finance."
-              value={draft.operationalNote}
-            />
-          </label>
-          {formError ? <p className="text-xs font-semibold text-rose-700">{formError}</p> : null}
-          <div className="flex flex-wrap gap-2">
-            <button className="primary-button" disabled={saving} type="submit">{saving ? 'Menyimpan...' : 'Simpan Potongan'}</button>
-            <button className="secondary-button" disabled={saving} onClick={() => { setFormOpen(false); setDraft(emptyDeductionDraft); setFormError(''); }} type="button">Batal</button>
-          </div>
-        </form>
+        </ModalPortal>
       ) : null}
 
       <div className="mt-3 grid gap-1.5">
@@ -407,8 +443,8 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
               {item.status === 'active' ? (
                 canManage && !paymentPaid ? (
                   <button
-                    className="text-[10px] font-black uppercase text-rose-600 hover:underline"
-                    onClick={() => { setVoidingId(voidingId === item.id ? '' : item.id); setVoidReason(''); setVoidFormError(''); }}
+                    className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase text-rose-700 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+                    onClick={() => { setVoidingTarget(item); setVoidReason(''); setVoidFormError(''); }}
                     type="button"
                   >
                     Batalkan
@@ -418,38 +454,82 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
                 <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[9px] font-black uppercase text-rose-700">Dibatalkan</span>
               )}
             </div>
-            <p className="mt-1 text-[11px] text-slate-600">Alasan Potongan: {item.reason}</p>
-            {item.operationalNote ? <p className="mt-0.5 text-[11px] text-slate-500">Catatan untuk Operational: {item.operationalNote}</p> : null}
+            <p className="mt-1 text-[11px] text-slate-600">Catatan: {item.reason}</p>
             <p className="mt-1 text-[10px] font-semibold text-slate-400">{item.createdByName || '-'} - {formatDateTime(item.createdAt)}</p>
             {item.status !== 'active' ? (
               <p className="mt-1 text-[10px] font-semibold text-rose-600">Dibatalkan: {item.voidReason} - {item.voidedByName || '-'} - {formatDateTime(item.voidedAt)}</p>
             ) : null}
-            {voidingId === item.id ? (
-              <div className="mt-2 grid gap-1.5 rounded-md border border-rose-200 bg-rose-100/40 p-2">
-                <textarea
-                  className="w-full rounded-md border border-rose-200 px-2 py-1.5 text-xs"
-                  onChange={(event) => setVoidReason(event.target.value)}
-                  placeholder="Alasan pembatalan potongan (wajib)"
-                  rows={2}
-                  value={voidReason}
-                />
-                {voidFormError ? <p className="text-[10px] font-semibold text-rose-700">{voidFormError}</p> : null}
-                <div className="flex justify-end gap-2">
-                  <button className="secondary-button" onClick={() => { setVoidingId(''); setVoidReason(''); setVoidFormError(''); }} type="button">Batal</button>
-                  <button
-                    className="rounded-md border border-rose-300 bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={!voidReason.trim() || saving}
-                    onClick={() => confirmVoid(item.id)}
-                    type="button"
-                  >
-                    Konfirmasi Batalkan
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
         ))}
       </div>
+      {voidingTarget ? (
+        <ModalPortal>
+          <div className="master-modal-backdrop !z-[140]" role="presentation" onMouseDown={() => { if (!saving) setVoidingTarget(null); }}>
+            <section
+              aria-labelledby="driver-commission-void-deduction-title"
+              className="master-modal w-full !max-w-xl"
+              onMouseDown={(event) => event.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+            >
+              <form className="master-form" onSubmit={(event) => { event.preventDefault(); confirmVoid(voidingTarget.id); }}>
+                <div className="master-form-heading">
+                  <div>
+                    <span>Batalkan Potongan</span>
+                    <h2 id="driver-commission-void-deduction-title">Konfirmasi Pembatalan</h2>
+                    <p>Potongan ini akan dibatalkan dari perhitungan net komisi sopir.</p>
+                  </div>
+                  <button
+                    aria-label="Tutup konfirmasi pembatalan potongan"
+                    className="modal-close-button"
+                    disabled={saving}
+                    onClick={() => { setVoidingTarget(null); setVoidReason(''); setVoidFormError(''); }}
+                    type="button"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="master-form-sections">
+                  {voidFormError ? <p className="master-form-error rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{voidFormError}</p> : null}
+                  <fieldset className="master-fieldset">
+                    <legend>Detail Potongan</legend>
+                    <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+                      <strong className="block text-sm font-black text-slate-900">
+                        {deductionTypeLabels[voidingTarget.deductionType] || voidingTarget.deductionType} - {formatCurrency(voidingTarget.amount)}
+                      </strong>
+                      <p className="mt-1 text-xs font-medium text-slate-600">Catatan: {voidingTarget.reason || '-'}</p>
+                    </div>
+                    <div className="master-form-grid">
+                      <label className="master-field span-full">
+                        <span>Alasan Pembatalan</span>
+                        <textarea
+                          onChange={(event) => setVoidReason(event.target.value)}
+                          placeholder="Contoh: Kasbon sudah dilunasi sopir"
+                          rows={3}
+                          value={voidReason}
+                        />
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+                <div className="master-form-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() => { setVoidingTarget(null); setVoidReason(''); setVoidFormError(''); }}
+                    type="button"
+                  >
+                    Batal
+                  </button>
+                  <button className="primary-button" disabled={!voidReason.trim() || saving} type="submit">
+                    {saving ? 'Memproses...' : 'Konfirmasi Batalkan'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        </ModalPortal>
+      ) : null}
     </div>
   );
 }
@@ -639,14 +719,20 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
                   <form className="grid gap-3" onSubmit={submitProof}>
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                       <span className="min-w-0 truncate text-xs font-bold text-slate-800">{pendingFile.name}</span>
-                      <button
-                        className="shrink-0 text-xs font-bold text-red-600 hover:underline disabled:opacity-60"
-                        disabled={saving}
-                        onClick={() => setPendingFile(null)}
-                        type="button"
+                      <label
+                        className={`secondary-button inline-flex shrink-0 cursor-pointer items-center gap-1.5 px-3 py-1.5 text-xs ${saving ? 'pointer-events-none opacity-60' : ''}`}
+                        title="Ganti file bukti transfer"
                       >
+                        <Upload size={14} />
                         Ganti File
-                      </button>
+                        <input
+                          accept=".jpg,.jpeg,.png,.pdf"
+                          className="sr-only"
+                          disabled={saving}
+                          onChange={(event) => setPendingFile(event.target.files?.[0] || pendingFile)}
+                          type="file"
+                        />
+                      </label>
                     </div>
                     <label className="grid gap-1.5 text-[11px] font-black uppercase tracking-wide text-slate-400">
                       Catatan Pembayaran (opsional)

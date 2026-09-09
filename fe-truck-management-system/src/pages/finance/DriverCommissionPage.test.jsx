@@ -356,13 +356,15 @@ describe('DriverCommissionPage finance', () => {
 
     await user.click(screen.getByRole('button', { name: /tambah potongan/i }));
     await user.type(screen.getByPlaceholderText('100000'), '50000');
-    await user.type(screen.getByPlaceholderText(/Potongan hutang sopir sesuai catatan Finance/), 'Kasbon belum lunas dari minggu lalu');
+    expect(screen.getByRole('dialog', { name: /tambah potongan/i })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText(/Potongan kasbon sopir sesuai catatan Finance/), 'Kasbon belum lunas dari minggu lalu');
     await user.click(screen.getByRole('button', { name: /simpan potongan/i }));
 
     await waitFor(() => {
       expect(recordDriverCommissionDeduction).toHaveBeenCalledWith('payment-1', expect.objectContaining({
         amount: 50000,
         reason: 'Kasbon belum lunas dari minggu lalu',
+        operationalNote: '',
       }));
     });
   });
@@ -447,7 +449,8 @@ describe('DriverCommissionPage finance', () => {
     await screen.findByText('Potongan Komisi');
 
     await user.click(screen.getByRole('button', { name: /^batalkan$/i }));
-    await user.type(screen.getByPlaceholderText(/alasan pembatalan potongan/i), 'Hutang sudah lunas');
+    expect(screen.getByRole('dialog', { name: /konfirmasi pembatalan/i })).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText(/kasbon sudah dilunasi sopir/i), 'Hutang sudah lunas');
     await user.click(screen.getByRole('button', { name: /konfirmasi batalkan/i }));
 
     await waitFor(() => {

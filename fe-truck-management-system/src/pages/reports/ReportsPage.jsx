@@ -915,14 +915,6 @@ function SummaryToggleCard({
     sky: 'border-sky-400 bg-sky-50 text-sky-900 ring-1 ring-sky-200',
     rose: 'border-rose-400 bg-rose-50 text-rose-900 ring-1 ring-rose-200',
   }[tone] || 'border-slate-300 bg-slate-100 text-slate-800';
-  const actionClass = {
-    slate: 'border-slate-200 bg-slate-900 text-white hover:bg-slate-800',
-    emerald: 'border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700',
-    amber: 'border-amber-200 bg-amber-600 text-white hover:bg-amber-700',
-    sky: 'border-sky-200 bg-sky-600 text-white hover:bg-sky-700',
-    rose: 'border-rose-200 bg-rose-600 text-white hover:bg-rose-700',
-  }[tone] || 'border-slate-200 bg-slate-900 text-white hover:bg-slate-800';
-
   return (
     <article
       className={`flex min-h-[14rem] w-full flex-col justify-between gap-3 rounded-md border p-4 text-left shadow-sm transition duration-150 hover:-translate-y-0.5 hover:shadow-md ${
@@ -959,7 +951,7 @@ function SummaryToggleCard({
       {onOpenStatistics ? (
         <button
           type="button"
-          className={`inline-flex h-8 w-fit appearance-none items-center justify-center gap-1.5 self-end rounded-md border px-2.5 text-[11px] font-black shadow-sm transition focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-2 ${actionClass}`}
+          className="inline-flex h-8 w-fit appearance-none items-center justify-center gap-1.5 self-end rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 shadow-none transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-offset-2"
           onClick={onOpenStatistics}
         >
           <BarChart3 size={13} />
@@ -2990,17 +2982,17 @@ function ReportsPage() {
                   : 'Sisa outstanding customer saat ini -- bisa berasal dari invoice beberapa bulan sebelumnya, bukan cuma periode yang sedang dipilih.'}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100/70 p-1">
                 <button
                   type="button"
-                  className={`rounded px-3 py-1.5 text-xs font-bold transition ${customerDetailView === 'revenue' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-bold transition ${customerDetailView === 'revenue' ? 'border-slate-200 bg-white text-slate-950 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-800'}`}
                   onClick={() => setCustomerDetailView('revenue')}
                 >
                   Revenue
                 </button>
                 <button
                   type="button"
-                  className={`rounded px-3 py-1.5 text-xs font-bold transition ${customerDetailView === 'outstanding' ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-bold transition ${customerDetailView === 'outstanding' ? 'border-slate-200 bg-white text-slate-950 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-800'}`}
                   onClick={() => setCustomerDetailView('outstanding')}
                 >
                   Outstanding
@@ -3009,10 +3001,10 @@ function ReportsPage() {
               {customerDetailView === 'outstanding' ? (
                 <div className="inline-flex items-center gap-2 border-l border-slate-200 pl-2.5">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Umur Piutang</span>
-                  <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100/70 p-1">
                     <button
                       type="button"
-                      className={`rounded px-2.5 py-1.5 text-xs font-bold transition ${outstandingMinOverdueDays === null ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      className={`rounded-md border px-2.5 py-1.5 text-xs font-bold transition ${outstandingMinOverdueDays === null ? 'border-slate-200 bg-white text-slate-950 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-800'}`}
                       onClick={() => setOutstandingMinOverdueDays(null)}
                     >
                       Semua
@@ -3021,7 +3013,7 @@ function ReportsPage() {
                       <button
                         key={days}
                         type="button"
-                        className={`rounded px-2.5 py-1.5 text-xs font-bold transition ${outstandingMinOverdueDays === days ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        className={`rounded-md border px-2.5 py-1.5 text-xs font-bold transition ${outstandingMinOverdueDays === days ? 'border-slate-200 bg-white text-slate-950 shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-800'}`}
                         onClick={() => setOutstandingMinOverdueDays(days)}
                         title={`Minimal menunggak ${days} hari`}
                       >
@@ -3046,6 +3038,8 @@ function ReportsPage() {
                         { label: 'No' },
                         { label: 'Customer' },
                         { label: 'Volume', align: 'right' },
+                        { label: '20FT', align: 'right' },
+                        { label: '40FT', align: 'right' },
                         { label: 'SO Selesai', align: 'right' },
                         { label: 'Revenue', align: 'right' },
                         { label: 'Last Order' },
@@ -3087,6 +3081,8 @@ function ReportsPage() {
                               {customer.totalVolume || 0}
                             </span>
                           </td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="20FT">{customer.container20ft || 0}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="40FT">{customer.container40ft || 0}</td>
                           <td className="px-3 py-2 text-right font-semibold text-slate-800" data-label="SO Selesai">{customer.completedOrders || 0}</td>
                           <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(customer.totalRevenue)}</td>
                           <td className="px-3 py-2 font-semibold text-slate-700" data-label="Last Order">{formatDate(customer.lastOrderDate)}</td>

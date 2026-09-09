@@ -437,7 +437,6 @@ function createSpkPdfBlob(documentData, logoImage = null) {
   y = drawSection('1. INFORMASI SPK / ORDER', documentData.orderRows, y);
   y = drawSection('2. INFORMASI ARMADA & DRIVER', documentData.driverRows, y);
   y = drawSection('3. INFORMASI OPERASIONAL', documentData.operationalRows, y);
-  y = drawSection('4. INFORMASI BIAYA PERJALANAN / SPK', documentData.rpujRows, y);
   drawText('Catatan:', leftX, y, { bold: true, size: 6.4, color: '0.62 0.06 0.08' });
   documentData.notes.forEach((note, index) => drawText(`${index + 1}. ${note}`, leftX, y - 10 - (index * 9), { size: 5.7 }));
   commands.push('0.82 0.82 0.82 RG 430 44 131 50 re S');
@@ -1038,7 +1037,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             ${renderSection('1', 'Informasi SPK / Order', documentData.orderRows)}
             ${renderSection('2', 'Informasi Armada & Driver', documentData.driverRows)}
             ${renderSection('3', 'Informasi Operasional', documentData.operationalRows)}
-            ${renderSection('4', 'Informasi Biaya Perjalanan / SPK', documentData.rpujRows)}
             <div class="notes">
               <div>
                 <strong>Catatan:</strong>

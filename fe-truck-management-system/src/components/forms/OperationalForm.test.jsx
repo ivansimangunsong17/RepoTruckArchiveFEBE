@@ -664,11 +664,12 @@ describe('OperationalForm', () => {
     expect(html).not.toContain('ops@armada-logistik.co.id');
     expect(html).not.toContain('www.armada-logistik.co.id');
     expect(html).toContain('SPK ini di-generate secara otomatis oleh sistem dan tidak memerlukan tanda tangan.');
-    expect(html).toContain('Uang Jalan');
-    expect(html).toContain('Komisi Sopir');
+    expect(html).not.toContain('Informasi Biaya Perjalanan');
+    expect(html).not.toContain('Uang Jalan');
+    expect(html).not.toContain('Komisi Sopir');
     expect(html).not.toContain('Biaya Lainnya');
     expect(html).not.toContain('Catatan Biaya Lainnya');
-    expect(html).toContain('Total Biaya Perjalanan');
+    expect(html).not.toContain('Total Biaya Perjalanan');
     expect(html).not.toContain('Persetujuan');
     expect(html).not.toContain('OPERATIONAL');
     expect(html).not.toContain('FINANCE');
