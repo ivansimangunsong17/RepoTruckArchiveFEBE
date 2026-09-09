@@ -16,11 +16,15 @@ const {
   isAdminCorrectionMode,
   isContainerNumberLockedForOperational,
   isDriverCommissionLockedForOperational,
+  isDocumentOnlyContainerJobUpdateActor,
   isInitialContainerNumberInput,
   isOtherCostLockedForRepoPickup,
   isRepoCancellationLockedForOperational,
   updateContainerJobExpenseProof,
 } = await import('./container-jobs.service.js');
+const {
+  assertDocumentOnlyPayload,
+} = await import('./container-jobs.controller.js');
 const {
   buildAutoJourneyMoneyDescription,
   hasCompleteOperationalAssignment,
@@ -192,6 +196,61 @@ test('auto UJ memilih tarif sesuai ukuran container dan membuat keterangan ledge
     },
     { driver: 'Randi', plateNumber: 'B9180BEL' },
   ), 'UJ Revo Patimban 50X40 B9180BEL');
+});
+
+test('sales document-only dikenali untuk upload dokumen container job historical', () => {
+  assert.equal(isDocumentOnlyContainerJobUpdateActor({
+    role: 'sales',
+    permissions: ['container_job.read', 'container_job.document.update', 'document.upload'],
+  }), true);
+  assert.equal(isDocumentOnlyContainerJobUpdateActor({
+    role: 'admin',
+    permissions: ['container_job.update', 'container_job.document.update', 'historical_entry.manage'],
+  }), false);
+});
+
+test('sales document-only hanya boleh mengirim field dokumen container job', () => {
+  const salesActor = {
+    role: 'sales',
+    permissions: ['container_job.read', 'container_job.document.update', 'document.upload'],
+  };
+
+  assert.doesNotThrow(() => assertDocumentOnlyPayload(salesActor, {
+    travelDocument: 'SJ-001',
+    travelDocumentFile: { path: 'surat-jalan.pdf' },
+    loadingVoucher: 'BON-001',
+    otherDocuments: [{ name: 'Foto bongkar', file: { path: 'foto.jpg' } }],
+  }));
+  assert.throws(
+    () => assertDocumentOnlyPayload(salesActor, {
+      travelDocument: 'SJ-001',
+      status: 'completed',
+      driver: 'Driver Baru',
+      plateNumber: 'B 1234 XYZ',
+      destination: 'Tujuan Baru',
+      containerNumber: 'MSCU1234567',
+      ujAmountSnapshot: 100000,
+    }),
+    (error) => (
+      error.code === 'CONTAINER_JOB_DOCUMENT_UPDATE_ONLY'
+      && error.statusCode === 403
+      && error.details.disallowedFields.includes('status')
+      && error.details.disallowedFields.includes('driver')
+      && error.details.disallowedFields.includes('ujAmountSnapshot')
+    ),
+  );
+});
+
+test('admin tetap boleh mengirim payload lengkap container job', () => {
+  assert.doesNotThrow(() => assertDocumentOnlyPayload({
+    role: 'admin',
+    permissions: ['container_job.update', 'container_job.update_status', 'container_job.document.update', 'historical_entry.manage'],
+  }, {
+    status: 'completed',
+    travelDocument: 'SJ-001',
+    driver: 'Driver Admin',
+    plateNumber: 'B 1234 XYZ',
+  }));
 });
 
 test('auto UJ saat closing tidak menggagalkan ritasi jika batch rekening dropping sudah ditutup', async () => {

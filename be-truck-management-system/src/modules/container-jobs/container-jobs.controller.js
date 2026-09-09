@@ -70,6 +70,20 @@ const documentOnlyPayloadFields = new Set([
   'otherDocuments',
 ]);
 
+const documentOnlyAuditLabels = {
+  eirNumber: 'EIR',
+  eirDocument: 'EIR',
+  repoEirNumber: 'EIR Titip',
+  repoEirDocument: 'EIR Titip',
+  loadingVoucher: 'Bon Muat/Bongkar',
+  loadingVoucherDocument: 'Bon Muat/Bongkar',
+  tilaGatepassDocument: 'TILA/Gatepass',
+  tilaGatepassDocumentFile: 'TILA/Gatepass',
+  travelDocument: 'Surat Jalan',
+  travelDocumentFile: 'Surat Jalan',
+  otherDocuments: 'Dokumen Lainnya',
+};
+
 export function isDocumentOnlyActor(actor) {
   return actorHasPermission(actor, 'container_job.document.update')
     && !actorHasPermission(actor, 'container_job.update')
@@ -101,6 +115,22 @@ export function adminCorrectionMetadata(payload = {}, job = {}) {
     salesOrderId: job.orderId,
     soNumber: job.soNumber,
     containerNumber: job.containerNumber,
+  };
+}
+
+function documentOnlyMetadata(payload = {}, job = {}) {
+  const categories = Array.from(new Set(
+    Object.keys(payload || {})
+      .map((field) => documentOnlyAuditLabels[field])
+      .filter(Boolean),
+  ));
+  if (!categories.length) return {};
+  return {
+    documentOnly: true,
+    salesOrderId: job.orderId,
+    soNumber: job.soNumber,
+    containerNumber: job.containerNumber,
+    documentCategories: categories,
   };
 }
 
@@ -292,7 +322,10 @@ export async function updateContainerJobController(request, response) {
     entityId: saved.id,
     beforeData: before,
     afterData: saved,
-    metadata: adminCorrectionMetadata(request.body, saved),
+    metadata: {
+      ...adminCorrectionMetadata(request.body, saved),
+      ...documentOnlyMetadata(request.body, saved),
+    },
   });
   if (isAdminCorrectionPayload(request.body)) {
     const changes = adminCorrectionChanges(before, saved);

@@ -140,6 +140,10 @@ function isDocumentOnlyActor(actor) {
     && !actorHasPermission(actor, 'container_job.assign');
 }
 
+export function isDocumentOnlyContainerJobUpdateActor(actor) {
+  return isDocumentOnlyActor(actor);
+}
+
 function hasRpujNotesInput(payload = {}) {
   return Boolean(String(payload.rpujNotes || '').trim());
 }
@@ -775,18 +779,20 @@ export async function saveContainerJob(id, payload, actor) {
 
   const currentJob = await getContainerJob(id);
   ensureAdminCorrectionContract(actor, normalizedPayload);
-  ensureCanManageHistoricalEntry(actor, {
-    payload: normalizedPayload,
-    currentRecord: currentJob,
-    entityLabel: 'Data historis Container Job',
-  });
-  await ensureHistoricalPeriodEditable(
-    normalizedPayload.historicalPeriod || currentJob.historicalPeriod,
-    'Container data lama',
-  );
+  const documentOnlyUpdate = isDocumentOnlyActor(actor);
+  if (!documentOnlyUpdate) {
+    ensureCanManageHistoricalEntry(actor, {
+      payload: normalizedPayload,
+      currentRecord: currentJob,
+      entityLabel: 'Data historis Container Job',
+    });
+    await ensureHistoricalPeriodEditable(
+      normalizedPayload.historicalPeriod || currentJob.historicalPeriod,
+      'Container data lama',
+    );
+  }
   ensureRepoPickupOtherCostLocked(actor, currentJob, normalizedPayload);
   ensureRepoHistoryCanCancel(actor, currentJob, normalizedPayload);
-  const documentOnlyUpdate = isDocumentOnlyActor(actor);
   const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
   if (!documentOnlyUpdate) {

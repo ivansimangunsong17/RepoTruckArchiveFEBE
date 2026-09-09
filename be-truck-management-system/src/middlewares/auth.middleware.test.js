@@ -47,6 +47,31 @@ test('ensureRoutePermission limits historical entry management to admin', () => 
   });
 });
 
+test('ensureRoutePermission mengizinkan Sales upload dokumen container job tapi menolak role tanpa permission', () => {
+  const route = {
+    permissions: ['container_job.update', 'container_job.update_status', 'container_job.document.update'],
+  };
+
+  assert.equal(ensureRoutePermission(route, actorForRole('sales')).role, 'sales');
+  assert.equal(ensureRoutePermission(route, actorForRole('admin')).role, 'admin');
+  assert.throws(
+    () => ensureRoutePermission(route, actorForRole('observer')),
+    (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+  );
+});
+
+test('ensureRoutePermission tetap membatasi edit data historical penuh ke admin', () => {
+  const route = {
+    permission: 'historical_entry.manage',
+  };
+
+  assert.equal(ensureRoutePermission(route, actorForRole('admin')).role, 'admin');
+  assert.throws(
+    () => ensureRoutePermission(route, actorForRole('sales')),
+    (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+  );
+});
+
 test('ensureRoutePermission mengizinkan viewer akses Finance read only', () => {
   const readRoute = {
     permission: 'finance.invoice.read',
