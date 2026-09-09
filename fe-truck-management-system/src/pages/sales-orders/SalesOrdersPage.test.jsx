@@ -187,6 +187,16 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(screen.queryByText(/Multi-tujuan/)).not.toBeInTheDocument();
   });
 
+  it('menampilkan Dokumen Customer dari Sales Order yang seluruh ritasinya selesai', async () => {
+    render(<SalesOrdersPage customerDocumentsOnly />);
+
+    await waitFor(() => expect(fetchSalesOrdersPage).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'completed',
+      invoiced: false,
+    })));
+    expect(await screen.findByText('SO-001')).toBeInTheDocument();
+  });
+
   it('memfilter Sales Order yang dokumen Accurate-nya siap dikirim', async () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage customerDocumentsOnly />);

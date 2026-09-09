@@ -59,13 +59,13 @@ const STATUS_NAVIGATION = [
   { value: '', label: 'Semua', tone: 'all' },
 ];
 const CUSTOMER_DOCUMENT_STATUS_NAVIGATION = [
-  { value: 'completed_invoiced', label: 'Proses Billing', tone: 'completed' },
+  { value: 'completed', label: 'Proses Billing', tone: 'completed' },
   { value: 'invoice_ready', label: 'Siap Dikirim', tone: 'invoice' },
   { value: 'invoice_sent', label: 'Dokumen Terkirim', tone: 'completed' },
   { value: '', label: 'Semua', tone: 'all' },
 ];
 const DEFAULT_STATUS_FILTER = 'waiting_operational';
-const DEFAULT_CUSTOMER_DOCUMENT_STATUS_FILTER = 'invoice_ready';
+const DEFAULT_CUSTOMER_DOCUMENT_STATUS_FILTER = 'completed';
 
 function valueOrDash(value) {
   return value || '-';
@@ -344,7 +344,7 @@ function canCancelOrderBeforeOperational(order) {
 }
 
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '', customerDocumentsOnly = false) {
-  if (!selectedStatus && customerDocumentsOnly) return order.status === 'completed' && Boolean(String(invoiceNumber || '').trim());
+  if (!selectedStatus && customerDocumentsOnly) return order.status === 'completed';
   if (!selectedStatus) return true;
   if (selectedStatus === 'waiting_operational') return isWaitingStatus(order.status);
   if (selectedStatus === 'completed_invoiced') return order.status === 'completed' && Boolean(String(invoiceNumber || '').trim());
@@ -363,7 +363,7 @@ function getServerFilter(selectedStatus, customerDocumentsOnly = false) {
   if (selectedStatus === 'invoice_sent') {
     return { status: 'completed', invoiced: true, invoiceDocumentStatus: 'terkirim' };
   }
-  if (!selectedStatus && customerDocumentsOnly) return { status: 'completed', invoiced: true };
+  if (!selectedStatus && customerDocumentsOnly) return { status: 'completed', invoiced: false };
   if (!selectedStatus) return {};
   return { status: selectedStatus, invoiced: false };
 }
@@ -618,7 +618,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       invoice_ready: summary.readyInvoiceDocuments || 0,
       invoice_sent: summary.sentInvoiceDocuments || 0,
       cancelled: summary.cancelledOrders || 0,
-      all: customerDocumentsOnly ? (summary.invoicedOrders || 0) : Math.max(0, (summary.orders || 0) - (summary.cancelledOrders || 0)),
+      all: customerDocumentsOnly ? (summary.completedOrders || 0) : Math.max(0, (summary.orders || 0) - (summary.cancelledOrders || 0)),
     }
     : {
       waiting_operational: queryMatchedLocalOrders.filter((order) => isWaitingStatus(order.status)).length,
@@ -629,7 +629,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       invoice_sent: queryMatchedLocalOrders.filter((order) => order.status === 'completed' && order.invoiceDocumentStatus === 'terkirim').length,
       cancelled: queryMatchedLocalOrders.filter((order) => order.status === 'cancelled').length,
       all: customerDocumentsOnly
-        ? queryMatchedLocalOrders.filter((order) => order.status === 'completed' && Boolean(String((invoiceOverrides[order.id] ?? order.invoiceNumber) || '').trim())).length
+        ? queryMatchedLocalOrders.filter((order) => order.status === 'completed').length
         : queryMatchedLocalOrders.length,
     };
 
