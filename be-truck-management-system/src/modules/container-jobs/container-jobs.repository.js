@@ -625,6 +625,20 @@ function normalizeOptionalText(value) {
   return normalized || null;
 }
 
+export function normalizeCompletedAtForSave(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (typeof value !== 'string') return null;
+
+  const normalized = value.trim();
+  if (!normalized || !/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}/.test(normalized)) return null;
+
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
 function buildCommissionDriverSnapshot(assignment = {}) {
   if (!assignment?.driver) return {};
   return {
@@ -755,6 +769,7 @@ export async function syncAutoJourneyMoneyExpense(client, {
   assignment,
   actorName,
   allowOperationalFundPending = false,
+  allowAdminCorrection = false,
 }) {
   if (!['running', 'completed'].includes(nextStatus)) return;
   if (nextEntrySource === 'historical') return;
@@ -799,6 +814,20 @@ export async function syncAutoJourneyMoneyExpense(client, {
 
   const paidAt = runningAt || new Date().toISOString();
   const batchDate = toJakartaDateKey(paidAt);
+  if (allowAdminCorrection && batchDate) {
+    const lockedBatch = await client.query(
+      `
+        select batch.id
+        from operational_fund_batches batch
+        where batch.batch_date = $1::date
+          and batch.status = 'closed'
+        limit 1
+      `,
+      [batchDate],
+    );
+    if (lockedBatch.rows[0]) return;
+  }
+
   const description = buildAutoJourneyMoneyDescription(job, assignment);
   const sourceRefId = job.id;
   const existingAutoLedger = await client.query(
@@ -955,7 +984,25 @@ export async function syncAutoJourneyMoneyExpense(client, {
   return null;
 }
 
-async function voidAutoJourneyMoneyExpense(client, jobId, actorName = 'Operational') {
+async function voidAutoJourneyMoneyExpense(client, jobId, actorName = 'Operational', { allowAdminCorrection = false } = {}) {
+  if (allowAdminCorrection) {
+    const lockedBatch = await client.query(
+      `
+        select batch.id
+        from operational_fund_transactions oft
+        join operational_fund_batches batch on batch.id = oft.batch_id
+        where oft.container_job_id = $1
+          and oft.source = 'auto_uj_order'
+          and oft.transaction_type = 'debit'
+          and oft.status = 'posted'
+          and batch.status = 'closed'
+        limit 1
+      `,
+      [jobId],
+    );
+    if (lockedBatch.rows[0]) return;
+  }
+
   await client.query(
     `
       update container_job_expenses
@@ -1115,7 +1162,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
 
   const runningAt = form.runningAt || existing.running_at;
-  const completedAt = form.completedAt;
+  const completedAt = normalizeCompletedAtForSave(form.completedAt);
   if (runningAt && completedAt && new Date(completedAt) < new Date(runningAt)) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu mulai.',
@@ -1139,7 +1186,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
       409,
     );
   }
-  if (allowHistoricalBackfill || allowAdminCorrection) return;
+  if (allowHistoricalBackfill || allowAdminCorrection) return completedAt;
 
   const attachmentResult = await client.query(
     `
@@ -1173,6 +1220,8 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
       409,
     );
   }
+
+  return completedAt;
 }
 
 export async function findContainerJobsPage(options = {}) {
@@ -2257,9 +2306,9 @@ async function updateContainerJobTransaction(id, form) {
     if (!documentOnlyUpdate) {
       await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
     }
-    if (!documentOnlyUpdate && nextStatus === 'completed') {
-      await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill, allowAdminCorrection });
-    }
+    const validatedCompletedAt = !documentOnlyUpdate && nextStatus === 'completed'
+      ? await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill, allowAdminCorrection })
+      : null;
     const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
       ? new Date().toISOString()
       : null;
@@ -2449,7 +2498,7 @@ async function updateContainerJobTransaction(id, form) {
     const completedAtForUpdate = documentOnlyUpdate
       ? existing.rows[0].completed_at
       : nextStatus === 'completed'
-        ? form.completedAt || new Date().toISOString()
+        ? validatedCompletedAt
         : null;
     const shouldRefreshCommissionLock = nextStatus === 'completed'
       && nextHasDriverCommission
@@ -2638,7 +2687,7 @@ async function updateContainerJobTransaction(id, form) {
       // Document-only users (Sales) may complete missing/customer documents without changing
       // operational status, assignment, timeline, auto UJ, or resource availability.
     } else if (nextStatus === 'cancelled') {
-      await voidAutoJourneyMoneyExpense(client, id, actorName);
+      await voidAutoJourneyMoneyExpense(client, id, actorName, { allowAdminCorrection });
     } else {
       const autoUjWarning = await syncAutoJourneyMoneyExpense(client, {
         job: existing.rows[0],
@@ -2649,6 +2698,7 @@ async function updateContainerJobTransaction(id, form) {
         assignment: nextAssignmentSnapshot,
         actorName,
         allowOperationalFundPending: nextStatus === 'completed',
+        allowAdminCorrection,
       });
       if (autoUjWarning) updateWarnings.push(autoUjWarning);
     }

@@ -29,6 +29,7 @@ const {
   buildAutoJourneyMoneyDescription,
   hasCompleteOperationalAssignment,
   hasRequiredRepoCompletionDocuments,
+  normalizeCompletedAtForSave,
   resolveJourneyMoneyAmountForSize,
   shouldValidateVehicleContainerSize,
   syncAutoJourneyMoneyExpense,
@@ -39,6 +40,15 @@ test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
     { containerNumber: '', status: 'running', rpujStatus: 'paid' },
     { containerNumber: 'TCLU1234567' },
   ), true);
+});
+
+test('completed_at wajib berupa tanggal dan jam yang valid', () => {
+  assert.equal(normalizeCompletedAtForSave(''), null);
+  assert.equal(normalizeCompletedAtForSave('08:30'), null);
+  assert.equal(normalizeCompletedAtForSave({}), null);
+  assert.equal(normalizeCompletedAtForSave('2026-09-09'), null);
+  assert.equal(normalizeCompletedAtForSave('2026-99-99T08:30'), null);
+  assert.equal(normalizeCompletedAtForSave('2026-09-09T08:30')?.startsWith('2026-09-09'), true);
 });
 
 test('tidak menganggap perubahan nomor tersimpan sebagai pengisian pertama', () => {

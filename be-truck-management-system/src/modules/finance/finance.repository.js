@@ -525,6 +525,7 @@ function financeRowsCte() {
         )
       left join attachment_flags af on af.entity_id = cj.id
       where cj.status = 'completed'
+        and cj.completed_at is not null
         and so.status <> 'cancelled'
     )
   `;
@@ -1416,7 +1417,7 @@ export function mapInvoiceDocuments(rows = []) {
   return [...financeDocuments, ...operationalDocuments, ...additionalOperationalDocuments, ...salesDocuments];
 }
 
-function invoiceOrdersCte() {
+export function invoiceOrdersCte() {
   return `
     ${financeRowsCte()},
     order_job_statuses as (
@@ -1513,6 +1514,7 @@ function invoiceOrdersCte() {
         ) as destinations,
         so.customer_name,
         so.destination,
+        so.trip_date,
         so.updated_at,
         ${paymentTermsExpression('so')} as payment_terms,
         max(fr.completed_at) as completed_at,
@@ -3938,12 +3940,15 @@ function outstandingOrdersCte() {
     ),
     -- Difilter dari sisa outstanding yang dihitung ulang (bukan dari billing_status='lunas' yang
     -- tersimpan), karena billing_amount dihitung live dari finance_rows dan bisa berubah setelah
-    -- sebuah SO ditandai lunas (mis. koreksi revenue). Kalau hanya filter dari flag tersimpan, SO
-    -- yang piutangnya kebuka lagi gara-gara koreksi itu akan hilang diam-diam dari dashboard ini.
+    -- sebuah SO ditandai lunas (mis. koreksi revenue). Untuk opening outstanding production,
+    -- Finance hanya memonitor SO trip_date Juni-Agustus 2026; SO sebelum periode itu dianggap
+    -- settled secara operasional tanpa membuat pembayaran penyesuaian fiktif.
     outstanding_orders as (
       select *
       from outstanding_orders_all
       where outstanding_amount > 0
+        and trip_date >= date '2026-06-01'
+        and trip_date < date '2026-09-01'
     )
   `;
 }
