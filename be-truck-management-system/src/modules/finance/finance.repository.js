@@ -3904,7 +3904,7 @@ export async function getInvoiceOrdersPage(options = {}) {
   };
 }
 
-function outstandingOrdersCte() {
+export function outstandingOrdersCte() {
   return `
     ${invoiceOrdersCte()},
     payment_totals as (
@@ -3937,20 +3937,18 @@ function outstandingOrdersCte() {
     ),
     -- Difilter dari sisa outstanding yang dihitung ulang (bukan dari billing_status='lunas' yang
     -- tersimpan), karena billing_amount dihitung live dari finance_rows dan bisa berubah setelah
-    -- sebuah SO ditandai lunas (mis. koreksi revenue). Untuk opening outstanding production,
-    -- Finance hanya memonitor SO trip_date Juni-Agustus 2026; SO sebelum periode itu dianggap
-    -- settled secara operasional tanpa membuat pembayaran penyesuaian fiktif.
+    -- sebuah SO ditandai lunas (mis. koreksi revenue). Rentang trip_date (kalau ada) difilter di
+    -- buildOutstandingFilters/buildCustomerOutstandingFilters lewat whereSql di luar CTE ini, bukan
+    -- di sini, supaya default-nya menampilkan semua bulan outstanding.
     outstanding_orders as (
       select *
       from outstanding_orders_all
       where outstanding_amount > 0
-        and trip_date >= date '2026-06-01'
-        and trip_date < date '2026-09-01'
     )
   `;
 }
 
-function buildOutstandingFilters(options = {}) {
+export function buildOutstandingFilters(options = {}) {
   const clauses = [];
   const params = [];
 
@@ -3960,6 +3958,14 @@ function buildOutstandingFilters(options = {}) {
   if (options.dataReviewStatus) {
     params.push(options.dataReviewStatus);
     clauses.push(`ots_data_review_status = $${params.length}`);
+  }
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`trip_date >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`trip_date <= $${params.length}`);
   }
   if (options.query) {
     params.push(`%${String(options.query).trim()}%`);
@@ -4084,11 +4090,19 @@ export async function getSalesOrderOutstandingPage(options = {}) {
   };
 }
 
-function buildCustomerOutstandingFilters(options = {}) {
+export function buildCustomerOutstandingFilters(options = {}) {
   const clauses = [];
   const params = [];
 
   appendOutstandingAgingBucketFilter(clauses, params, options.agingBucket);
+  if (options.dateFrom) {
+    params.push(options.dateFrom);
+    clauses.push(`trip_date >= $${params.length}`);
+  }
+  if (options.dateTo) {
+    params.push(options.dateTo);
+    clauses.push(`trip_date <= $${params.length}`);
+  }
   if (options.query) {
     params.push(`%${String(options.query).trim()}%`);
     clauses.push(`customer_name ilike $${params.length}`);

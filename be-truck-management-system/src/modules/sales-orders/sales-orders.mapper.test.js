@@ -94,6 +94,46 @@ test('container job di sales order membaca kategori lama untuk file Surat Jalan'
   assert.equal(mapped.travelDocumentFile.path, 'attachment-sj-legacy');
 });
 
+test('container job di sales order membaca lampiran dari row mentah pg (kolom snake_case)', () => {
+  // pg mengembalikan row dengan nama kolom apa adanya (snake_case), bukan camelCase.
+  // Regression test untuk bug: mapAttachmentFile sempat hanya membaca attachment.fileName /
+  // attachment.mimeType / attachment.storagePath (camelCase) sehingga file yang sudah
+  // ter-upload tetap tampil "Belum ada file" walau attachment-nya sudah ada di database.
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    container_number: 'TLLU3185959',
+    eir_number: 'EIR-001',
+    travel_document_number: 'TLLU3185959',
+    container_size: '20FT',
+    container_type: 'Dry',
+    assignment_snapshot: {},
+    rpuj_status: 'paid',
+    status: 'completed',
+  }, [
+    {
+      id: 'attachment-eir-raw',
+      category: 'eirDocument',
+      file_name: 'TLLU3185959.jpeg',
+      file_size: '153600',
+      mime_type: 'image/jpeg',
+      storage_path: 'container_job/job-1/eirDocument/tllu3185959.jpeg',
+    },
+    {
+      id: 'attachment-sj-raw',
+      category: 'travelDocumentFile',
+      file_name: 'WhatsApp-Image-2026-09-07-at-11.20.40.jpeg',
+      file_size: '204800',
+      mime_type: 'image/jpeg',
+      storage_path: 'container_job/job-1/travelDocumentFile/whatsapp-image.jpeg',
+    },
+  ]);
+
+  assert.equal(mapped.eirDocument.name, 'TLLU3185959.jpeg');
+  assert.equal(mapped.eirDocument.storagePath, 'container_job/job-1/eirDocument/tllu3185959.jpeg');
+  assert.equal(mapped.travelDocumentFile.name, 'WhatsApp-Image-2026-09-07-at-11.20.40.jpeg');
+  assert.equal(mapped.travelDocumentFile.storagePath, 'container_job/job-1/travelDocumentFile/whatsapp-image.jpeg');
+});
+
 test('sales order db mapper menyimpan metadata workflow dokumen invoice', () => {
   const row = toSalesOrderDb({
     customer: 'PT Contoh',

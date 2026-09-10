@@ -1,11 +1,16 @@
 function mapAttachmentFile(attachment) {
+  // Row lampiran bisa datang dari dua bentuk: hasil query mentah tabel `attachments`
+  // (kolom snake_case, mis. file_name/storage_path/mime_type/file_size) atau object yang
+  // sudah dirakit manual dengan key camelCase (mis. proofAttachment di bawah). Baca dua-duanya
+  // supaya nama file & path selalu terisi, bukan cuma string kosong.
+  const fileSize = attachment?.fileSize ?? attachment?.file_size;
   return attachment
     ? {
-        name: attachment.fileName || '',
-        size: attachment.fileSize == null ? 0 : Number(attachment.fileSize),
-        type: attachment.mimeType || '',
+        name: attachment.fileName || attachment.file_name || '',
+        size: fileSize == null ? 0 : Number(fileSize),
+        type: attachment.mimeType || attachment.mime_type || '',
         path: attachment.id,
-        storagePath: attachment.storagePath || '',
+        storagePath: attachment.storagePath || attachment.storage_path || '',
       }
     : null;
 }
@@ -93,7 +98,7 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
   const otherDocuments = attachments
     .filter((attachment) => attachment.category === 'otherDocument')
     .map((attachment) => ({
-      name: attachment.notes || attachment.referenceNumber || attachment.fileName || 'Other Document',
+      name: attachment.notes || attachment.referenceNumber || attachment.reference_number || attachment.fileName || attachment.file_name || 'Other Document',
       file: mapAttachmentFile(attachment),
     }));
 

@@ -397,6 +397,8 @@ export function fetchSalesOrderOutstanding(query = {}) {
     query: query.query || query.search || '',
     agingBucket: query.agingBucket || '',
     dataReviewStatus: query.dataReviewStatus || '',
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
   });
 }
 
@@ -407,6 +409,8 @@ export function fetchCustomerOutstandingRollup(query = {}) {
     query: query.query || query.search || '',
     agingBucket: query.agingBucket || '',
     sortBy: query.sortBy || '',
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
   });
 }
 

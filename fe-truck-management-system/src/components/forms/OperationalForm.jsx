@@ -71,6 +71,18 @@ function fileMetadata(file) {
   return file ? { name: file.name, size: file.size, type: file.type, rawFile: file } : null;
 }
 
+// Attachment dari backend kadang cuma punya `path`/`storagePath` tanpa `name` eksplisit
+// (tergantung mapper). Jangan hanya cek `.name` -- itu bikin file yang sudah ter-upload
+// dianggap kosong dan tampil "Belum ada file" padahal sudah ada di database.
+function hasDocumentFile(file) {
+  return Boolean(file?.path || file?.name || file?.storagePath);
+}
+
+function documentFileLabel(file) {
+  if (!hasDocumentFile(file)) return 'Belum ada file';
+  return file?.name || 'Dokumen tersimpan';
+}
+
 function getTruckDefaultDriver(truck, fallbackRows = []) {
   if (!truck) return '';
   const fallbackTruck = fallbackRows.find((item) => item.plateNumber === truck.plateNumber);
@@ -1545,8 +1557,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                       />
                     </label>
                     <div className="operational-document-upload-row">
-                      <span className={`operational-file-name ${container.repoEirDocument ? 'has-file' : 'is-empty'}`}>
-                        {container.repoEirDocument?.name || 'Belum ada file'}
+                      <span className={`operational-file-name ${hasDocumentFile(container.repoEirDocument) ? 'has-file' : 'is-empty'}`}>
+                        {documentFileLabel(container.repoEirDocument)}
                       </span>
                     </div>
                     <small className="operational-document-helper">Dibuat saat container dititipkan.</small>
@@ -1591,10 +1603,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                       }}
                     />
                     <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker('eirDocument')} disabled={!canEditDocumentFile('eirDocument')} aria-label="Pilih lampiran EIR">
-                      {form.eirDocument?.name ? 'Ubah File' : 'Pilih File'}
+                      {hasDocumentFile(form.eirDocument) ? 'Ubah File' : 'Pilih File'}
                     </button>
-                    <span className={`operational-file-name ${form.eirDocument ? 'has-file' : 'is-empty'}`}>
-                      {form.eirDocument?.name || 'Belum ada file'}
+                    <span className={`operational-file-name ${hasDocumentFile(form.eirDocument) ? 'has-file' : 'is-empty'}`}>
+                      {documentFileLabel(form.eirDocument)}
                     </span>
                   </div>
                   <small className="operational-document-helper">PDF maks. 5 MB, JPG/PNG maks. 10 MB</small>
@@ -1635,10 +1647,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                         }}
                       />
                       <button type="button" className="secondary-button operational-upload-button" onClick={() => openOperationalFilePicker(field.fileField)} disabled={!canEditDocumentFile(field.fileField)} aria-label={`Pilih ${field.label}`}>
-                        {form[field.fileField]?.name ? 'Ubah File' : 'Pilih File'}
+                        {hasDocumentFile(form[field.fileField]) ? 'Ubah File' : 'Pilih File'}
                       </button>
-                      <span className={`operational-file-name ${form[field.fileField] ? 'has-file' : 'is-empty'}`}>
-                        {form[field.fileField]?.name || 'Belum ada file'}
+                      <span className={`operational-file-name ${hasDocumentFile(form[field.fileField]) ? 'has-file' : 'is-empty'}`}>
+                        {documentFileLabel(form[field.fileField])}
                       </span>
                     </div>
                     <small className="operational-document-helper">PDF maks. 5 MB, JPG/PNG maks. 10 MB</small>

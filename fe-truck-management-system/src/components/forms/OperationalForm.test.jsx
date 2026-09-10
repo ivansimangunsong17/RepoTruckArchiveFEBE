@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import OperationalForm from './OperationalForm';
@@ -61,6 +61,36 @@ describe('OperationalForm', () => {
     expect(screen.getByText('Dokumen Operasional')).toBeInTheDocument();
     expect(screen.getByText('EIR')).toBeInTheDocument();
     expect(screen.getByLabelText('No. EIR')).toBeInTheDocument();
+  });
+
+  it('menampilkan file dokumen yang sudah ter-upload walau object file dari backend cuma punya path (bukan name)', async () => {
+    // Regression: backend kadang mengembalikan attachment yang sudah ada di database dengan
+    // `name` kosong (bug mapping snake_case/camelCase) atau memang tanpa `name` eksplisit,
+    // hanya `path`/`storagePath`. Modal tidak boleh menampilkan "Belum ada file" untuk kasus ini.
+    const user = userEvent.setup();
+
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          eirDocument: { path: 'attachment-eir-1', storagePath: 'container_job/job-1/eirDocument/tllu.jpeg', name: '' },
+          travelDocumentFile: { path: 'attachment-travel-1', storagePath: 'container_job/job-1/travelDocumentFile/wa.jpeg', name: '' },
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await openOperationalPhase(user, /dokumen & closing/i);
+
+    const eirUploadButton = screen.getByRole('button', { name: 'Pilih lampiran EIR' });
+    expect(eirUploadButton).toHaveTextContent('Ubah File');
+    expect(within(eirUploadButton.parentElement).queryByText('Belum ada file')).not.toBeInTheDocument();
+
+    const travelUploadButton = screen.getByRole('button', { name: 'Pilih No. Surat Jalan' });
+    expect(travelUploadButton).toHaveTextContent('Ubah File');
+    expect(within(travelUploadButton.parentElement).queryByText('Belum ada file')).not.toBeInTheDocument();
   });
 
   it('tidak memakai truck dummy ketika master truck API kosong', () => {

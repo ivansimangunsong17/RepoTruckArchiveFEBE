@@ -95,7 +95,9 @@ function AttachmentUploadField({
   }
 
   const file = getFileSource(value);
-  const fileName = value?.name || file?.name || 'Belum ada file';
+  // Attachment dari backend kadang cuma punya `path`/`storagePath` tanpa `name` eksplisit
+  // -- jangan tampilkan "Belum ada file" di sini kalau filenya sebenarnya sudah ada.
+  const fileName = value?.name || file?.name || (value?.path || file?.path ? 'Dokumen tersimpan' : 'Belum ada file');
   const fileSize = value?.size || file?.size || 0;
   const isImage = isImageFile(file);
 

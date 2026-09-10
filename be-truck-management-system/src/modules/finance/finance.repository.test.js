@@ -6,7 +6,10 @@ process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters'
 const {
   buildInvoiceFilters,
   buildOrderVerificationFilters,
+  buildOutstandingFilters,
+  buildCustomerOutstandingFilters,
   invoiceOrdersCte,
+  outstandingOrdersCte,
 } = await import('./finance.repository.js');
 
 test('invoice CTE hanya mengambil completed job yang punya completed_at valid', () => {
@@ -20,6 +23,32 @@ test('invoice CTE menghitung dokumen Surat Jalan yang sudah diupload per SO', ()
   const sql = invoiceOrdersCte();
 
   assert.match(sql, /count\(fr\.id\)\s+filter\s+\(where\s+fr\.has_travel_document\)::int\s+as\s+travel_document_uploaded_count/i);
+});
+
+test('customer outstanding CTE tidak lagi membatasi trip_date ke Juni-Agustus 2026', () => {
+  const sql = outstandingOrdersCte();
+
+  assert.doesNotMatch(sql, /2026-06-01/);
+  assert.doesNotMatch(sql, /2026-09-01/);
+  assert.match(sql, /where\s+outstanding_amount\s*>\s*0/i);
+});
+
+test('filter outstanding SO menerapkan rentang trip_date dari dateFrom/dateTo', () => {
+  const noRange = buildOutstandingFilters({});
+  const withRange = buildOutstandingFilters({ dateFrom: '2026-09-01', dateTo: '2026-09-30' });
+
+  assert.doesNotMatch(noRange.whereSql, /trip_date/i);
+  assert.match(withRange.whereSql, /trip_date\s*>=\s*\$1/i);
+  assert.match(withRange.whereSql, /trip_date\s*<=\s*\$2/i);
+  assert.deepEqual(withRange.params, ['2026-09-01', '2026-09-30']);
+});
+
+test('filter customer outstanding rollup menerapkan rentang trip_date dari dateFrom/dateTo', () => {
+  const withRange = buildCustomerOutstandingFilters({ dateFrom: '2026-09-01', dateTo: '2026-09-30' });
+
+  assert.match(withRange.whereSql, /trip_date\s*>=\s*\$1/i);
+  assert.match(withRange.whereSql, /trip_date\s*<=\s*\$2/i);
+  assert.deepEqual(withRange.params, ['2026-09-01', '2026-09-30']);
 });
 
 test('filter SO Terisi tetap memuat SO batal yang sudah punya nomor SO Finance', () => {

@@ -96,6 +96,107 @@ test('container job mapper membaca kategori lama untuk file Surat Jalan', () => 
   assert.equal(mapped.travelDocumentFile.path, 'file-sj-legacy');
 });
 
+test('container job mapper membaca lampiran travelDocumentFile dan eirDocument dari row mentah pg (kolom snake_case)', () => {
+  // pg mengembalikan row dengan nama kolom apa adanya (snake_case), bukan camelCase.
+  // Regression test untuk bug: mapAttachmentFile sempat hanya membaca attachment.fileName /
+  // attachment.mimeType / attachment.storagePath (camelCase) sehingga file yang sudah
+  // ter-upload tetap tampil "Belum ada file" karena name/storagePath jadi string kosong,
+  // walau attachment-nya sudah benar ada & ter-relasi di database.
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    sales_order_id: 'order-1',
+    so_number: '2609/02-00155',
+    customer_name: 'MANTAP JAYA',
+    shipment_type: 'import',
+    job_type: 'dry',
+    origin: 'Tanjung Priok',
+    destination: 'Cikarang',
+    trip_date: '2026-09-07',
+    container_number: 'TLLU3185959',
+    container_size: '20FT',
+    container_type: 'Dry',
+    assignment_snapshot: {},
+    travel_document_number: 'TLLU3185959',
+    eir_number: 'EIR-001',
+    rpuj_status: 'pending',
+    status: 'running',
+  }, [
+    {
+      id: 'attachment-travel-1',
+      entity_id: 'job-1',
+      category: 'travelDocumentFile',
+      reference_number: null,
+      document_date: null,
+      file_name: 'WhatsApp-Image-2026-09-07-at-11.20.40.jpeg',
+      storage_path: 'container_job/job-1/travelDocumentFile/whatsapp-image.jpeg',
+      mime_type: 'image/jpeg',
+      file_size: '204800',
+      notes: null,
+      uploaded_by_name: 'Operational Test',
+      created_at: '2026-09-07T04:00:00.000Z',
+    },
+    {
+      id: 'attachment-eir-1',
+      entity_id: 'job-1',
+      category: 'eirDocument',
+      reference_number: null,
+      document_date: null,
+      file_name: 'TLLU3185959.jpeg',
+      storage_path: 'container_job/job-1/eirDocument/tllu3185959.jpeg',
+      mime_type: 'image/jpeg',
+      file_size: '153600',
+      notes: null,
+      uploaded_by_name: 'Operational Test',
+      created_at: '2026-09-07T05:00:00.000Z',
+    },
+  ]);
+
+  assert.equal(mapped.travelDocumentFile.name, 'WhatsApp-Image-2026-09-07-at-11.20.40.jpeg');
+  assert.equal(mapped.travelDocumentFile.path, 'attachment-travel-1');
+  assert.equal(mapped.travelDocumentFile.storagePath, 'container_job/job-1/travelDocumentFile/whatsapp-image.jpeg');
+  assert.equal(mapped.travelDocumentFile.type, 'image/jpeg');
+  assert.equal(mapped.travelDocumentFile.size, 204800);
+
+  assert.equal(mapped.eirDocument.name, 'TLLU3185959.jpeg');
+  assert.equal(mapped.eirDocument.path, 'attachment-eir-1');
+  assert.equal(mapped.eirDocument.storagePath, 'container_job/job-1/eirDocument/tllu3185959.jpeg');
+});
+
+test('container job mapper membaca lampiran legacy travelDocument dari row mentah pg (kolom snake_case)', () => {
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    sales_order_id: 'order-1',
+    so_number: 'SO-ARM-202608-0001',
+    customer_name: 'PT Contoh',
+    shipment_type: 'import',
+    job_type: 'dry',
+    origin: 'Tanjung Priok',
+    destination: 'Cikarang',
+    trip_date: '2026-08-14',
+    container_size: '20FT',
+    container_type: 'Dry',
+    assignment_snapshot: {},
+    travel_document_number: 'SJ-001',
+    rpuj_status: 'pending',
+    status: 'completed',
+  }, [
+    {
+      id: 'file-sj-legacy-raw',
+      entity_id: 'job-1',
+      category: 'travelDocument',
+      file_name: 'sj-legacy.jpg',
+      storage_path: 'container/sj-legacy.jpg',
+      mime_type: 'image/jpeg',
+      file_size: '123',
+    },
+  ]);
+
+  assert.equal(mapped.travelDocument, 'SJ-001');
+  assert.equal(mapped.travelDocumentFile.name, 'sj-legacy.jpg');
+  assert.equal(mapped.travelDocumentFile.path, 'file-sj-legacy-raw');
+  assert.equal(mapped.travelDocumentFile.storagePath, 'container/sj-legacy.jpg');
+});
+
 test('container job expense mapper membaca bukti pembayaran ledger', () => {
   const mapped = mapContainerJobExpense({
     id: 'expense-1',

@@ -158,6 +158,21 @@ describe('CustomerOutstandingPage finance', () => {
     });
   });
 
+  it('mengirim dateFrom/dateTo saat filter Trip Date diisi, supaya semua bulan outstanding bisa ditampilkan bukan cuma Juni-Agustus', async () => {
+    const user = userEvent.setup();
+    render(<CustomerOutstandingPage />);
+
+    await screen.findByText('PT Mitra Kimia');
+    await user.type(screen.getByLabelText('Trip Date Dari'), '2026-09-01');
+    await user.type(screen.getByLabelText('Trip Date Sampai'), '2026-09-30');
+
+    await waitFor(() => {
+      expect(fetchFinanceOutstandingByCustomer).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, dateFrom: '2026-09-01', dateTo: '2026-09-30' }),
+      );
+    });
+  });
+
   it('mengekspor daftar piutang per customer ke CSV', async () => {
     const user = userEvent.setup();
     render(<CustomerOutstandingPage />);
@@ -196,5 +211,22 @@ describe('CustomerOutstandingPage finance', () => {
       expect(recordFinanceInvoicePayment).toHaveBeenCalledWith('so-1', expect.objectContaining({ amount: 1000000 }), proofFile);
       expect(notify).toHaveBeenCalled();
     });
+  });
+
+  it('memfilter invoice di modal detail piutang customer', async () => {
+    const user = userEvent.setup();
+    render(<CustomerOutstandingPage />);
+
+    await screen.findByText('PT Mitra Kimia');
+    await user.click(screen.getAllByRole('button', { name: 'Detail' })[0]);
+
+    const detailDialog = await screen.findByRole('dialog', { name: /PT Mitra Kimia/i });
+    expect(await within(detailDialog).findByText('SO-202608-001')).toBeInTheDocument();
+    expect(within(detailDialog).getByText('SO-202608-002')).toBeInTheDocument();
+
+    await user.type(within(detailDialog).getByLabelText('Cari invoice piutang'), 'INV-202608-002');
+
+    expect(within(detailDialog).queryByText('SO-202608-001')).not.toBeInTheDocument();
+    expect(within(detailDialog).getByText('SO-202608-002')).toBeInTheDocument();
   });
 });

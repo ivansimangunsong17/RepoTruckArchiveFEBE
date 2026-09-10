@@ -7,6 +7,7 @@ import { USER_ROLES } from '../../constants/roles';
 import PageHeader from '../../components/common/PageHeader';
 import EmptyState from '../../components/common/EmptyState';
 import AttachmentUploadField from '../../components/common/AttachmentUploadField';
+import SearchBar from './shared/SearchBar';
 import {
   fetchFinanceInvoicePayments,
   fetchFinanceOutstanding,
@@ -120,7 +121,27 @@ function ModalPortal({ children }) {
 }
 
 function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment, onClose, onRecordPayment }) {
+  const [detailQuery, setDetailQuery] = useState('');
+
+  useEffect(() => {
+    setDetailQuery('');
+  }, [customer?.customer]);
+
   if (!customer) return null;
+
+  const normalizedQuery = detailQuery.trim().toLowerCase();
+  const visibleRows = normalizedQuery
+    ? rows.filter((row) => [
+      row.soNumber,
+      row.invoiceNumber,
+      row.customer,
+      row.dueDate ? formatDate(row.dueDate) : '',
+      row.billingAmount,
+      row.totalPaid,
+      row.outstandingAmount,
+      AGING_LABELS[row.agingBucket],
+    ].join(' ').toLowerCase().includes(normalizedQuery))
+    : rows;
 
   return (
     <ModalPortal>
@@ -150,48 +171,62 @@ function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment,
             ) : !error && !rows.length ? (
               <EmptyState title="Tidak ada invoice" description="Customer ini tidak memiliki invoice outstanding." />
             ) : !error ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] divide-y divide-slate-200 text-left text-sm">
-                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">No. SO</th>
-                      <th className="px-4 py-3">No. Invoice</th>
-                      <th className="px-4 py-3 text-right">Tagihan</th>
-                      <th className="px-4 py-3 text-right">Dibayar</th>
-                      <th className="px-4 py-3 text-right">Outstanding</th>
-                      <th className="px-4 py-3">Jatuh Tempo</th>
-                      <th className="px-4 py-3">Umur Piutang</th>
-                      <th className="px-4 py-3 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {rows.map((row) => (
-                      <tr key={row.id} className="align-middle hover:bg-slate-50/70">
-                        <td className="px-4 py-3 font-black text-slate-950">
-                          {row.soNumber}
-                          {row.dataReviewStatus === 'perlu_dicek' ? (
-                            <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-700">
-                              <AlertTriangle size={10} /> Perlu Ditinjau
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3 text-xs font-medium text-slate-700">{row.invoiceNumber || '-'}</td>
-                        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.billingAmount)}</td>
-                        <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.totalPaid)}</td>
-                        <td className="px-4 py-3 text-right text-sm font-black text-amber-700">{formatCurrency(row.outstandingAmount)}</td>
-                        <td className="px-4 py-3 text-xs font-medium text-slate-700">{row.dueDate ? formatDate(row.dueDate) : '-'}</td>
-                        <td className="px-4 py-3"><AgingBadge bucket={row.agingBucket} /></td>
-                        <td className="px-4 py-3 text-right">
-                          {canRecordPayment ? (
-                            <button className="secondary-button" onClick={() => onRecordPayment(row)} type="button">
-                              Catat Pembayaran
-                            </button>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                  <SearchBar
+                    ariaLabel="Cari invoice piutang"
+                    query={detailQuery}
+                    onChange={setDetailQuery}
+                    placeholder="Cari No. SO, invoice, nominal..."
+                  />
+                </div>
+                {!visibleRows.length ? (
+                  <EmptyState title="Invoice tidak ditemukan" description="Coba gunakan nomor SO atau nomor invoice lain." />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3">No. SO</th>
+                          <th className="px-4 py-3">No. Invoice</th>
+                          <th className="px-4 py-3 text-right">Tagihan</th>
+                          <th className="px-4 py-3 text-right">Dibayar</th>
+                          <th className="px-4 py-3 text-right">Outstanding</th>
+                          <th className="px-4 py-3">Jatuh Tempo</th>
+                          <th className="px-4 py-3">Umur Piutang</th>
+                          <th className="px-4 py-3 text-right">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {visibleRows.map((row) => (
+                          <tr key={row.id} className="align-middle hover:bg-slate-50/70">
+                            <td className="px-4 py-3 font-black text-slate-950">
+                              {row.soNumber}
+                              {row.dataReviewStatus === 'perlu_dicek' ? (
+                                <span className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-700">
+                                  <AlertTriangle size={10} /> Perlu Ditinjau
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-4 py-3 text-xs font-medium text-slate-700">{row.invoiceNumber || '-'}</td>
+                            <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.billingAmount)}</td>
+                            <td className="px-4 py-3 text-right text-xs font-bold text-slate-700">{formatCurrency(row.totalPaid)}</td>
+                            <td className="px-4 py-3 text-right text-sm font-black text-amber-700">{formatCurrency(row.outstandingAmount)}</td>
+                            <td className="px-4 py-3 text-xs font-medium text-slate-700">{row.dueDate ? formatDate(row.dueDate) : '-'}</td>
+                            <td className="px-4 py-3"><AgingBadge bucket={row.agingBucket} /></td>
+                            <td className="px-4 py-3 text-right">
+                              {canRecordPayment ? (
+                                <button className="secondary-button" onClick={() => onRecordPayment(row)} type="button">
+                                  Catat Pembayaran
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
@@ -402,6 +437,8 @@ function CustomerOutstandingPage() {
   const [query, setQuery] = useState('');
   const [agingBucket, setAgingBucket] = useState('');
   const [sortBy, setSortBy] = useState('outstanding_desc');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -426,7 +463,7 @@ function CustomerOutstandingPage() {
       // Satu fetch saja: /finance/outstanding/by-customer sudah mengembalikan data tabel rollup
       // DAN summary sekaligus, supaya query outstanding yang berat tidak dijalankan dua kali
       // (dulu ada panggilan kedua ke fetchFinanceOutstanding({ pageSize: 1 }) hanya untuk summary).
-      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, agingBucket, sortBy });
+      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, agingBucket, sortBy, dateFrom, dateTo });
       setCustomerRows(rollup?.rows || []);
       setTotal(Number(rollup?.total || 0));
       setTotalPages(Math.max(1, Number(rollup?.totalPages || 1)));
@@ -436,7 +473,7 @@ function CustomerOutstandingPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, query, agingBucket, sortBy]);
+  }, [page, query, agingBucket, sortBy, dateFrom, dateTo]);
 
   function exportCustomerRows() {
     downloadCsv(
@@ -453,7 +490,7 @@ function CustomerOutstandingPage() {
   function loadDetailRows(customerName) {
     setDetailLoading(true);
     setDetailError('');
-    fetchFinanceOutstanding({ query: customerName, pageSize: DETAIL_PAGE_SIZE })
+    fetchFinanceOutstanding({ query: customerName, pageSize: DETAIL_PAGE_SIZE, dateFrom, dateTo })
       .then((result) => setDetailRows((result?.rows || []).filter((row) => row.customer === customerName)))
       .catch((err) => setDetailError(err.message || 'Rincian invoice gagal dimuat.'))
       .finally(() => setDetailLoading(false));
@@ -611,6 +648,24 @@ function CustomerOutstandingPage() {
                 onChange={(event) => { setPage(1); setQuery(event.target.value); }}
                 placeholder="Nama customer"
                 value={query}
+              />
+            </label>
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+              Trip Date Dari
+              <input
+                className="master-filter-select"
+                onChange={(event) => { setPage(1); setDateFrom(event.target.value); }}
+                type="date"
+                value={dateFrom}
+              />
+            </label>
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+              Trip Date Sampai
+              <input
+                className="master-filter-select"
+                onChange={(event) => { setPage(1); setDateTo(event.target.value); }}
+                type="date"
+                value={dateTo}
               />
             </label>
             <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">

@@ -225,7 +225,7 @@
 .master-modal-backdrop { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 24px; background: #17181cb3; backdrop-filter: blur(3px); animation: modal-fade-in .16s ease-out; }
 .master-modal { overflow: hidden; width: min(900px, 100%); max-height: calc(100vh - 48px); border: 1px solid #ffffff40; border-radius: 14px; background: white; box-shadow: 0 28px 80px #08090b59; animation: modal-slide-in .2s ease-out; }
 .master-modal.dropping-expense-modal { width: min(1040px, 100%); }
-.master-modal.customer-outstanding-detail-modal { width: min(1100px, 100%); }
+.master-modal.customer-outstanding-detail-modal { width: min(1240px, 100%); }
 .master-modal .master-form { display: flex; max-height: calc(100vh - 48px); flex-direction: column; }
 .master-modal .master-form-sections { overflow-y: auto; overscroll-behavior: contain; }
 .modal-close-button { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border: 1px solid #e3e7ed; border-radius: 8px; color: #6d7788; background: white; }
