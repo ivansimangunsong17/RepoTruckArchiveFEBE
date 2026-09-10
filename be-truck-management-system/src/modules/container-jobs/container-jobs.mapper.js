@@ -75,6 +75,12 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     attachmentMap.unloadingVoucherDocument,
     attachmentMap.weighingDocumentFile,
   );
+  const travelDocumentAttachment = firstAttachment(
+    attachmentMap.travelDocumentFile,
+    attachmentMap.travelDocument,
+    attachmentMap.suratJalan,
+    attachmentMap.suratJalanDocument,
+  );
   const tilaGatepassLegacyDocumentFiles = [
     ['Legacy TILA / Delivery Card', attachmentMap.unloadingVoucherDocument],
     ['Legacy Gatepass / SP2', attachmentMap.weighingDocumentFile],
@@ -197,7 +203,7 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     tilaGatepassDocumentFile: mapAttachmentFile(tilaGatepassPrimaryAttachment),
     tilaGatepassLegacyDocumentFiles,
     unloadingVoucherDocument: mapAttachmentFile(attachmentMap.unloadingVoucherDocument),
-    travelDocumentFile: mapAttachmentFile(attachmentMap.travelDocumentFile),
+    travelDocumentFile: mapAttachmentFile(travelDocumentAttachment),
     weighingDocumentFile: mapAttachmentFile(attachmentMap.weighingDocumentFile),
     otherDocuments,
     expenses: expenses.map(mapContainerJobExpense),

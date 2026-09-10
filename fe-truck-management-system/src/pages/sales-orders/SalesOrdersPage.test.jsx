@@ -197,6 +197,55 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(await screen.findByText('SO-001')).toBeInTheDocument();
   });
 
+  it('menampilkan progres upload SJ di Dokumen Customer', async () => {
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-sj',
+        soNumber: 'SO-SJ-001',
+        customer: 'PT Dokumen',
+        shipment: 'import',
+        status: 'completed',
+        destination: 'Cikarang',
+        receivedAt: '2026-07-20T10:21:00.000Z',
+        quantity: 3,
+        containers: [
+          {
+            id: 'job-sj-1',
+            containerNumber: 'CONT-SJ-1',
+            size: '20FT',
+            type: 'Dry',
+            status: 'completed',
+            travelDocumentFile: { name: 'sj-1.jpg', path: 'attachment-sj-1' },
+          },
+          { id: 'job-sj-2', containerNumber: 'CONT-SJ-2', size: '20FT', type: 'Dry', status: 'completed' },
+          { id: 'job-sj-3', containerNumber: 'CONT-SJ-3', size: '20FT', type: 'Dry', status: 'cancelled' },
+        ],
+      }],
+      total: 1,
+      summary: {
+        orders: 1,
+        waitingOrders: 0,
+        runningOrders: 0,
+        completedOrders: 1,
+        invoicedOrders: 0,
+        readyInvoiceDocuments: 0,
+        sentInvoiceDocuments: 0,
+        cancelledOrders: 0,
+        activeContainers: 2,
+        completedContainers: 2,
+        cancelledContainers: 1,
+      },
+    });
+
+    render(<SalesOrdersPage customerDocumentsOnly />);
+
+    expect(await screen.findByText('SJ 1/2')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Detail' }));
+    expect(await screen.findByText('CONT-SJ-1')).toBeInTheDocument();
+    expect(screen.getByText('SJ OK')).toBeInTheDocument();
+    expect(screen.getAllByText('SJ -').length).toBeGreaterThan(0);
+  });
+
   it('memfilter Sales Order yang dokumen Accurate-nya siap dikirim', async () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage customerDocumentsOnly />);

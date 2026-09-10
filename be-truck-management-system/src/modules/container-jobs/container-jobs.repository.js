@@ -444,7 +444,7 @@ function buildJobWhere({
         select 1 from attachments attachment
         where attachment.entity_type = 'container_job'
           and attachment.entity_id = cj.id
-          and attachment.category = 'travelDocumentFile'
+          and attachment.category in ('travelDocumentFile', 'travelDocument', 'suratJalan', 'suratJalanDocument')
       )
       or (
         (

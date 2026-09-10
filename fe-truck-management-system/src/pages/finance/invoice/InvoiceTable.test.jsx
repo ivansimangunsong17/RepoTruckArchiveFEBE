@@ -56,6 +56,18 @@ describe('InvoiceTable destinations', () => {
   });
 });
 
+describe('InvoiceTable Surat Jalan', () => {
+  it('menampilkan progres upload SJ per SO dengan ringkas', () => {
+    renderTable([baseRow({ sjUploadedCount: 1, sjTotalCount: 2 })]);
+    expect(screen.getByText('SJ 1/2')).toBeInTheDocument();
+  });
+
+  it('menampilkan SJ OK saat semua Surat Jalan sudah diupload', () => {
+    renderTable([baseRow({ sjUploadedCount: 1, sjTotalCount: 1 })]);
+    expect(screen.getByText('SJ OK')).toBeInTheDocument();
+  });
+});
+
 describe('InvoiceTable input nomor invoice', () => {
   it('menampilkan input nomor invoice langsung di tabel untuk invoice yang belum punya nomor', async () => {
     const user = userEvent.setup();

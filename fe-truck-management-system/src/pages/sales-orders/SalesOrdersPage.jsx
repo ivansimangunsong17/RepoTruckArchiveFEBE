@@ -123,6 +123,31 @@ function getContainerProgress(order) {
   return { total, active, completed, cancelled, running, waiting };
 }
 
+function hasTravelDocumentFile(container = {}) {
+  return Boolean(container.travelDocumentFile?.path || container.travelDocumentFile?.name);
+}
+
+function getTravelDocumentProgress(order) {
+  const billableContainers = getOrderContainers(order)
+    .filter((container) => container.status !== 'cancelled' && container.cancelRequestStatus !== 'approved');
+  const total = billableContainers.length || Number(order?.quantity || 0);
+  const uploaded = billableContainers.filter(hasTravelDocumentFile).length;
+  return { uploaded, total };
+}
+
+function getTravelDocumentBadgeLabel(order) {
+  const { uploaded, total } = getTravelDocumentProgress(order);
+  if (total > 1) return `SJ ${uploaded}/${total}`;
+  return total > 0 && uploaded >= total ? 'SJ OK' : 'SJ -';
+}
+
+function getTravelDocumentBadgeTone(order) {
+  const { uploaded, total } = getTravelDocumentProgress(order);
+  if (total > 0 && uploaded >= total) return 'ready';
+  if (uploaded > 0) return 'partial';
+  return 'missing';
+}
+
 function getPaymentTermLabel(order) {
   if (order?.paymentTerms) return order.paymentTerms;
   return order?.paymentType === 'tempo' ? `Tempo ${Number(order.paymentTermDays || 0) || 30} hari` : 'Cash';
@@ -371,6 +396,7 @@ function getServerFilter(selectedStatus, customerDocumentsOnly = false) {
 function ContainerDetail({ container, index, onRequestCancel, canRequestCancel, onEdit, canEdit }) {
   const allowRequestCancel = canRequestCancel && container.status === 'received' && container.cancelRequestStatus !== 'submitted';
   const allowEdit = canEdit && !['cancelled'].includes(container.status);
+  const hasTravelDocument = hasTravelDocumentFile(container);
   return (
     <div className="container-detail" style={allowEdit ? { paddingRight: 118 } : undefined}>
       {allowEdit ? (
@@ -391,6 +417,15 @@ function ContainerDetail({ container, index, onRequestCancel, canRequestCancel, 
       <div className="sales-container-fields">
         <div><span>Ukuran</span><strong>{container.size}</strong></div>
         <div><span>Tipe</span><strong>{valueOrDash(container.type)}</strong></div>
+        <div>
+          <span>SJ</span>
+          <strong
+            className={`container-sj-badge ${hasTravelDocument ? 'ready' : 'missing'}`}
+            title={hasTravelDocument ? 'Surat Jalan sudah diupload' : 'Surat Jalan belum diupload'}
+          >
+            {hasTravelDocument ? 'SJ OK' : 'SJ -'}
+          </strong>
+        </div>
         <div><span>Catatan</span><strong>{valueOrDash(container.notes)}</strong></div>
       </div>
       <div className="container-timeline">
@@ -898,8 +933,15 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                         </strong>
                       </div>
                       <div className="order-document-summary">
-                        <span>Dokumen</span>
-                        {isInvoiced(order) ? (
+                        <span>{customerDocumentsOnly ? 'SJ' : 'Dokumen'}</span>
+                        {customerDocumentsOnly ? (
+                          <strong
+                            className={`travel-document-badge ${getTravelDocumentBadgeTone(order)}`}
+                            title={`${getTravelDocumentProgress(order).uploaded} dari ${getTravelDocumentProgress(order).total} Surat Jalan sudah diupload`}
+                          >
+                            {getTravelDocumentBadgeLabel(order)}
+                          </strong>
+                        ) : isInvoiced(order) ? (
                           <strong className={getInvoiceDocumentTone(order)}>
                             {getInvoiceDocumentStatusLabel(order)}
                           </strong>

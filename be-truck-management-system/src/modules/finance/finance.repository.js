@@ -224,7 +224,7 @@ function financeRowsCte() {
              bool_or(category = 'spkDocument') as has_spk_file,
              bool_or(category = 'loadingVoucherDocument') as has_loading_file,
              bool_or(category in ('tilaGatepassDocumentFile', 'unloadingVoucherDocument', 'weighingDocumentFile', 'deliveryCard', 'gatepass')) as has_tila_gatepass_file,
-             bool_or(category = 'travelDocumentFile') as has_travel_file
+             bool_or(category in ('travelDocumentFile', 'travelDocument', 'suratJalan', 'suratJalanDocument')) as has_travel_file
       from attachments
       where entity_type = 'container_job'
       group by entity_id
@@ -1222,6 +1222,8 @@ function mapInvoiceOrderRow(row) {
     billingAmount: row.billing_amount == null ? 0 : Number(row.billing_amount),
     plannedJobsCount: Number(row.planned_jobs_count || 0),
     billedJobsCount: Number(row.billed_jobs_count || row.total_jobs_count || 0),
+    sjUploadedCount: Number(row.travel_document_uploaded_count || 0),
+    sjTotalCount: Number(row.billed_jobs_count || row.total_jobs_count || 0),
     cancelledJobsCount,
     repoStoredJobsCount,
     cancellationNote,
@@ -1286,7 +1288,11 @@ const invoiceDocumentLabels = {
 
 const operationalInvoiceDocumentSlots = [
   { category: 'eirDocument', label: 'EIR', acceptedCategories: ['eirDocument'] },
-  { category: 'travelDocumentFile', label: 'Surat Jalan', acceptedCategories: ['travelDocumentFile'] },
+  {
+    category: 'travelDocumentFile',
+    label: 'Surat Jalan',
+    acceptedCategories: ['travelDocumentFile', 'travelDocument', 'suratJalan', 'suratJalanDocument'],
+  },
   {
     category: 'loadingVoucherDocument',
     label: 'Bon Muat / Bon Bongkar',
@@ -1525,6 +1531,7 @@ export function invoiceOrdersCte() {
         coalesce(max(ojs.repo_stored_jobs_count), 0)::int as repo_stored_jobs_count,
         count(fr.id) filter (where fr.document_status = 'BELUM_LENGKAP')::int as incomplete_documents_count,
         count(fr.id) filter (where fr.document_status = 'SIAP_DITAGIHKAN')::int as ready_documents_count,
+        count(fr.id) filter (where fr.has_travel_document)::int as travel_document_uploaded_count,
         coalesce(sum(fr.total_revenue) filter (where fr.total_revenue is not null), nullif(so.total_amount, 0), 0)::numeric
           + coalesce(max(mrt.manual_revenue_amount), 0)::numeric as billing_amount,
         bool_and(fr.has_loading_document) as has_loading_document,

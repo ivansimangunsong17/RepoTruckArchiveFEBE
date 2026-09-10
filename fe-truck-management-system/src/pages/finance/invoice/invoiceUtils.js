@@ -59,6 +59,8 @@ function normalizeFinanceInvoiceRow(row = {}) {
     billingAmount: Number(row.billingAmount || 0),
     plannedJobsCount: Number(row.plannedJobsCount || 0),
     billedJobsCount: Number(row.billedJobsCount || 0),
+    sjUploadedCount: Number(row.sjUploadedCount || 0),
+    sjTotalCount: Number(row.sjTotalCount || row.billedJobsCount || row.containerCount || 0),
     cancelledJobsCount: Number(row.cancelledJobsCount || 0),
     repoStoredJobsCount: Number(row.repoStoredJobsCount || 0),
     cancellationNote: row.cancellationNote || '',

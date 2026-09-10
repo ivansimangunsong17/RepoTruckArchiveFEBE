@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapSalesOrder, toSalesOrderDb } from './sales-orders.mapper.js';
+import { mapContainerJob, mapSalesOrder, toSalesOrderDb } from './sales-orders.mapper.js';
 
 test('sales order mapper membaca metadata workflow dokumen invoice', () => {
   const mapped = mapSalesOrder({
@@ -29,6 +29,69 @@ test('sales order mapper membaca metadata workflow dokumen invoice', () => {
   assert.equal(mapped.invoiceDocumentSentBy, 'Sales User');
   assert.equal(mapped.invoiceDocumentDeliveryMethod, 'email');
   assert.equal(mapped.invoiceDocumentDeliveryNotes, 'Dikirim ke PIC customer.');
+});
+
+test('container job di sales order membaca file dokumen operational yang sudah diupload', () => {
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    container_number: 'FBIU5640483',
+    eir_number: 'EIR-2026-001',
+    travel_document_number: 'FBIU5640483',
+    container_size: '40FT',
+    container_type: 'Dry',
+    assignment_snapshot: {},
+    rpuj_status: 'paid',
+    status: 'completed',
+  }, [
+    {
+      id: 'attachment-eir',
+      category: 'eirDocument',
+      fileName: 'eir.jpg',
+      fileSize: 123,
+      mimeType: 'image/jpeg',
+      storagePath: 'container/eir.jpg',
+    },
+    {
+      id: 'attachment-sj',
+      category: 'travelDocumentFile',
+      fileName: 'surat-jalan.jpg',
+      fileSize: 456,
+      mimeType: 'image/jpeg',
+      storagePath: 'container/surat-jalan.jpg',
+    },
+  ]);
+
+  assert.equal(mapped.eirNumber, 'EIR-2026-001');
+  assert.equal(mapped.eirDocument.name, 'eir.jpg');
+  assert.equal(mapped.eirDocument.path, 'attachment-eir');
+  assert.equal(mapped.travelDocument, 'FBIU5640483');
+  assert.equal(mapped.travelDocumentFile.name, 'surat-jalan.jpg');
+  assert.equal(mapped.travelDocumentFile.path, 'attachment-sj');
+});
+
+test('container job di sales order membaca kategori lama untuk file Surat Jalan', () => {
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    container_number: 'FBIU5640483',
+    travel_document_number: 'FBIU5640483',
+    container_size: '40FT',
+    container_type: 'Dry',
+    assignment_snapshot: {},
+    rpuj_status: 'paid',
+    status: 'completed',
+  }, [
+    {
+      id: 'attachment-sj-legacy',
+      category: 'travelDocument',
+      fileName: 'sj-legacy.jpg',
+      fileSize: 456,
+      mimeType: 'image/jpeg',
+      storagePath: 'container/sj-legacy.jpg',
+    },
+  ]);
+
+  assert.equal(mapped.travelDocumentFile.name, 'sj-legacy.jpg');
+  assert.equal(mapped.travelDocumentFile.path, 'attachment-sj-legacy');
 });
 
 test('sales order db mapper menyimpan metadata workflow dokumen invoice', () => {

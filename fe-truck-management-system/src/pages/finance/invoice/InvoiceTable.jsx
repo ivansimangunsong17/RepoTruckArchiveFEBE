@@ -93,6 +93,28 @@ function InvoiceTable({
     setInvoiceDrafts((current) => ({ ...current, [id]: value.toUpperCase() }));
   }
 
+  function travelDocumentBadge(row) {
+    const total = Math.max(Number(row.sjTotalCount || row.billedJobsCount || row.containerCount || 0), 0);
+    const uploaded = Math.min(Math.max(Number(row.sjUploadedCount || 0), 0), total || Number(row.sjUploadedCount || 0));
+    const complete = total > 0 && uploaded >= total;
+    const empty = uploaded === 0;
+    const tone = complete
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : empty
+        ? 'border-rose-200 bg-rose-50 text-rose-700'
+        : 'border-amber-200 bg-amber-50 text-amber-700';
+    const label = total > 1 ? `SJ ${uploaded}/${total}` : complete ? 'SJ OK' : 'SJ -';
+
+    return (
+      <span
+        className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[10px] font-black uppercase leading-4 ${tone}`}
+        title={total > 0 ? `${uploaded} dari ${total} Surat Jalan sudah diupload` : 'Belum ada data ritasi untuk cek Surat Jalan'}
+      >
+        {label}
+      </span>
+    );
+  }
+
   async function saveInvoiceNumber(row) {
     if (!onSaveInvoiceNumberInline) return;
     try {
@@ -222,13 +244,14 @@ function InvoiceTable({
           <colgroup>
             <col className="w-[3%]" />
             <col className="w-[9%]" />
-            <col className="w-[13%]" />
-            <col className="w-[15%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
             <col className="w-[12%]" />
-            <col className="w-[12%]" />
-            <col className="w-[10%]" />
+            <col className="w-[14%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[6%]" />
+            <col className="w-[11%]" />
+            <col className="w-[11%]" />
+            <col className="w-[9%]" />
             <col className="w-[7%]" />
           </colgroup>
           <thead>
@@ -240,6 +263,7 @@ function InvoiceTable({
                 { label: 'Customer', align: 'text-left' },
                 { label: 'Selesai', align: 'text-left' },
                 { label: 'Jatuh Tempo', align: 'text-left' },
+                { label: 'SJ', align: 'text-center' },
                 { label: 'Total Invoice', align: 'text-right' },
                 { label: 'Total Debit Note', align: 'text-right' },
                 { label: 'Status Pelunasan', align: 'text-center' },
@@ -309,6 +333,7 @@ function InvoiceTable({
                   </td>
                   <td className="finance-invoice-date text-slate-700" data-label="Selesai">{row.completedAt}</td>
                   <td className="finance-invoice-date text-slate-700" data-label="Jatuh Tempo">{row.dueDate}</td>
+                  <td className="text-center" data-label="SJ">{travelDocumentBadge(row)}</td>
                   <td className="finance-invoice-total font-semibold text-slate-900" data-label="Total Invoice">{formatCurrency(row.billingAmount)}</td>
                   <td className="text-right font-semibold text-slate-700" data-label="Total Debit Note">
                     {row.debitNoteAmount ? (
@@ -344,7 +369,7 @@ function InvoiceTable({
             })}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={10}>Tidak ada data pada klasifikasi ini.</td>
+                <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={11}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>

@@ -63,6 +63,39 @@ test('container job mapper membaca lampiran biaya lainnya terpisah dari SPK', ()
   assert.equal(mapped.spkDocument, null);
 });
 
+test('container job mapper membaca kategori lama untuk file Surat Jalan', () => {
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    sales_order_id: 'order-1',
+    so_number: 'SO-ARM-202608-0001',
+    customer_name: 'PT Contoh',
+    shipment_type: 'import',
+    job_type: 'dry',
+    origin: 'Tanjung Priok',
+    destination: 'Cikarang',
+    trip_date: '2026-08-14',
+    container_size: '20FT',
+    container_type: 'Dry',
+    assignment_snapshot: {},
+    travel_document_number: 'SJ-001',
+    rpuj_status: 'pending',
+    status: 'completed',
+  }, [
+    {
+      id: 'file-sj-legacy',
+      category: 'travelDocument',
+      fileName: 'sj-legacy.jpg',
+      fileSize: 123,
+      mimeType: 'image/jpeg',
+      storagePath: 'container/sj-legacy.jpg',
+    },
+  ]);
+
+  assert.equal(mapped.travelDocument, 'SJ-001');
+  assert.equal(mapped.travelDocumentFile.name, 'sj-legacy.jpg');
+  assert.equal(mapped.travelDocumentFile.path, 'file-sj-legacy');
+});
+
 test('container job expense mapper membaca bukti pembayaran ledger', () => {
   const mapped = mapContainerJobExpense({
     id: 'expense-1',

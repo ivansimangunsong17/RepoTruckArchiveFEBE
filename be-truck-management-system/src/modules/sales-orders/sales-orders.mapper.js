@@ -141,6 +141,12 @@ export function mapContainerJob(row, attachments = []) {
     attachmentMap.unloadingVoucherDocument,
     attachmentMap.weighingDocumentFile,
   );
+  const travelDocumentAttachment = firstAttachment(
+    attachmentMap.travelDocumentFile,
+    attachmentMap.travelDocument,
+    attachmentMap.suratJalan,
+    attachmentMap.suratJalanDocument,
+  );
   const tilaGatepassLegacyDocumentFiles = [
     ['Legacy TILA / Delivery Card', attachmentMap.unloadingVoucherDocument],
     ['Legacy Gatepass / SP2', attachmentMap.weighingDocumentFile],
@@ -180,6 +186,7 @@ export function mapContainerJob(row, attachments = []) {
     rpujTransferUploadedAt: row.rpuj_transfer_uploaded_at,
     rpujTransferProof: mapAttachmentFile(attachmentMap.rpujTransferProof),
     spkNumber: row.spk_number,
+    eirNumber: row.eir_number,
     loadingVoucher: row.loading_voucher_number,
     tilaGatepassDocument: row.tila_gatepass_document_number || row.unloading_voucher_number || row.weighing_document_number,
     tilaGatepassMigrationNote: row.tila_gatepass_migration_note || '',
@@ -187,12 +194,13 @@ export function mapContainerJob(row, attachments = []) {
     travelDocument: row.travel_document_number,
     weighingDocument: row.weighing_document_number,
     spkDocument: mapAttachmentFile(attachmentMap.spkDocument),
+    eirDocument: mapAttachmentFile(attachmentMap.eirDocument),
     loadingVoucherDocument: mapAttachmentFile(attachmentMap.loadingVoucherDocument),
     repoEirDocument: mapAttachmentFile(attachmentMap.repoEirDocument),
     tilaGatepassDocumentFile: mapAttachmentFile(tilaGatepassPrimaryAttachment),
     tilaGatepassLegacyDocumentFiles,
     unloadingVoucherDocument: mapAttachmentFile(attachmentMap.unloadingVoucherDocument),
-    travelDocumentFile: mapAttachmentFile(attachmentMap.travelDocumentFile),
+    travelDocumentFile: mapAttachmentFile(travelDocumentAttachment),
     weighingDocumentFile: mapAttachmentFile(attachmentMap.weighingDocumentFile),
     otherDocuments,
     status: row.status,
