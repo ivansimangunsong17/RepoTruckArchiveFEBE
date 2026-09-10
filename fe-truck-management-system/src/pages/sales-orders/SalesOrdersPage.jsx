@@ -271,7 +271,7 @@ function sortOrdersForStatus(orders, selectedStatus, customerDocumentsOnly = fal
 function getOrderInvoiceAging(order, invoiceNumber = order?.invoiceNumber || '') {
   const hasInvoiceNumber = Boolean(String(invoiceNumber || '').trim());
   const hasCompleteDocuments = Boolean(
-    (order?.invoiceDocumentUploadedAt && order?.taxInvoiceDocumentUploadedAt)
+    order?.invoiceDocumentUploadedAt
     || hasReadyAccurateDocuments(order),
   );
   const isSent = Boolean(order?.invoiceDocumentSentAt);
@@ -360,7 +360,7 @@ function getAccurateDocument(order, category) {
 }
 
 function hasReadyAccurateDocuments(order) {
-  return ACCURATE_DOCUMENT_SLOTS.every((slot) => getAccurateDocument(order, slot.category));
+  return Boolean(getAccurateDocument(order, 'invoicePdf'));
 }
 
 function canCancelOrderBeforeOperational(order) {

@@ -546,7 +546,7 @@ function InvoiceDetailModal({
     setUploadResultModal({
       status: 'loading',
       title: 'Mengirim dokumen',
-      message: 'Invoice dan Faktur Pajak sedang disimpan ke sistem.',
+      message: 'Dokumen invoice sedang disimpan ke sistem.',
       items: pendingUploadSlots.map((slot) => `${slot.label}: ${pendingInvoiceFiles[slot.type]?.name || 'File dipilih'}`),
     });
 
@@ -1109,7 +1109,7 @@ function InvoiceDetailModal({
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h4 className="text-xs font-black text-slate-950">Dokumen Accurate</h4>
-                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Upload PDF Invoice dan Faktur Pajak dari Accurate.</p>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Invoice PDF wajib. Faktur Pajak dan Debit Note dapat dilengkapi jika ada.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill value={invoice.invoiceDocumentStatusLabel} />

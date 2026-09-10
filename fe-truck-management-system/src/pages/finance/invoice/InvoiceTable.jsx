@@ -67,7 +67,7 @@ function InvoiceTable({
     if (!currentTab.match(row)) return false;
     if (!canFilterDocuments) return true;
     if (activeInvoiceDocumentFilter === 'complete') {
-      return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.taxInvoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
+      return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
     }
     if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
     return true;
@@ -275,7 +275,7 @@ function InvoiceTable({
           </thead>
           <tbody>
             {paginatedRows.map((row, index) => {
-              const needsInvoiceDocuments = Boolean(row.invoiceNumber && (!row.invoiceDocumentUploadedAt || !row.taxInvoiceDocumentUploadedAt));
+              const needsInvoiceDocuments = Boolean(row.invoiceNumber && !row.invoiceDocumentUploadedAt);
               const documentActionLabel = needsInvoiceDocuments && canUploadInvoiceDocument ? 'Upload Dokumen' : 'Detail Dokumen';
               const isLunas = row.billingStatus === 'lunas';
 

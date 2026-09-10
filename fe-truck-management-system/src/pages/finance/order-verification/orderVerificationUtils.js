@@ -19,7 +19,7 @@ function isCancelledFinanceOrder(row = {}) {
 }
 
 function isVerifiedFinanceOrder(row = {}) {
-  return !isCancelledFinanceOrder(row) && (row.verificationStatus === 'verified' || Boolean(row.accurateSoNumber || row.soNumber));
+  return row.verificationStatus === 'verified' || Boolean(row.accurateSoNumber || row.soNumber);
 }
 
 function isGeneratedInternalSoNumber(value) {

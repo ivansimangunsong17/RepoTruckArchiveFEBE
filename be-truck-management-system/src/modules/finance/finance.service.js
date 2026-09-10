@@ -444,7 +444,7 @@ function normalizeInvoiceUploadType(value) {
 
 export async function uploadInvoiceDocument(id, payload = {}, actor) {
   if (!actor || !['finance', 'admin'].includes(actor.role)) {
-    const error = new Error('Upload Invoice dan Faktur Pajak hanya dapat dilakukan oleh Finance atau Admin.');
+    const error = new Error('Upload dokumen invoice hanya dapat dilakukan oleh Finance atau Admin.');
     error.statusCode = 403;
     error.code = 'FINANCE_INVOICE_UPLOAD_FORBIDDEN';
     throw error;
@@ -460,7 +460,7 @@ export async function uploadInvoiceDocument(id, payload = {}, actor) {
 
   const mimeType = payload.mimeType || '';
   if (mimeType !== 'application/pdf') {
-    const error = new Error('Invoice dan Faktur Pajak wajib berupa PDF.');
+    const error = new Error('Dokumen invoice wajib berupa PDF.');
     error.statusCode = 400;
     error.code = 'INVOICE_DOCUMENT_PDF_REQUIRED';
     throw error;

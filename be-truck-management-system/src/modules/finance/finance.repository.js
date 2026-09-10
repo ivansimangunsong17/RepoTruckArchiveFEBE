@@ -581,7 +581,7 @@ function buildFinanceFilters(options = {}) {
   };
 }
 
-function buildOrderVerificationFilters(options = {}) {
+export function buildOrderVerificationFilters(options = {}) {
   const clauses = [];
   const params = [];
 
@@ -600,7 +600,6 @@ function buildOrderVerificationFilters(options = {}) {
     clauses.push("so.status <> 'cancelled'");
     clauses.push("(so.finance_verification_status <> 'verified' or nullif(btrim(so.accurate_so_number), '') is null)");
   } else if (options.status === 'verified') {
-    clauses.push("so.status <> 'cancelled'");
     clauses.push("so.finance_verification_status = 'verified'");
     clauses.push("nullif(btrim(so.accurate_so_number), '') is not null");
   }
@@ -686,7 +685,7 @@ function buildRpujSummaryDateCondition(expression, options = {}, params = []) {
   return clauses.length ? ` and ${clauses.join(' and ')}` : '';
 }
 
-function buildInvoiceFilters(options = {}) {
+export function buildInvoiceFilters(options = {}) {
   const clauses = [];
   const params = [];
   const periodStatus = options.periodBasis || options.status;
@@ -711,12 +710,10 @@ function buildInvoiceFilters(options = {}) {
     clauses.push(`(
       nullif(btrim(invoice_number), '') is null
       or invoice_document_uploaded_at is null
-      or tax_invoice_document_uploaded_at is null
     )`);
   } else if (options.status === 'in-progress') {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
     clauses.push('invoice_document_uploaded_at is not null');
-    clauses.push('tax_invoice_document_uploaded_at is not null');
     clauses.push("billing_status <> 'lunas'");
   } else if (options.status === 'paid') {
     clauses.push("billing_status = 'lunas'");
@@ -724,7 +721,7 @@ function buildInvoiceFilters(options = {}) {
 
   if (options.invoiceDocumentFilter === 'missing-documents') {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
-    clauses.push('(invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)');
+    clauses.push('invoice_document_uploaded_at is null');
   } else if (options.invoiceDocumentFilter === 'missing-invoice') {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
     clauses.push('invoice_document_uploaded_at is null');
@@ -734,7 +731,6 @@ function buildInvoiceFilters(options = {}) {
   } else if (options.invoiceDocumentFilter === 'complete') {
     clauses.push("nullif(btrim(invoice_number), '') is not null");
     clauses.push('invoice_document_uploaded_at is not null');
-    clauses.push('tax_invoice_document_uploaded_at is not null');
     clauses.push("coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'");
   } else if (options.invoiceDocumentFilter === 'sent') {
     clauses.push("coalesce(invoice_document_status, 'belum_upload') = 'terkirim'");
@@ -1045,7 +1041,6 @@ function mapInvoiceStatusLabel(row) {
   if (
     row.invoice_number
     && row.invoice_document_uploaded_at
-    && row.tax_invoice_document_uploaded_at
   ) return 'Menunggu Update Status';
   return 'Butuh Nomor Invoice';
 }
@@ -1106,8 +1101,7 @@ function mapInvoiceAging(row) {
   const documentsCompletedAt = latestDate(row.invoice_document_uploaded_at, row.tax_invoice_document_uploaded_at);
   const hasInvoiceNumber = Boolean(String(row.invoice_number || '').trim());
   const hasInvoicePdf = Boolean(row.invoice_document_uploaded_at);
-  const hasTaxInvoicePdf = Boolean(row.tax_invoice_document_uploaded_at);
-  const hasCompleteDocuments = hasInvoicePdf && hasTaxInvoicePdf;
+  const hasCompleteDocuments = hasInvoicePdf;
   const isSent = Boolean(row.invoice_document_sent_at);
   const isPaid = row.billing_status === 'lunas';
   const paidAt = isPaid ? row.updated_at : null;
@@ -1693,7 +1687,7 @@ export async function getFinanceDashboard(options = {}) {
             select count(*)::int
             from invoice_orders
             where nullif(btrim(invoice_number), '') is not null
-              and (invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)
+              and invoice_document_uploaded_at is null
           ) as missing_invoice_documents,
           (
             select count(*)::int
@@ -1712,7 +1706,6 @@ export async function getFinanceDashboard(options = {}) {
             from invoice_orders
             where nullif(btrim(invoice_number), '') is not null
               and invoice_document_uploaded_at is not null
-              and tax_invoice_document_uploaded_at is not null
               and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
               and billing_status <> 'lunas'
           ) as complete_invoice_documents,
@@ -1726,7 +1719,7 @@ export async function getFinanceDashboard(options = {}) {
             select count(*)::int
             from invoice_orders
             where nullif(btrim(invoice_number), '') is not null
-              and (invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)
+              and invoice_document_uploaded_at is null
               and coalesce(invoice_issued_at::date, completed_at::date) <= current_date - interval '3 days'
           ) as overdue_document_upload,
           (
@@ -1865,7 +1858,7 @@ export async function getOrderVerificationsPage(options = {}) {
       `
         select
           count(*) filter (where so.status <> 'cancelled' and (so.finance_verification_status <> 'verified' or nullif(btrim(so.accurate_so_number), '') is null))::int as pending_so,
-          count(*) filter (where so.status <> 'cancelled' and so.finance_verification_status = 'verified' and nullif(btrim(so.accurate_so_number), '') is not null)::int as verified,
+          count(*) filter (where so.finance_verification_status = 'verified' and nullif(btrim(so.accurate_so_number), '') is not null)::int as verified,
           count(*) filter (where so.status = 'cancelled')::int as cancelled
         from sales_orders so
         ${summaryWhereSql}
@@ -3862,25 +3855,22 @@ export async function getInvoiceOrdersPage(options = {}) {
           count(*) filter (
             where nullif(btrim(invoice_number), '') is null
               or invoice_document_uploaded_at is null
-              or tax_invoice_document_uploaded_at is null
           )::int as need_number,
           count(*) filter (
             where nullif(btrim(invoice_number), '') is not null
               and invoice_document_uploaded_at is not null
-              and tax_invoice_document_uploaded_at is not null
               and billing_status <> 'lunas'
           )::int as in_progress,
           count(*) filter (where billing_status = 'lunas')::int as paid,
           count(*) filter (
             where nullif(btrim(invoice_number), '') is not null
-              and (invoice_document_uploaded_at is null or tax_invoice_document_uploaded_at is null)
+              and invoice_document_uploaded_at is null
           )::int as missing_invoice_documents,
           count(*) filter (where nullif(btrim(invoice_number), '') is not null and invoice_document_uploaded_at is null)::int as missing_invoice_document,
           count(*) filter (where nullif(btrim(invoice_number), '') is not null and tax_invoice_document_uploaded_at is null)::int as missing_tax_invoice_document,
           count(*) filter (
             where nullif(btrim(invoice_number), '') is not null
               and invoice_document_uploaded_at is not null
-              and tax_invoice_document_uploaded_at is not null
               and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
               and billing_status <> 'lunas'
           )::int as complete_invoice_documents,
@@ -4798,8 +4788,7 @@ export async function markInvoiceDocumentUploaded(id, patch = {}) {
     );
     const flags = attachmentFlags.rows[0] || {};
     const hasInvoicePdf = Boolean(flags.has_invoice_pdf) || isInvoice;
-    const hasTaxInvoicePdf = Boolean(flags.has_tax_invoice_pdf) || !isInvoice;
-    const nextStatus = hasInvoicePdf && hasTaxInvoicePdf ? 'siap_dikirim' : 'belum_upload';
+    const nextStatus = hasInvoicePdf ? 'siap_dikirim' : 'belum_upload';
 
     await client.query(
       `

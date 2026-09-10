@@ -411,6 +411,37 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
+  it('tetap menampilkan SO batal di tab SO Terisi jika nomor SO Finance sudah terisi', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    await user.click(await screen.findByRole('tab', { name: /SO Terisi/i }));
+
+    await waitFor(() => {
+      expect(fetchFinanceOrderVerifications).toHaveBeenLastCalledWith(expect.objectContaining({
+        status: 'verified',
+      }));
+    });
+
+    const cancelledCustomer = await screen.findByText('PT Customer Batal');
+    expect(screen.getByText('SO sudah dibatalkan')).toBeInTheDocument();
+    expect(cancelledCustomer.closest('tr')).toHaveClass('bg-rose-50/70');
+  });
+
+  it('tetap menyediakan tab SO Batal untuk audit order batal', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="order-verification" />);
+
+    await user.click(await screen.findByRole('tab', { name: /SO Batal/i }));
+
+    await waitFor(() => {
+      expect(fetchFinanceOrderVerifications).toHaveBeenLastCalledWith(expect.objectContaining({
+        status: 'cancelled',
+      }));
+    });
+    expect(await screen.findByText('PT Customer Batal')).toBeInTheDocument();
+  });
+
   it('tidak menampilkan flow approval RPUJ legacy di Rekening Dropping Finance', async () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 

@@ -180,7 +180,7 @@ function OrderVerificationTable({
                     {(() => {
                       const isCancelled = isCancelledFinanceOrder(row);
                       return (
-                    <tr className="align-middle hover:bg-slate-50">
+                    <tr className={`align-middle ${isCancelled ? 'bg-rose-50/70 hover:bg-rose-100/70' : 'hover:bg-slate-50'}`}>
                       <td className="px-2 py-1 font-semibold text-slate-700" data-label="Order Dibuat">{row.orderDate}</td>
                       <td className="px-2 py-1 font-black text-slate-900" data-label="Tujuan">{row.destination}</td>
                       <td className="px-2 py-1 text-slate-700" data-label="Jenis Order">{row.orderType}</td>
