@@ -30,6 +30,7 @@ const {
   hasCompleteOperationalAssignment,
   hasRequiredRepoCompletionDocuments,
   normalizeCompletedAtForSave,
+  resolveCompletedAtForSave,
   resolveJourneyMoneyAmountForSize,
   shouldValidateVehicleContainerSize,
   syncAutoJourneyMoneyExpense,
@@ -49,6 +50,28 @@ test('completed_at wajib berupa tanggal dan jam yang valid', () => {
   assert.equal(normalizeCompletedAtForSave('2026-09-09'), null);
   assert.equal(normalizeCompletedAtForSave('2026-99-99T08:30'), null);
   assert.equal(normalizeCompletedAtForSave('2026-09-09T08:30')?.startsWith('2026-09-09'), true);
+});
+
+test('completed_at job selesai dipertahankan saat payload mengirim null atau nilai invalid', () => {
+  const existing = {
+    status: 'completed',
+    completed_at: '2026-09-08T03:30:00.000Z',
+  };
+
+  assert.equal(resolveCompletedAtForSave({ completedAt: null }, existing, 'completed'), existing.completed_at);
+  assert.equal(resolveCompletedAtForSave({ completedAt: '08:30' }, existing, 'completed'), existing.completed_at);
+  assert.equal(resolveCompletedAtForSave({ completedAt: {} }, existing, 'completed'), existing.completed_at);
+});
+
+test('completed_at otomatis diisi saat status berubah ke completed tanpa timestamp valid', () => {
+  const before = Date.now();
+  const resolved = resolveCompletedAtForSave({ status: 'completed', completedAt: null }, { status: 'running' }, 'completed');
+  const after = Date.now();
+  const resolvedTime = new Date(resolved).getTime();
+
+  assert.ok(resolved);
+  assert.ok(resolvedTime >= before - 1000);
+  assert.ok(resolvedTime <= after + 1000);
 });
 
 test('tidak menganggap perubahan nomor tersimpan sebagai pengisian pertama', () => {

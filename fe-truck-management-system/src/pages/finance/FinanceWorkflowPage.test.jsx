@@ -425,7 +425,7 @@ describe('FinanceWorkflowPage validation modals', () => {
 
     const cancelledCustomer = await screen.findByText('PT Customer Batal');
     expect(screen.getByText('SO sudah dibatalkan')).toBeInTheDocument();
-    expect(cancelledCustomer.closest('tr')).toHaveClass('bg-rose-50/70');
+    expect(cancelledCustomer.closest('tr')).toHaveClass('bg-rose-100/80');
   });
 
   it('tetap menyediakan tab SO Batal untuk audit order batal', async () => {

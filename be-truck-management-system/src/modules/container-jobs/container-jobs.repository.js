@@ -639,6 +639,20 @@ export function normalizeCompletedAtForSave(value) {
   return date.toISOString();
 }
 
+export function resolveCompletedAtForSave(form = {}, existing = {}, nextStatus = '') {
+  if (nextStatus !== 'completed') return null;
+
+  const requestedCompletedAt = hasOwnInput(form, 'completedAt')
+    ? normalizeCompletedAtForSave(form.completedAt)
+    : null;
+  if (requestedCompletedAt) return requestedCompletedAt;
+
+  const existingCompletedAt = normalizeCompletedAtForSave(existing.completed_at || existing.completedAt);
+  if (existingCompletedAt) return existingCompletedAt;
+
+  return new Date().toISOString();
+}
+
 function buildCommissionDriverSnapshot(assignment = {}) {
   if (!assignment?.driver) return {};
   return {
@@ -1162,7 +1176,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
 
   const runningAt = form.runningAt || existing.running_at;
-  const completedAt = normalizeCompletedAtForSave(form.completedAt);
+  const completedAt = resolveCompletedAtForSave(form, existing, 'completed');
   if (runningAt && completedAt && new Date(completedAt) < new Date(runningAt)) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu mulai.',
@@ -2213,7 +2227,7 @@ async function updateContainerJobTransaction(id, form) {
   return withTransaction(async (client) => {
     const existing = await client.query(
       `
-        select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.cancelled_at,
+        select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.completed_at, cj.cancelled_at,
                cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.rpuj_notes, cj.status, cj.eir_number,
                cj.assignment_snapshot,
                cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
@@ -2495,11 +2509,18 @@ async function updateContainerJobTransaction(id, form) {
     const nextCommissionDriverSnapshot = existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
       ? existing.rows[0].commission_driver_snapshot
       : (shouldCaptureCommissionDriver ? buildCommissionDriverSnapshot(nextAssignmentSnapshot) : {});
-    const completedAtForUpdate = documentOnlyUpdate
-      ? existing.rows[0].completed_at
-      : nextStatus === 'completed'
-        ? validatedCompletedAt
-        : null;
+    const completedAtForUpdate = nextStatus === 'completed'
+      ? (documentOnlyUpdate
+        ? resolveCompletedAtForSave({}, existing.rows[0], nextStatus)
+        : validatedCompletedAt || resolveCompletedAtForSave(form, existing.rows[0], nextStatus))
+      : null;
+    if (nextStatus === 'completed' && !completedAtForUpdate) {
+      throw validationError(
+        'Pekerjaan belum dapat diselesaikan. Waktu selesai wajib tersimpan.',
+        'CONTAINER_JOB_COMPLETION_MISSING_COMPLETED_AT',
+        409,
+      );
+    }
     const shouldRefreshCommissionLock = nextStatus === 'completed'
       && nextHasDriverCommission
       && nextDriverCommissionAmount > 0
