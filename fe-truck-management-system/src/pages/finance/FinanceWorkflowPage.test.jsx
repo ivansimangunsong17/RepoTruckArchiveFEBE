@@ -879,6 +879,81 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
+  it('tab Semua menampilkan seluruh data invoice tanpa mengirim status ke backend', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await screen.findByRole('tab', { name: /Belum Lengkap/i });
+    await user.click(screen.getByRole('tab', { name: /Semua/i }));
+
+    await waitFor(() => {
+      const lastCallArgs = fetchFinanceInvoices.mock.calls.at(-1)[0];
+      expect(lastCallArgs).not.toHaveProperty('status');
+    });
+    expect(await screen.findByText('SO-TEST-001')).toBeInTheDocument();
+  });
+
+  it('tab lama (Belum Lengkap/Menunggu Pembayaran/Lunas) tetap mengirim status seperti sebelumnya', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await screen.findByRole('tab', { name: /Belum Lengkap/i });
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'need-number' }));
+    });
+
+    await user.click(screen.getByRole('tab', { name: /Menunggu Pembayaran/i }));
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'in-progress' }));
+    });
+
+    await user.click(screen.getByRole('tab', { name: /Lunas/i }));
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'paid' }));
+    });
+  });
+
+  it('dropdown Filter Dokumen & Piutang hanya tampil di tab Semua dan mengirim invoiceDocumentFilter yang dipilih', async () => {
+    const user = userEvent.setup();
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await screen.findByRole('tab', { name: /Belum Lengkap/i });
+    expect(screen.queryByLabelText(/Filter Dokumen & Piutang/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /Semua/i }));
+    const dropdown = await screen.findByLabelText(/Filter Dokumen & Piutang/i);
+    expect(within(dropdown).getByRole('option', { name: /Invoice belum upload/i })).toBeInTheDocument();
+    expect(within(dropdown).getByRole('option', { name: /SJ belum lengkap/i })).toBeInTheDocument();
+    expect(within(dropdown).getByRole('option', { name: /SJ sudah lengkap/i })).toBeInTheDocument();
+    expect(within(dropdown).getByRole('option', { name: /Belum dikirim ke customer/i })).toBeInTheDocument();
+    expect(within(dropdown).getByRole('option', { name: /Sudah dikirim ke customer/i })).toBeInTheDocument();
+    expect(within(dropdown).getByRole('option', { name: /Jatuh tempo dekat/i })).toBeInTheDocument();
+    expect(within(dropdown).getByRole('option', { name: /Lewat jatuh tempo/i })).toBeInTheDocument();
+
+    await user.selectOptions(dropdown, 'overdue');
+
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
+        invoiceDocumentFilter: 'overdue',
+      }));
+      expect(fetchFinanceInvoices.mock.calls.at(-1)[0]).not.toHaveProperty('status');
+    });
+
+    await user.selectOptions(dropdown, 'missing-invoice');
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
+        invoiceDocumentFilter: 'missing-invoice',
+      }));
+    });
+
+    await user.selectOptions(dropdown, 'sj-incomplete');
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
+        invoiceDocumentFilter: 'sj-incomplete',
+      }));
+    });
+  });
+
   it('tidak menampilkan sub-filter dokumen di tab Belum Lengkap', async () => {
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
 

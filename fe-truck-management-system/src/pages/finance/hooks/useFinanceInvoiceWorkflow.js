@@ -76,11 +76,12 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
         ...(invoiceDateFrom ? { dateFrom: invoiceDateFrom } : {}),
         ...(invoiceDateTo ? { dateTo: invoiceDateTo } : {}),
         invoiceDocumentFilter: activeInvoiceTab === 'paid' ? 'all' : activeInvoiceDocumentFilter,
-        ...(activeInvoiceTab === 'in-progress' || activeInvoiceTab === 'paid'
+        // Tab 'all' sengaja tidak mengirim `status` sama sekali -- buildInvoiceFilters di backend
+        // tidak menambah klausa status apa pun kalau param ini kosong, jadi hasilnya otomatis semua
+        // SO/invoice tanpa perlu nilai status khusus untuk "Semua".
+        ...(['in-progress', 'paid', 'need-number'].includes(activeInvoiceTab)
           ? { status: activeInvoiceTab }
-          : activeInvoiceTab === 'need-number'
-            ? { status: activeInvoiceTab }
-            : {}),
+          : {}),
       });
       setInvoiceRows((result.rows || []).map(normalizeFinanceInvoiceRow));
       const nextInvoiceTotal = Number(result.total ?? result.rows?.length ?? 0);
@@ -103,6 +104,13 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
         missingTaxInvoiceDocument: Number(result.summary?.missingTaxInvoiceDocument || 0),
         completeInvoiceDocuments: Number(result.summary?.completeInvoiceDocuments || 0),
         sentInvoiceDocuments: Number(result.summary?.sentInvoiceDocuments || 0),
+        allInvoices: Number(result.summary?.allInvoices || 0),
+        sjIncomplete: Number(result.summary?.sjIncomplete || 0),
+        sjComplete: Number(result.summary?.sjComplete || 0),
+        notSentToCustomer: Number(result.summary?.notSentToCustomer || 0),
+        sentToCustomer: Number(result.summary?.sentToCustomer || 0),
+        dueSoon: Number(result.summary?.dueSoon || 0),
+        overdue: Number(result.summary?.overdue || 0),
       });
     } catch (error) {
       setInvoiceError(error.message || 'Daftar invoice gagal dimuat.');

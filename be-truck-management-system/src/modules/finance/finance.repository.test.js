@@ -74,3 +74,32 @@ test('filter invoice hanya mewajibkan PDF Invoice untuk kelengkapan dokumen', ()
   assert.match(complete, /invoice_document_uploaded_at\s+is\s+not\s+null/i);
   assert.doesNotMatch(complete, /tax_invoice_document_uploaded_at/i);
 });
+
+test('status kosong atau "all" pada filter invoice tidak menambah klausa status, sehingga tab Semua menampilkan seluruh data', () => {
+  const noStatus = buildInvoiceFilters({});
+  const allStatus = buildInvoiceFilters({ status: 'all' });
+
+  assert.equal(noStatus.whereSql, '');
+  assert.equal(allStatus.whereSql, '');
+});
+
+test('filter dropdown SJ belum lengkap/sudah lengkap pada tab Semua memakai has_travel_document', () => {
+  const incomplete = buildInvoiceFilters({ invoiceDocumentFilter: 'sj-incomplete' }).whereSql;
+  const complete = buildInvoiceFilters({ invoiceDocumentFilter: 'sj-complete' }).whereSql;
+
+  assert.match(incomplete, /coalesce\(has_travel_document,\s*false\)\s*=\s*false/i);
+  assert.match(complete, /coalesce\(has_travel_document,\s*false\)\s*=\s*true/i);
+});
+
+test('filter dropdown jatuh tempo dekat/lewat jatuh tempo hanya menyertakan invoice belum lunas', () => {
+  const dueSoon = buildInvoiceFilters({ invoiceDocumentFilter: 'due-soon' }).whereSql;
+  const overdue = buildInvoiceFilters({ invoiceDocumentFilter: 'overdue' }).whereSql;
+
+  assert.match(dueSoon, /billing_status\s*<>\s*'lunas'/i);
+  assert.match(dueSoon, />=\s*\(now\(\) at time zone 'Asia\/Jakarta'\)::date/i);
+  assert.match(dueSoon, /<=\s*\(now\(\) at time zone 'Asia\/Jakarta'\)::date\s*\+\s*7/i);
+
+  assert.match(overdue, /billing_status\s*<>\s*'lunas'/i);
+  assert.match(overdue, /<\s*\(now\(\) at time zone 'Asia\/Jakarta'\)::date/i);
+  assert.doesNotMatch(overdue, /\+\s*7/i);
+});

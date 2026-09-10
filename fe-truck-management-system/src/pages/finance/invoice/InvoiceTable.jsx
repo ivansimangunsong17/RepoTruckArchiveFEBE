@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Eye, FileText, Info, Save, Upload } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Eye, FileText, Info, LayoutGrid, Save, Upload } from 'lucide-react';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import MonthFilterControl from '../shared/MonthFilterControl';
 import StatusPill from '../shared/StatusPill';
@@ -33,6 +33,13 @@ function InvoiceTable({
   const [invoiceDrafts, setInvoiceDrafts] = useState({});
   const invoiceTabs = [
     {
+      id: 'all',
+      label: 'Semua',
+      icon: LayoutGrid,
+      tone: 'slate',
+      match: () => true,
+    },
+    {
       id: 'need-number',
       label: 'Belum Lengkap',
       icon: FileText,
@@ -59,17 +66,51 @@ function InvoiceTable({
     { id: 'complete', label: 'Belum Dikirim ke Customer', countKey: 'completeInvoiceDocuments' },
     { id: 'sent', label: 'Sudah Dikirim ke Customer', countKey: 'sentInvoiceDocuments' },
   ];
+  // Dropdown lebih lengkap ini khusus tab "Semua" -- tab lain (Belum Lengkap/Menunggu Pembayaran/Lunas)
+  // sengaja tidak diubah supaya perilakunya tetap seperti sebelumnya. countKey merujuk field di
+  // invoiceSummary (lihat useFinanceInvoiceWorkflow) yang dihitung backend dengan kondisi yang sama
+  // persis dengan klausa filter di buildInvoiceFilters, supaya badge jumlah tidak meleset dari hasil.
+  const invoiceAllTabFilters = [
+    { id: 'all', label: 'Semua dokumen', countKey: 'allInvoices' },
+    { id: 'missing-invoice', label: 'Invoice belum upload', countKey: 'missingInvoiceDocument' },
+    { id: 'sj-incomplete', label: 'SJ belum lengkap', countKey: 'sjIncomplete' },
+    { id: 'sj-complete', label: 'SJ sudah lengkap', countKey: 'sjComplete' },
+    { id: 'complete', label: 'Belum dikirim ke customer', countKey: 'notSentToCustomer' },
+    { id: 'sent', label: 'Sudah dikirim ke customer', countKey: 'sentToCustomer' },
+    { id: 'due-soon', label: 'Jatuh tempo dekat', countKey: 'dueSoon' },
+    { id: 'overdue', label: 'Lewat jatuh tempo', countKey: 'overdue' },
+  ];
   const currentTab = invoiceTabs.find((tab) => tab.id === activeInvoiceTab) || invoiceTabs[0];
   const canFilterDocuments = activeInvoiceTab === 'in-progress';
+  const canFilterAllTabDocuments = activeInvoiceTab === 'all';
   const visibleInvoiceDocumentFilters = invoiceDocumentFilters.filter(() => canFilterDocuments);
   const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${(row.destinations || []).join(' ')} ${row.invoiceNumber} ${row.invoiceStatus} ${row.debitNoteNumber || ''} ${(row.containerNumbers || []).join(' ')}`.toLowerCase().includes(query.toLowerCase()));
   const filteredRows = searchedRows.filter((row) => {
     if (!currentTab.match(row)) return false;
-    if (!canFilterDocuments) return true;
-    if (activeInvoiceDocumentFilter === 'complete') {
-      return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
+    if (canFilterDocuments) {
+      if (activeInvoiceDocumentFilter === 'complete') {
+        return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
+      }
+      if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
+      return true;
     }
-    if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
+    if (canFilterAllTabDocuments) {
+      if (activeInvoiceDocumentFilter === 'missing-invoice') {
+        return Boolean(row.invoiceNumber) && !row.invoiceDocumentUploadedAt;
+      }
+      if (activeInvoiceDocumentFilter === 'sj-incomplete') return row.sjTotalCount > 0 && row.sjUploadedCount < row.sjTotalCount;
+      if (activeInvoiceDocumentFilter === 'sj-complete') return row.sjTotalCount > 0 && row.sjUploadedCount >= row.sjTotalCount;
+      if (activeInvoiceDocumentFilter === 'complete') {
+        return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
+      }
+      if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
+      // 'due-soon'/'overdue' sengaja tidak dihitung ulang di sini: perbandingannya perlu timezone
+      // Asia/Jakarta yang presisi (lihat buildInvoiceFilters di finance.repository.js), sementara
+      // baris di sini cuma punya dueDate yang sudah diformat jadi teks tampilan, bukan tanggal mentah.
+      // rows yang datang ke komponen ini sudah difilter backend sesuai activeInvoiceDocumentFilter,
+      // jadi di sini cukup percaya hasil itu.
+      return true;
+    }
     return true;
   });
   const safeTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
@@ -79,11 +120,12 @@ function InvoiceTable({
   const showingFrom = safeTotal ? (safeCurrentPage - 1) * INVOICE_TABLE_PAGE_SIZE + 1 : 0;
   const showingTo = safeTotal ? Math.min(showingFrom + paginatedRows.length - 1, safeTotal) : 0;
   const tabCounts = {
-    'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[0].match(row)).length),
-    'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
-    paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
+    'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
+    'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
+    paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[3].match(row)).length),
   };
   const allInvoiceTotal = tabCounts['need-number'] + tabCounts['in-progress'] + tabCounts.paid;
+  tabCounts.all = Number(summary?.allInvoices ?? allInvoiceTotal);
 
   function invoiceDraftValue(row) {
     return invoiceDrafts[row.id] ?? row.invoiceNumber ?? '';
@@ -138,6 +180,11 @@ function InvoiceTable({
           const count = tabCounts[tab.id] || 0;
           const active = tab.id === activeInvoiceTab;
           const toneClass = {
+            slate: {
+              active: 'border-slate-300 bg-slate-100 text-slate-800 ring-slate-200',
+              icon: 'bg-white text-slate-600 ring-1 ring-slate-200',
+              count: 'bg-slate-200 text-slate-700',
+            },
             red: {
               active: 'border-red-200 bg-red-50 text-red-800 ring-red-100',
               icon: 'bg-white text-red-600 ring-1 ring-red-100',
@@ -235,6 +282,26 @@ function InvoiceTable({
               </button>
             );
           })}
+        </div>
+        ) : null}
+        {canFilterAllTabDocuments ? (
+        <div className="mt-2 flex items-center gap-2">
+          <label className="grid gap-1 text-[10px] font-black uppercase text-slate-500" htmlFor="invoice-all-tab-document-filter">
+            Filter Dokumen &amp; Piutang
+            <select
+              className="h-8 min-w-[220px] rounded-md border border-slate-200 bg-white px-2 text-xs font-bold normal-case text-slate-800 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+              id="invoice-all-tab-document-filter"
+              onChange={(event) => onActiveInvoiceDocumentFilterChange(event.target.value)}
+              value={activeInvoiceDocumentFilter}
+            >
+              {invoiceAllTabFilters.map((filter) => {
+                const count = filter.countKey ? Number(summary?.[filter.countKey] || 0) : Number(summary?.allInvoices || 0);
+                return (
+                  <option key={filter.id} value={filter.id}>{filter.label} ({count})</option>
+                );
+              })}
+            </select>
+          </label>
         </div>
         ) : null}
       </div>

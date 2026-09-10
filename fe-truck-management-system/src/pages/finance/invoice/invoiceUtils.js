@@ -11,6 +11,13 @@ const defaultInvoiceSummary = {
   missingTaxInvoiceDocument: 0,
   completeInvoiceDocuments: 0,
   sentInvoiceDocuments: 0,
+  allInvoices: 0,
+  sjIncomplete: 0,
+  sjComplete: 0,
+  notSentToCustomer: 0,
+  sentToCustomer: 0,
+  dueSoon: 0,
+  overdue: 0,
 };
 
 const financeInvoiceUploadSlots = [

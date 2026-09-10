@@ -734,6 +734,22 @@ export function buildInvoiceFilters(options = {}) {
     clauses.push("coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'");
   } else if (options.invoiceDocumentFilter === 'sent') {
     clauses.push("coalesce(invoice_document_status, 'belum_upload') = 'terkirim'");
+  } else if (options.invoiceDocumentFilter === 'sj-incomplete') {
+    // has_travel_document adalah bool_and per SO atas container job completed (invoice_orders hanya
+    // memuat SO yang sudah punya job completed_at, lihat invoiceOrdersCte), jadi "job selesai tapi SJ
+    // belum lengkap" sudah otomatis terpenuhi tanpa perlu cek status job terpisah.
+    clauses.push('coalesce(has_travel_document, false) = false');
+  } else if (options.invoiceDocumentFilter === 'sj-complete') {
+    clauses.push('coalesce(has_travel_document, false) = true');
+  } else if (options.invoiceDocumentFilter === 'due-soon') {
+    clauses.push("billing_status <> 'lunas'");
+    clauses.push('due_date is not null');
+    clauses.push("(due_date at time zone 'Asia/Jakarta')::date >= (now() at time zone 'Asia/Jakarta')::date");
+    clauses.push("(due_date at time zone 'Asia/Jakarta')::date <= (now() at time zone 'Asia/Jakarta')::date + 7");
+  } else if (options.invoiceDocumentFilter === 'overdue') {
+    clauses.push("billing_status <> 'lunas'");
+    clauses.push('due_date is not null');
+    clauses.push("(due_date at time zone 'Asia/Jakarta')::date < (now() at time zone 'Asia/Jakarta')::date");
   }
 
   if (options.query) {
@@ -3877,7 +3893,27 @@ export async function getInvoiceOrdersPage(options = {}) {
           count(*) filter (
             where coalesce(invoice_document_status, 'belum_upload') = 'terkirim'
               and billing_status <> 'lunas'
-          )::int as sent_invoice_documents
+          )::int as sent_invoice_documents,
+          count(*)::int as all_invoices,
+          count(*) filter (where coalesce(has_travel_document, false) = false)::int as sj_incomplete,
+          count(*) filter (where coalesce(has_travel_document, false) = true)::int as sj_complete,
+          count(*) filter (
+            where nullif(btrim(invoice_number), '') is not null
+              and invoice_document_uploaded_at is not null
+              and coalesce(invoice_document_status, 'belum_upload') <> 'terkirim'
+          )::int as not_sent_to_customer,
+          count(*) filter (where coalesce(invoice_document_status, 'belum_upload') = 'terkirim')::int as sent_to_customer,
+          count(*) filter (
+            where billing_status <> 'lunas'
+              and due_date is not null
+              and (due_date at time zone 'Asia/Jakarta')::date >= (now() at time zone 'Asia/Jakarta')::date
+              and (due_date at time zone 'Asia/Jakarta')::date <= (now() at time zone 'Asia/Jakarta')::date + 7
+          )::int as due_soon,
+          count(*) filter (
+            where billing_status <> 'lunas'
+              and due_date is not null
+              and (due_date at time zone 'Asia/Jakarta')::date < (now() at time zone 'Asia/Jakarta')::date
+          )::int as overdue
         from invoice_orders
         ${summaryWhereSql}
       `,
@@ -3900,6 +3936,13 @@ export async function getInvoiceOrdersPage(options = {}) {
       missingTaxInvoiceDocument: Number(summary.rows[0]?.missing_tax_invoice_document || 0),
       completeInvoiceDocuments: Number(summary.rows[0]?.complete_invoice_documents || 0),
       sentInvoiceDocuments: Number(summary.rows[0]?.sent_invoice_documents || 0),
+      allInvoices: Number(summary.rows[0]?.all_invoices || 0),
+      sjIncomplete: Number(summary.rows[0]?.sj_incomplete || 0),
+      sjComplete: Number(summary.rows[0]?.sj_complete || 0),
+      notSentToCustomer: Number(summary.rows[0]?.not_sent_to_customer || 0),
+      sentToCustomer: Number(summary.rows[0]?.sent_to_customer || 0),
+      dueSoon: Number(summary.rows[0]?.due_soon || 0),
+      overdue: Number(summary.rows[0]?.overdue || 0),
     },
   };
 }
