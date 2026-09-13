@@ -639,7 +639,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(rows.at(-1)).toEqual(expect.arrayContaining(['SISA SALDO', 19875000]));
     expect(fetchOperationalFundTransactions).toHaveBeenCalledWith(expect.objectContaining({
       page: 1,
-      pageSize: 8,
+      pageSize: 50,
     }));
   });
 

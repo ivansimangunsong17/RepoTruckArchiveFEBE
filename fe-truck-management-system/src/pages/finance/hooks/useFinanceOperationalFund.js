@@ -23,6 +23,9 @@ import {
   normalizeOperationalFundTransactionRow,
 } from '../dropping-account/operationalFundUtils';
 
+const EXPENSE_RECONCILIATION_PAGE_SIZE = 50;
+const OPERATIONAL_FUND_TRANSACTION_PAGE_SIZE = 50;
+
 function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund, canDepositOperationalFund }) {
   const todayDate = new Date().toISOString().slice(0, 10);
   const [operationalFundBatchDate, setOperationalFundBatchDate] = useState(todayDate);
@@ -158,7 +161,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     try {
       const result = await fetchOperationalFundTransactions({
         page: 1,
-        pageSize: 8,
+        pageSize: OPERATIONAL_FUND_TRANSACTION_PAGE_SIZE,
         batchDate: operationalFundBatchDate,
         ...(query.trim() ? { query: query.trim() } : {}),
       });
@@ -192,7 +195,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     try {
       const result = await fetchFinanceContainerJobExpenses({
         page: 1,
-        pageSize: 8,
+        pageSize: EXPENSE_RECONCILIATION_PAGE_SIZE,
         financeCheckStatus: 'open',
         dateFrom: operationalFundBatchDate,
         dateTo: operationalFundBatchDate,
