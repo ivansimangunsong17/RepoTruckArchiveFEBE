@@ -10,6 +10,7 @@ import {
   Eye,
   FileText,
   Moon,
+  RotateCcw,
   X,
   Search,
   SlidersHorizontal,
@@ -36,6 +37,7 @@ import {
   fetchContainerJob,
   fetchContainerJobsPage,
   generateContainerJobSpk,
+  resetContainerJobAssignment,
 } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
@@ -439,6 +441,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelForm, setCancelForm] = useState({ cancelSource: 'customer', cancelReason: '' });
   const [cancelSaving, setCancelSaving] = useState(false);
+  const [resetTarget, setResetTarget] = useState(null);
+  const [resetReason, setResetReason] = useState('');
+  const [resetSaving, setResetSaving] = useState(false);
   const [repoTarget, setRepoTarget] = useState(null);
   const [repoForm, setRepoForm] = useState({
     repoLocation: '',
@@ -459,6 +464,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const detailDocuments = detail ? documentState(detail) : { completed: 0, total: 0, missing: [] };
   const detailRpuj = detail ? rpujDetail(detail) : { label: '-', helper: '' };
   const cancelReasonValid = cancelForm.cancelReason.trim().length >= 8;
+  const resetReasonValid = resetReason.trim().length >= 8;
   const repoMissing = getRepoStorageMissing(repoTarget);
   const depotOptions = useMemo(() => normalizeDepotOptions(archive.masters?.depots), [archive.masters?.depots]);
   const hasCurrentDepot = Boolean(repoForm.repoLocation && !depotOptions.includes(repoForm.repoLocation));
@@ -506,6 +512,21 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       window.removeEventListener('keydown', closeCancelOnEscape);
     };
   }, [cancelSaving, cancelTarget, detail]);
+
+  useEffect(() => {
+    if (!resetTarget) return undefined;
+
+    function closeResetOnEscape(event) {
+      if (event.key === 'Escape' && !resetSaving) setResetTarget(null);
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeResetOnEscape);
+    return () => {
+      document.body.style.overflow = detail ? 'hidden' : '';
+      window.removeEventListener('keydown', closeResetOnEscape);
+    };
+  }, [detail, resetSaving, resetTarget]);
 
   useEffect(() => {
     if (!repoTarget) return undefined;
@@ -801,6 +822,51 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       notify({ type: 'error', title: 'Container Job gagal dibatalkan', message: requestError.message });
     } finally {
       setCancelSaving(false);
+    }
+  }
+
+  function openResetAssignment(job) {
+    setResetTarget(job);
+    setResetReason('');
+  }
+
+  async function resetOperationalAssignment(event) {
+    event.preventDefault();
+    if (!resetTarget || !resetReasonValid || resetSaving) return;
+
+    setResetSaving(true);
+    try {
+      if (archive.isDatabaseMode) {
+        await resetContainerJobAssignment(resetTarget.id, {
+          reason: resetReason.trim(),
+          updatedBy: user?.fullName || user?.name || 'Operational',
+        });
+        setListVersion((value) => value + 1);
+      } else {
+        await archive.updateJob(resetTarget.id, {
+          containerNumber: '',
+          driverId: '',
+          vehicleId: '',
+          driver: '',
+          plateNumber: '',
+          status: 'received',
+          runningAt: null,
+          completedAt: null,
+          rpujStatus: 'pending',
+          hasDriverCommission: false,
+          driverCommissionAmount: 0,
+        });
+      }
+      setDetail(null);
+      setResetTarget(null);
+      notify({
+        title: 'Ritasi direset',
+        message: `${containerLabel(resetTarget)} siap diinput ulang di party yang benar.`,
+      });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Reset ritasi gagal', message: requestError.message });
+    } finally {
+      setResetSaving(false);
     }
   }
 
@@ -1216,6 +1282,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         {canEdit && !historicalLocked && isRepoStoredJob(job) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
                         {canEdit && !historicalLocked && canMarkInap(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(job)}><Moon size={14} /> Tandai Inap</button> : null}
                         {canEdit && !historicalLocked && isInapJob(job) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(job)}><CheckCircle2 size={14} /> Selesai Inap</button> : null}
+                        {canEdit && !historicalLocked && !['cancelled'].includes(job.status) ? <button className="secondary-button" type="button" onClick={() => openResetAssignment(job)}><RotateCcw size={14} /> Reset</button> : null}
                         {canEdit && !historicalLocked && !isRepoStoredJob(job) && !isInapJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
                     </article>
@@ -1339,6 +1406,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && canMarkInap(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(detail)}><Moon size={16} /> Tandai Inap</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isInapJob(detail) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(detail)}><CheckCircle2 size={16} /> Selesai Inap</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !hasRepoStorageHistory(detail) && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
+              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !['cancelled'].includes(detail.status) ? <button className="secondary-button" type="button" onClick={() => openResetAssignment(detail)}><RotateCcw size={16} /> Reset Ritasi</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !isRepoStoredJob(detail) && !isInapJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
             </footer>
           </section>
@@ -1383,6 +1451,47 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                 <button className="secondary-button" type="button" disabled={cancelSaving} onClick={() => setCancelTarget(null)}>Batal</button>
                 <button className="danger-button" type="submit" disabled={!cancelReasonValid || cancelSaving}>
                   <Ban size={16} /> {cancelSaving ? 'Membatalkan...' : 'Batalkan Job'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {resetTarget ? (
+        <div className="master-modal-backdrop" role="presentation" onMouseDown={() => !resetSaving && setResetTarget(null)}>
+          <section className="container-cancel-modal" role="dialog" aria-modal="true" aria-labelledby="container-reset-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header>
+              <span><RotateCcw size={18} /></span>
+              <div>
+                <h2 id="container-reset-title">Reset Ritasi Salah Assign</h2>
+                <p>{containerLabel(resetTarget)} - {resetTarget.soNumber || '-'} - {resetTarget.customer || '-'}</p>
+              </div>
+              <button className="modal-close-button" type="button" aria-label="Tutup reset ritasi" disabled={resetSaving} onClick={() => setResetTarget(null)}><X size={18} /></button>
+            </header>
+            <form onSubmit={resetOperationalAssignment}>
+              <div className="repo-assignment-snapshot">
+                <span>Status<strong>{getJobStatusLabel(resetTarget.status)}</strong></span>
+                <span>Truck<strong>{resetTarget.plateNumber || '-'}</strong></span>
+                <span>Sopir<strong>{resetTarget.driver || '-'}</strong></span>
+              </div>
+              <label>
+                Alasan Reset
+                <textarea
+                  rows={4}
+                  value={resetReason}
+                  onChange={(event) => setResetReason(event.target.value)}
+                  placeholder="Contoh: Ritasi masuk ke party yang salah dan akan diinput ulang ke party benar"
+                />
+              </label>
+              <div className="container-cancel-warning">
+                <AlertTriangle size={16} />
+                <span>Reset akan mengosongkan container, truck, sopir, timeline, UJ/biaya aktif, dan komisi pada ritasi ini. Dokumen yang sudah terupload tetap tersimpan sebagai arsip.</span>
+              </div>
+              <footer>
+                <button className="secondary-button" type="button" disabled={resetSaving} onClick={() => setResetTarget(null)}>Batal</button>
+                <button className="danger-button" type="submit" disabled={!resetReasonValid || resetSaving}>
+                  <RotateCcw size={16} /> {resetSaving ? 'Mereset...' : 'Reset Ritasi'}
                 </button>
               </footer>
             </form>

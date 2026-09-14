@@ -50,6 +50,7 @@ const operationalRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.OPERATIONAL,
 ];
+const driverCommissionSubmitRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.SALES];
 const reportRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const financeReadOnlyRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 
@@ -114,7 +115,7 @@ export const navigationGroups = [
         to: '/operations/driver-commissions',
         label: 'Report Komisi',
         icon: CircleDollarSign,
-        roles: operationalRoles,
+        roles: driverCommissionSubmitRoles,
       },
       {
         to: '/operations/fleet-assignment',

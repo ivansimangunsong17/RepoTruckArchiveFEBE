@@ -1,9 +1,92 @@
 import { useState } from 'react';
-import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Eye, FileText, Info, LayoutGrid, Save, Upload } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Clock3, Eye, FileText, Info, LayoutGrid, Save, Upload, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import DocumentLink from '../../../components/common/DocumentLink';
+import { fetchFinanceInvoicePayments } from '../../../services/finance/financeService';
 import { formatCurrency } from '../../../utils/formatCurrency';
+import { formatDate } from '../../../utils/formatDate';
 import MonthFilterControl from '../shared/MonthFilterControl';
 import StatusPill from '../shared/StatusPill';
 import { INVOICE_TABLE_PAGE_SIZE } from './invoiceUtils';
+
+function paymentProofFile(payment = {}) {
+  if (payment.proofAttachment) return payment.proofAttachment;
+  if (!payment.proofAttachmentId) return null;
+  return {
+    id: payment.proofAttachmentId,
+    name: 'Bukti Pembayaran',
+    path: payment.proofAttachmentId,
+  };
+}
+
+function PaymentProofModal({ row, payments, loading, error, onClose }) {
+  if (!row) return null;
+  return createPortal(
+    <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="master-modal max-w-2xl" role="dialog" aria-modal="true" aria-label={`Bukti pembayaran ${row.soNumber}`} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="master-form">
+          <div className="master-form-heading">
+            <div className="min-w-0">
+              <span>Bukti Pembayaran</span>
+              <h2>{row.invoiceNumber || row.soNumber}</h2>
+              <p>{row.customer}</p>
+            </div>
+            <button className="modal-close-button" type="button" aria-label="Tutup bukti pembayaran" onClick={onClose}>
+              <X size={17} />
+            </button>
+          </div>
+          <div className="master-form-sections">
+            <fieldset className="master-fieldset">
+              <legend>Riwayat Bukti Bayar</legend>
+              {loading ? (
+                <p className="text-xs font-semibold text-slate-500">Memuat bukti pembayaran...</p>
+              ) : error ? (
+                <p className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p>
+              ) : payments.length ? (
+                <ul className="grid gap-2">
+                  {payments.map((payment, index) => {
+                    const proofFile = paymentProofFile(payment);
+                    return (
+                      <li className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-xs" key={payment.id || index}>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className={payment.voidedAt ? 'opacity-60' : ''}>
+                            <strong className={`block text-sm text-slate-900 ${payment.voidedAt ? 'line-through' : ''}`}>{formatCurrency(payment.amount)}</strong>
+                            <span className="block text-slate-500">{formatDate(payment.paymentDate)}{payment.referenceNumber ? ` - ${payment.referenceNumber}` : ''}</span>
+                            <span className="block text-slate-400">{payment.recordedByName || '-'}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {payment.voidedAt ? (
+                              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
+                            ) : null}
+                            {proofFile ? (
+                              <DocumentLink
+                                className="rounded-md border border-sky-200 bg-white px-2.5 py-1.5 text-[10px] font-black uppercase text-sky-700 hover:bg-sky-50"
+                                file={proofFile}
+                                label="Lihat Bukti"
+                              />
+                            ) : (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">Belum Ada Bukti</span>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-xs font-semibold text-slate-500">Belum ada pembayaran tercatat.</p>
+              )}
+            </fieldset>
+          </div>
+          <div className="master-form-actions">
+            <button className="secondary-button" type="button" onClick={onClose}>Tutup</button>
+          </div>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
 
 function InvoiceTable({
   rows,
@@ -31,6 +114,10 @@ function InvoiceTable({
   canUploadInvoiceDocument = false,
 }) {
   const [invoiceDrafts, setInvoiceDrafts] = useState({});
+  const [paymentProofRow, setPaymentProofRow] = useState(null);
+  const [paymentProofs, setPaymentProofs] = useState([]);
+  const [paymentProofLoading, setPaymentProofLoading] = useState(false);
+  const [paymentProofError, setPaymentProofError] = useState('');
   const invoiceTabs = [
     {
       id: 'all',
@@ -129,6 +216,21 @@ function InvoiceTable({
 
   function invoiceDraftValue(row) {
     return invoiceDrafts[row.id] ?? row.invoiceNumber ?? '';
+  }
+
+  async function openPaymentProofs(row) {
+    setPaymentProofRow(row);
+    setPaymentProofs([]);
+    setPaymentProofError('');
+    setPaymentProofLoading(true);
+    try {
+      const result = await fetchFinanceInvoicePayments(row.id);
+      setPaymentProofs(Array.isArray(result) ? result : []);
+    } catch (error) {
+      setPaymentProofError(error.message || 'Bukti pembayaran gagal dimuat.');
+    } finally {
+      setPaymentProofLoading(false);
+    }
   }
 
   function updateInvoiceDraft(id, value) {
@@ -415,7 +517,18 @@ function InvoiceTable({
                     ) : '-'}
                   </td>
                   <td className="finance-invoice-status text-center" data-label="Status Pelunasan">
-                    <StatusPill className="max-w-full overflow-hidden text-ellipsis" value={isLunas ? 'Lunas' : 'Belum Lunas'} />
+                    <div className="grid justify-items-center gap-1">
+                      <StatusPill className="max-w-full overflow-hidden text-ellipsis" value={isLunas ? 'Lunas' : 'Belum Lunas'} />
+                      {isLunas ? (
+                        <button
+                          className="rounded-md border border-sky-200 bg-white px-2 py-1 text-[10px] font-black uppercase text-sky-700 hover:bg-sky-50"
+                          onClick={() => openPaymentProofs(row)}
+                          type="button"
+                        >
+                          Lihat Bukti
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="finance-invoice-actions" data-label="Detail">
                     <div className="finance-invoice-action-row">
@@ -457,6 +570,17 @@ function InvoiceTable({
           </button>
         </div>
       </div>
+      <PaymentProofModal
+        error={paymentProofError}
+        loading={paymentProofLoading}
+        onClose={() => {
+          setPaymentProofRow(null);
+          setPaymentProofs([]);
+          setPaymentProofError('');
+        }}
+        payments={paymentProofs}
+        row={paymentProofRow}
+      />
     </div>
   );
 }

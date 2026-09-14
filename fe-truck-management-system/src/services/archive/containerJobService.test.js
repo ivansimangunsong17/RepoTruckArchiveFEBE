@@ -7,6 +7,7 @@ import {
   fetchContainerJobExpenses,
   fetchContainerJobsPage,
   generateContainerJobSpk,
+  resetContainerJobAssignment,
   uploadContainerJobExpenseProof,
   updateContainerJob,
 } from './containerJobService';
@@ -286,6 +287,21 @@ describe('containerJobService', () => {
 
     expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1', { status: 'cancelled', updatedBy: 'Ops' });
     expect(result.status).toBe('cancelled');
+  });
+
+  it('mereset ritasi salah assign lewat endpoint khusus', async () => {
+    httpClient.patch.mockResolvedValue({ id: 'job-1', status: 'received', driverId: '', vehicleId: '' });
+
+    const result = await resetContainerJobAssignment('job-1', {
+      reason: 'Salah masuk party',
+      updatedBy: 'Ops',
+    });
+
+    expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1/reset-assignment', {
+      reason: 'Salah masuk party',
+      updatedBy: 'Ops',
+    });
+    expect(result.status).toBe('received');
   });
 
   it('membatalkan Container Job dengan alasan dan sumber pembatalan', async () => {

@@ -10,6 +10,7 @@ import {
   findContainerJobsPage,
   moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord,
   requestContainerJobCancellation as requestContainerJobCancellationRepository,
+  resetContainerJobAssignment,
   reviewContainerJobCancellation as reviewContainerJobCancellationRepository,
   updateContainerJobExpenseProofRecord,
   updateContainerJob,
@@ -758,6 +759,26 @@ export function voidDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {
   ensureNotOperationalRole(actor, 'Void transaksi');
   return voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, {
     voidReason: normalizeExpenseText(payload.voidReason || payload.reason, 'Alasan void', 500),
+    actorName: getActorName(actor),
+  });
+}
+
+export function resetMisassignedContainerJob(id, payload = {}, actor) {
+  if (!actor || !['operational', 'admin'].includes(actor.role)) {
+    const error = new Error('Reset ritasi hanya dapat dilakukan oleh Operational atau Admin.');
+    error.statusCode = 403;
+    error.code = 'CONTAINER_JOB_RESET_FORBIDDEN';
+    throw error;
+  }
+  const reason = normalizeExpenseText(payload.reason || payload.resetReason, 'Alasan reset', 500);
+  if (reason.length < BACKDATE_REASON_MIN_LENGTH) {
+    const error = new Error(`Alasan reset ritasi wajib diisi minimal ${BACKDATE_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_RESET_REASON_REQUIRED';
+    throw error;
+  }
+  return resetContainerJobAssignment(id, {
+    reason,
     actorName: getActorName(actor),
   });
 }

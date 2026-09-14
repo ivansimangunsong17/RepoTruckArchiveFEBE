@@ -99,6 +99,7 @@ export async function createContainerJobExpense(id, payload = {}) {
     recipientType: payload.recipientType,
     recipientName: payload.recipientName,
     paymentStatus: payload.paymentStatus,
+    paidAt: payload.paidAt || null,
     proofAttachmentId: proofAttachment?.id || proofAttachment?.path || payload.proofAttachmentId || null,
     idempotencyKey: payload.idempotencyKey || null,
   });
@@ -286,6 +287,10 @@ export function cancelContainerJob(id, payloadOrUpdatedBy = 'Operational') {
     : { status: 'cancelled', updatedBy: payloadOrUpdatedBy };
 
   return updateContainerJob(id, payload);
+}
+
+export function resetContainerJobAssignment(id, payload = {}) {
+  return httpClient.patch(`/container-jobs/${id}/reset-assignment`, payload);
 }
 
 export function requestContainerJobCancellation(id, payload = {}) {

@@ -49,7 +49,7 @@ describe('navigationGroups', () => {
     const financeCommission = financeItems.find((item) => item.to === '/finance/driver-commissions');
 
     expect(operationalCommission?.label).toBe('Report Komisi');
-    expect(operationalCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL]);
+    expect(operationalCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.SALES]);
     expect(financeCommission?.label).toBe('Pembayaran Komisi');
     expect(financeCommission?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
   });

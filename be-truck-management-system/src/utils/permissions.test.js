@@ -13,6 +13,9 @@ test('actorHasPermission tetap menolak permission kosong', () => {
 
 test('actorHasPermission role non-admin tetap mengikuti permission matrix', () => {
   assert.equal(actorHasPermission({ role: 'operational' }, 'container_job.update'), true);
+  assert.equal(actorHasPermission({ role: 'operational' }, 'driver_commission.submit'), true);
+  assert.equal(actorHasPermission({ role: 'sales' }, 'driver_commission.submit'), true);
+  assert.equal(actorHasPermission({ role: 'sales' }, 'container_job.update'), false);
   assert.equal(actorHasPermission({ role: 'operational' }, 'future.permission.manage'), false);
 });
 

@@ -14,6 +14,7 @@ import {
   fetchFinanceInvoiceCorrections,
   fetchFinanceInvoiceDetail,
   fetchFinanceInvoices,
+  fetchFinanceInvoicePayments,
   fetchFinanceOrderCorrections,
   fetchFinanceOrderVerifications,
   fetchFinanceRpujRequests,
@@ -50,6 +51,7 @@ vi.mock('../../services/finance/financeService', () => ({
   fetchFinanceInvoiceCorrections: vi.fn(),
   fetchFinanceInvoiceDetail: vi.fn(),
   fetchFinanceInvoices: vi.fn().mockResolvedValue({ rows: [] }),
+  fetchFinanceInvoicePayments: vi.fn().mockResolvedValue([]),
   fetchFinanceOrderCorrections: vi.fn(),
   fetchFinanceOrderVerifications: vi.fn(),
   fetchFinanceRpujRequests: vi.fn(),
@@ -740,7 +742,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
-  it('tidak menampilkan tombol buka kembali batch untuk role Finance biasa', async () => {
+  it('menampilkan tombol buka kembali batch untuk role Finance', async () => {
     fetchOperationalFundBatches.mockResolvedValue({
       rows: [{
         id: 'batch-2026-08-20',
@@ -763,7 +765,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     expect(await screen.findByText(/Batch ini sudah ditutup oleh Fitri Finance/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Buka Kembali Batch' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Buka Kembali Batch' })).toBeInTheDocument();
   });
 
   it('menampilkan dan menandai transaksi biaya D+1 sudah dicek', async () => {
@@ -866,6 +868,49 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
     expect(screen.getByRole('tab', { name: /Menunggu Pembayaran/i })).toHaveTextContent('1');
     expect(screen.getByRole('tab', { name: /Lunas/i })).toHaveTextContent('2');
+  });
+
+  it('menampilkan bukti pembayaran pada invoice yang sudah lunas', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoices.mockResolvedValue({
+      rows: [{
+        ...invoiceRow,
+        id: 'invoice-paid-1',
+        invoiceStatus: 'Lunas',
+        billingStatus: 'lunas',
+        invoiceNumber: 'INV-PAID-001',
+      }],
+      summary: invoiceSummary,
+    });
+    fetchFinanceInvoicePayments.mockResolvedValue([
+      {
+        id: 'payment-1',
+        amount: 400000,
+        paymentDate: '2026-09-10',
+        referenceNumber: 'TRF-001',
+        recordedByName: 'Fitri Finance',
+        proofAttachment: { id: 'proof-1', path: 'proof-1', name: 'bukti-1.pdf', type: 'application/pdf' },
+      },
+      {
+        id: 'payment-2',
+        amount: 600000,
+        paymentDate: '2026-09-12',
+        referenceNumber: 'TRF-002',
+        recordedByName: 'Fitri Finance',
+        proofAttachment: { id: 'proof-2', path: 'proof-2', name: 'bukti-2.pdf', type: 'application/pdf' },
+      },
+    ]);
+
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Lunas/i }));
+    await user.click(await screen.findByRole('button', { name: /^Lihat Bukti$/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /Bukti pembayaran/i });
+    expect(fetchFinanceInvoicePayments).toHaveBeenCalledWith('invoice-paid-1');
+    expect(within(dialog).getByText(/Rp\s*400\.000/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Rp\s*600\.000/i)).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('button', { name: /lihat bukti/i })).toHaveLength(2);
   });
 
   it('memakai total invoice dari backend untuk pagination lebih dari 100 data', async () => {

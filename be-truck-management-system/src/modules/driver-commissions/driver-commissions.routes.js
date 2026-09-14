@@ -42,7 +42,7 @@ export const driverCommissionRoutes = [
   {
     method: 'POST',
     path: '/api/driver-commissions/batches',
-    permissions: ['container_job.update', 'container_job.update_status'],
+    permissions: ['driver_commission.submit', 'container_job.update', 'container_job.update_status'],
     handler: submitDriverCommissionBatchController,
   },
   {

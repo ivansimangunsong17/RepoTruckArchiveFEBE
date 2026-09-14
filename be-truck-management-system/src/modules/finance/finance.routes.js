@@ -26,6 +26,7 @@ import {
   approveOperationalFundRequestController,
   reconcileContainerJobExpenseController,
   recordDebitNotePaymentController,
+  recordCustomerInvoicePaymentController,
   recordInvoicePaymentController,
   rejectFinanceCorrectionController,
   rejectOperationalFundRequestController,
@@ -190,6 +191,12 @@ export const financeRoutes = [
     path: '/api/finance/outstanding/by-customer',
     permission: 'finance.invoice.read',
     handler: outstandingByCustomerController,
+  },
+  {
+    method: 'POST',
+    path: '/api/finance/customer-payments',
+    permission: 'finance.invoice.payment.record',
+    handler: recordCustomerInvoicePaymentController,
   },
   {
     method: 'GET',

@@ -2298,6 +2298,196 @@ export async function updateContainerJob(id, form) {
   }
 }
 
+export async function resetContainerJobAssignment(id, payload = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select cj.id, cj.sales_order_id, cj.container_number, cj.status, cj.driver_id, cj.vehicle_id,
+               cj.assignment_snapshot, cj.entry_source, cj.is_backdate_entry,
+               cj.has_driver_commission, cj.driver_commission_amount, cj.commission_status,
+               so.so_number, so.invoice_number, so.billing_status, so.debit_note_document_uploaded_at
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.id = $1
+        for update
+      `,
+      [id],
+    );
+    const job = existing.rows[0];
+    if (!job) {
+      const error = new Error('Container Job tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_NOT_FOUND';
+      throw error;
+    }
+    if (job.status === 'cancelled') {
+      throw validationError('Container Job yang sudah batal tidak perlu direset.', 'CONTAINER_JOB_RESET_ALREADY_CANCELLED', 409);
+    }
+    await ensureSalesOrderBillingNotAdvanced(client, job.sales_order_id);
+
+    const checkedExpense = await client.query(
+      `
+        select id
+        from container_job_expenses
+        where container_job_id = $1
+          and payment_status <> 'batal'
+          and finance_check_status = 'sudah_dicek'
+        limit 1
+      `,
+      [id],
+    );
+    if (checkedExpense.rows[0]) {
+      throw validationError(
+        'Ritasi tidak bisa direset karena ada biaya yang sudah divalidasi Finance.',
+        'CONTAINER_JOB_RESET_HAS_FINANCE_CHECKED_EXPENSE',
+        409,
+      );
+    }
+
+    const closedBatch = await client.query(
+      `
+        select batch.id
+        from operational_fund_transactions oft
+        join operational_fund_batches batch on batch.id = oft.batch_id
+        where oft.container_job_id = $1
+          and oft.status = 'posted'
+          and batch.status = 'closed'
+        limit 1
+      `,
+      [id],
+    );
+    if (closedBatch.rows[0]) {
+      throw validationError(
+        'Ritasi tidak bisa direset karena ada transaksi rekening dropping yang sudah masuk batch tertutup.',
+        'CONTAINER_JOB_RESET_HAS_CLOSED_FUND_BATCH',
+        409,
+      );
+    }
+
+    const actorName = payload.actorName || 'Operational';
+    const reason = payload.reason || 'Reset ritasi salah assign';
+    await client.query(
+      `
+        update container_job_expenses
+        set payment_status = 'batal',
+            finance_check_status = case
+              when finance_check_status = 'perlu_klarifikasi' then 'dikoreksi'
+              else finance_check_status
+            end,
+            finance_note = coalesce(nullif(finance_note, ''), $3),
+            updated_by_name = $2,
+            updated_at = now()
+        where container_job_id = $1
+          and payment_status <> 'batal'
+      `,
+      [id, actorName, reason],
+    );
+    await client.query(
+      `
+        update operational_fund_transactions
+        set status = 'void',
+            updated_by_name = $2,
+            updated_at = now()
+        where container_job_id = $1
+          and transaction_type = 'debit'
+          and status = 'posted'
+      `,
+      [id, actorName],
+    );
+
+    await client.query(
+      `
+        update container_jobs
+        set driver_id = null,
+            vehicle_id = null,
+            assignment_snapshot = '{}'::jsonb,
+            container_number = null,
+            rpuj_status = 'pending',
+            rpuj_notes = null,
+            rpuj_requested_by_name = null,
+            rpuj_requested_at = null,
+            rpuj_reviewed_by_name = null,
+            rpuj_reviewed_at = null,
+            rpuj_rejection_note = null,
+            rpuj_transfer_uploaded_by_name = null,
+            rpuj_transfer_uploaded_at = null,
+            status = 'received',
+            running_at = null,
+            completed_at = null,
+            cancelled_at = null,
+            cancel_reason = null,
+            cancel_source = null,
+            cancelled_by_name = null,
+            cancel_request_status = 'none',
+            cancel_request_note = null,
+            cancel_requested_by_name = null,
+            cancel_requested_by_role = null,
+            cancel_requested_at = null,
+            cancel_reviewed_by_name = null,
+            cancel_reviewed_at = null,
+            cancel_review_note = null,
+            repo_location = null,
+            repo_stored_at = null,
+            repo_eir_number = null,
+            repo_reason = null,
+            repo_notes = null,
+            repo_container_condition = null,
+            repo_released_driver_id = null,
+            repo_released_vehicle_id = null,
+            repo_created_by_name = null,
+            repo_picked_up_at = null,
+            repo_picked_up_by_name = null,
+            inap_started_at = null,
+            inap_ended_at = null,
+            inap_reason = null,
+            inap_notes = null,
+            inap_created_by_name = null,
+            has_driver_commission = false,
+            driver_commission_amount = 0,
+            driver_commission_source_destination_id = null,
+            driver_commission_note = null,
+            commission_driver_id = null,
+            commission_driver_name = null,
+            commission_driver_snapshot = '{}'::jsonb,
+            commission_locked_amount = null,
+            commission_locked_at = null,
+            commission_status = 'without_commission',
+            uj_amount_snapshot = null,
+            uj_source_destination_id = null,
+            uj_snapshot_at = null,
+            uj_snapshot_source = null,
+            updated_by_name = $2,
+            updated_at = now()
+        where id = $1
+      `,
+      [id, actorName],
+    );
+
+    await syncResourceAssignmentStatus(client, job, { driverId: null, vehicleId: null }, 'received', job.entry_source, job.is_backdate_entry);
+    await refreshOrderStatus(client, job.sales_order_id);
+
+    const updated = await client.query(
+      `
+        select ${joinedJobColumns}
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.id = $1
+      `,
+      [id],
+    );
+    const attachmentResult = await client.query(
+      `
+        select ${attachmentColumns}
+        from attachments
+        where entity_type = 'container_job' and entity_id = $1
+        order by created_at asc
+      `,
+      [id],
+    );
+    return mapContainerJob(updated.rows[0], attachmentResult.rows);
+  });
+}
+
 async function updateContainerJobTransaction(id, form) {
   return withTransaction(async (client) => {
     const existing = await client.query(

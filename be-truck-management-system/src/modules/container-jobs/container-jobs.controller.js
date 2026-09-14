@@ -13,6 +13,7 @@ import {
   listContainerJobs,
   moveDroppingExpenseToAnotherJobBeforeFinanceCheck,
   requestContainerJobCancellation,
+  resetMisassignedContainerJob,
   reviewContainerJobCancellation,
   saveContainerJob,
   updateContainerJobExpenseProof,
@@ -561,6 +562,32 @@ export async function updateContainerJobController(request, response) {
     });
   }
   sendSuccess(response, saved, 'Container Job berhasil diperbarui.');
+}
+
+export async function resetMisassignedContainerJobController(request, response) {
+  const before = await getContainerJob(request.params.id);
+  const saved = await resetMisassignedContainerJob(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'RESET_MISASSIGNED_CONTAINER_JOB',
+    module: 'container_jobs',
+    entityType: 'container_job',
+    entityId: saved.id,
+    beforeData: before,
+    afterData: saved,
+    metadata: {
+      salesOrderId: saved.orderId,
+      soNumber: saved.soNumber,
+      containerNumber: before.containerNumber,
+      fromStatus: before.status,
+      toStatus: saved.status,
+      previousDriverId: before.driverId,
+      previousDriver: before.driver,
+      previousVehicleId: before.vehicleId,
+      previousPlateNumber: before.plateNumber,
+      reason: request.body?.reason || request.body?.resetReason || '',
+    },
+  });
+  sendSuccess(response, saved, 'Ritasi berhasil direset dan siap diinput ulang.');
 }
 
 export async function generateContainerJobSpkController(request, response) {

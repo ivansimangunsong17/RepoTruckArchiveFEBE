@@ -60,6 +60,19 @@ test('ensureRoutePermission mengizinkan Sales upload dokumen container job tapi 
   );
 });
 
+test('ensureRoutePermission mengizinkan Sales submit batch komisi tanpa permission update container job', () => {
+  const route = {
+    permissions: ['driver_commission.submit', 'container_job.update', 'container_job.update_status'],
+  };
+
+  assert.equal(ensureRoutePermission(route, actorForRole('sales')).role, 'sales');
+  assert.equal(ensureRoutePermission(route, actorForRole('operational')).role, 'operational');
+  assert.throws(
+    () => ensureRoutePermission(route, actorForRole('observer')),
+    (error) => error.code === 'FORBIDDEN' && error.statusCode === 403,
+  );
+});
+
 test('ensureRoutePermission tetap membatasi edit data historical penuh ke admin', () => {
   const route = {
     permission: 'historical_entry.manage',

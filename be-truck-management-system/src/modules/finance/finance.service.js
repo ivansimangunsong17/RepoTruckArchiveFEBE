@@ -30,6 +30,7 @@ import {
   markOperationalFundTransferUploadedRecord,
   markRpujTransferUploaded,
   reconcileContainerJobExpenseRecord,
+  recordCustomerInvoicePayments,
   recordDebitNotePayment,
   recordSalesOrderPayment,
   rejectOperationalFundRequestRecord,
@@ -565,6 +566,68 @@ export async function recordInvoicePayment(id, payload = {}, actor) {
     referenceNumber: payload.referenceNumber,
     proofAttachmentId,
     note: payload.note,
+    idempotencyKey: payload.idempotencyKey,
+    actorUserId: actor?.id || null,
+    actorName,
+  });
+}
+
+export async function recordCustomerInvoicePaymentAllocations(payload = {}, actor) {
+  if (!actor || !['finance', 'admin'].includes(actor.role)) {
+    const error = new Error('Pembayaran invoice hanya dapat dicatat oleh Finance atau Admin.');
+    error.statusCode = 403;
+    error.code = 'FINANCE_INVOICE_PAYMENT_FORBIDDEN';
+    throw error;
+  }
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const allocations = Array.isArray(payload.allocations) ? payload.allocations : [];
+  if (!allocations.length) {
+    const error = new Error('Minimal satu invoice wajib dipilih untuk alokasi pembayaran.');
+    error.statusCode = 400;
+    error.code = 'CUSTOMER_PAYMENT_ALLOCATIONS_REQUIRED';
+    throw error;
+  }
+  const totalAmount = Number(payload.totalAmount || 0);
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    const error = new Error('Total transfer wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'CUSTOMER_PAYMENT_TOTAL_AMOUNT_INVALID';
+    throw error;
+  }
+  const allocationTotal = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
+  if (!Number.isFinite(allocationTotal) || allocationTotal <= 0) {
+    const error = new Error('Total alokasi pembayaran wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'CUSTOMER_PAYMENT_ALLOCATION_AMOUNT_INVALID';
+    throw error;
+  }
+  if (allocationTotal > totalAmount) {
+    const error = new Error('Total alokasi tidak boleh melebihi total transfer.');
+    error.statusCode = 409;
+    error.code = 'CUSTOMER_PAYMENT_ALLOCATION_EXCEEDS_TRANSFER';
+    throw error;
+  }
+
+  let proofAttachmentId = payload.proofAttachmentId || null;
+  if (!proofAttachmentId && payload.proofFile) {
+    const attachment = await createAttachment({
+      ...payload.proofFile,
+      entityType: 'sales_order',
+      entityId: allocations[0]?.salesOrderId || allocations[0]?.id || null,
+      category: 'paymentProof',
+      uploadedByName: actorName,
+      notes: payload.proofFile.notes || 'Bukti transfer pembayaran customer multi-invoice',
+    });
+    proofAttachmentId = attachment.id;
+  }
+
+  return recordCustomerInvoicePayments({
+    totalAmount,
+    paymentDate: payload.paymentDate,
+    referenceNumber: payload.referenceNumber,
+    proofAttachmentId,
+    note: payload.note,
+    allocations,
     idempotencyKey: payload.idempotencyKey,
     actorUserId: actor?.id || null,
     actorName,

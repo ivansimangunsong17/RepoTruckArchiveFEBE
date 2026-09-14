@@ -11,6 +11,7 @@ const {
   rejectFinanceCorrection,
   rejectOperationalFundRequest,
   rejectRpuj,
+  recordCustomerInvoicePaymentAllocations,
   saveInvoiceNumber,
   uploadInvoiceDocument,
 } = await import('./finance.service.js');
@@ -59,6 +60,37 @@ test('deposit saldo operasional langsung memakai validasi tanggal, nominal, dan 
   await assert.rejects(
     () => depositOperationalFund({ requestDate: '2026-08-20', amount: 1000000 }, { name: 'Finance Test' }),
     (error) => error.code === 'OPERATIONAL_FUND_DEPOSIT_PROOF_REQUIRED' && error.statusCode === 400,
+  );
+});
+
+test('alokasi pembayaran customer multi-invoice memvalidasi role, total, dan alokasi sebelum upload bukti', async () => {
+  await assert.rejects(
+    () => recordCustomerInvoicePaymentAllocations(
+      { totalAmount: 1000000, allocations: [{ salesOrderId: 'so-1', amount: 1000000 }] },
+      { role: 'sales', name: 'Sales Test' },
+    ),
+    (error) => error.code === 'FINANCE_INVOICE_PAYMENT_FORBIDDEN' && error.statusCode === 403,
+  );
+  await assert.rejects(
+    () => recordCustomerInvoicePaymentAllocations(
+      { totalAmount: 0, allocations: [{ salesOrderId: 'so-1', amount: 1000000 }] },
+      { role: 'finance', name: 'Finance Test' },
+    ),
+    (error) => error.code === 'CUSTOMER_PAYMENT_TOTAL_AMOUNT_INVALID' && error.statusCode === 400,
+  );
+  await assert.rejects(
+    () => recordCustomerInvoicePaymentAllocations(
+      { totalAmount: 1000000, allocations: [{ salesOrderId: 'so-1', amount: 0 }] },
+      { role: 'finance', name: 'Finance Test' },
+    ),
+    (error) => error.code === 'CUSTOMER_PAYMENT_ALLOCATION_AMOUNT_INVALID' && error.statusCode === 400,
+  );
+  await assert.rejects(
+    () => recordCustomerInvoicePaymentAllocations(
+      { totalAmount: 1000000, allocations: [{ salesOrderId: 'so-1', amount: 1200000 }] },
+      { role: 'finance', name: 'Finance Test' },
+    ),
+    (error) => error.code === 'CUSTOMER_PAYMENT_ALLOCATION_EXCEEDS_TRANSFER' && error.statusCode === 409,
   );
 });
 

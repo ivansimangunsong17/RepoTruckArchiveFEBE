@@ -2415,13 +2415,13 @@ if (!hasDatabase) {
       assert.equal(blockedExpense.status, 409);
       assert.equal(blockedExpense.body.error.code, 'OPERATIONAL_FUND_BATCH_CLOSED');
 
-      const blockedForFinance = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
+      const blockedForOperational = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
         method: 'PATCH',
-        token: financeToken,
-        body: { reason: 'Finance coba buka sendiri' },
+        token: operationalToken,
+        body: { reason: 'Operational coba buka batch finance' },
       });
-      assert.equal(blockedForFinance.status, 403);
-      assert.equal(blockedForFinance.body.error.code, 'FORBIDDEN');
+      assert.equal(blockedForOperational.status, 403);
+      assert.equal(blockedForOperational.body.error.code, 'FORBIDDEN');
 
       const blockedNoReason = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
         method: 'PATCH',
@@ -2434,7 +2434,7 @@ if (!hasDatabase) {
       const reopenReason = `Batch ditutup terlalu cepat, masih ada biaya sore ${runId}`;
       const reopened = await api(`/api/finance/operational-fund-batches/${batchId}/reopen`, {
         method: 'PATCH',
-        token: adminToken,
+        token: financeToken,
         body: { reason: reopenReason },
       });
       assert.equal(reopened.status, 200);

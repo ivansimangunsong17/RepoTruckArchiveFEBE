@@ -268,6 +268,24 @@ export async function recordFinanceInvoicePayment(id, payload = {}, proofFile) {
   });
 }
 
+export async function recordFinanceCustomerPayment(payload = {}, proofFile) {
+  const validationError = validateArchiveFile(proofFile, { label: 'Bukti transfer' })
+    || validateFinalUploadFile(proofFile, { label: 'Bukti transfer' });
+  if (validationError) throw new Error(validationError);
+
+  const uploadFile = proofFile.type?.startsWith('image/') ? await compressImageFile(proofFile) : proofFile;
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
+  return httpClient.post('/finance/customer-payments', {
+    ...payload,
+    proofFile: {
+      fileName: uploadFile.name,
+      mimeType: uploadFile.type || 'application/octet-stream',
+      fileSize: uploadFile.size,
+      fileBase64,
+    },
+  });
+}
+
 export function voidFinanceInvoicePayment(id, paymentId, reason) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/payments/${encodeURIComponent(paymentId)}/void`, { reason });
 }

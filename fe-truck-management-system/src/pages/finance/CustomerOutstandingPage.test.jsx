@@ -6,6 +6,7 @@ import {
   fetchFinanceInvoicePayments,
   fetchFinanceOutstanding,
   fetchFinanceOutstandingByCustomer,
+  recordFinanceCustomerPayment,
   recordFinanceInvoicePayment,
 } from '../../services/finance/financeService';
 import { downloadCsv } from '../../utils/csvExport';
@@ -24,6 +25,7 @@ vi.mock('../../services/finance/financeService', () => ({
   fetchFinanceOutstanding: vi.fn(),
   fetchFinanceOutstandingByCustomer: vi.fn(),
   fetchFinanceInvoicePayments: vi.fn(),
+  recordFinanceCustomerPayment: vi.fn(),
   recordFinanceInvoicePayment: vi.fn(),
 }));
 
@@ -107,6 +109,7 @@ describe('CustomerOutstandingPage finance', () => {
     fetchFinanceOutstandingByCustomer.mockResolvedValue(rollupResult);
     fetchFinanceOutstanding.mockResolvedValue(customerInvoiceRows);
     fetchFinanceInvoicePayments.mockResolvedValue([]);
+    recordFinanceCustomerPayment.mockResolvedValue({});
     recordFinanceInvoicePayment.mockResolvedValue({});
   });
 
@@ -188,8 +191,26 @@ describe('CustomerOutstandingPage finance', () => {
     ]);
   });
 
-  it('membuka detail piutang customer lalu mencatat pembayaran salah satu invoice', async () => {
+  it('membuka detail piutang customer lalu mencatat pembayaran cicilan salah satu invoice', async () => {
     const user = userEvent.setup();
+    fetchFinanceInvoicePayments.mockResolvedValue([
+      {
+        id: 'payment-1',
+        amount: 500000,
+        paymentDate: '2026-09-10',
+        referenceNumber: 'TRF-001',
+        recordedByName: 'Fitri Finance',
+        proofAttachment: { id: 'proof-1', path: 'proof-1', name: 'bukti-1.pdf', type: 'application/pdf' },
+      },
+      {
+        id: 'payment-2',
+        amount: 250000,
+        paymentDate: '2026-09-12',
+        referenceNumber: 'TRF-002',
+        recordedByName: 'Fitri Finance',
+        proofAttachment: { id: 'proof-2', path: 'proof-2', name: 'bukti-2.pdf', type: 'application/pdf' },
+      },
+    ]);
     render(<CustomerOutstandingPage />);
 
     await screen.findByText('PT Mitra Kimia');
@@ -200,16 +221,50 @@ describe('CustomerOutstandingPage finance', () => {
     expect(within(detailDialog).getByText('SO-202608-001')).toBeInTheDocument();
     expect(within(detailDialog).getByText('SO-202608-002')).toBeInTheDocument();
 
-    await user.click(within(detailDialog).getAllByRole('button', { name: /catat pembayaran/i })[0]);
+    await user.click(within(detailDialog).getAllByRole('button', { name: /^catat pembayaran$/i })[0]);
 
     const paymentDialog = await screen.findByRole('dialog', { name: /SO-202608-001/i });
+    expect(await within(paymentDialog).findAllByRole('button', { name: /lihat bukti/i })).toHaveLength(2);
+    const amountInput = within(paymentDialog).getByLabelText(/nominal dibayar/i);
+    expect(amountInput).toHaveValue(1000000);
+    await user.clear(amountInput);
+    await user.type(amountInput, '400000');
     const proofFile = new File(['bukti'], 'bukti-transfer.pdf', { type: 'application/pdf' });
     await user.upload(within(paymentDialog).getByLabelText(/pilih bukti/i), proofFile);
-    await user.click(within(paymentDialog).getByRole('button', { name: /tandai lunas/i }));
+    await user.click(within(paymentDialog).getByRole('button', { name: /simpan pembayaran/i }));
 
     await waitFor(() => {
-      expect(recordFinanceInvoicePayment).toHaveBeenCalledWith('so-1', expect.objectContaining({ amount: 1000000 }), proofFile);
+      expect(recordFinanceInvoicePayment).toHaveBeenCalledWith('so-1', expect.objectContaining({ amount: 400000 }), proofFile);
       expect(notify).toHaveBeenCalled();
+    });
+  });
+
+  it('mencatat satu bukti transfer customer untuk beberapa invoice', async () => {
+    const user = userEvent.setup();
+    render(<CustomerOutstandingPage />);
+
+    await screen.findByText('PT Mitra Kimia');
+    await user.click(screen.getAllByRole('button', { name: 'Detail' })[0]);
+
+    const detailDialog = await screen.findByRole('dialog', { name: /PT Mitra Kimia/i });
+    await user.click(within(detailDialog).getByRole('button', { name: /catat pembayaran customer/i }));
+
+    const paymentDialog = await screen.findByRole('dialog', { name: /pembayaran customer/i });
+    await user.type(within(paymentDialog).getByLabelText(/total transfer/i), '3500000');
+    await user.type(within(paymentDialog).getAllByLabelText(/alokasi/i)[0], '1000000');
+    await user.type(within(paymentDialog).getAllByLabelText(/alokasi/i)[1], '2500000');
+    const proofFile = new File(['bukti'], 'bukti-gabungan.pdf', { type: 'application/pdf' });
+    await user.upload(within(paymentDialog).getByLabelText(/pilih bukti/i), proofFile);
+    await user.click(within(paymentDialog).getByRole('button', { name: /simpan alokasi/i }));
+
+    await waitFor(() => {
+      expect(recordFinanceCustomerPayment).toHaveBeenCalledWith(expect.objectContaining({
+        totalAmount: 3500000,
+        allocations: [
+          { salesOrderId: 'so-1', amount: 1000000 },
+          { salesOrderId: 'so-2', amount: 2500000 },
+        ],
+      }), proofFile);
     });
   });
 

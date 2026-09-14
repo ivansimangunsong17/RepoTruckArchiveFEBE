@@ -55,12 +55,13 @@ const nonFinanceRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES, USER_ROLES.OPERATIO
 const orderRoles = nonFinanceRoles;
 const customerDocumentRoles = [USER_ROLES.ADMIN, USER_ROLES.SALES];
 const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
+const driverCommissionSubmitRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.SALES];
 const adminRoles = [USER_ROLES.ADMIN];
 const viewerOnlyRoles = [USER_ROLES.OBSERVER];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 const reportsPageRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const financeReadOnlyRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
-const driverCommissionRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.FINANCE];
+const driverCommissionRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.SALES, USER_ROLES.FINANCE];
 
 function DriverCommissionRedirect() {
   const { user } = useAuth();
@@ -97,7 +98,7 @@ export const router = createBrowserRouter([
         { path: 'operations/rekening-dropping', children: [guardedPage(operationalRoles, <LazyPage><OperationalDroppingAccountPage /></LazyPage>)] },
         { path: 'operations/repo-storage', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage repoStorageOnly /></LazyPage>)] },
         { path: 'operations/incomplete-documents', children: [guardedPage(operationalRoles, <LazyPage><OperationsPage documentFollowUp /></LazyPage>)] },
-        { path: 'operations/driver-commissions', children: [guardedPage(operationalRoles, <LazyPage><DriverCommissionOperationalPage /></LazyPage>)] },
+        { path: 'operations/driver-commissions', children: [guardedPage(driverCommissionSubmitRoles, <LazyPage><DriverCommissionOperationalPage /></LazyPage>)] },
         { path: 'operations/fleet-assignment', children: [guardedPage(operationalRoles, <LazyPage><FleetAssignmentPage /></LazyPage>)] },
         { path: 'operations/hino-connect', children: [guardedPage(operationalRoles, <LazyPage><HinoTelematicsPage /></LazyPage>)] },
         { path: 'driver-commissions', children: [guardedPage(driverCommissionRoles, <DriverCommissionRedirect />)] },

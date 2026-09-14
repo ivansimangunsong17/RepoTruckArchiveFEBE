@@ -13,12 +13,16 @@ describe('hasPermission', () => {
 
   it('role non-admin tetap mengikuti permission matrix', () => {
     expect(hasPermission({ role: USER_ROLES.OPERATIONAL }, 'operations.update')).toBe(true);
+    expect(hasPermission({ role: USER_ROLES.OPERATIONAL }, 'driver_commission.submit')).toBe(true);
+    expect(hasPermission({ role: USER_ROLES.SALES }, 'driver_commission.submit')).toBe(true);
+    expect(hasPermission({ role: USER_ROLES.SALES }, 'operations.update')).toBe(false);
     expect(hasPermission({ role: USER_ROLES.OPERATIONAL }, 'future.permission.manage')).toBe(false);
   });
 
   it('memberikan finance akses baca laporan', () => {
     expect(hasPermission({ role: USER_ROLES.FINANCE }, 'reports.read')).toBe(true);
     expect(hasPermission(USER_ROLES.FINANCE, 'reports.read')).toBe(true);
+    expect(hasPermission({ role: USER_ROLES.FINANCE }, 'finance.operational_fund.reopen')).toBe(true);
   });
 
   it('memberikan viewer akses Finance read only', () => {

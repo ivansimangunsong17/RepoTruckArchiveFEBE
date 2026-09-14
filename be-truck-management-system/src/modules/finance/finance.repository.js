@@ -5028,6 +5028,15 @@ export async function markInvoiceDocumentUploaded(id, patch = {}) {
 }
 
 function mapSalesOrderPaymentRow(row = {}) {
+  const proofAttachment = row.proof_attachment_id
+    ? {
+        id: row.proof_attachment_id,
+        name: row.proof_file_name || 'Bukti Pembayaran',
+        size: row.proof_file_size == null ? 0 : Number(row.proof_file_size),
+        type: row.proof_mime_type || '',
+        path: row.proof_attachment_id,
+      }
+    : null;
   return {
     id: row.id,
     salesOrderId: row.sales_order_id,
@@ -5037,6 +5046,7 @@ function mapSalesOrderPaymentRow(row = {}) {
     note: row.note || '',
     recordedByName: row.recorded_by_name || '',
     proofAttachmentId: row.proof_attachment_id || null,
+    proofAttachment,
     createdAt: row.created_at,
     voidedAt: row.voided_at || null,
     voidedByName: row.voided_by_name || '',
@@ -5047,11 +5057,16 @@ function mapSalesOrderPaymentRow(row = {}) {
 export async function listSalesOrderPayments(salesOrderId) {
   const result = await query(
     `
-      select id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at,
-        proof_attachment_id, voided_at, voided_by_name, void_reason
-      from sales_order_payments
-      where sales_order_id = $1
-      order by payment_date desc, created_at desc
+      select sop.id, sop.sales_order_id, sop.amount, sop.payment_date, sop.reference_number, sop.note,
+        sop.recorded_by_name, sop.created_at, sop.proof_attachment_id,
+        proof.file_name as proof_file_name,
+        proof.mime_type as proof_mime_type,
+        proof.file_size as proof_file_size,
+        sop.voided_at, sop.voided_by_name, sop.void_reason
+      from sales_order_payments sop
+      left join attachments proof on proof.id = sop.proof_attachment_id
+      where sop.sales_order_id = $1
+      order by sop.payment_date desc, sop.created_at desc
     `,
     [salesOrderId],
   );
@@ -5096,6 +5111,202 @@ function ensurePaymentPayloadMatches(existingRow, payload) {
   return Number(existingRow.amount) === Number(payload.amount)
     && String(existingRow.reference_number || '') === String(payload.referenceNumber || '')
     && String(existingRow.note || '') === String(payload.note || '');
+}
+
+export async function recordCustomerInvoicePayments(payload = {}) {
+  return withTransaction(async (client) => {
+    if (!payload.proofAttachmentId) {
+      const error = new Error('Bukti transfer wajib dilampirkan sebelum pembayaran bisa dicatat.');
+      error.statusCode = 400;
+      error.code = 'SALES_ORDER_PAYMENT_PROOF_REQUIRED';
+      throw error;
+    }
+
+    const allocations = Array.isArray(payload.allocations) ? payload.allocations : [];
+    if (!allocations.length) {
+      const error = new Error('Minimal satu invoice wajib dipilih untuk alokasi pembayaran.');
+      error.statusCode = 400;
+      error.code = 'CUSTOMER_PAYMENT_ALLOCATIONS_REQUIRED';
+      throw error;
+    }
+
+    const totalAmount = Number(payload.totalAmount || 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      const error = new Error('Total transfer wajib lebih dari 0.');
+      error.statusCode = 400;
+      error.code = 'CUSTOMER_PAYMENT_TOTAL_AMOUNT_INVALID';
+      throw error;
+    }
+
+    const allocationTotal = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
+    if (!Number.isFinite(allocationTotal) || allocationTotal <= 0) {
+      const error = new Error('Total alokasi pembayaran wajib lebih dari 0.');
+      error.statusCode = 400;
+      error.code = 'CUSTOMER_PAYMENT_ALLOCATION_AMOUNT_INVALID';
+      throw error;
+    }
+    if (allocationTotal > totalAmount) {
+      const error = new Error('Total alokasi tidak boleh melebihi total transfer.');
+      error.statusCode = 409;
+      error.code = 'CUSTOMER_PAYMENT_ALLOCATION_EXCEEDS_TRANSFER';
+      throw error;
+    }
+
+    const idempotencyBase = payload.idempotencyKey || null;
+    const payments = [];
+    const summaries = [];
+
+    for (const allocation of allocations) {
+      const salesOrderId = String(allocation.salesOrderId || allocation.id || '').trim();
+      const amount = Number(allocation.amount || 0);
+      if (!salesOrderId || !Number.isFinite(amount) || amount <= 0) {
+        const error = new Error('Setiap alokasi wajib memiliki invoice dan nominal lebih dari 0.');
+        error.statusCode = 400;
+        error.code = 'CUSTOMER_PAYMENT_ALLOCATION_INVALID';
+        throw error;
+      }
+
+      const locked = await client.query(
+        'select id, status, invoice_number, billing_status from sales_orders where id = $1 for update',
+        [salesOrderId],
+      );
+      if (!locked.rows[0]) {
+        const error = new Error('Sales Order tidak ditemukan.');
+        error.statusCode = 404;
+        error.code = 'SALES_ORDER_NOT_FOUND';
+        throw error;
+      }
+      if (locked.rows[0].status !== 'completed') {
+        const error = new Error('Pembayaran hanya bisa dicatat setelah Sales Order selesai.');
+        error.statusCode = 400;
+        error.code = 'SALES_ORDER_PAYMENT_ORDER_NOT_COMPLETED';
+        throw error;
+      }
+      if (!String(locked.rows[0].invoice_number || '').trim()) {
+        const error = new Error('Nomor invoice belum tersedia. Input nomor invoice terlebih dahulu sebelum mencatat pembayaran.');
+        error.statusCode = 409;
+        error.code = 'SALES_ORDER_PAYMENT_INVOICE_NUMBER_REQUIRED';
+        throw error;
+      }
+
+      const idempotencyKey = idempotencyBase ? `${idempotencyBase}:${salesOrderId}` : null;
+      const allocationPayload = {
+        amount,
+        referenceNumber: payload.referenceNumber || null,
+        note: payload.note || null,
+      };
+      if (idempotencyKey) {
+        const existing = await client.query(
+          'select * from sales_order_payments where idempotency_key = $1 limit 1',
+          [idempotencyKey],
+        );
+        if (existing.rows[0]) {
+          if (!ensurePaymentPayloadMatches(existing.rows[0], allocationPayload)) {
+            const error = new Error('Percobaan submit ini memakai kunci yang sama dengan pembayaran lain yang datanya berbeda. Silakan catat sebagai entri baru.');
+            error.statusCode = 409;
+            error.code = 'SALES_ORDER_PAYMENT_IDEMPOTENCY_KEY_MISMATCH';
+            throw error;
+          }
+          payments.push(mapSalesOrderPaymentRow(existing.rows[0]));
+          summaries.push({ salesOrderId, ...(await computeSalesOrderPaymentSummary(client, salesOrderId)) });
+          continue;
+        }
+      }
+
+      const invoiceResult = await client.query(
+        `
+          ${invoiceOrdersCte()}
+          select billing_amount
+          from invoice_orders
+          where id = $1
+          limit 1
+        `,
+        [salesOrderId],
+      );
+      if (!invoiceResult.rows[0]) {
+        const error = new Error('Sales Order ini belum siap ditagihkan. Pastikan dokumen lengkap dan sudah diverifikasi Finance.');
+        error.statusCode = 409;
+        error.code = 'SALES_ORDER_PAYMENT_NOT_INVOICEABLE';
+        throw error;
+      }
+      const billingAmount = Number(invoiceResult.rows[0].billing_amount || 0);
+      const paidResult = await client.query(
+        'select coalesce(sum(amount), 0)::numeric as total_paid from sales_order_payments where sales_order_id = $1 and voided_at is null',
+        [salesOrderId],
+      );
+      const totalPaid = Number(paidResult.rows[0].total_paid || 0);
+      const remaining = billingAmount - totalPaid;
+      if (remaining <= 0) {
+        const error = new Error('Sales Order ini sudah lunas.');
+        error.statusCode = 409;
+        error.code = 'SALES_ORDER_PAYMENT_ALREADY_PAID';
+        throw error;
+      }
+      if (amount > remaining) {
+        const error = new Error(`Nominal pembayaran melebihi sisa outstanding. Sisa outstanding Rp ${remaining.toLocaleString('id-ID')}.`);
+        error.statusCode = 409;
+        error.code = 'SALES_ORDER_PAYMENT_EXCEEDS_OUTSTANDING';
+        throw error;
+      }
+
+      const inserted = await client.query(
+        `
+          insert into sales_order_payments (
+            sales_order_id, amount, payment_date, reference_number, proof_attachment_id, note,
+            recorded_by_user_id, recorded_by_name, idempotency_key
+          )
+          values ($1, $2, coalesce($3::date, (now() at time zone 'Asia/Jakarta')::date), $4, $5, $6, $7, $8, $9)
+          returning id, sales_order_id, amount, payment_date, reference_number, note, recorded_by_name, created_at, proof_attachment_id
+        `,
+        [
+          salesOrderId,
+          amount,
+          payload.paymentDate || null,
+          payload.referenceNumber || null,
+          payload.proofAttachmentId || null,
+          payload.note || null,
+          payload.actorUserId || null,
+          payload.actorName || 'Finance',
+          idempotencyKey,
+        ],
+      );
+
+      const newTotalPaid = totalPaid + amount;
+      const nextBillingStatus = newTotalPaid >= billingAmount
+        ? 'lunas'
+        : (locked.rows[0].billing_status === 'lunas' ? 'menunggu_pembayaran' : locked.rows[0].billing_status);
+      if (nextBillingStatus !== locked.rows[0].billing_status) {
+        await client.query(
+          `
+            update sales_orders
+            set billing_status = $2,
+                updated_by_name = $3,
+                updated_at = now()
+            where id = $1
+          `,
+          [salesOrderId, nextBillingStatus, payload.actorName || 'Finance'],
+        );
+      }
+
+      payments.push(mapSalesOrderPaymentRow(inserted.rows[0]));
+      summaries.push({
+        salesOrderId,
+        billingAmount,
+        totalPaid: newTotalPaid,
+        outstandingAmount: Math.max(billingAmount - newTotalPaid, 0),
+        billingStatus: nextBillingStatus,
+      });
+    }
+
+    return {
+      payments,
+      summaries,
+      totalAmount,
+      allocatedAmount: allocationTotal,
+      unallocatedAmount: Math.max(totalAmount - allocationTotal, 0),
+      proofAttachmentId: payload.proofAttachmentId,
+    };
+  });
 }
 
 // Fondasi Customer Outstanding (Phase 1): satu-satunya jalur yang boleh membawa Sales Order

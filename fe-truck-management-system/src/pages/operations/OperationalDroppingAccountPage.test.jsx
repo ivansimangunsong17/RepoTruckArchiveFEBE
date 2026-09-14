@@ -250,6 +250,7 @@ describe('OperationalDroppingAccountPage', () => {
     const user = userEvent.setup();
     render(<OperationalDroppingAccountPage />);
 
+    const selectedBatchDate = screen.getByLabelText('Batch rekening dropping').value;
     await user.click(await screen.findByRole('button', { name: /catat biaya/i }));
     await screen.findByRole('dialog', { name: /catat biaya penggunaan saldo/i });
     await user.click(screen.getByLabelText(/^ritasi$/i));
@@ -279,6 +280,7 @@ describe('OperationalDroppingAccountPage', () => {
         description: 'Parkir depo',
         recipientName: 'Petugas Depo',
         paymentStatus: 'sudah_dibayar',
+        paidAt: selectedBatchDate,
         proofFile: null,
         updatedBy: 'Fitri Operational',
       }));
@@ -290,6 +292,7 @@ describe('OperationalDroppingAccountPage', () => {
     const user = userEvent.setup();
     render(<OperationalDroppingAccountPage />);
 
+    const selectedBatchDate = screen.getByLabelText('Batch rekening dropping').value;
     await user.click(await screen.findByRole('button', { name: /catat biaya/i }));
     const formDialog = await screen.findByRole('dialog', { name: /catat biaya penggunaan saldo/i });
     await user.click(within(formDialog).getByLabelText(/^ritasi$/i));
@@ -313,6 +316,7 @@ describe('OperationalDroppingAccountPage', () => {
         expenseGroup: 'operational',
         amount: 50000,
         description: 'Uang Admin TF',
+        paidAt: selectedBatchDate,
         proofFile: null,
       }));
     });

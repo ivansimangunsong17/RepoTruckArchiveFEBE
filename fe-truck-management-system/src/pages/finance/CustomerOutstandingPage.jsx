@@ -7,11 +7,13 @@ import { USER_ROLES } from '../../constants/roles';
 import PageHeader from '../../components/common/PageHeader';
 import EmptyState from '../../components/common/EmptyState';
 import AttachmentUploadField from '../../components/common/AttachmentUploadField';
+import DocumentLink from '../../components/common/DocumentLink';
 import SearchBar from './shared/SearchBar';
 import {
   fetchFinanceInvoicePayments,
   fetchFinanceOutstanding,
   fetchFinanceOutstandingByCustomer,
+  recordFinanceCustomerPayment,
   recordFinanceInvoicePayment,
   voidFinanceInvoicePayment,
 } from '../../services/finance/financeService';
@@ -82,6 +84,16 @@ const AGING_TONE = {
   unknown: 'border-slate-200 bg-slate-50 text-slate-500',
 };
 
+function paymentProofFile(payment = {}) {
+  if (payment.proofAttachment) return payment.proofAttachment;
+  if (!payment.proofAttachmentId) return null;
+  return {
+    id: payment.proofAttachmentId,
+    name: 'Bukti Pembayaran',
+    path: payment.proofAttachmentId,
+  };
+}
+
 function customerRollupCsvRows(rows) {
   return rows.map((row) => [
     row.customer || '-',
@@ -120,7 +132,7 @@ function ModalPortal({ children }) {
   return createPortal(children, document.body);
 }
 
-function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment, onClose, onRecordPayment }) {
+function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment, onClose, onRecordPayment, onRecordCustomerPayment }) {
   const [detailQuery, setDetailQuery] = useState('');
 
   useEffect(() => {
@@ -160,9 +172,16 @@ function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment,
 
           <div className="master-form-sections min-h-0 flex-1 overflow-y-auto">
             <div className="master-fieldset">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Total Piutang Belum Lunas</span>
-                <strong className="text-2xl font-black normal-case text-amber-700">{formatCurrency(customer.totalOutstandingAmount)}</strong>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-black uppercase tracking-wide text-slate-400">Total Piutang Belum Lunas</span>
+                  <strong className="mt-1 block text-2xl font-black normal-case text-amber-700">{formatCurrency(customer.totalOutstandingAmount)}</strong>
+                </div>
+                {canRecordPayment && rows.length ? (
+                  <button className="primary-button" type="button" onClick={() => onRecordCustomerPayment(customer, rows)}>
+                    Catat Pembayaran Customer
+                  </button>
+                ) : null}
               </div>
             </div>
             {error ? <div className="alert error">{error}</div> : null}
@@ -240,6 +259,167 @@ function CustomerDetailModal({ customer, rows, loading, error, canRecordPayment,
   );
 }
 
+function CustomerBulkPaymentModal({ customer, rows, form, busy, error, onChange, onClose, onConfirm }) {
+  if (!customer) return null;
+  const allocations = form.allocations || {};
+  const allocatedAmount = rows.reduce((sum, row) => sum + Number(allocations[row.id] || 0), 0);
+  const totalAmount = Number(form.totalAmount || 0);
+  const unallocatedAmount = Math.max(totalAmount - allocatedAmount, 0);
+
+  function updateAllocation(id, value) {
+    onChange({
+      ...form,
+      allocations: {
+        ...allocations,
+        [id]: value,
+      },
+    });
+  }
+
+  function fillOutstanding() {
+    const nextAllocations = {};
+    let total = 0;
+    for (const row of rows) {
+      const amount = Number(row.outstandingAmount || 0);
+      if (amount > 0) {
+        nextAllocations[row.id] = String(amount);
+        total += amount;
+      }
+    }
+    onChange({ ...form, totalAmount: String(total), allocations: nextAllocations });
+  }
+
+  return (
+    <ModalPortal>
+      <div className="master-modal-backdrop" role="presentation" onMouseDown={onClose}>
+        <section className="master-modal max-w-5xl" role="dialog" aria-modal="true" aria-label={`Pembayaran customer ${customer.customer}`} onMouseDown={(event) => event.stopPropagation()}>
+          <form
+            className="master-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onConfirm();
+            }}
+          >
+            <div className="master-form-heading">
+              <div className="min-w-0">
+                <span>Pembayaran Customer</span>
+                <h2 id="customer-bulk-payment-title">{customer.customer}</h2>
+                <p>Satu bukti transfer bisa dialokasikan ke beberapa invoice.</p>
+              </div>
+              <button className="modal-close-button" type="button" onClick={onClose} aria-label="Tutup pembayaran customer" disabled={busy}>
+                <X size={17} />
+              </button>
+            </div>
+
+            <div className="master-form-sections">
+              <fieldset className="master-fieldset">
+                <legend>Transfer</legend>
+                <div className="master-form-grid">
+                  <label className="master-field">
+                    <span>Total Transfer</span>
+                    <input
+                      inputMode="numeric"
+                      min="1"
+                      onChange={(event) => onChange({ ...form, totalAmount: event.target.value })}
+                      placeholder="Contoh: 10000000"
+                      type="number"
+                      value={form.totalAmount}
+                    />
+                  </label>
+                  <label className="master-field">
+                    <span>Tanggal Pembayaran</span>
+                    <input
+                      onChange={(event) => onChange({ ...form, paymentDate: event.target.value })}
+                      type="date"
+                      value={form.paymentDate}
+                    />
+                  </label>
+                  <label className="master-field">
+                    <span>Nomor Referensi Transfer</span>
+                    <input
+                      maxLength={80}
+                      onChange={(event) => onChange({ ...form, referenceNumber: event.target.value })}
+                      placeholder="Contoh: TRF-20260914-001"
+                      value={form.referenceNumber}
+                    />
+                  </label>
+                  <label className="master-field span-full">
+                    <span>Catatan</span>
+                    <textarea
+                      maxLength={500}
+                      onChange={(event) => onChange({ ...form, note: event.target.value })}
+                      rows={2}
+                      value={form.note}
+                    />
+                  </label>
+                  <div className="master-field span-full">
+                    <AttachmentUploadField
+                      compact
+                      helper="Wajib. Format PDF, JPG, PNG."
+                      id="customer-bulk-payment-proof"
+                      label="Bukti Transfer"
+                      onClear={() => onChange({ ...form, proofFile: null })}
+                      onSelect={(file, validationError) => {
+                        if (validationError) return;
+                        onChange({ ...form, proofFile: file });
+                      }}
+                      title={form.proofFile?.name ? 'Ganti Bukti' : 'Pilih Bukti'}
+                      value={form.proofFile}
+                    />
+                  </div>
+                </div>
+              </fieldset>
+
+              <fieldset className="master-fieldset">
+                <legend>Alokasi Invoice</legend>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-slate-500">Isi nominal pembayaran untuk invoice yang tercover transfer ini.</p>
+                  <button className="secondary-button" type="button" onClick={fillOutstanding}>Isi Semua Outstanding</button>
+                </div>
+                <div className="grid gap-2">
+                  {rows.map((row) => (
+                    <div className="grid gap-2 rounded-md border border-slate-100 bg-slate-50 p-3 md:grid-cols-[1fr_160px]" key={row.id}>
+                      <div className="min-w-0">
+                        <strong className="block truncate text-sm text-slate-950">{row.invoiceNumber || row.soNumber}</strong>
+                        <span className="block text-xs font-semibold text-slate-500">{row.soNumber} - Outstanding {formatCurrency(row.outstandingAmount)}</span>
+                      </div>
+                      <label className="master-field">
+                        <span>Alokasi</span>
+                        <input
+                          inputMode="numeric"
+                          max={row.outstandingAmount}
+                          min="0"
+                          onChange={(event) => updateAllocation(row.id, event.target.value)}
+                          type="number"
+                          value={allocations[row.id] || ''}
+                        />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-white p-3 text-xs font-bold text-slate-600 md:grid-cols-3">
+                  <span>Total Transfer: <strong className="text-slate-950">{formatCurrency(totalAmount)}</strong></span>
+                  <span>Dialokasikan: <strong className="text-slate-950">{formatCurrency(allocatedAmount)}</strong></span>
+                  <span>Sisa Transfer: <strong className={unallocatedAmount ? 'text-amber-700' : 'text-emerald-700'}>{formatCurrency(unallocatedAmount)}</strong></span>
+                </div>
+              </fieldset>
+
+              {error ? <div className="alert error">{error}</div> : null}
+            </div>
+
+            <div className="master-form-actions">
+              <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Batal</button>
+              <button className="primary-button" type="submit" disabled={busy || !form.proofFile || allocatedAmount <= 0}>
+                {busy ? 'Menyimpan...' : 'Simpan Alokasi'}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </ModalPortal>
+  );
+}
+
 function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onChange, form, onClose, onConfirm, canVoidPayment, voidBusyId, voidError, onVoidPayment }) {
   const [voidingId, setVoidingId] = useState(null);
   const [voidReason, setVoidReason] = useState('');
@@ -291,13 +471,25 @@ function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onCha
                   </div>
                 </div>
                 <div className="alert warning mt-3">
-                  Pembayaran ini akan mencatat pelunasan penuh sebesar <strong>{formatCurrency(row.outstandingAmount)}</strong> (sisa outstanding saat ini). Nominal tidak diinput manual supaya tidak ada risiko salah ketik &mdash; outstanding di sini tidak dicicil.
+                  Pembayaran boleh dicatat sebagian. Invoice baru dianggap lunas jika total pembayaran sudah menutup seluruh sisa outstanding.
                 </div>
               </fieldset>
 
               <fieldset className="master-fieldset">
                 <legend>Detail Pembayaran</legend>
                 <div className="master-form-grid">
+                  <label className="master-field">
+                    <span>Nominal Dibayar</span>
+                    <input
+                      inputMode="numeric"
+                      min="1"
+                      max={row.outstandingAmount}
+                      onChange={(event) => onChange({ ...form, amount: event.target.value })}
+                      placeholder="Contoh: 1000000"
+                      type="number"
+                      value={form.amount}
+                    />
+                  </label>
                   <label className="master-field">
                     <span>Tanggal Pembayaran</span>
                     <input
@@ -358,6 +550,13 @@ function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onCha
                             <span className="block text-slate-500">{formatDate(payment.paymentDate)} {payment.referenceNumber ? `- ${payment.referenceNumber}` : ''}</span>
                           </div>
                           <div className="flex items-center gap-2">
+                            {paymentProofFile(payment) ? (
+                              <DocumentLink
+                                className="rounded-md border border-sky-200 bg-white px-2 py-1 text-[10px] font-black uppercase text-sky-700 hover:bg-sky-50"
+                                file={paymentProofFile(payment)}
+                                label="Lihat Bukti"
+                              />
+                            ) : null}
                             {payment.voidedAt ? (
                               <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
                             ) : (
@@ -413,7 +612,7 @@ function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onCha
             <div className="master-form-actions">
               <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Batal</button>
               <button className="primary-button" disabled={busy || Number(row.outstandingAmount) <= 0 || !form.proofFile} type="submit">
-                {busy ? 'Menyimpan...' : 'Tandai Lunas'}
+                {busy ? 'Menyimpan...' : 'Simpan Pembayaran'}
               </button>
             </div>
           </form>
@@ -450,8 +649,12 @@ function CustomerOutstandingPage() {
   const [selectedRow, setSelectedRow] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
-  const [paymentForm, setPaymentForm] = useState({ paymentDate: '', referenceNumber: '', note: '', proofFile: null, idempotencyKey: crypto.randomUUID() });
+  const [paymentForm, setPaymentForm] = useState({ amount: '', paymentDate: '', referenceNumber: '', note: '', proofFile: null, idempotencyKey: crypto.randomUUID() });
   const [paymentError, setPaymentError] = useState('');
+  const [bulkPaymentCustomer, setBulkPaymentCustomer] = useState(null);
+  const [bulkPaymentRows, setBulkPaymentRows] = useState([]);
+  const [bulkPaymentForm, setBulkPaymentForm] = useState({ totalAmount: '', paymentDate: '', referenceNumber: '', note: '', proofFile: null, allocations: {}, idempotencyKey: crypto.randomUUID() });
+  const [bulkPaymentError, setBulkPaymentError] = useState('');
   const [saving, setSaving] = useState(false);
   const [voidBusyId, setVoidBusyId] = useState('');
   const [voidError, setVoidError] = useState('');
@@ -512,6 +715,7 @@ function CustomerOutstandingPage() {
     setSelectedRow(row);
     setPaymentError('');
     setPaymentForm({
+      amount: row.outstandingAmount ? String(row.outstandingAmount) : '',
       paymentDate: new Date().toISOString().slice(0, 10),
       referenceNumber: '',
       note: '',
@@ -531,13 +735,94 @@ function CustomerOutstandingPage() {
     setPaymentError('');
   }
 
+  function openCustomerPaymentModal(customer, rows) {
+    setBulkPaymentCustomer(customer);
+    setBulkPaymentRows(rows.filter((row) => Number(row.outstandingAmount || 0) > 0));
+    setBulkPaymentError('');
+    setBulkPaymentForm({
+      totalAmount: '',
+      paymentDate: new Date().toISOString().slice(0, 10),
+      referenceNumber: '',
+      note: '',
+      proofFile: null,
+      allocations: {},
+      idempotencyKey: crypto.randomUUID(),
+    });
+  }
+
+  function closeCustomerPaymentModal() {
+    setBulkPaymentCustomer(null);
+    setBulkPaymentRows([]);
+    setBulkPaymentError('');
+  }
+
+  async function confirmCustomerPayment() {
+    if (!bulkPaymentCustomer) return;
+    const totalAmount = Number(bulkPaymentForm.totalAmount || 0);
+    const allocations = bulkPaymentRows
+      .map((row) => ({ salesOrderId: row.id, amount: Number(bulkPaymentForm.allocations?.[row.id] || 0) }))
+      .filter((allocation) => allocation.amount > 0);
+    const allocatedAmount = allocations.reduce((sum, allocation) => sum + allocation.amount, 0);
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      setBulkPaymentError('Total transfer wajib lebih dari Rp 0.');
+      return;
+    }
+    if (!allocations.length || allocatedAmount <= 0) {
+      setBulkPaymentError('Minimal satu invoice wajib dialokasikan.');
+      return;
+    }
+    if (allocatedAmount > totalAmount) {
+      setBulkPaymentError('Total alokasi tidak boleh melebihi total transfer.');
+      return;
+    }
+    const overAllocated = allocations.find((allocation) => {
+      const row = bulkPaymentRows.find((item) => item.id === allocation.salesOrderId);
+      return allocation.amount > Number(row?.outstandingAmount || 0);
+    });
+    if (overAllocated) {
+      setBulkPaymentError('Alokasi tidak boleh melebihi outstanding invoice.');
+      return;
+    }
+    if (!bulkPaymentForm.proofFile) {
+      setBulkPaymentError('Bukti transfer wajib dilampirkan.');
+      return;
+    }
+
+    setSaving(true);
+    setBulkPaymentError('');
+    try {
+      await recordFinanceCustomerPayment({
+        totalAmount,
+        paymentDate: bulkPaymentForm.paymentDate || undefined,
+        referenceNumber: bulkPaymentForm.referenceNumber || undefined,
+        note: bulkPaymentForm.note || undefined,
+        allocations,
+        idempotencyKey: bulkPaymentForm.idempotencyKey,
+      }, bulkPaymentForm.proofFile);
+      notify({ title: 'Pembayaran customer tercatat', message: `${bulkPaymentCustomer.customer} - ${allocations.length} invoice diperbarui.` });
+      const customerName = bulkPaymentCustomer.customer;
+      closeCustomerPaymentModal();
+      await loadData();
+      if (detailCustomer) loadDetailRows(customerName);
+    } catch (err) {
+      if (err.payload?.error?.code === 'SALES_ORDER_PAYMENT_IDEMPOTENCY_KEY_MISMATCH') {
+        setBulkPaymentForm((current) => ({ ...current, idempotencyKey: crypto.randomUUID() }));
+      }
+      setBulkPaymentError(err.message || 'Pembayaran customer gagal disimpan.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function confirmPayment() {
     if (!selectedRow) return;
-    // Nominal selalu diambil dari sisa outstanding saat ini (bukan input manual) supaya tidak ada
-    // risiko salah ketik jumlah pelunasan.
-    const amount = Number(selectedRow.outstandingAmount);
+    const amount = Number(paymentForm.amount || 0);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentError('Sales order ini tidak memiliki sisa outstanding untuk dilunasi.');
+      setPaymentError('Nominal pembayaran wajib lebih dari Rp 0.');
+      return;
+    }
+    if (amount > Number(selectedRow.outstandingAmount || 0)) {
+      setPaymentError(`Nominal pembayaran melebihi sisa outstanding ${formatCurrency(selectedRow.outstandingAmount)}.`);
       return;
     }
     if (!paymentForm.proofFile) {
@@ -774,6 +1059,18 @@ function CustomerOutstandingPage() {
         canRecordPayment={canRecordPayment}
         onClose={closeDetailModal}
         onRecordPayment={openPaymentModal}
+        onRecordCustomerPayment={openCustomerPaymentModal}
+      />
+
+      <CustomerBulkPaymentModal
+        customer={bulkPaymentCustomer}
+        rows={bulkPaymentRows}
+        form={bulkPaymentForm}
+        busy={saving}
+        error={bulkPaymentError}
+        onChange={setBulkPaymentForm}
+        onClose={closeCustomerPaymentModal}
+        onConfirm={confirmCustomerPayment}
       />
 
       <RecordPaymentModal

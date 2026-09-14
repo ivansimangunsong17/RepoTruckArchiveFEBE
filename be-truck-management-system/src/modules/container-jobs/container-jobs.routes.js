@@ -9,6 +9,7 @@ import {
   listContainerJobsController,
   moveDroppingExpenseController,
   requestCancelContainerJobController,
+  resetMisassignedContainerJobController,
   reviewCancelContainerJobController,
   updateContainerJobController,
   updateContainerJobExpenseProofController,
@@ -101,6 +102,12 @@ export const containerJobRoutes = [
     path: '/api/container-jobs/:id/spk',
     permission: 'container_job.update',
     handler: generateContainerJobSpkController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/reset-assignment',
+    permission: 'container_job.update',
+    handler: resetMisassignedContainerJobController,
   },
   {
     method: 'PATCH',

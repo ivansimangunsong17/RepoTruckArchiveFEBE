@@ -30,6 +30,7 @@ import {
   rejectFinanceCorrection,
   approveOperationalFundRequest,
   reconcileContainerJobExpense,
+  recordCustomerInvoicePaymentAllocations,
   recordDebitNotePaymentForOrder,
   recordInvoicePayment,
   rejectOperationalFundRequest,
@@ -334,6 +335,25 @@ export async function recordInvoicePaymentController(request, response) {
     },
   });
   sendSuccess(response, result, 'Pembayaran berhasil dicatat.');
+}
+
+export async function recordCustomerInvoicePaymentController(request, response) {
+  const result = await recordCustomerInvoicePaymentAllocations(request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_RECORD_CUSTOMER_INVOICE_PAYMENT',
+    module: 'finance',
+    entityType: 'customer_payment',
+    entityId: result?.payments?.[0]?.id || null,
+    afterData: result,
+    metadata: {
+      totalAmount: result?.totalAmount,
+      allocatedAmount: result?.allocatedAmount,
+      unallocatedAmount: result?.unallocatedAmount,
+      invoiceCount: result?.payments?.length || 0,
+      proofAttachmentId: result?.proofAttachmentId || null,
+    },
+  });
+  sendSuccess(response, result, 'Pembayaran customer berhasil dialokasikan.');
 }
 
 export async function invoicePaymentsController(request, response) {

@@ -1130,6 +1130,7 @@ function OperationalDroppingAccountPage() {
         ...addExpenseForm,
         description,
         amount,
+        paidAt: batchDate,
         updatedBy: actorName,
       });
       setAddExpenseOpen(false);

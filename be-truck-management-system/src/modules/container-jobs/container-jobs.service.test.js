@@ -22,6 +22,7 @@ const {
   isInitialContainerNumberInput,
   isOtherCostLockedForRepoPickup,
   isRepoCancellationLockedForOperational,
+  resetMisassignedContainerJob,
   updateContainerJobExpenseProof,
 } = await import('./container-jobs.service.js');
 const {
@@ -251,6 +252,17 @@ test('sales document-only dikenali untuk upload dokumen container job historical
     role: 'admin',
     permissions: ['container_job.update', 'container_job.document.update', 'historical_entry.manage'],
   }), false);
+});
+
+test('reset ritasi salah assign hanya untuk operational/admin dan wajib alasan', () => {
+  assert.throws(
+    () => resetMisassignedContainerJob('job-1', { reason: 'Salah party' }, { role: 'sales', name: 'Sales Test' }),
+    (error) => error.code === 'CONTAINER_JOB_RESET_FORBIDDEN' && error.statusCode === 403,
+  );
+  assert.throws(
+    () => resetMisassignedContainerJob('job-1', { reason: 'pendek' }, { role: 'operational', name: 'Ops Test' }),
+    (error) => error.code === 'CONTAINER_JOB_RESET_REASON_REQUIRED' && error.statusCode === 400,
+  );
 });
 
 test('sales document-only hanya boleh mengirim field dokumen container job', () => {
