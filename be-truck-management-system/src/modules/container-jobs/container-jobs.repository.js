@@ -1396,6 +1396,64 @@ export async function findContainerJobsPage(options = {}) {
       )
     : { rows: [{ total: 0 }] };
 
+  // Ringkasan per SO (total/selesai/jalan/belum) SENGAJA dihitung dari SELURUH container job milik
+  // SO tersebut, bukan dari `rowsResult` yang sudah kena filter status/tanggal/dsb -- supaya badge
+  // ringkasan tetap menampilkan progres asli SO itu walau daftar baris di bawahnya sedang difilter
+  // (mis. tab "Belum Jalan" tidak boleh membuat badge ikut seolah-olah SO itu cuma py container itu saja).
+  const groupOrderIds = groupByOrder
+    ? [...new Set(rowsResult.rows.map((row) => row.sales_order_id))]
+    : [];
+  const groupStatsResult = groupOrderIds.length
+    ? await query(
+        `
+          select
+            cj.sales_order_id,
+            count(*)::int as total,
+            count(*) filter (where cj.status = 'completed')::int as completed,
+            count(*) filter (
+              where cj.status in ('running', 'inap', 'repo_stored')
+                or (cj.repo_stored_at is not null and cj.repo_picked_up_at is null)
+            )::int as running,
+            count(*) filter (where cj.status = 'cancelled')::int as cancelled
+          from container_jobs cj
+          where cj.sales_order_id = any($1::uuid[])
+          group by cj.sales_order_id
+        `,
+        [groupOrderIds],
+      )
+    : { rows: [] };
+  const partyCountsResult = groupOrderIds.length
+    ? await query(
+        `
+          select
+            cj.sales_order_id,
+            coalesce(cj.container_size, 'Lainnya') as size,
+            count(*)::int as count
+          from container_jobs cj
+          where cj.sales_order_id = any($1::uuid[])
+          group by cj.sales_order_id, coalesce(cj.container_size, 'Lainnya')
+        `,
+        [groupOrderIds],
+      )
+    : { rows: [] };
+  const groupStats = groupStatsResult.rows.reduce((map, row) => {
+    const waiting = Math.max(0, row.total - row.completed - row.running - row.cancelled);
+    map[row.sales_order_id] = {
+      total: row.total,
+      completed: row.completed,
+      running: row.running,
+      waiting,
+      cancelled: row.cancelled,
+      partyCounts: {},
+    };
+    return map;
+  }, {});
+  partyCountsResult.rows.forEach((row) => {
+    if (groupStats[row.sales_order_id]) {
+      groupStats[row.sales_order_id].partyCounts[row.size] = row.count;
+    }
+  });
+
   const jobIds = rowsResult.rows.map((row) => row.id);
   const attachmentResult = jobIds.length
     ? await query(
@@ -1432,6 +1490,7 @@ export async function findContainerJobsPage(options = {}) {
     totalGroups,
     counts,
     rpujCounts,
+    groupStats,
   };
 }
 

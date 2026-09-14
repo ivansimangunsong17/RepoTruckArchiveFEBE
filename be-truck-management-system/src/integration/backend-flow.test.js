@@ -7705,4 +7705,84 @@ if (!hasDatabase) {
     assert.ok(openPeriodItem, 'ritasi susulan periode terbuka harus ikut masuk batch komisi periode tersebut');
     assert.equal(openPeriodItem.isBackdateCommission, false);
   });
+
+  // Test ini juga sengaja ditaruh top-level TERPISAH di akhir file, alasan sama seperti dua test
+  // di atas (state activity log/container job bersama yang dipakai test lain yang berjalan
+  // berurutan). Login sendiri, TIDAK memanggil seedUsers() lagi.
+  test('operational: ringkasan per SO (total/selesai/jalan/belum) tetap menghitung SELURUH container walau daftar barisnya sedang difilter status', async () => {
+    const groupStatsAdminLogin = await login(users.admin.email);
+    const groupStatsSalesLogin = await login(users.sales.email);
+    const groupStatsAdminToken = groupStatsAdminLogin.body.data.token;
+    const groupStatsSalesToken = groupStatsSalesLogin.body.data.token;
+
+    const groupStatsSoNumber = `SO-${runId}-GROUPSTATS`.toUpperCase();
+    const groupStatsOrder = await api('/api/sales-orders', {
+      method: 'POST',
+      token: groupStatsSalesToken,
+      body: salesOrderPayload({
+        soNumber: groupStatsSoNumber,
+        containers: [
+          { id: '', containerNumber: `${groupStatsSoNumber}CNTR1`, size: '20FT', type: 'Dry', status: 'received' },
+          { id: '', containerNumber: `${groupStatsSoNumber}CNTR2`, size: '20FT', type: 'Dry', status: 'received' },
+          { id: '', containerNumber: `${groupStatsSoNumber}CNTR3`, size: '20FT', type: 'Dry', status: 'received' },
+        ],
+      }),
+    });
+    assert.equal(groupStatsOrder.status, 201);
+    const groupStatsOrderId = groupStatsOrder.body.data.id;
+    const [groupStatsJob1, groupStatsJob2, groupStatsJob3] = groupStatsOrder.body.data.containers;
+
+    // 2 dari 3 container ditandai "sedang jalan", 1 dibiarkan "belum jalan" (received).
+    const runningUpdate1 = await api(`/api/container-jobs/${groupStatsJob1.id}`, {
+      method: 'PATCH',
+      token: groupStatsAdminToken,
+      body: {
+        status: 'running',
+        driver: `Driver GroupStats 1 ${runId}`,
+        plateNumber: `B GS1 ${runId}`,
+        updatedBy: 'Sprint2C Admin',
+      },
+    });
+    assert.equal(runningUpdate1.status, 200);
+    const runningUpdate2 = await api(`/api/container-jobs/${groupStatsJob2.id}`, {
+      method: 'PATCH',
+      token: groupStatsAdminToken,
+      body: {
+        status: 'running',
+        driver: `Driver GroupStats 2 ${runId}`,
+        plateNumber: `B GS2 ${runId}`,
+        updatedBy: 'Sprint2C Admin',
+      },
+    });
+    assert.equal(runningUpdate2.status, 200);
+
+    // Daftar baris difilter status=received -- cuma 1 baris yang harus lolos.
+    const filteredByReceived = await api(
+      `/api/container-jobs?query=${encodeURIComponent(groupStatsSoNumber)}&groupByOrder=true&status=received`,
+      { token: groupStatsAdminToken },
+    );
+    assert.equal(filteredByReceived.status, 200);
+    assert.equal(filteredByReceived.body.data.rows.length, 1, 'daftar baris tetap harus terfilter cuma status received');
+    assert.equal(filteredByReceived.body.data.rows[0].id, groupStatsJob3.id);
+
+    // Tapi ringkasan per SO (groupStats) harus tetap menghitung SELURUH 3 container, bukan cuma
+    // 1 yang lolos filter status -- ini persis kasus yang dilaporkan: badge ringkasan ikut salah
+    // seolah-olah SO ini cuma py container yang lolos filter, padahal totalnya tidak berubah.
+    const trueStats = filteredByReceived.body.data.groupStats[groupStatsOrderId];
+    assert.ok(trueStats, 'groupStats untuk SO ini harus tersedia walau daftar barisnya sedang difilter');
+    assert.equal(trueStats.total, 3, 'total container di ringkasan harus tetap 3, bukan cuma yang lolos filter status');
+    assert.equal(trueStats.running, 2);
+    assert.equal(trueStats.completed, 0);
+    assert.equal(trueStats.waiting, 1);
+    assert.equal(trueStats.cancelled, 0);
+
+    // Tanpa filter status sama sekali, daftar baris dan ringkasan harus konsisten sama-sama 3.
+    const unfiltered = await api(
+      `/api/container-jobs?query=${encodeURIComponent(groupStatsSoNumber)}&groupByOrder=true`,
+      { token: groupStatsAdminToken },
+    );
+    assert.equal(unfiltered.status, 200);
+    assert.equal(unfiltered.body.data.rows.length, 3);
+    assert.equal(unfiltered.body.data.groupStats[groupStatsOrderId].total, 3);
+  });
 }

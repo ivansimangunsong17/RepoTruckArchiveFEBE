@@ -296,7 +296,22 @@ function groupJobsBySo(rows = []) {
   return Array.from(groups.values());
 }
 
-function getSoGroupStats(group) {
+function getSoGroupStats(group, statsOverride) {
+  // statsOverride datang dari backend (groupStats per sales_order_id), dihitung dari SELURUH
+  // container job SO tersebut -- dipakai kalau ada supaya badge ringkasan tidak ikut berubah
+  // seolah-olah SO itu jadi lebih sedikit container-nya cuma karena daftar di bawahnya lagi
+  // difilter (tab status/tanggal/dsb). Tanpa override (mis. mode demo), fallback hitung dari
+  // group.jobs seperti sebelumnya.
+  if (statsOverride) {
+    return {
+      total: statsOverride.total || 0,
+      completed: statsOverride.completed || 0,
+      running: statsOverride.running || 0,
+      waiting: statsOverride.waiting || 0,
+      cancelled: statsOverride.cancelled || 0,
+      handled: (statsOverride.completed || 0) + (statsOverride.running || 0),
+    };
+  }
   const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
   const completed = jobs.filter((job) => job.status === 'completed').length;
   const running = jobs.filter((job) => job.status === 'running' || isInapJob(job) || isRepoStoredJob(job)).length;
@@ -320,24 +335,31 @@ function normalizeContainerSizeLabel(size) {
   return size ? String(size).trim() : 'Lainnya';
 }
 
-function formatSoPartySummary(group) {
-  const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
-  if (!jobs.length) return 'Party -';
-  const counts = jobs.reduce((accumulator, job) => {
-    const size = normalizeContainerSizeLabel(job.size || job.containerSize || job.container_size);
-    accumulator[size] = (accumulator[size] || 0) + 1;
-    return accumulator;
-  }, {});
+function formatSoPartySummary(group, partyCountsOverride) {
+  // partyCountsOverride datang dari backend (partyCounts per sales_order_id), dihitung dari SELURUH
+  // container job SO tersebut -- dipakai kalau ada supaya ringkasan party tidak ikut berubah seolah-olah
+  // ukuran-ukuran tertentu tidak ada cuma karena daftar baris lagi difilter status/tanggal.
+  let counts = partyCountsOverride || {};
+  if (!partyCountsOverride) {
+    const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
+    if (!jobs.length) return 'Party -';
+    counts = jobs.reduce((accumulator, job) => {
+      const size = normalizeContainerSizeLabel(job.size || job.containerSize || job.container_size);
+      accumulator[size] = (accumulator[size] || 0) + 1;
+      return accumulator;
+    }, {});
+  }
   const preferredOrder = ['20FT', '40FT', '45FT', 'Lainnya'];
   const orderedSizes = [
     ...preferredOrder.filter((size) => counts[size]),
     ...Object.keys(counts).filter((size) => !preferredOrder.includes(size)).sort(),
   ];
+  if (!orderedSizes.length) return 'Party -';
   return `Party ${orderedSizes.map((size) => `${counts[size]} x ${size}`).join(' + ')}`;
 }
 
-function formatSoGroupSummary(group) {
-  const stats = getSoGroupStats(group);
+function formatSoGroupSummary(group, statsOverride) {
+  const stats = getSoGroupStats(group, statsOverride);
   const parts = [
     `${stats.total} container`,
     `${stats.completed} selesai`,
@@ -396,6 +418,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const archive = useArchiveData();
   const [databaseJobs, setDatabaseJobs] = useState([]);
   const [pendingDatabaseJobs, setPendingDatabaseJobs] = useState([]);
+  const [groupStatsById, setGroupStatsById] = useState({});
   const [serverTotal, setServerTotal] = useState(0);
   const [serverTotalRows, setServerTotalRows] = useState(0);
   const [statusCounts, setStatusCounts] = useState(EMPTY_STATUS_COUNTS);
@@ -598,6 +621,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
         setServerTotalRows(result.totalRows ?? result.total);
         setStatusCounts({ ...EMPTY_STATUS_COUNTS, ...result.counts });
         setRpujCounts({ queue: 0, submitted: 0, approved: 0, paid: 0, ...result.rpujCounts });
+        setGroupStatsById(result.groupStats || {});
       } catch (requestError) {
         if (!active) return;
         setDatabaseJobs([]);
@@ -605,6 +629,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
         setServerTotalRows(0);
         setStatusCounts(EMPTY_STATUS_COUNTS);
         setRpujCounts({ queue: 0, submitted: 0, approved: 0, paid: 0 });
+        setGroupStatsById({});
         setError(requestError.message || 'Data Container Job gagal dimuat dari database.');
       } finally {
         if (active) setLoading(false);
@@ -1102,7 +1127,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
             </div>
           ) : null}
           {!loading && !error ? groupedJobs.map((group, groupIndex) => {
-            const groupStats = getSoGroupStats(group);
+            const groupStats = getSoGroupStats(group, groupStatsById[group.key]);
             return (
             <section className="operational-so-group" key={group.key}>
               <header className="operational-so-header">
@@ -1111,14 +1136,14 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   <div className="operational-so-title">
                     <span>Sales Order</span>
                     <strong>{group.soNumber}</strong>
-                    <i className="operational-so-party">{formatSoPartySummary(group)}</i>
+                    <i className="operational-so-party">{formatSoPartySummary(group, groupStatsById[group.key]?.partyCounts)}</i>
                   </div>
                   <div className="operational-so-meta">
                     <small><b>Customer</b>{group.customer}</small>
                     <small><b>Rute</b>{group.route}</small>
                   </div>
                 </div>
-                <em>{formatSoGroupSummary(group)}</em>
+                <em>{formatSoGroupSummary(group, groupStatsById[group.key])}</em>
                 <div className="operational-so-progress" aria-label={`Progress ${group.soNumber}`}>
                   <span><b>{groupStats.total}</b> Container</span>
                   <span className="waiting"><b>{groupStats.waiting}</b> Belum</span>
