@@ -22,6 +22,7 @@ const joinedJobColumns = `
   cj.inap_started_at, cj.inap_ended_at, cj.inap_reason, cj.inap_notes, cj.inap_created_by_name,
   cj.uj_amount_snapshot, cj.uj_source_destination_id, cj.uj_snapshot_at, cj.uj_snapshot_source,
   cj.entry_source, cj.historical_period, cj.historical_notes,
+  cj.is_backdate_entry, cj.backdate_reason, cj.created_as_correction,
   cj.has_driver_commission, cj.driver_commission_amount,
   cj.driver_commission_source_destination_id, cj.driver_commission_note,
   cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
@@ -725,6 +726,24 @@ function isHistoricalBackfill(form = {}, existing = {}) {
   return normalizeEntrySource(source) === 'historical' || Boolean(normalizeOptionalText(form.historicalPeriod || existing.historical_period));
 }
 
+// Ritasi susulan/backdate (Phase 2) SENGAJA dipisah dari "historical backfill" -- historical backfill
+// adalah backfill massal data lama yang admin-only (lihat historical-entry module), sedangkan backdate
+// entry adalah ritasi yang benar-benar terjadi tapi baru dicatat belakangan, boleh dipakai Operational
+// biasa selama alasannya diisi (divalidasi di service layer). Keduanya sama-sama boleh melewati syarat
+// dokumen/assignment yang biasanya wajib untuk ritasi realtime -- lihat isBackfillLike di bawah.
+function isBackdateEntry(form = {}, existing = {}) {
+  return hasOwnInput(form, 'isBackdateEntry')
+    ? normalizeBooleanFlag(form.isBackdateEntry)
+    : Boolean(existing.is_backdate_entry);
+}
+
+// Dipakai di titik-titik yang sudah lebih dulu membebaskan historical backfill dari syarat normal
+// (dokumen completion, ketersediaan driver/truck, sinkronisasi status "Bertugas") -- backdate entry
+// butuh pembebasan yang sama karena sama-sama mencatat kejadian di masa lalu, bukan kejadian sekarang.
+function isBackfillLike(form = {}, existing = {}) {
+  return isHistoricalBackfill(form, existing) || isBackdateEntry(form, existing);
+}
+
 export function shouldValidateVehicleContainerSize(form = {}, existing = {}) {
   return !isHistoricalBackfill(form, existing);
 }
@@ -778,6 +797,7 @@ export async function syncAutoJourneyMoneyExpense(client, {
   job,
   nextStatus,
   nextEntrySource,
+  nextIsBackdateEntry = false,
   nextDriverId,
   runningAt,
   assignment,
@@ -786,7 +806,10 @@ export async function syncAutoJourneyMoneyExpense(client, {
   allowAdminCorrection = false,
 }) {
   if (!['running', 'completed'].includes(nextStatus)) return;
-  if (nextEntrySource === 'historical') return;
+  // Ritasi susulan/backdate (Phase 3) TIDAK boleh memicu UJ otomatis / rekening dropping sama
+  // sekali -- persis seperti entry historis. Kalau UJ tetap diperlukan untuk ritasi ini, harus
+  // dicatat manual lewat createContainerJobExpense (koreksi biaya), bukan jalur otomatis di sini.
+  if (nextEntrySource === 'historical' || nextIsBackdateEntry) return;
   if (['approved', 'paid'].includes(job.rpuj_status)) return;
 
   const existingJourneyMoney = await client.query(
@@ -1046,7 +1069,7 @@ async function voidAutoJourneyMoneyExpense(client, jobId, actorName = 'Operation
 
 async function requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing = {}) {
   if (isAssignmentReleasedStatus(nextStatus)) return;
-  if (isHistoricalBackfill(form, existing)) return;
+  if (isBackfillLike(form, existing)) return;
   const driverName = String(form.driver || driver?.name || '').trim();
   const plateNumber = String(form.plateNumber || vehicle?.plate_number || '').trim();
   const driverId = driver?.id || form.driverId || null;
@@ -1129,8 +1152,10 @@ async function releaseVehicleIfIdle(client, vehicleId) {
   );
 }
 
-async function syncResourceAssignmentStatus(client, existing, nextAssignment = {}, nextStatus, nextEntrySource = 'realtime') {
-  if (normalizeEntrySource(nextEntrySource) === 'historical') return;
+async function syncResourceAssignmentStatus(client, existing, nextAssignment = {}, nextStatus, nextEntrySource = 'realtime', nextIsBackdateEntry = false) {
+  // Ritasi susulan/backdate (Phase 2) mencatat pekerjaan yang sudah selesai di masa lalu -- jangan
+  // tandai driver/truck "Bertugas" sekarang untuk pekerjaan yang sebenarnya sudah lama berakhir.
+  if (normalizeEntrySource(nextEntrySource) === 'historical' || nextIsBackdateEntry) return;
   const nextDriverId = nextAssignment.driverId || null;
   const nextVehicleId = nextAssignment.vehicleId || null;
   const previousDriverId = existing?.driver_id || null;
@@ -1172,7 +1197,10 @@ async function syncResourceAssignmentStatus(client, existing, nextAssignment = {
 }
 
 async function requireCompletedJobReady(client, id, form, existing, options = {}) {
-  const allowHistoricalBackfill = Boolean(options.allowHistoricalBackfill);
+  // allowRetroactiveEntry mencakup historical backfill DAN ritasi susulan/backdate (Phase 2) --
+  // keduanya sama-sama mencatat pekerjaan yang sudah selesai di masa lalu, jadi sama-sama boleh
+  // lewati syarat upload dokumen (SPK/EIR) yang normalnya wajib untuk penyelesaian ritasi realtime.
+  const allowRetroactiveEntry = Boolean(options.allowRetroactiveEntry);
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
 
   const runningAt = form.runningAt || existing.running_at;
@@ -1200,7 +1228,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
       409,
     );
   }
-  if (allowHistoricalBackfill || allowAdminCorrection) return completedAt;
+  if (allowRetroactiveEntry || allowAdminCorrection) return completedAt;
 
   const attachmentResult = await client.query(
     `
@@ -1925,12 +1953,6 @@ export async function correctContainerJobExpenseRecord(id, expenseId, payload = 
       error.code = 'CONTAINER_JOB_EXPENSE_CORRECTION_INVALID_STATUS';
       throw error;
     }
-    if (payload.paymentStatus === 'sudah_dibayar' && !payload.proofAttachmentId && !existing.proof_attachment_id) {
-      const error = new Error('Bukti pembayaran wajib diupload untuk biaya yang sudah dibayar.');
-      error.statusCode = 400;
-      error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
-      throw error;
-    }
     return applyDroppingExpenseFieldsUpdate(client, {
       id, expenseId, existing, payload, resultingFinanceCheckStatus: 'dikoreksi',
     });
@@ -1945,12 +1967,6 @@ export async function updateDroppingExpenseBeforeFinanceCheckRecord(id, expenseI
     ensureTransactionNotFinanceChecked(existing);
     await ensureOperationalFundBatchOpenForExpense(client, expenseId);
     await ensureSalesOrderBillingNotAdvanced(client, existing.sales_order_id);
-    if (payload.paymentStatus === 'sudah_dibayar' && !payload.proofAttachmentId && !existing.proof_attachment_id) {
-      const error = new Error('Bukti pembayaran wajib diupload untuk biaya yang sudah dibayar.');
-      error.statusCode = 400;
-      error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
-      throw error;
-    }
     return applyDroppingExpenseFieldsUpdate(client, {
       id, expenseId, existing, payload, resultingFinanceCheckStatus: 'belum_dicek',
     });
@@ -2238,6 +2254,7 @@ async function updateContainerJobTransaction(id, form) {
                cj.repo_picked_up_at, cj.repo_picked_up_by_name,
                cj.inap_started_at, cj.inap_ended_at, cj.inap_reason, cj.inap_notes, cj.inap_created_by_name,
                cj.entry_source, cj.historical_period, cj.historical_notes,
+               cj.is_backdate_entry, cj.backdate_reason, cj.created_as_correction,
                cj.has_driver_commission, cj.driver_commission_amount,
                cj.driver_commission_source_destination_id, cj.driver_commission_note,
                cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
@@ -2261,7 +2278,7 @@ async function updateContainerJobTransaction(id, form) {
 
     const currentJob = existing.rows[0];
     const documentOnlyUpdate = normalizeBooleanFlag(form.documentOnlyUpdate);
-    const allowHistoricalBackfill = isHistoricalBackfill(form, currentJob);
+    const allowRetroactiveEntry = isBackfillLike(form, currentJob);
     const allowAdminCorrection = normalizeBooleanFlag(form.adminCorrectionMode);
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
@@ -2321,7 +2338,7 @@ async function updateContainerJobTransaction(id, form) {
       await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
     }
     const validatedCompletedAt = !documentOnlyUpdate && nextStatus === 'completed'
-      ? await requireCompletedJobReady(client, id, form, currentJob, { allowHistoricalBackfill, allowAdminCorrection })
+      ? await requireCompletedJobReady(client, id, form, currentJob, { allowRetroactiveEntry, allowAdminCorrection })
       : null;
     const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
       ? new Date().toISOString()
@@ -2461,6 +2478,15 @@ async function updateContainerJobTransaction(id, form) {
     const nextHistoricalNotes = nextEntrySource === 'historical'
       ? normalizeOptionalText(hasOwnInput(form, 'historicalNotes') ? form.historicalNotes : existing.rows[0].historical_notes)
       : null;
+    // Ritasi susulan/backdate (Phase 2) -- independen dari entry_source historis di atas. Alasannya
+    // wajib diisi (divalidasi di service layer sebelum sampai ke sini), disimpan apa adanya di sini.
+    const nextIsBackdateEntry = isBackdateEntry(form, existing.rows[0]);
+    const nextBackdateReason = nextIsBackdateEntry
+      ? normalizeOptionalText(hasOwnInput(form, 'backdateReason') ? form.backdateReason : existing.rows[0].backdate_reason)
+      : null;
+    const nextCreatedAsCorrection = nextIsBackdateEntry
+      ? normalizeBooleanFlag(hasOwnInput(form, 'createdAsCorrection') ? form.createdAsCorrection : existing.rows[0].created_as_correction)
+      : Boolean(existing.rows[0].created_as_correction);
     const hasTilaInput = hasOwnInput(form, 'tilaGatepassDocument') || hasOwnInput(form, 'unloadingVoucher') || hasOwnInput(form, 'weighingDocument');
     const nextTilaGatepassDocument = hasTilaInput
       ? form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null
@@ -2601,9 +2627,12 @@ async function updateContainerJobTransaction(id, form) {
             uj_source_destination_id = $52::uuid,
             uj_snapshot_at = $53,
             uj_snapshot_source = $54,
-            updated_by_name = $55,
+            is_backdate_entry = $55,
+            backdate_reason = $56,
+            created_as_correction = $57,
+            updated_by_name = $58,
             updated_at = now()
-        where id = $56
+        where id = $59
       `,
       [
         nextContainerNumber,
@@ -2660,6 +2689,9 @@ async function updateContainerJobTransaction(id, form) {
         nextUjSourceDestinationId,
         nextUjSnapshotAt,
         nextUjSnapshotSource,
+        nextIsBackdateEntry,
+        nextBackdateReason,
+        nextCreatedAsCorrection,
         actorName,
         id,
       ],
@@ -2714,6 +2746,7 @@ async function updateContainerJobTransaction(id, form) {
         job: existing.rows[0],
         nextStatus,
         nextEntrySource,
+        nextIsBackdateEntry,
         nextDriverId,
         runningAt,
         assignment: nextAssignmentSnapshot,
@@ -2728,7 +2761,7 @@ async function updateContainerJobTransaction(id, form) {
       await syncResourceAssignmentStatus(client, existing.rows[0], {
         driverId: nextDriverId,
         vehicleId: nextVehicleId,
-      }, nextStatus, nextEntrySource);
+      }, nextStatus, nextEntrySource, nextIsBackdateEntry);
     }
     await refreshOrderStatus(client, existing.rows[0].sales_order_id);
     const updated = await client.query(

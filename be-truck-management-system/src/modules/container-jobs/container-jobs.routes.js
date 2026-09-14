@@ -63,7 +63,7 @@ export const containerJobRoutes = [
   {
     method: 'PATCH',
     path: '/api/container-jobs/:id/expenses/:expenseId/proof',
-    permission: 'container_job.update',
+    permission: 'finance.operational_fund.reconcile',
     handler: updateContainerJobExpenseProofController,
   },
   {
@@ -87,7 +87,7 @@ export const containerJobRoutes = [
   {
     method: 'PATCH',
     path: '/api/container-jobs/:id/expenses/:expenseId/uj-transfer-proof',
-    permission: 'container_job.update',
+    permission: 'finance.operational_fund.reconcile',
     handler: uploadAutoJourneyMoneyProofController,
   },
   {

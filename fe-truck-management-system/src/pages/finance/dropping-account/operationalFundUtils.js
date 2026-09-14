@@ -58,6 +58,7 @@ const expenseCategoryLabels = {
   inap: 'Inap',
   terminal_depo: 'Terminal / Depo',
   tunggu: 'Tunggu',
+  uang_admin_tf: 'Uang Admin TF',
   reimbursement: 'Reimbursement',
   lainnya: 'Lainnya',
 };
@@ -97,9 +98,15 @@ const operationalFundTransactionCategoryLabels = {
   dropping_in: 'Dropping Masuk',
   container_job_expense: 'Biaya Container Job',
   driver_uj_balance: 'Saldo UJ Sopir',
+  admin_transfer: 'Admin Transfer',
   correction: 'Koreksi',
   lainnya: 'Lainnya',
 };
+
+function operationalFundTransactionCategoryLabel(row = {}) {
+  if (row.source === 'container_job_expense_admin_fee') return 'Admin Transfer';
+  return operationalFundTransactionCategoryLabels[row.category] || row.category || '';
+}
 
 function readableLabel(labels, value) {
   return labels[value] || String(value || '-').replaceAll('_', ' ');
@@ -277,7 +284,7 @@ function operationalFundTransactionCsvRows(rows = []) {
       index + 1,
       row.transactionDate || '',
       row.description || '',
-      operationalFundTransactionCategoryLabels[row.category] || row.category || '',
+      operationalFundTransactionCategoryLabel(row),
       row.moneyIn || 0,
       row.moneyOut || 0,
       row.runningBalance == null ? '' : row.runningBalance,
@@ -304,6 +311,7 @@ export {
   normalizeOperationalFundTransactionRow,
   operationalFundBatchStatusLabel,
   operationalFundStatusLabel,
+  operationalFundTransactionCategoryLabel,
   operationalFundTransactionCategoryLabels,
   operationalFundTransactionCsvRows,
   operationalFundTransactionTypeLabels,

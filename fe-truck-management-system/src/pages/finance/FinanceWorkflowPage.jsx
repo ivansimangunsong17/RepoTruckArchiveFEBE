@@ -672,6 +672,10 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     expenseReconciliationDecisionRow,
     expenseCheckConfirmId,
     expenseCheckConfirmRow,
+    expenseCheckProofFile,
+    expenseCheckProofError,
+    expenseCheckAdminFeeAmount,
+    expenseCheckAdminFeeNote,
     handleOperationalFundRequestFormChange,
     submitOperationalFundRequest,
     closeOperationalFundRequestModal,
@@ -684,6 +688,10 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     handleExpenseReconciliationNoteChange,
     submitExpenseClarification,
     closeExpenseCheckConfirmModal,
+    handleExpenseCheckProofSelect,
+    clearExpenseCheckProofFile,
+    handleExpenseCheckAdminFeeAmountChange,
+    handleExpenseCheckAdminFeeNoteChange,
     confirmExpenseChecked,
     closeOperationalFundCloseValidationModal,
     confirmCloseOperationalFundBatch,
@@ -946,8 +954,16 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       <ExpenseCheckConfirmModal
         busy={expenseReconciliationBusyId === expenseCheckConfirmId}
         error={expenseReconciliationError}
+        onProofClear={clearExpenseCheckProofFile}
+        onProofSelect={handleExpenseCheckProofSelect}
+        adminFeeAmount={expenseCheckAdminFeeAmount}
+        adminFeeNote={expenseCheckAdminFeeNote}
+        onAdminFeeAmountChange={handleExpenseCheckAdminFeeAmountChange}
+        onAdminFeeNoteChange={handleExpenseCheckAdminFeeNoteChange}
         onClose={closeExpenseCheckConfirmModal}
         onConfirm={confirmExpenseChecked}
+        proofError={expenseCheckProofError}
+        proofFile={expenseCheckProofFile}
         row={expenseCheckConfirmRow}
       />
       <InvoiceNumberConfirmModal

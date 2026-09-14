@@ -367,6 +367,7 @@ export async function fetchSalesOrdersPage({
   historicalPeriod = '',
   dateFrom = '',
   dateTo = '',
+  vendorFilter = '',
 } = {}) {
   const params = new URLSearchParams({
     page: String(page),
@@ -380,6 +381,7 @@ export async function fetchSalesOrdersPage({
   if (historicalPeriod) params.set('historicalPeriod', historicalPeriod);
   if (dateFrom) params.set('dateFrom', dateFrom);
   if (dateTo) params.set('dateTo', dateTo);
+  if (vendorFilter) params.set('vendorFilter', vendorFilter);
   return httpClient.get(`/sales-orders?${params.toString()}`);
 }
 

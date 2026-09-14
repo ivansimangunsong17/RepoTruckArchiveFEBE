@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FinanceWorkflowPage from './FinanceWorkflowPage';
 import { downloadCsv } from '../../utils/csvExport';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 import {
   approveOperationalFundRequest,
   closeOperationalFundBatch,
@@ -69,6 +70,10 @@ vi.mock('../../services/finance/financeService', () => ({
 
 vi.mock('../../utils/csvExport', () => ({
   downloadCsv: vi.fn(),
+}));
+
+vi.mock('../../utils/simplePdfReport', () => ({
+  downloadPdfReport: vi.fn(),
 }));
 
 const orderRow = {
@@ -629,6 +634,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.queryByText('Driver Expense')).not.toBeInTheDocument();
     expect(screen.queryByText('DO-EXP-001')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /view bukti-transfer.pdf/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /download pdf/i })).toBeEnabled();
     expect(screen.getAllByText(/Rp\s*19\.875\.000/i).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: /export csv/i }));
     const [, headers, rows] = downloadCsv.mock.calls[0];
@@ -637,6 +643,23 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(rows[1]).toEqual(expect.arrayContaining(['UANG MASUK', 20000000]));
     expect(rows.at(-2)).toEqual(expect.arrayContaining(['TOTAL PENGELUARAN', 125000]));
     expect(rows.at(-1)).toEqual(expect.arrayContaining(['SISA SALDO', 19875000]));
+    await user.click(screen.getByRole('button', { name: /download pdf/i }));
+    expect(downloadPdfReport).toHaveBeenCalledWith(expect.objectContaining({
+      filename: expect.stringMatching(/^rekening-dropping-\d{8}\.pdf$/),
+      reportLabel: 'Finance Report',
+      title: 'Report Rekening Dropping',
+      subtitle: expect.stringContaining('Batch'),
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          description: 'Transfer saldo operasional harian dari Finance',
+          reportNumber: 1,
+        }),
+        expect.objectContaining({
+          description: 'Tol Cikampek',
+          reportNumber: 2,
+        }),
+      ]),
+    }));
     expect(fetchOperationalFundTransactions).toHaveBeenCalledWith(expect.objectContaining({
       page: 1,
       pageSize: 50,
@@ -754,9 +777,9 @@ describe('FinanceWorkflowPage validation modals', () => {
         destination: 'Cikarang',
         driverName: 'Driver Expense',
         truck: 'B 2000 EX',
-        category: 'tol',
+        category: 'uang_admin_tf',
         amount: 125000,
-        description: 'Tol Cikampek',
+        description: 'Uang Admin TF',
         paymentStatus: 'sudah_dibayar',
         paidAt: '2026-08-20',
         financeCheckStatus: 'belum_dicek',
@@ -769,7 +792,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     expect(await screen.findByText('Menunggu Validasi Finance')).toBeInTheDocument();
-    expect(screen.getByText('Tol Cikampek')).toBeInTheDocument();
+    expect(screen.getAllByText('Uang Admin TF').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Validasi' }));
@@ -777,12 +800,22 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(await screen.findByText('Validasi Cek Biaya Lapangan')).toBeInTheDocument();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Ya, Sudah Dicek' }));
+    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
+    expect(await screen.findByText('Bukti pembayaran wajib diupload Finance sebelum validasi.')).toBeInTheDocument();
+    expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
+
+    const proofFile = new File(['proof'], 'bukti-transfer.pdf', { type: 'application/pdf' });
+    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), proofFile);
+    await user.type(screen.getByLabelText(/biaya admin transfer/i), '2500');
+    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
 
     await waitFor(() => {
       expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', {
         financeCheckStatus: 'sudah_dicek',
         financeNote: '',
+        proofFile,
+        adminFeeAmount: 2500,
+        adminFeeNote: '',
       });
     });
   });

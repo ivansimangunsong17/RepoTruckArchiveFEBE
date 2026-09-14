@@ -68,6 +68,7 @@ const EXPENSE_CATEGORY_OPTIONS = [
   { value: 'inap', label: 'Inap' },
   { value: 'terminal_depo', label: 'Terminal / Depo' },
   { value: 'tunggu', label: 'Tunggu' },
+  { value: 'uang_admin_tf', label: 'Uang Admin TF' },
   { value: 'reimbursement', label: 'Reimbursement' },
   { value: 'lainnya', label: 'Lainnya' },
 ];
@@ -309,6 +310,30 @@ function getSoGroupStats(group) {
     cancelled,
     handled: completed + running,
   };
+}
+
+function normalizeContainerSizeLabel(size) {
+  const normalized = String(size || '').toUpperCase().replace(/\s/g, '');
+  if (normalized === '20FT' || normalized === '20') return '20FT';
+  if (normalized === '40FT' || normalized === '40') return '40FT';
+  if (normalized === '45FT' || normalized === '45') return '45FT';
+  return size ? String(size).trim() : 'Lainnya';
+}
+
+function formatSoPartySummary(group) {
+  const jobs = Array.isArray(group?.jobs) ? group.jobs : [];
+  if (!jobs.length) return 'Party -';
+  const counts = jobs.reduce((accumulator, job) => {
+    const size = normalizeContainerSizeLabel(job.size || job.containerSize || job.container_size);
+    accumulator[size] = (accumulator[size] || 0) + 1;
+    return accumulator;
+  }, {});
+  const preferredOrder = ['20FT', '40FT', '45FT', 'Lainnya'];
+  const orderedSizes = [
+    ...preferredOrder.filter((size) => counts[size]),
+    ...Object.keys(counts).filter((size) => !preferredOrder.includes(size)).sort(),
+  ];
+  return `Party ${orderedSizes.map((size) => `${counts[size]} x ${size}`).join(' + ')}`;
 }
 
 function formatSoGroupSummary(group) {
@@ -1086,6 +1111,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   <div className="operational-so-title">
                     <span>Sales Order</span>
                     <strong>{group.soNumber}</strong>
+                    <i className="operational-so-party">{formatSoPartySummary(group)}</i>
                   </div>
                   <div className="operational-so-meta">
                     <small><b>Customer</b>{group.customer}</small>

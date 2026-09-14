@@ -77,18 +77,26 @@ test('pengajuan saldo operasional membatasi keterangan dan catatan reject', () =
   );
 });
 
-test('rekonsiliasi biaya container job memvalidasi status dan catatan klarifikasi', () => {
-  assert.throws(
+test('rekonsiliasi biaya container job memvalidasi status dan catatan klarifikasi', async () => {
+  await assert.rejects(
     () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'selesai' }, { name: 'Finance Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_FINANCE_STATUS_INVALID' && error.statusCode === 400,
   );
-  assert.throws(
+  await assert.rejects(
     () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'perlu_klarifikasi', financeNote: '   ' }, { name: 'Finance Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_REQUIRED' && error.statusCode === 400,
   );
-  assert.throws(
+  await assert.rejects(
     () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'sudah_dicek', financeNote: 'a'.repeat(501) }, { name: 'Finance Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_TOO_LONG' && error.statusCode === 400,
+  );
+  await assert.rejects(
+    () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'sudah_dicek', adminFeeAmount: -1 }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_ADMIN_FEE_INVALID' && error.statusCode === 400,
+  );
+  await assert.rejects(
+    () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'sudah_dicek', adminFeeNote: 'a'.repeat(501) }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_ADMIN_FEE_NOTE_TOO_LONG' && error.statusCode === 400,
   );
 });
 

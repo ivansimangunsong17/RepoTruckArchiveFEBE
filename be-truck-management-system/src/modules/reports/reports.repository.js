@@ -614,6 +614,8 @@ export function summarizeCustomerPerformanceRows(rows = []) {
 
 export async function getDashboardReport() {
   const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs] = await Promise.all([
+    // Dikecualikan is_vendor_order (Phase 3): dashboard ini meringkas ritasi/revenue operasional,
+    // dan order vendor tidak pernah punya ritasi -- revenue-nya juga bukan revenue otomatis internal.
     query(`
       select
         count(*)::int as total_orders,
@@ -623,6 +625,7 @@ export async function getDashboardReport() {
         count(*) filter (where status = 'cancelled')::int as cancelled_orders,
         coalesce(sum(total_amount), 0)::numeric as revenue
       from sales_orders
+      where not is_vendor_order
     `),
     query(`
       select
@@ -788,7 +791,9 @@ export async function getDashboardReport() {
 export async function getSalesOrderReport(options = {}) {
   const { pageSize, offset } = parsePage(options);
   const dateFilter = buildDateWhere('trip_date', options);
-  const clauses = [...dateFilter.clauses];
+  // Order vendor (Phase 3) hanya pencatatan Sales Order, bukan ritasi internal -- jangan ikut
+  // dihitung di laporan ritasi ini (baik baris maupun rollup revenue/container-nya).
+  const clauses = [...dateFilter.clauses, 'not is_vendor_order'];
   const params = [...dateFilter.params];
 
   if (options.status) {
@@ -1679,6 +1684,11 @@ export async function getInputMonitoringReport(options = {}) {
     missingInvoice,
     missingDocuments,
   ] = await Promise.all([
+    // missingSoNumber query di sini sengaja mengecualikan is_vendor_order -- ini satu-satunya
+    // sub-query monitoring yang membaca sales_orders langsung tanpa join container_jobs, jadi
+    // tanpa filter ini order vendor (yang memang tidak diproses Finance) akan salah ditandai
+    // "belum ada nomor SO" (Phase 3). Sub-query lain di bawah sudah otomatis aman karena
+    // mensyaratkan container_jobs, yang tidak pernah dibuat untuk order vendor.
     query(
       `
         select so.id, so.so_number, so.accurate_so_number, so.customer_name,
@@ -1689,6 +1699,7 @@ export async function getInputMonitoringReport(options = {}) {
                count(*) over()::int as total_count
         from sales_orders so
         where ${activeOrderSql}
+          and not so.is_vendor_order
           and nullif(btrim(coalesce(so.accurate_so_number, '')), '') is null
         order by coalesce(so.so_date, so.trip_date, so.created_at::date) asc, so.created_at asc
         limit $1

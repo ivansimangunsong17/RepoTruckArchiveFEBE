@@ -5,6 +5,7 @@ process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters'
 
 const {
   adminCorrectionReason,
+  backdateReason,
   canUseAdminCorrection,
   createContainerJobExpense,
   correctContainerJobExpense,
@@ -14,6 +15,7 @@ const {
   hasDriverCommissionChange,
   hasOperationalDocumentChange,
   isAdminCorrectionMode,
+  isBackdateEntryPayload,
   isContainerNumberLockedForOperational,
   isDriverCommissionLockedForOperational,
   isDocumentOnlyContainerJobUpdateActor,
@@ -162,6 +164,15 @@ test('mode koreksi admin membutuhkan role admin dan alasan', () => {
     { role: 'admin' },
     { adminCorrectionMode: true, adminCorrectionReason: 'pendek' },
   ), false);
+});
+
+test('ritasi susulan/backdate: penanda dan alasan dibaca dari payload, jatuh ke data existing kalau tidak dikirim', () => {
+  assert.equal(isBackdateEntryPayload({ isBackdateEntry: true }), true);
+  assert.equal(isBackdateEntryPayload({ isBackdateEntry: 'true' }), true);
+  assert.equal(isBackdateEntryPayload({}, { isBackdateEntry: true }), true);
+  assert.equal(isBackdateEntryPayload({ isBackdateEntry: false }, { isBackdateEntry: true }), false);
+  assert.equal(backdateReason({ backdateReason: ' Telat input dari lapangan ' }), 'Telat input dari lapangan');
+  assert.equal(backdateReason({}, { backdateReason: 'Alasan tersimpan' }), 'Alasan tersimpan');
 });
 
 test('mengizinkan pengisian awal dokumen kosong setelah job selesai', () => {
@@ -568,7 +579,7 @@ test('tidak memvalidasi apa pun kalau status yang dikirim bukan inap', () => {
   ));
 });
 
-test('create expense menolak kategori, nominal, jenis biaya, dan bukti pembayaran yang tidak valid', () => {
+test('create expense menolak kategori, nominal, dan jenis biaya yang tidak valid', () => {
   assert.throws(
     () => createContainerJobExpense('job-1', { category: 'solar', amount: 100000, expenseGroup: 'operational' }, { name: 'Operational Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_CATEGORY_INVALID' && error.statusCode === 400,
@@ -580,10 +591,6 @@ test('create expense menolak kategori, nominal, jenis biaya, dan bukti pembayara
   assert.throws(
     () => createContainerJobExpense('job-1', { category: 'tol', amount: 0, expenseGroup: 'operational' }, { name: 'Operational Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_AMOUNT_INVALID' && error.statusCode === 400,
-  );
-  assert.throws(
-    () => createContainerJobExpense('job-1', { category: 'tol', amount: 100000, expenseGroup: 'operational', paymentStatus: 'sudah_dibayar' }, { name: 'Operational Test' }),
-    (error) => error.code === 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED' && error.statusCode === 400,
   );
 });
 

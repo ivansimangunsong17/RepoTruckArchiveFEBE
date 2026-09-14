@@ -34,6 +34,7 @@ const expenseCategoryLabels = {
   inap: 'Inap',
   terminal_depo: 'Terminal / Depo',
   tunggu: 'Tunggu',
+  uang_admin_tf: 'Uang Admin TF',
   reimbursement: 'Reimbursement',
   lainnya: 'Lainnya',
 };
@@ -74,11 +75,12 @@ const fundCategoryLabels = {
 
 
 const REIMBURSEMENT_LAINNYA_PRESET = 'Reimbursement Lainnya';
+const UANG_ADMIN_TF_PRESET = 'Uang Admin TF';
 const EXPENSE_DESCRIPTION_GROUPS = [
   {
     id: 'operational',
     label: 'Biaya Operational',
-    presets: ['Biaya MEL', 'Biaya Tambal Ban', 'Biaya Ganti Ban Dalam', 'Biaya BAN Kurang Angin'],
+    presets: ['Biaya MEL', 'Biaya Tambal Ban', 'Biaya Ganti Ban Dalam', 'Biaya BAN Kurang Angin', UANG_ADMIN_TF_PRESET],
   },
   {
     id: 'reimbursement',
@@ -105,6 +107,7 @@ const expenseCategoryOptions = [
   { value: 'inap', label: expenseCategoryLabels.inap },
   { value: 'terminal_depo', label: expenseCategoryLabels.terminal_depo },
   { value: 'tunggu', label: expenseCategoryLabels.tunggu },
+  { value: 'uang_admin_tf', label: expenseCategoryLabels.uang_admin_tf },
   { value: 'reimbursement', label: expenseCategoryLabels.reimbursement },
   { value: 'lainnya', label: expenseCategoryLabels.lainnya },
 ];
@@ -832,16 +835,22 @@ function OperationalDroppingAccountPage() {
   const showManualDescription = descriptionManualMode || (addExpenseForm.description.trim() && !isPresetDescription);
   const descriptionSelectValue = showManualDescription ? CUSTOM_DESCRIPTION_VALUE : (isPresetDescription ? addExpenseForm.description : '');
   const showReimbursementLainnyaNote = addExpenseForm.description === REIMBURSEMENT_LAINNYA_PRESET;
-
   function handleDescriptionSelectChange(event) {
     const selected = event.target.value;
     if (selected === CUSTOM_DESCRIPTION_VALUE) {
       setDescriptionManualMode(true);
-      setAddExpenseForm((current) => ({ ...current, expenseGroup: '', lainnyaNote: '' }));
+      setAddExpenseForm((current) => ({ ...current, category: 'lainnya', expenseGroup: '', lainnyaNote: '' }));
       return;
     }
     setDescriptionManualMode(false);
-    setAddExpenseForm((current) => ({ ...current, description: selected, expenseGroup: EXPENSE_GROUP_BY_PRESET[selected] || '', lainnyaNote: '' }));
+    setAddExpenseForm((current) => ({
+      ...current,
+      category: selected === UANG_ADMIN_TF_PRESET ? 'uang_admin_tf' : 'lainnya',
+      description: selected,
+      expenseGroup: EXPENSE_GROUP_BY_PRESET[selected] || '',
+      lainnyaNote: '',
+      proofFile: null,
+    }));
     setFileError('');
   }
 
@@ -948,10 +957,6 @@ function OperationalDroppingAccountPage() {
       setFileError('Penerima wajib diisi agar pencatatan pengeluaran jelas.');
       return null;
     }
-    if (!addExpenseForm.proofFile) {
-      setFileError('Bukti pembayaran wajib dipilih.');
-      return null;
-    }
     setFileError('');
     return {
       selectedJob: selectedAddExpenseJob,
@@ -1011,11 +1016,6 @@ function OperationalDroppingAccountPage() {
       setFileError('Nominal koreksi wajib lebih dari Rp 0.');
       return;
     }
-    if (correctionForm.paymentStatus === 'sudah_dibayar' && !correctionForm.proofFile && !correctionExpense.proofAttachment) {
-      setFileError('Bukti pembayaran wajib dipilih untuk transaksi yang sudah dibayar.');
-      return;
-    }
-
     setSaving(true);
     setFileError('');
     try {
@@ -1185,7 +1185,7 @@ function OperationalDroppingAccountPage() {
         <MetricCard icon={Banknote} label="Saldo Aktif" value={formatCurrency(summary.balance)} helper={`${totalRows} mutasi`} tone="text-emerald-700" />
         <MetricCard icon={ArrowDownLeft} label="Uang Masuk" value={formatCurrency(summary.moneyIn)} helper="Dropping dari Finance" />
         <MetricCard icon={ArrowUpRight} label="Uang Keluar" value={formatCurrency(summary.moneyOut)} helper="UJ dan biaya lapangan" />
-        <MetricCard icon={FileUp} label="Belum Ada Bukti" value={`${expenseSummary.needProof || 0} transaksi`} helper="Upload bukti jika uang sudah keluar" tone="text-amber-700" />
+        <MetricCard icon={FileUp} label="Belum Ada Bukti" value={`${expenseSummary.needProof || 0} transaksi`} helper="Bukti diupload dan divalidasi Finance" tone="text-amber-700" />
         <MetricCard icon={CheckCircle2} label="Validasi Finance" value={`${expenseSummary.waitingFinance || 0} menunggu`} helper={`${expenseSummary.needCorrection || 0} perlu klarifikasi`} tone="text-sky-700" />
       </section>
 
@@ -1286,10 +1286,9 @@ function OperationalDroppingAccountPage() {
                 {filteredRows.map((row, index) => {
                   const isVoided = row.paymentStatus === 'batal';
                   const hasExpenseAction = Boolean(row.jobId && actionExpenseId(row));
-                  const isAutoUj = isAutoJourneyMoneyRow(row);
                   const canChangeBeforeFinance = hasExpenseAction && canOperationalEditRow(row.financeCheckStatus, row.expensePaymentStatus || row.paymentStatus) && batchStatus === 'open' && !isVoided;
                   const canManualEdit = canChangeBeforeFinance && Boolean(row.canEdit) && isManualOperationalExpenseRow(row);
-                  const canUploadProof = canChangeBeforeFinance && !row.proofAttachment;
+                  const missingProof = canChangeBeforeFinance && !row.proofAttachment;
                   const secondaryInfo = [row.soNumber, row.containerNumber !== '-' ? row.containerNumber : '', row.driverName || row.driver || '', row.customerName || row.customer || '']
                     .filter(Boolean)
                     .filter((value) => value !== '-')
@@ -1316,7 +1315,7 @@ function OperationalDroppingAccountPage() {
                             {isVoided ? 'Void/Batal' : financeStatusLabels[row.financeCheckStatus] || row.financeCheckStatus}
                           </span>
                         ) : <span className="text-slate-300">-</span>}
-                        {canUploadProof ? (
+                        {missingProof ? (
                           <span className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold normal-case ${proofStatusBadgeTone}`}>Belum Ada Bukti</span>
                         ) : null}
                       </td>
@@ -1337,11 +1336,7 @@ function OperationalDroppingAccountPage() {
                               <Pencil size={13} /> Edit
                             </button>
                           ) : null}
-                          {canUploadProof ? (
-                            <button className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50" type="button" onClick={() => (isAutoUj ? openUjProof(row) : openUpload(row))}>
-                              <FileUp size={13} /> Upload Bukti
-                            </button>
-                          ) : null}
+                          {missingProof ? <span className="inline-flex h-8 items-center justify-center rounded-md bg-slate-50 px-3 text-xs font-semibold text-slate-500">Menunggu Finance</span> : null}
                           {hasExpenseAction && row.financeCheckStatus === 'perlu_klarifikasi' ? (
                             <button className="secondary-button" type="button" onClick={() => openCorrection(row)}>
                               Koreksi
@@ -1649,23 +1644,9 @@ function OperationalDroppingAccountPage() {
                       }} />
                     </label>
                     <div className="master-field span-full">
-                      <AttachmentUploadField
-                        compact
-                        helper="Wajib. Format PDF, JPG, PNG."
-                        id="dropping-add-expense-proof"
-                        label="Bukti Pembayaran"
-                        onClear={() => setAddExpenseForm((current) => ({ ...current, proofFile: null }))}
-                        onSelect={(file, validationError) => {
-                          if (validationError) {
-                            setFileError(validationError);
-                            return;
-                          }
-                          setAddExpenseForm((current) => ({ ...current, proofFile: file }));
-                          setFileError('');
-                        }}
-                        title={addExpenseForm.proofFile?.name ? 'Ganti Bukti' : 'Pilih Bukti'}
-                        value={addExpenseForm.proofFile}
-                      />
+                      <div className="rounded-md border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                        Bukti pembayaran akan diupload Finance saat validasi rekening dropping.
+                      </div>
                     </div>
                   </div>
                 </fieldset>
@@ -1720,7 +1701,7 @@ function OperationalDroppingAccountPage() {
                     </div>
                     <div className="master-field">
                       <span>Bukti</span>
-                      <strong className="text-sm font-bold normal-case text-slate-950">{addExpenseForm.proofFile?.name || '-'}</strong>
+                      <strong className="text-sm font-bold normal-case text-slate-950">Diupload Finance</strong>
                     </div>
                     <div className="master-field span-full">
                       <span>Keterangan</span>
@@ -1795,23 +1776,9 @@ function OperationalDroppingAccountPage() {
                       <input value={correctionForm.description} onChange={(event) => setCorrectionForm((current) => ({ ...current, description: event.target.value }))} />
                     </label>
                     <div className="master-field span-full">
-                      <AttachmentUploadField
-                        compact
-                        helper={correctionExpense.proofAttachment ? 'Kosongkan jika bukti lama masih benar. PDF, JPG, PNG' : 'Wajib jika sudah dibayar. PDF, JPG, PNG'}
-                        id="dropping-correction-proof"
-                        label="Bukti Pembayaran Koreksi"
-                        onClear={() => setCorrectionForm((current) => ({ ...current, proofFile: null }))}
-                        onSelect={(file, validationError) => {
-                          if (validationError) {
-                            setFileError(validationError);
-                            return;
-                          }
-                          setCorrectionForm((current) => ({ ...current, proofFile: file }));
-                          setFileError('');
-                        }}
-                        title={correctionForm.proofFile?.name ? 'Ganti Bukti' : correctionExpense.proofAttachment ? 'Upload Bukti Baru' : 'Pilih Bukti'}
-                        value={correctionForm.proofFile}
-                      />
+                      <div className="rounded-md border border-sky-100 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                        Bukti pembayaran koreksi tetap diupload Finance saat validasi ulang.
+                      </div>
                     </div>
                   </div>
                 </fieldset>

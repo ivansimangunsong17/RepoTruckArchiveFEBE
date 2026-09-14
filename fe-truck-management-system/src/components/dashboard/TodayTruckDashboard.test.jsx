@@ -3,19 +3,26 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TodayTruckDashboard from './TodayTruckDashboard';
 import { fetchDashboardReport } from '../../services/reports/reportService';
-import { downloadPdfReport } from '../../utils/simplePdfReport';
 
 vi.mock('../../services/reports/reportService', () => ({
   fetchDashboardReport: vi.fn(),
 }));
 
-vi.mock('../../utils/simplePdfReport', () => ({
-  downloadPdfReport: vi.fn(),
-}));
-
 describe('TodayTruckDashboard', () => {
+  let canvasFillTextCalls;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    canvasFillTextCalls = [];
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      fillRect: vi.fn(),
+      fillText: vi.fn((text) => canvasFillTextCalls.push(String(text))),
+      measureText: vi.fn((text) => ({ width: String(text).length * 10 })),
+      set fillStyle(_value) {},
+      set font(_value) {},
+    }));
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,report');
+    HTMLAnchorElement.prototype.click = vi.fn();
     fetchDashboardReport.mockResolvedValue({
       trucks: [
         {
@@ -63,7 +70,7 @@ describe('TodayTruckDashboard', () => {
     expect(screen.queryByText('Tanggal')).not.toBeInTheDocument();
   });
 
-  it('memakai last update pada subtitle PDF', async () => {
+  it('mendownload report gambar progress unit dari dashboard Order Berjalan', async () => {
     const user = userEvent.setup();
     fetchDashboardReport.mockResolvedValue({
       trucks: [
@@ -73,6 +80,7 @@ describe('TodayTruckDashboard', () => {
           unitCode: 'TRK-001',
           capacity: '20FT',
           status: 'Aktif',
+          defaultDriver: 'Agus',
         },
       ],
       activeJobs: [
@@ -81,17 +89,22 @@ describe('TodayTruckDashboard', () => {
           plateNumber: 'B 1234 XYZ',
           status: 'running',
           updatedAt: '2026-08-17T03:35:00.000Z',
+          shipment: 'export',
+          customer: 'INDOBARAT',
+          destination: 'PWK',
+          driver: 'Agus',
+          size: '40FT',
         },
       ],
     });
 
     render(<TodayTruckDashboard />);
     await screen.findByText(/Last Update/i);
-    await user.click(screen.getByRole('button', { name: /download pdf/i }));
+    await user.click(screen.getByRole('button', { name: /download report/i }));
 
-    expect(downloadPdfReport).toHaveBeenCalledWith(expect.objectContaining({
-      subtitle: 'Last Update 17 Agustus 2026 10:35 WIB',
-    }));
+    expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith('image/png');
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    expect(canvasFillTextCalls.join('\n')).toContain('AGUS / B 1234 XYZ');
   });
 
   it('menampilkan hanya size chassis di dashboard', async () => {

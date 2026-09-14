@@ -271,6 +271,14 @@ function createInitialForm(order) {
     destination: order?.destination || '',
     terminal: order?.terminal || '',
     jobDescription: order?.jobDescription || order?.notes || '',
+    isVendorOrder: Boolean(order?.isVendorOrder),
+    vendorName: order?.vendorName || '',
+    vendorNote: order?.vendorNote || '',
+    // Status order vendor (Phase 4) -- dipertahankan dari order yang diedit supaya edit field lain
+    // tidak diam-diam membalikkan status "Selesai" ke "Dicatat". Untuk order internal, field ini
+    // tidak pernah dipakai langsung oleh Sales/Admin -- backend tetap menghitung ulang otomatis
+    // dari container job (lihat refreshOrderStatus di sales-orders.repository.js).
+    status: order?.status || 'waiting_operational',
     price: order?.price ? String(order.price) : '',
     unit: order?.unit || 'Container',
     serviceName,
@@ -515,6 +523,18 @@ function SalesOrderForm({
     }));
   }
 
+  function updateVendorOrderMode(event) {
+    const checked = event.target.checked;
+    setForm((current) => ({
+      ...current,
+      isVendorOrder: checked,
+      // Nama/catatan vendor hanya relevan selama checkbox dicentang -- dikosongkan lagi
+      // saat di-uncheck supaya tidak ada data vendor basi ikut tersimpan diam-diam.
+      vendorName: checked ? current.vendorName : '',
+      vendorNote: checked ? current.vendorNote : '',
+    }));
+  }
+
   function updateLineItem(index, field, value) {
     setForm((current) => ({
       ...current,
@@ -663,6 +683,9 @@ function SalesOrderForm({
       container: containerSummary,
       terminal: form.terminal.trim(),
       vesselName: form.vesselName.trim(),
+      isVendorOrder: Boolean(form.isVendorOrder),
+      vendorName: form.isVendorOrder ? form.vendorName.trim() : '',
+      vendorNote: form.isVendorOrder ? form.vendorNote.trim() : '',
       serviceName: serviceSummary,
       lineItems: normalizedLineItems,
       container20Qty,
@@ -799,6 +822,50 @@ function SalesOrderForm({
                 ? 'Nomor SO lama boleh langsung diisi Admin sesuai data arsip.'
                 : 'Nomor SO Finance akan diisi oleh Finance setelah order dicek.'}
             </p>
+
+            <label className="vendor-order-toggle">
+              <input
+                type="checkbox"
+                name="isVendorOrder"
+                checked={Boolean(form.isVendorOrder)}
+                onChange={updateVendorOrderMode}
+              />
+              <span>
+                <strong>Dikerjakan oleh Vendor</strong>
+                <small>Order hanya dicatat sebagai Sales Order bertanda Vendor -- tidak membuat ritasi/container job internal.</small>
+              </span>
+            </label>
+
+            {form.isVendorOrder ? (
+              <div className="order-form-grid vendor-order-fields">
+                <label>
+                  Status Vendor
+                  <select name="status" value={form.status} onChange={updateField}>
+                    <option value="waiting_operational">Dicatat</option>
+                    <option value="completed">Selesai</option>
+                  </select>
+                </label>
+                <label>
+                  Nama Vendor
+                  <input
+                    name="vendorName"
+                    value={form.vendorName}
+                    onChange={updateField}
+                    placeholder="Nama vendor/truck luar (opsional)"
+                  />
+                </label>
+                <label className="span-two">
+                  Catatan Vendor
+                  <textarea
+                    name="vendorNote"
+                    value={form.vendorNote}
+                    onChange={updateField}
+                    rows="2"
+                    placeholder="Catatan tambahan (opsional)"
+                  />
+                </label>
+              </div>
+            ) : null}
 
             <div className="order-form-grid">
               {editing || historicalMode ? (

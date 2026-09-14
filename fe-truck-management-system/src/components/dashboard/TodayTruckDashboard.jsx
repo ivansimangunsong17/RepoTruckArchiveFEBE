@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Archive, Download, FileText, History, Truck, X } from 'lucide-react';
 import { formatShortDate, normalizeSize, todayKey } from '../../data/operationalDashboard';
 import { fetchDashboardReport } from '../../services/reports/reportService';
-import { downloadPdfReport } from '../../utils/simplePdfReport';
 import { formatDateTime } from '../../utils/formatDate';
 
 function formatShipment(value) {
@@ -189,6 +188,185 @@ function reportDateKey(value) {
   return String(value || '').replace(/[^0-9]/g, '') || 'report';
 }
 
+function formatReportDate(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  }).format(parsed);
+}
+
+function normalizeReportText(value) {
+  return String(value || '-').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function normalizeReportStatus(status) {
+  if (status === 'completed') return 'SELESAI';
+  if (status === 'running') return 'SEDANG JALAN';
+  if (status === 'inap') return 'INAP';
+  if (status === 'repo_stored') return 'CONTAINER TITIP';
+  if (status === 'cancelled') return 'BATAL';
+  return 'BELUM JALAN';
+}
+
+function normalizeReportSize(value) {
+  const size = normalizeSize(value);
+  if (size === '20FT') return '20';
+  if (size === '40FT') return '40';
+  return size ? size.replace('FT', '') : '-';
+}
+
+function reportDriverPlateLabel(row) {
+  const driver = normalizeReportText(row?.job?.driver || row?.truck?.driver || row?.truck?.plateNumber);
+  const plate = normalizeReportText(row?.job?.plateNumber || row?.job?.truck || row?.truck?.plateNumber);
+  if (!plate || plate === '-' || plate === driver) return driver;
+  return `${driver} / ${plate}`;
+}
+
+function reportGroupKey(job) {
+  return [
+    job?.soNumber || job?.salesOrderNumber || '',
+    job?.shipment || '',
+    job?.customer || '',
+    job?.destination || '',
+  ].join('|');
+}
+
+function buildProgressReportSections(rows = [], reportDate) {
+  const assignedRows = rows.filter((row) => row.job);
+  const groups = new Map();
+  assignedRows.forEach((row) => {
+    const key = reportGroupKey(row.job);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+  const orderSections = Array.from(groups.values()).map((items) => {
+    const first = items[0]?.job || {};
+    const sizeCounts = items.reduce((accumulator, item) => {
+      const size = normalizeReportSize(item.job?.size || item.job?.containerSize || item.truck?.chassisSize);
+      accumulator[size] = (accumulator[size] || 0) + 1;
+      return accumulator;
+    }, {});
+    const orderedSizes = ['20', '40'].filter((size) => sizeCounts[size]).concat(
+      Object.keys(sizeCounts).filter((size) => !['20', '40'].includes(size)).sort(),
+    );
+    const party = orderedSizes.map((size) => `${sizeCounts[size]}X${size}`).join(' + ');
+    return {
+      title: [
+        normalizeReportText(formatShipment(first.shipment)),
+        normalizeReportText(first.customer || first.salesName || first.soNumber),
+        normalizeReportText(first.destination),
+        party,
+      ].filter((part) => part && part !== '-').join(' '),
+      lines: items.map((item) => `${reportDriverPlateLabel(item)} - ${normalizeReportStatus(item.job?.status)}`),
+    };
+  });
+  const waitingRows = rows.filter((row) => !row.job && !isTruckMaintenance(row.truck));
+  const maintenanceRows = rows.filter((row) => isTruckMaintenance(row.truck));
+  const sections = [
+    {
+      title: `REPORT PROGRESS UNIT TGL ${formatReportDate(reportDate)}`,
+      lines: orderSections.length ? [] : ['BELUM ADA ORDER BERJALAN'],
+    },
+    ...orderSections,
+  ];
+  if (waitingRows.length) {
+    sections.push({
+      title: 'DI GARASI / TUNGGU ORDER',
+      lines: waitingRows.map((row) => `${reportDriverPlateLabel(row)} - TUNGGU ORDER`),
+    });
+  }
+  if (maintenanceRows.length) {
+    sections.push({
+      title: 'UNIT MAINTENANCE',
+      lines: maintenanceRows.map((row) => `${normalizeReportText(row.truck.plateNumber || row.truck.unitCode)} - MAINTENANCE`),
+    });
+  }
+  return sections;
+}
+
+function wrapCanvasText(context, text, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (context.measureText(next).width <= maxWidth || !line) {
+      line = next;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [''];
+}
+
+function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Browser tidak mendukung export gambar.');
+  const width = 1080;
+  const padding = 48;
+  const contentWidth = width - padding * 2;
+  const sectionGap = 22;
+  const lineHeight = 30;
+  const wrappedSections = sections.map((section) => {
+    context.font = '900 25px Arial';
+    const titleLines = wrapCanvasText(context, section.title, contentWidth);
+    context.font = '600 23px Arial';
+    const bodyLines = (section.lines || []).flatMap((line, index) => (
+      wrapCanvasText(context, section.lines.length > 1 ? `${index + 1}. ${line}` : line, contentWidth)
+    ));
+    return { ...section, titleLines, bodyLines };
+  });
+  const height = Math.max(480, padding * 2 + 78 + wrappedSections.reduce((total, section) => (
+    total + section.titleLines.length * 34 + Math.max(1, section.bodyLines.length) * lineHeight + sectionGap
+  ), 0));
+  canvas.width = width;
+  canvas.height = height;
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#b91c1c';
+  context.fillRect(0, 0, width, 10);
+  let y = padding;
+  context.fillStyle = '#111827';
+  context.font = '900 34px Arial';
+  context.fillText('REPORT PROGRESS UNIT', padding, y);
+  y += 36;
+  context.fillStyle = '#64748b';
+  context.font = '700 18px Arial';
+  context.fillText(`Tanggal ${formatReportDate(reportDate)} - Last Update ${lastUpdateLabel}`, padding, y);
+  y += 34;
+
+  wrappedSections.forEach((section) => {
+    y += 10;
+    context.fillStyle = '#b91c1c';
+    context.font = '900 25px Arial';
+    section.titleLines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += 34;
+    });
+    context.fillStyle = '#111827';
+    context.font = '600 23px Arial';
+    const lines = section.bodyLines.length ? section.bodyLines : ['-'];
+    lines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += lineHeight;
+    });
+    y += sectionGap;
+  });
+
+  const link = document.createElement('a');
+  link.download = `progress-unit-${reportDateKey(reportDate)}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
 function rowStatusLabel(row) {
   if (isTruckMaintenance(row.truck)) return 'Maintenance';
   return row.job ? 'Assign' : 'Unassign';
@@ -266,27 +444,10 @@ function TodayTruckDashboard() {
   const lastOperationalUpdateLabel = formatDateTime(lastOperationalUpdate);
 
   function handleDownloadReport() {
-    downloadPdfReport({
-      title: 'Order Berjalan Hari Ini',
-      subtitle: `Last Update ${lastOperationalUpdateLabel}`,
-      filename: `dashboard-truck-harian-${reportDateKey(currentDateKey)}.pdf`,
-      meta: [
-        { label: 'Total Truck', value: rows.length },
-        { label: 'Assign', value: rows.filter((row) => row.job).length },
-        { label: 'Unassign', value: rows.filter((row) => !row.job).length },
-      ],
-      columns: [
-        { label: 'No', width: 0.55, value: (row) => row.reportNumber },
-        { label: 'No Lambung', width: 1, value: (row) => formatTruckNumber(row.truck.unitCode), bold: true },
-        { label: 'Plat', width: 1.25, value: (row) => row.truck.plateNumber },
-        { label: 'Sopir', width: 1.45, value: (row) => row.job?.driver || row.truck.driver || '-' },
-        { label: 'Container', width: 1.35, value: (row) => row.job?.containerNumber || '-' },
-        { label: 'Order', width: 1.05, value: (row) => formatShipment(row.job?.shipment) },
-        { label: 'Size', width: 0.8, value: (row) => chassisSizeLabel(row.truck) },
-        { label: 'Tujuan', width: 1.55, value: (row) => destinationText(row.job) },
-        { label: 'Status', width: 0.95, value: (row) => (row.job ? 'Assign' : 'Unassign') },
-      ],
-      rows: rows.map((row, index) => ({ ...row, reportNumber: index + 1 })),
+    downloadProgressReportPng({
+      sections: buildProgressReportSections(rows, currentDateKey),
+      reportDate: currentDateKey,
+      lastUpdateLabel: lastOperationalUpdateLabel,
     });
   }
 
@@ -306,7 +467,7 @@ function TodayTruckDashboard() {
             onClick={handleDownloadReport}
             disabled={loading || Boolean(error)}
           >
-            <Download size={15} /> Download PDF
+            <Download size={15} /> Download Report
           </button>
           <p className="m-0 text-[12px] font-semibold leading-none text-slate-500">Last Update: {lastOperationalUpdateLabel}</p>
         </div>

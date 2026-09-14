@@ -1,6 +1,7 @@
 import { AlertTriangle, Banknote, CheckCircle2, Download, ReceiptText } from 'lucide-react';
 import DocumentLink from '../../../components/common/DocumentLink';
 import { downloadCsv } from '../../../utils/csvExport';
+import { downloadPdfReport } from '../../../utils/simplePdfReport';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
 import AmountField from '../shared/AmountField';
@@ -14,11 +15,16 @@ import {
   expenseFinanceStatusLabels,
   expensePaymentStatusLabels,
   operationalFundBatchStatusLabel,
+  operationalFundTransactionCategoryLabel,
   operationalFundTransactionCategoryLabels,
   operationalFundTransactionCsvRows,
   operationalFundTransactionTypeLabels,
   readableLabel,
 } from './operationalFundUtils';
+
+function reportDateKey(value = '') {
+  return String(value || '').replace(/[^0-9]/g, '') || 'batch';
+}
 
 function DailyOperationalFundPanel({
   batch = defaultOperationalFundBatch,
@@ -95,6 +101,33 @@ function DailyOperationalFundPanel({
       ['No', 'Tanggal', 'Keterangan', 'Kategori', 'Uang Masuk', 'Uang Keluar', 'Saldo', 'Bukti'],
       operationalFundTransactionCsvRows(transactionRows),
     );
+  }
+
+  function exportTransactionPdf() {
+    const chronologicalRows = [...transactionRows].reverse();
+    downloadPdfReport({
+      reportLabel: 'Finance Report',
+      title: 'Report Rekening Dropping',
+      subtitle: `Batch ${formatDate(batchDate || normalizedBatch.batchDate)} - ${operationalFundBatchStatusLabel(normalizedBatch.status)}`,
+      filename: `rekening-dropping-${reportDateKey(batchDate || normalizedBatch.batchDate)}.pdf`,
+      meta: [
+        { label: 'Sisa Saldo', value: formatCurrency(normalizedTransactionSummary.balance) },
+        { label: 'Uang Masuk', value: formatCurrency(normalizedTransactionSummary.totalCredit) },
+        { label: 'Uang Keluar', value: formatCurrency(normalizedTransactionSummary.totalDebit) },
+        { label: 'Belum Bukti', value: `${expenseNeedProofCount} transaksi` },
+      ],
+      columns: [
+        { label: 'No', width: 0.45, value: (row) => row.reportNumber, align: 'center' },
+        { label: 'Tanggal', width: 1.05, value: (row) => row.transactionDate },
+        { label: 'Keterangan', width: 2.75, value: (row) => row.description, bold: true },
+        { label: 'Kategori', width: 1.25, value: (row) => operationalFundTransactionCategoryLabel(row) || '-' },
+        { label: 'Masuk', width: 1, value: (row) => (row.moneyIn ? formatCurrency(row.moneyIn) : '-'), align: 'right' },
+        { label: 'Keluar', width: 1, value: (row) => (row.moneyOut ? formatCurrency(row.moneyOut) : '-'), align: 'right' },
+        { label: 'Saldo', width: 1, value: (row) => (row.runningBalance == null ? '-' : formatCurrency(row.runningBalance)), align: 'right' },
+        { label: 'Bukti', width: 0.75, value: (row) => (row.proofAttachment ? 'Ada' : 'Belum'), align: 'center' },
+      ],
+      rows: chronologicalRows.map((row, index) => ({ ...row, reportNumber: index + 1 })),
+    });
   }
 
   return (
@@ -225,6 +258,14 @@ function DailyOperationalFundPanel({
               >
                 <Download size={13} /> Export CSV
               </button>
+              <button
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                disabled={!transactionRows.length}
+                onClick={exportTransactionPdf}
+                type="button"
+              >
+                <Download size={13} /> Download PDF
+              </button>
             </div>
           </div>
           {!transactionLoading && !transactionError && !transactionRows.length ? (
@@ -262,7 +303,7 @@ function DailyOperationalFundPanel({
                       <td className="whitespace-nowrap px-4 py-3 text-xs font-medium text-slate-700">{row.transactionDate}</td>
                       <td className="px-4 py-3">
                         <span className="line-clamp-2 block text-xs font-bold text-slate-900">{row.description}</span>
-                        <span className="mt-1 block text-[10px] font-semibold text-slate-500">{operationalFundTransactionCategoryLabels[row.category] || row.category || '-'}</span>
+                        <span className="mt-1 block text-[10px] font-semibold text-slate-500">{operationalFundTransactionCategoryLabel(row) || '-'}</span>
                         <span className="mt-0.5 block text-[10px] font-medium text-slate-400">{row.soNumber || row.containerNumber || operationalFundTransactionTypeLabels[row.transactionType] || '-'}</span>
                       </td>
                       <td className="px-4 py-3 text-right text-xs font-semibold text-emerald-700">{row.moneyIn ? formatCurrency(row.moneyIn) : <span className="text-slate-300">-</span>}</td>

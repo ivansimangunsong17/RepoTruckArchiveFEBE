@@ -309,7 +309,7 @@ export function fetchContainerJobExpensesForReconciliation(query = {}) {
   });
 }
 
-export function reconcileContainerJobExpense(id, payload = {}, actor) {
+export async function reconcileContainerJobExpense(id, payload = {}, actor) {
   const financeCheckStatus = String(payload.financeCheckStatus || payload.status || '').trim();
   if (!['belum_dicek', 'sudah_dicek', 'perlu_klarifikasi', 'dikoreksi'].includes(financeCheckStatus)) {
     const error = new Error('Status cek Finance biaya container job tidak valid.');
@@ -330,10 +330,43 @@ export function reconcileContainerJobExpense(id, payload = {}, actor) {
     error.code = 'CONTAINER_JOB_EXPENSE_FINANCE_NOTE_TOO_LONG';
     throw error;
   }
+  const adminFeeAmount = Number(payload.adminFeeAmount || 0);
+  if (!Number.isFinite(adminFeeAmount) || adminFeeAmount < 0) {
+    const error = new Error('Biaya admin transfer tidak valid.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_ADMIN_FEE_INVALID';
+    throw error;
+  }
+  const adminFeeNote = String(payload.adminFeeNote || '').trim();
+  if (adminFeeNote.length > 500) {
+    const error = new Error('Catatan biaya admin transfer maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_ADMIN_FEE_NOTE_TOO_LONG';
+    throw error;
+  }
+  const actorName = actor?.name || actor?.email || 'Finance';
+  let proofAttachmentId = payload.proofAttachmentId || null;
+  if (!proofAttachmentId && payload.fileName && payload.fileBase64) {
+    const attachment = await createAttachment({
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      fileSize: payload.fileSize,
+      fileBase64: payload.fileBase64,
+      entityType: 'container_job_expense',
+      entityId: id,
+      category: 'expensePaymentProof',
+      uploadedByName: actorName,
+      notes: payload.proofNote || payload.financeNote || 'Bukti pembayaran biaya rekening dropping',
+    });
+    proofAttachmentId = attachment.id;
+  }
   return reconcileContainerJobExpenseRecord(id, {
     financeCheckStatus,
     financeNote,
-    actorName: actor?.name || actor?.email || 'Finance',
+    proofAttachmentId,
+    adminFeeAmount,
+    adminFeeNote,
+    actorName,
   });
 }
 

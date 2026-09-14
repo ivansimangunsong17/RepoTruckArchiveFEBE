@@ -26,9 +26,18 @@ vi.mock('../../services/archive/salesOrderService', () => ({
 describe('SalesOrdersPage billing status flow', () => {
   const notify = vi.fn();
   const confirmAction = vi.fn();
+  const cancelOrder = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    cancelOrder.mockResolvedValue(undefined);
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      fillRect: vi.fn(),
+      fillText: vi.fn(),
+      measureText: vi.fn((text) => ({ width: String(text || '').length * 9 })),
+    }));
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,report');
+    HTMLAnchorElement.prototype.click = vi.fn();
     confirmAction.mockResolvedValue(true);
     useAuth.mockReturnValue({
       user: { id: 'user-1', role: 'admin', fullName: 'Admin User' },
@@ -39,6 +48,7 @@ describe('SalesOrdersPage billing status flow', () => {
       orders: [],
       masters: { trucks: [], drivers: [], destinations: [], customers: [], depots: [], terminals: [] },
       updateJob: vi.fn(),
+      cancelOrder,
       refresh: vi.fn(),
     });
     fetchSalesOrdersPage.mockResolvedValue({
@@ -131,6 +141,22 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(screen.queryByRole('button', { name: 'Simpan Status' })).not.toBeInTheDocument();
   });
 
+  it('mendownload list DO masuk dalam bentuk PNG sesuai filter Sales Order', async () => {
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+
+    const downloadButton = await screen.findByRole('button', { name: /download list do/i });
+    await user.click(downloadButton);
+
+    await waitFor(() => expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith('image/png'));
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      page: 1,
+      pageSize: 500,
+      status: 'waiting_operational',
+    }));
+  });
+
   it('membuka form update container job langsung dari detail Sales Order', async () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage />);
@@ -185,6 +211,106 @@ describe('SalesOrdersPage billing status flow', () => {
     await user.click(await screen.findByRole('button', { name: 'Detail' }));
     await screen.findByText('Pembayaran: Tempo 14 hari');
     expect(screen.queryByText(/Multi-tujuan/)).not.toBeInTheDocument();
+  });
+
+  it('menampilkan badge Vendor di daftar dan detail Sales Order saat order ditandai vendor', async () => {
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-vendor-1',
+        soNumber: 'SO-VENDOR-001',
+        customer: 'PT Vendor Luar',
+        shipment: 'import',
+        status: 'waiting_operational',
+        origin: 'Tanjung Priok',
+        destination: 'Cikarang',
+        soDate: '2026-07-19',
+        receivedAt: '2026-07-20T10:21:00.000Z',
+        quantity: 1,
+        isVendorOrder: true,
+        vendorName: 'CV Truck Luar',
+        vendorNote: 'Truck internal penuh',
+        containers: [
+          { id: 'job-vendor-1', size: '20FT', type: 'Dry', status: 'received', destination: 'Cikarang' },
+        ],
+      }],
+      total: 1,
+      summary: {
+        orders: 1, waitingOrders: 1, runningOrders: 0, completedOrders: 0, invoicedOrders: 0,
+        readyInvoiceDocuments: 0, sentInvoiceDocuments: 0, cancelledOrders: 0,
+        activeContainers: 1, completedContainers: 0, cancelledContainers: 0,
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+
+    expect(await screen.findByText('Vendor', { selector: '.vendor-order-badge' })).toBeInTheDocument();
+    // Order vendor status waiting_operational -> label sederhana "Dicatat", bukan progress
+    // container (yang tidak relevan karena order vendor tidak pernah punya container job).
+    expect(await screen.findByText('Status Vendor')).toBeInTheDocument();
+    expect(screen.getByText('Dicatat')).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    expect(await screen.findByText(/Vendor:\s*CV Truck Luar\s*\(Truck internal penuh\)/)).toBeInTheDocument();
+    expect(screen.getByText('Status Vendor: Dicatat')).toBeInTheDocument();
+  });
+
+  it('menampilkan label Status Vendor "Selesai" saat order vendor sudah ditandai selesai', async () => {
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-vendor-done',
+        soNumber: 'SO-VENDOR-DONE',
+        customer: 'PT Vendor Luar',
+        shipment: 'import',
+        status: 'completed',
+        origin: 'Tanjung Priok',
+        destination: 'Cikarang',
+        soDate: '2026-07-19',
+        receivedAt: '2026-07-20T10:21:00.000Z',
+        quantity: 1,
+        isVendorOrder: true,
+        vendorName: 'CV Truck Luar',
+        containers: [],
+      }],
+      total: 1,
+      summary: {
+        orders: 1, waitingOrders: 0, runningOrders: 0, completedOrders: 1, invoicedOrders: 0,
+        readyInvoiceDocuments: 0, sentInvoiceDocuments: 0, cancelledOrders: 0,
+        activeContainers: 0, completedContainers: 0, cancelledContainers: 0,
+      },
+    });
+
+    render(<SalesOrdersPage />);
+
+    expect(await screen.findByText('Selesai')).toBeInTheDocument();
+  });
+
+  it('filter Internal/Vendor mengirim vendorFilter yang sesuai ke fetchSalesOrdersPage', async () => {
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+    await screen.findByText('SO-001');
+
+    await user.selectOptions(screen.getByLabelText('Filter tipe order'), 'vendor');
+    await waitFor(() => expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      vendorFilter: 'vendor',
+    })));
+
+    await user.selectOptions(screen.getByLabelText('Filter tipe order'), 'internal');
+    await waitFor(() => expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      vendorFilter: 'internal',
+    })));
+  });
+
+  it('tidak menampilkan badge Vendor untuk Sales Order internal biasa', async () => {
+    const user = userEvent.setup();
+    render(<SalesOrdersPage />);
+
+    expect(await screen.findByText('SO-001')).toBeInTheDocument();
+    expect(screen.queryByText('Vendor', { selector: '.vendor-order-badge' })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+    await screen.findByText('Pembayaran: Tempo 14 hari');
+    expect(screen.queryByText('Vendor', { selector: '.vendor-order-badge' })).not.toBeInTheDocument();
   });
 
   it('menampilkan Dokumen Customer dari Sales Order yang seluruh ritasinya selesai', async () => {
@@ -471,5 +597,54 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(screen.getByRole('button', { name: /Edit Sales Order/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Hapus Sales Order/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Ajukan Batal/i })).toBeInTheDocument();
+  });
+
+  it('menampilkan tombol batal khusus vendor dan tetap bisa edit saat vendor sudah selesai', async () => {
+    const user = userEvent.setup();
+    useAuth.mockReturnValue({
+      user: { id: 'user-1', role: 'sales', fullName: 'Sales A' },
+    });
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-vendor-completed',
+        soNumber: 'SO-VENDOR-002',
+        customer: 'PT Vendor Selesai',
+        shipment: 'export',
+        status: 'completed',
+        createdByUserId: 'user-1',
+        createdBy: 'Sales A',
+        salesName: 'Sales A',
+        quantity: 5,
+        isVendorOrder: true,
+        vendorName: 'CV Vendor Luar',
+        canRevise: false,
+        containers: [],
+      }],
+      total: 1,
+      summary: {
+        orders: 1,
+        waitingOrders: 0,
+        runningOrders: 0,
+        completedOrders: 1,
+        invoicedOrders: 0,
+        cancelledOrders: 0,
+      },
+    });
+
+    render(<SalesOrdersPage />);
+    await user.click(await screen.findByRole('button', { name: 'Detail' }));
+
+    expect(screen.getByRole('button', { name: /Edit Sales Order/i })).toBeInTheDocument();
+    const cancelButton = screen.getByRole('button', { name: /Batalkan Order Vendor/i });
+    expect(cancelButton).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Hapus Sales Order/i })).not.toBeInTheDocument();
+
+    await user.click(cancelButton);
+
+    expect(confirmAction).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Batalkan Order Vendor?',
+      confirmLabel: 'Batalkan Vendor',
+    }));
+    expect(cancelOrder).toHaveBeenCalledWith('order-vendor-completed');
   });
 });

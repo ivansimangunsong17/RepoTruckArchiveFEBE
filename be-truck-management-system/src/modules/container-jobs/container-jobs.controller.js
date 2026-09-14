@@ -36,6 +36,24 @@ function historicalMetadata(job = {}) {
   };
 }
 
+// Ritasi susulan/backdate (Phase 2) -- audit log WAJIB (bukan opsional seperti historical entry di
+// atas) supaya setiap ritasi yang dicatat telat selalu tertelusuri: siapa, kapan, dan kenapa.
+function isBackdateRecord(record = {}) {
+  return Boolean(record?.isBackdateEntry);
+}
+
+function backdateMetadata(job = {}) {
+  return {
+    isBackdateEntry: true,
+    backdateReason: job.backdateReason || '',
+    createdAsCorrection: Boolean(job.createdAsCorrection),
+    salesOrderId: job.orderId,
+    soNumber: job.soNumber,
+    containerNumber: job.containerNumber,
+    status: job.status,
+  };
+}
+
 const adminCorrectionAuditFields = {
   status: 'Status',
   containerNumber: 'No. Container',
@@ -351,6 +369,17 @@ export async function updateContainerJobController(request, response) {
       beforeData: before,
       afterData: saved,
       metadata: historicalMetadata(saved),
+    });
+  }
+  if (isBackdateRecord(before) || isBackdateRecord(saved)) {
+    await safeRecordActivityLog(request, {
+      action: 'UPDATE_BACKDATE_CONTAINER_JOB',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: saved.id,
+      beforeData: before,
+      afterData: saved,
+      metadata: backdateMetadata(saved),
     });
   }
   if (before.status !== saved.status) {

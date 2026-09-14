@@ -131,4 +131,23 @@ describe('OperationsPage status inap', () => {
       completedDate: '2026-07-12',
     })));
   });
+
+  it('menampilkan ringkasan party container di header sales order', async () => {
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [
+        runningJobRow({ id: 'job-1', size: '40FT' }),
+        runningJobRow({ id: 'job-2', size: '40FT', containerNumber: 'TCLU7654321' }),
+        runningJobRow({ id: 'job-3', size: '20FT', containerNumber: 'TCLU7654322' }),
+      ],
+      total: 3,
+      totalRows: 3,
+      counts: { received: 0, running: 3, inap: 0, repo_stored: 0, completed: 0, cancelled: 0 },
+      rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
+    });
+
+    render(<OperationsPage />);
+
+    expect(await screen.findByText('Party 1 x 20FT + 2 x 40FT')).toBeInTheDocument();
+  });
+
 });

@@ -391,7 +391,14 @@
   }
 
   .operations-page .operational-so-title {
-    gap: 1px;
+    gap: 1px 6px;
+  }
+
+  .operations-page .operational-so-party {
+    width: fit-content;
+    margin-top: 4px;
+    padding: 3px 7px;
+    font-size: .52rem;
   }
 
   .operations-page .operational-so-title span {

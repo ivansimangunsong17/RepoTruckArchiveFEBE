@@ -52,6 +52,9 @@ const salesOrderColumnCandidates = [
   'destination',
   'status',
   'sales_name',
+  'is_vendor_order',
+  'vendor_name',
+  'vendor_note',
   'entry_source',
   'historical_period',
   'historical_notes',
@@ -123,7 +126,8 @@ const jobColumns = `
   repo_location, repo_stored_at, repo_eir_number, repo_reason, repo_notes, repo_container_condition,
   repo_released_driver_id, repo_released_vehicle_id, repo_created_by_name,
   repo_picked_up_at, repo_picked_up_by_name,
-  entry_source, historical_period, historical_notes
+  entry_source, historical_period, historical_notes,
+  is_backdate_entry, backdate_reason, created_as_correction
 `;
 
 const attachmentColumns = `
@@ -182,6 +186,7 @@ function buildOrderWhere({
   historicalPeriod = '',
   dateFrom = '',
   dateTo = '',
+  vendorFilter = '',
 } = {}, { hasOwnerUserIdColumn = true } = {}) {
   const clauses = [];
   const params = [];
@@ -228,6 +233,15 @@ function buildOrderWhere({
   if (historicalPeriod) {
     params.push(String(historicalPeriod).trim());
     clauses.push(`historical_period = $${params.length}`);
+  }
+
+  // Filter Internal/Vendor (Phase 4) -- badge-nya sudah ada sejak Phase 1, ini cuma menambahkan
+  // cara memfilter daftar berdasarkan penanda is_vendor_order, tanpa menyentuh status ritasi.
+  const cleanVendorFilter = String(vendorFilter || '').trim().toLowerCase();
+  if (cleanVendorFilter === 'vendor') {
+    clauses.push('is_vendor_order');
+  } else if (cleanVendorFilter === 'internal') {
+    clauses.push('not is_vendor_order');
   }
 
   if (ownerUserId && hasOwnerUserIdColumn) {
@@ -517,6 +531,7 @@ export async function findSalesOrdersPage(options = {}) {
     historicalPeriod: options.historicalPeriod,
     dateFrom: options.dateFrom,
     dateTo: options.dateTo,
+    vendorFilter: options.vendorFilter,
   }, ownerColumnOptions);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -614,19 +629,24 @@ export async function createSalesOrder(form) {
     );
     const order = orderResult.rows[0];
 
-    for (const container of form.containers || []) {
-      const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
-      const jobEntries = Object.entries(jobPayload);
-      await client.query(
-        `
-          insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
-          values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
-        `,
-        jobEntries.map(([, value]) => value),
-      );
-    }
+    // Order vendor (Phase 2) hanya pencatatan Sales Order -- tidak pernah membuat
+    // container_jobs, jadi tidak akan pernah muncul sebagai ritasi di Operational,
+    // dashboard truck, atau butuh assignment truck/sopir sama sekali.
+    if (!payload.is_vendor_order) {
+      for (const container of form.containers || []) {
+        const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
+        const jobEntries = Object.entries(jobPayload);
+        await client.query(
+          `
+            insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
+            values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
+          `,
+          jobEntries.map(([, value]) => value),
+        );
+      }
 
-    await refreshOrderStatus(client, order.id);
+      await refreshOrderStatus(client, order.id);
+    }
     const finalOrder = await client.query(`select ${orderColumns} from sales_orders where id = $1`, [order.id]);
     const jobs = await client.query(`select ${jobColumns} from container_jobs where sales_order_id = $1 order by created_at asc`, [order.id]);
     const jobAttachments = jobs.rows.length
@@ -678,7 +698,11 @@ export async function updateSalesOrder(id, form) {
       error.code = 'SALES_ORDER_CANCELLED_LOCKED';
       throw error;
     }
-    if (existing.rows[0].status === 'completed') {
+    // Order vendor (Phase 4) sengaja DIKECUALIKAN dari kunci "completed" ini -- status "Selesai"-nya
+    // cuma penanda manual sederhana (bukan hasil ritasi yang sudah diaudit Operational/Finance seperti
+    // order internal), jadi Sales/Admin tetap harus bisa mengedit nama/catatan vendor atau membalik
+    // status kapan saja tanpa perlu mode koreksi admin.
+    if (existing.rows[0].status === 'completed' && !existing.rows[0].is_vendor_order) {
       const error = new Error('Sales Order yang sudah selesai tidak bisa diedit.');
       error.statusCode = 409;
       error.code = 'SALES_ORDER_COMPLETED_LOCKED';
@@ -723,46 +747,68 @@ export async function updateSalesOrder(id, form) {
       'select id, status, container_size from container_jobs where sales_order_id = $1 order by created_at asc',
       [id],
     );
-    const { assignments, removableIds } = reconcileSalesOrderContainers(form.containers || [], currentJobs.rows);
-    if (removableIds.length) {
-      await client.query('delete from container_jobs where id = any($1::uuid[])', [removableIds]);
-    }
 
-    for (const { container, currentJob } of assignments) {
-      const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
-      if (currentJob) {
-        const salesJobPayload = {
-          container_size: jobPayload.container_size,
-          container_type: jobPayload.container_type,
-          container_notes: jobPayload.container_notes,
-          entry_source: jobPayload.entry_source,
-          historical_period: jobPayload.historical_period,
-          historical_notes: jobPayload.historical_notes,
-          updated_by_name: jobPayload.updated_by_name,
-        };
-        const jobEntries = Object.entries(salesJobPayload);
-        await client.query(
-          `
-            update container_jobs
-            set ${jobEntries.map(([key], index) => `${key} = $${index + 1}`).join(', ')},
-                updated_at = now()
-            where id = $${jobEntries.length + 1}
-          `,
-          [...jobEntries.map(([, value]) => value), currentJob.id],
-        );
-      } else {
-        const jobEntries = Object.entries(jobPayload);
-        await client.query(
-          `
-            insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
-            values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
-          `,
-          jobEntries.map(([, value]) => value),
-        );
+    if (payload.is_vendor_order) {
+      // Order vendor (Phase 2) tidak boleh punya container_jobs sama sekali -- kalau order ini
+      // sebelumnya sudah internal dan sudah punya ritasi, tolak perubahan supaya tidak ada ritasi
+      // "hantu" yang nyangkut di order yang sudah ditandai vendor. Batalkan/hapus dulu container
+      // job yang ada lewat flow existing sebelum menandai order ini sebagai vendor.
+      if (currentJobs.rows.length > 0) {
+        const error = new Error('Order ini masih punya container job/ritasi yang tercatat. Batalkan atau hapus container job tersebut terlebih dahulu sebelum menandai order sebagai Vendor.');
+        error.statusCode = 409;
+        error.code = 'SALES_ORDER_VENDOR_HAS_CONTAINER_JOBS';
+        throw error;
       }
-    }
+      // Tidak ada container job untuk disinkronkan/dibuat, dan status operational tidak relevan
+      // untuk order vendor -- refreshOrderStatus sengaja dilewati.
+    } else {
+      const { assignments, removableIds } = reconcileSalesOrderContainers(form.containers || [], currentJobs.rows);
+      if (removableIds.length) {
+        await client.query('delete from container_jobs where id = any($1::uuid[])', [removableIds]);
+      }
 
-    await refreshOrderStatus(client, id);
+      for (const { container, currentJob } of assignments) {
+        const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
+        if (currentJob) {
+          // Catatan: is_backdate_entry/backdate_reason SENGAJA tidak ikut disentuh di sini seperti
+          // entry_source/historical_period di atas -- toContainerJobDb() jatuh ke default order-level
+          // (bukan "nilai existing container ini"), jadi kalau ikut disertakan, edit SO apa pun yang
+          // TIDAK mengirim ulang isBackdateEntry untuk container lama bisa diam-diam menghapus status
+          // backdate-nya. Perubahan status backdate untuk container yang SUDAH ADA harus lewat endpoint
+          // PATCH /api/container-jobs/:id (sudah menjaga nilai existing lewat hasOwnInput).
+          const salesJobPayload = {
+            container_size: jobPayload.container_size,
+            container_type: jobPayload.container_type,
+            container_notes: jobPayload.container_notes,
+            entry_source: jobPayload.entry_source,
+            historical_period: jobPayload.historical_period,
+            historical_notes: jobPayload.historical_notes,
+            updated_by_name: jobPayload.updated_by_name,
+          };
+          const jobEntries = Object.entries(salesJobPayload);
+          await client.query(
+            `
+              update container_jobs
+              set ${jobEntries.map(([key], index) => `${key} = $${index + 1}`).join(', ')},
+                  updated_at = now()
+              where id = $${jobEntries.length + 1}
+            `,
+            [...jobEntries.map(([, value]) => value), currentJob.id],
+          );
+        } else {
+          const jobEntries = Object.entries(jobPayload);
+          await client.query(
+            `
+              insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
+              values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
+            `,
+            jobEntries.map(([, value]) => value),
+          );
+        }
+      }
+
+      await refreshOrderStatus(client, id);
+    }
     const finalOrder = await client.query(`select ${orderColumns} from sales_orders where id = $1`, [id]);
     const jobs = await client.query(`select ${jobColumns} from container_jobs where sales_order_id = $1 order by created_at asc`, [id]);
     const jobAttachments = jobs.rows.length

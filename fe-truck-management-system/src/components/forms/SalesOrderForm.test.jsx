@@ -334,6 +334,134 @@ describe('SalesOrderForm', () => {
     }));
   });
 
+  it('order baru default tidak ditandai vendor dan tidak menampilkan input vendor', () => {
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('checkbox', { name: /Dikerjakan oleh Vendor/i })).not.toBeChecked();
+    expect(screen.queryByLabelText('Nama Vendor')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Catatan Vendor')).not.toBeInTheDocument();
+  });
+
+  it('mencentang Dikerjakan oleh Vendor menampilkan Nama/Catatan Vendor dan mengirim payload penanda vendor', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await fillBaseFields(user, { soNumber: 'SO-VENDOR-001' });
+    await fillFirstLineItem(user, {
+      serviceName: 'Jasa Angkut D20',
+      containerType: 'Dry',
+      quantity: '1',
+      price: '100000',
+    });
+
+    await user.click(screen.getByRole('checkbox', { name: /Dikerjakan oleh Vendor/i }));
+    await user.type(screen.getByLabelText('Nama Vendor'), 'CV Truck Luar');
+    await user.type(screen.getByLabelText('Catatan Vendor'), 'Truck internal penuh');
+
+    await openReview(user);
+    await confirmReview(user);
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      isVendorOrder: true,
+      vendorName: 'CV Truck Luar',
+      vendorNote: 'Truck internal penuh',
+    }));
+  });
+
+  it('order vendor baru default Status Vendor "Dicatat", dan bisa diubah ke "Selesai" sebelum disimpan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await fillBaseFields(user, { soNumber: 'SO-VENDOR-002' });
+    await fillFirstLineItem(user, {
+      serviceName: 'Jasa Angkut D20',
+      containerType: 'Dry',
+      quantity: '1',
+      price: '100000',
+    });
+
+    await user.click(screen.getByRole('checkbox', { name: /Dikerjakan oleh Vendor/i }));
+    expect(screen.getByLabelText('Status Vendor')).toHaveValue('waiting_operational');
+
+    await user.selectOptions(screen.getByLabelText('Status Vendor'), 'Selesai');
+
+    await openReview(user);
+    await confirmReview(user);
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      isVendorOrder: true,
+      status: 'completed',
+    }));
+  });
+
+  it('edit order vendor yang sudah "Selesai" mempertahankan status itu walau field lain diubah tanpa menyentuh Status Vendor', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const order = {
+      id: 'so-vendor-done',
+      soNumber: 'SO-VENDOR-DONE',
+      customer: 'PT Armada Test',
+      origin: 'Jakarta',
+      destination: 'Bandung',
+      status: 'completed',
+      isVendorOrder: true,
+      vendorName: 'CV Truck Luar',
+      lineItems: [{ serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 1, price: 150000 }],
+      containers: [],
+    };
+
+    render(
+      <SalesOrderForm
+        order={order}
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[order]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByLabelText('Status Vendor')).toHaveValue('completed');
+
+    fireEvent.change(screen.getByLabelText('Lokasi Tujuan'), { target: { value: 'Karawang' } });
+
+    await openReview(user, true);
+    await confirmReview(user, true);
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      destination: 'Karawang',
+      isVendorOrder: true,
+      status: 'completed',
+    }));
+  });
+
   it('menampilkan dan memilih saran dari master data lewat dropdown kustom (bukan datalist bawaan browser)', async () => {
     const user = userEvent.setup();
     render(

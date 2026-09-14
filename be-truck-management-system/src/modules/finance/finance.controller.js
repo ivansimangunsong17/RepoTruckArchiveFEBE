@@ -217,6 +217,8 @@ export async function reconcileContainerJobExpenseController(request, response) 
       category: result.category,
       amount: result.amount,
       financeCheckStatus: result.financeCheckStatus,
+      proofAttachmentId: result.proofAttachmentId || null,
+      proofFileName: result.proofAttachment?.name || request.body?.fileName || null,
     },
   });
   sendSuccess(response, result, 'Status cek biaya container job berhasil disimpan.');

@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Download,
   Edit3,
   Eye,
   FileText,
@@ -66,9 +67,37 @@ const CUSTOMER_DOCUMENT_STATUS_NAVIGATION = [
 ];
 const DEFAULT_STATUS_FILTER = 'waiting_operational';
 const DEFAULT_CUSTOMER_DOCUMENT_STATUS_FILTER = 'completed';
+const DO_REPORT_PAGE_SIZE = 500;
 
 function valueOrDash(value) {
   return value || '-';
+}
+
+function reportDateKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function wrapCanvasText(context, text, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (context.measureText(next).width <= maxWidth || !line) {
+      line = next;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : ['-'];
 }
 
 function getJobStatusLabel(status) {
@@ -91,6 +120,114 @@ function formatShipmentLabel(value) {
   return shipmentMap[String(value || '').toLowerCase()] || value || '-';
 }
 
+function getDoReportStatusLabel(order) {
+  if (order?.status === 'cancelled') return 'BATAL';
+  if (order?.status === 'completed') return 'SELESAI';
+  if (order?.status === 'running') return 'SEDANG JALAN';
+  return 'BELUM JALAN';
+}
+
+function getDoReportParty(order) {
+  const lineItems = getOrderLineItems(order);
+  const quantities = lineItems.reduce((accumulator, item) => {
+    const qty = Math.max(0, Number(item.qty || 0));
+    const rawSize = String(item.size || item.containerSize || item.containerType || item.serviceName || '').toUpperCase();
+    const size = rawSize.includes('40') ? '40FT' : '20FT';
+    accumulator[size] = (accumulator[size] || 0) + qty;
+    return accumulator;
+  }, {});
+  const fallbackQuantity = Number(order?.quantity || 0);
+  if (!quantities['20FT'] && !quantities['40FT'] && fallbackQuantity) {
+    const fallbackSize = String(order?.container || order?.cargoType || '').toUpperCase().includes('40') ? '40FT' : '20FT';
+    quantities[fallbackSize] = fallbackQuantity;
+  }
+  return ['20FT', '40FT']
+    .filter((size) => quantities[size])
+    .map((size) => `${quantities[size]}x${size.replace('FT', '')}`)
+    .join(' + ') || '-';
+}
+
+function buildDoReportSections(orders = []) {
+  const sections = new Map();
+  orders.forEach((order) => {
+    const party = getDoReportParty(order);
+    const sectionKey = party.includes('40') && !party.includes('20') ? 'LIST ORDER PANJANG / 40FT' : 'LIST ORDER PENDEK / 20FT';
+    if (!sections.has(sectionKey)) sections.set(sectionKey, []);
+    const vendorLabel = order.isVendorOrder ? ' - VENDOR' : '';
+    const doLabel = order.doNumber ? ` - DO ${order.doNumber}` : '';
+    sections.get(sectionKey).push(`${order.customer || '-'} ${party} ${order.destination || '-'} - ${getDoReportStatusLabel(order)}${vendorLabel}${doLabel}`);
+  });
+  return [...sections.entries()].map(([title, lines]) => ({ title, lines }));
+}
+
+function downloadDoReportPng({ orders, dateFrom, dateTo }) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Browser tidak mendukung export gambar.');
+
+  const width = 1180;
+  const padding = 52;
+  const contentWidth = width - padding * 2;
+  const lineHeight = 29;
+  const sectionGap = 24;
+  const sections = buildDoReportSections(orders);
+  const periodLabel = dateFrom || dateTo
+    ? `${dateFrom ? formatDate(dateFrom) : 'Awal'} - ${dateTo ? formatDate(dateTo) : 'Akhir'}`
+    : 'Semua tanggal';
+
+  const wrappedSections = sections.length ? sections.map((section) => {
+    context.font = '900 25px Arial';
+    const titleLines = wrapCanvasText(context, section.title, contentWidth);
+    context.font = '600 22px Arial';
+    const bodyLines = section.lines.flatMap((line, index) => (
+      wrapCanvasText(context, `${index + 1}. ${line}`, contentWidth)
+    ));
+    return { ...section, titleLines, bodyLines };
+  }) : [{ title: 'BELUM ADA DO', titleLines: ['BELUM ADA DO'], bodyLines: ['Tidak ada Sales Order pada filter ini.'] }];
+
+  const height = Math.max(460, padding * 2 + 90 + wrappedSections.reduce((total, section) => (
+    total + section.titleLines.length * 34 + section.bodyLines.length * lineHeight + sectionGap
+  ), 0));
+  canvas.width = width;
+  canvas.height = height;
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#b91c1c';
+  context.fillRect(0, 0, width, 10);
+  let y = padding;
+  context.fillStyle = '#111827';
+  context.font = '900 34px Arial';
+  context.fillText('LIST DO MASUK', padding, y);
+  y += 36;
+  context.fillStyle = '#64748b';
+  context.font = '700 18px Arial';
+  context.fillText(`Periode ${periodLabel} - ${orders.length} SO`, padding, y);
+  y += 40;
+
+  wrappedSections.forEach((section) => {
+    y += 8;
+    context.fillStyle = '#b91c1c';
+    context.font = '900 25px Arial';
+    section.titleLines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += 34;
+    });
+    context.fillStyle = '#111827';
+    context.font = '600 22px Arial';
+    section.bodyLines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += lineHeight;
+    });
+    y += sectionGap;
+  });
+
+  const link = document.createElement('a');
+  link.download = `list-do-masuk-${reportDateKey(dateFrom || new Date())}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
 function getOrderContainers(order) {
   return Array.isArray(order?.containers) ? order.containers : [];
 }
@@ -111,9 +248,19 @@ function getOrderLineItems(order) {
   return [];
 }
 
+// Status order vendor (Phase 4) sengaja independen dari status ritasi -- order vendor tidak
+// pernah punya container job, jadi label progres container digantikan label sederhana ini.
+function getVendorOrderStatusLabel(order) {
+  if (order?.status === 'cancelled') return 'Batal';
+  if (order?.status === 'completed') return 'Selesai';
+  return 'Dicatat';
+}
+
 function getContainerProgress(order) {
   const containers = getOrderContainers(order);
-  const total = containers.length || Number(order?.quantity || 0);
+  // Order vendor (Phase 2) sengaja tidak pernah punya container_jobs -- jangan jatuhkan ke
+  // quantity SO, supaya tidak menampilkan seolah-olah ada ritasi yang masih "Belum Jalan".
+  const total = containers.length || (order?.isVendorOrder ? 0 : Number(order?.quantity || 0));
   const completed = containers.filter((container) => container.status === 'completed').length;
   const cancelled = containers.filter((container) => container.status === 'cancelled' || container.cancelRequestStatus === 'approved').length;
   const running = containers.filter((container) => container.status === 'running').length;
@@ -130,7 +277,9 @@ function hasTravelDocumentFile(container = {}) {
 function getTravelDocumentProgress(order) {
   const billableContainers = getOrderContainers(order)
     .filter((container) => container.status !== 'cancelled' && container.cancelRequestStatus !== 'approved');
-  const total = billableContainers.length || Number(order?.quantity || 0);
+  // Sama seperti getContainerProgress -- order vendor tidak pernah punya ritasi/Surat Jalan
+  // untuk ditagih, jadi jangan jatuhkan ke quantity SO.
+  const total = billableContainers.length || (order?.isVendorOrder ? 0 : Number(order?.quantity || 0));
   const uploaded = billableContainers.filter(hasTravelDocumentFile).length;
   return { uploaded, total };
 }
@@ -364,6 +513,7 @@ function hasReadyAccurateDocuments(order) {
 }
 
 function canCancelOrderBeforeOperational(order) {
+  if (order?.isVendorOrder) return order.status !== 'cancelled';
   if (!order || ['completed', 'cancelled'].includes(order.status)) return false;
   return getOrderContainers(order).every((container) => isWaitingStatus(container.status));
 }
@@ -503,9 +653,11 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const [status, setStatus] = useState(defaultStatusFilter);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [vendorFilter, setVendorFilter] = useState('');
   const [page, setPage] = useState(1);
   const [listVersion, setListVersion] = useState(0);
   const [loading, setLoading] = useState(archive.isDatabaseMode);
+  const [downloadDoLoading, setDownloadDoLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingContainer, setEditingContainer] = useState(null);
@@ -532,6 +684,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
   const canModifyOrder = (order) => {
     if (!order || !canUpdateOrder) return false;
     if (user?.role === USER_ROLES.ADMIN) return true;
+    if (user?.role === USER_ROLES.SALES && order.isVendorOrder) return isSalesOrderOwner(user, order);
     if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && Boolean(order.canRevise);
     return false;
   };
@@ -613,11 +766,12 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       (!query || [order.soNumber, order.doNumber, order.customer].some((value) =>
         value?.toLowerCase().includes(query.toLowerCase()))) &&
       matchesLocalDateRange(order) &&
-      matchesOrderStatus(order, status, invoiceOverrides[order.id] ?? order.invoiceNumber, customerDocumentsOnly),
+      matchesOrderStatus(order, status, invoiceOverrides[order.id] ?? order.invoiceNumber, customerDocumentsOnly) &&
+      (!vendorFilter || (vendorFilter === 'vendor' ? Boolean(order.isVendorOrder) : !order.isVendorOrder)),
     ),
     status,
     customerDocumentsOnly,
-  ), [activeLocalOrders, matchesLocalDateRange, query, status, invoiceOverrides, customerDocumentsOnly]);
+  ), [activeLocalOrders, matchesLocalDateRange, query, status, invoiceOverrides, customerDocumentsOnly, vendorFilter]);
 
   const totalItems = archive.isDatabaseMode ? serverTotal : filteredDemoOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
@@ -674,7 +828,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
 
   useEffect(() => {
     setPage(1);
-  }, [query, status, dateFrom, dateTo]);
+  }, [query, status, dateFrom, dateTo, vendorFilter]);
 
   useEffect(() => {
     if (!archive.isDatabaseMode) return undefined;
@@ -685,7 +839,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       setError('');
       try {
         const serverFilter = getServerFilter(status, customerDocumentsOnly);
-        const result = await fetchSalesOrdersPage({ page, pageSize: PAGE_SIZE, query, dateFrom, dateTo, ...serverFilter });
+        const result = await fetchSalesOrdersPage({ page, pageSize: PAGE_SIZE, query, dateFrom, dateTo, vendorFilter, ...serverFilter });
         if (!active) return;
         setDatabaseOrders(result.rows);
         setServerTotal(result.total);
@@ -704,7 +858,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [archive.isDatabaseMode, customerDocumentsOnly, dateFrom, dateTo, listVersion, page, query, status]);
+  }, [archive.isDatabaseMode, customerDocumentsOnly, dateFrom, dateTo, listVersion, page, query, status, vendorFilter]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -802,10 +956,13 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
 
   async function cancelSelectedSalesOrder() {
     if (!selectedOrder || !canCancelSelectedOrder) return;
+    const isVendorCancel = Boolean(selectedOrder.isVendorOrder);
     const approved = await confirmAction({
-      title: 'Hapus Sales Order?',
-      message: `${selectedOrder.soNumber} akan dibatalkan karena belum ada container yang diproses Operational.`,
-      confirmLabel: 'Hapus Sales Order',
+      title: isVendorCancel ? 'Batalkan Order Vendor?' : 'Hapus Sales Order?',
+      message: isVendorCancel
+        ? `${selectedOrder.soNumber} akan ditandai Batal. Order vendor tidak punya ritasi internal, UJ, komisi, atau rekening dropping.`
+        : `${selectedOrder.soNumber} akan dibatalkan karena belum ada container yang diproses Operational.`,
+      confirmLabel: isVendorCancel ? 'Batalkan Vendor' : 'Hapus Sales Order',
     });
     if (!approved) return;
 
@@ -814,15 +971,45 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
       if (archive.isDatabaseMode) setListVersion((value) => value + 1);
       setSelectedOrder(null);
       notify({
-        title: 'Sales Order dihapus',
-        message: `${selectedOrder.soNumber} berhasil dibatalkan dari daftar aktif.`,
+        title: isVendorCancel ? 'Order vendor dibatalkan' : 'Sales Order dihapus',
+        message: isVendorCancel
+          ? `${selectedOrder.soNumber} berhasil ditandai Batal.`
+          : `${selectedOrder.soNumber} berhasil dibatalkan dari daftar aktif.`,
       });
     } catch (requestError) {
       notify({
         type: 'error',
-        title: 'Sales Order gagal dihapus',
+        title: isVendorCancel ? 'Order vendor gagal dibatalkan' : 'Sales Order gagal dihapus',
         message: requestError.message,
       });
+    }
+  }
+
+  async function handleDownloadDoReport() {
+    if (downloadDoLoading) return;
+    setDownloadDoLoading(true);
+    try {
+      let reportOrders = visibleOrders;
+      if (archive.isDatabaseMode) {
+        const serverFilter = getServerFilter(status, customerDocumentsOnly);
+        const result = await fetchSalesOrdersPage({
+          page: 1,
+          pageSize: DO_REPORT_PAGE_SIZE,
+          query,
+          dateFrom,
+          dateTo,
+          vendorFilter,
+          ...serverFilter,
+        });
+        reportOrders = result.rows || [];
+      } else {
+        reportOrders = filteredDemoOrders;
+      }
+      downloadDoReportPng({ orders: reportOrders, dateFrom, dateTo });
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Download report gagal', message: requestError.message || 'List DO masuk gagal dibuat.' });
+    } finally {
+      setDownloadDoLoading(false);
     }
   }
 
@@ -842,6 +1029,16 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
           <label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={customerDocumentsOnly ? 'Cari SO, customer, atau tujuan...' : 'Cari SO, DO, atau customer...'} /></label>
           <label className="report-date-field"><span>Dari</span><input aria-label="Tanggal jalan dari" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
           <label className="report-date-field"><span>Sampai</span><input aria-label="Tanggal jalan sampai" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+          <select aria-label="Filter tipe order" value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}>
+            <option value="">Semua</option>
+            <option value="internal">Internal</option>
+            <option value="vendor">Vendor</option>
+          </select>
+          {!customerDocumentsOnly ? (
+            <button className="secondary-button sales-order-download-button" type="button" onClick={handleDownloadDoReport} disabled={downloadDoLoading}>
+              <Download size={16} /> {downloadDoLoading ? 'Membuat...' : 'Download List DO'}
+            </button>
+          ) : null}
         </div>
         <nav className="sales-order-status-nav" aria-label={customerDocumentsOnly ? 'Navigasi dokumen customer' : 'Navigasi status Sales Order'}>
           {visibleStatusNavigation.map((item) => {
@@ -864,13 +1061,14 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
         <FilterStatus
           total={totalItems}
           filtered={totalItems}
-          active={Boolean(query.trim() || status || dateFrom || dateTo)}
+          active={Boolean(query.trim() || status || dateFrom || dateTo || vendorFilter)}
           label={customerDocumentsOnly ? 'dokumen customer' : 'sales order'}
           onReset={() => {
             setQuery('');
             setStatus(defaultStatusFilter);
             setDateFrom('');
             setDateTo('');
+            setVendorFilter('');
           }}
         />
 
@@ -905,6 +1103,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                       <div className="order-primary">
                         <span>Nomor SO</span>
                         <strong>{order.soNumber || 'Menunggu Finance'}</strong>
+                        {order.isVendorOrder ? <span className="vendor-order-badge">Vendor</span> : null}
                       </div>
                       <div className="order-customer-summary">
                         <span>Customer</span>
@@ -919,12 +1118,22 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                         <strong>{order.destination || '-'}</strong>
                       </div>
                       <div className="order-container-summary">
-                        <span>Container</span>
-                        <strong>{containerProgress.active}/{containerProgress.total || 0} Aktif</strong>
-                        <small>
-                          Selesai {containerProgress.completed} | Jalan {containerProgress.running} | Belum {containerProgress.waiting}
-                          {containerProgress.cancelled ? ` | Batal ${containerProgress.cancelled}` : ''}
-                        </small>
+                        {order.isVendorOrder ? (
+                          <>
+                            <span>Status Vendor</span>
+                            <strong>{getVendorOrderStatusLabel(order)}</strong>
+                            <small>Tidak ada ritasi/container job internal.</small>
+                          </>
+                        ) : (
+                          <>
+                            <span>Container</span>
+                            <strong>{containerProgress.active}/{containerProgress.total || 0} Aktif</strong>
+                            <small>
+                              Selesai {containerProgress.completed} | Jalan {containerProgress.running} | Belum {containerProgress.waiting}
+                              {containerProgress.cancelled ? ` | Batal ${containerProgress.cancelled}` : ''}
+                            </small>
+                          </>
+                        )}
                       </div>
                       <div className="order-billing-summary">
                         <span>Status</span>
@@ -996,7 +1205,10 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
             <header>
               <div>
                 <span>Detail Sales Order</span>
-                <h2>{selectedOrder.soNumber || 'Menunggu Nomor SO Finance'}</h2>
+                <h2>
+                  {selectedOrder.soNumber || 'Menunggu Nomor SO Finance'}
+                  {selectedOrder.isVendorOrder ? <span className="vendor-order-badge">Vendor</span> : null}
+                </h2>
                 <p>{selectedOrder.customer} - {formatShipmentLabel(selectedOrder.shipment)}</p>
               </div>
               <button type="button" aria-label="Tutup detail Sales Order" onClick={() => setSelectedOrder(null)}><X size={19} /></button>
@@ -1034,6 +1246,15 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                   <small>Tanggal Jalan: {formatDate(selectedOrder.tripDate || selectedOrder.plannedDate || selectedOrder.soDate)}</small>
                   <small>Pembayaran: {getPaymentTermLabel(selectedOrder)}</small>
                   <small>No. Invoice: {getOrderInvoiceNumber(selectedOrder) || '-'}</small>
+                  {selectedOrder.isVendorOrder ? (
+                    <>
+                      <small>Status Vendor: {getVendorOrderStatusLabel(selectedOrder)}</small>
+                      <small>
+                        Vendor: {selectedOrder.vendorName || '-'}
+                        {selectedOrder.vendorNote ? ` (${selectedOrder.vendorNote})` : ''}
+                      </small>
+                    </>
+                  ) : null}
                   <small>{selectedOrder.jobDescription || selectedOrder.notes || '-'}</small>
                 </div>
                 <div>
@@ -1137,28 +1358,30 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                 ))}
               </div>
 
-              <div className="order-container-progress-panel">
-                <div>
-                  <span>Total Container</span>
-                  <strong>{selectedOrderContainerProgress.total || 0}</strong>
-                  <small>Rencana dari SO</small>
+              {selectedOrder.isVendorOrder ? null : (
+                <div className="order-container-progress-panel">
+                  <div>
+                    <span>Total Container</span>
+                    <strong>{selectedOrderContainerProgress.total || 0}</strong>
+                    <small>Rencana dari SO</small>
+                  </div>
+                  <div>
+                    <span>Aktif</span>
+                    <strong>{selectedOrderContainerProgress.active || 0}</strong>
+                    <small>Berjalan atau belum jalan</small>
+                  </div>
+                  <div>
+                    <span>Selesai</span>
+                    <strong>{selectedOrderContainerProgress.completed || 0}</strong>
+                    <small>Masuk closing/recap</small>
+                  </div>
+                  <div className={selectedOrderContainerProgress.cancelled ? 'has-cancelled' : ''}>
+                    <span>Batal</span>
+                    <strong>{selectedOrderContainerProgress.cancelled || 0}</strong>
+                    <small>Tidak dijalankan</small>
+                  </div>
                 </div>
-                <div>
-                  <span>Aktif</span>
-                  <strong>{selectedOrderContainerProgress.active || 0}</strong>
-                  <small>Berjalan atau belum jalan</small>
-                </div>
-                <div>
-                  <span>Selesai</span>
-                  <strong>{selectedOrderContainerProgress.completed || 0}</strong>
-                  <small>Masuk closing/recap</small>
-                </div>
-                <div className={selectedOrderContainerProgress.cancelled ? 'has-cancelled' : ''}>
-                  <span>Batal</span>
-                  <strong>{selectedOrderContainerProgress.cancelled || 0}</strong>
-                  <small>Tidak dijalankan</small>
-                </div>
-              </div>
+              )}
 
               {selectedOrderLockedForSales ? (
                 <div className="sales-order-cancelled-note">
@@ -1169,14 +1392,14 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
 
               {canModifySelectedOrder ? (
                 <div className="order-management-actions">
-                  {selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'completed' ? (
+                  {selectedOrder.status !== 'cancelled' && (selectedOrder.status !== 'completed' || selectedOrder.isVendorOrder) ? (
                     <button className="secondary-button" type="button" onClick={() => { setEditingOrder(selectedOrder); setFormOpen(true); setSelectedOrder(null); }}>
                       <Edit3 size={16} /> Edit Sales Order
                     </button>
                   ) : null}
                   {canCancelSelectedOrder ? (
                     <button className="danger-button" type="button" onClick={cancelSelectedSalesOrder}>
-                      <Trash2 size={16} /> Hapus Sales Order
+                      <Trash2 size={16} /> {selectedOrder.isVendorOrder ? 'Batalkan Order Vendor' : 'Hapus Sales Order'}
                     </button>
                   ) : null}
                 </div>
@@ -1197,7 +1420,11 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                   ))
                 ) : (
                   <div className="archive-inline-state">
-                    <p>Detail container belum tersedia untuk Sales Order ini.</p>
+                    <p>
+                      {selectedOrder.isVendorOrder
+                        ? 'Order ini ditandai Vendor -- tidak ada container job/ritasi internal yang dibuat.'
+                        : 'Detail container belum tersedia untuk Sales Order ini.'}
+                    </p>
                   </div>
                 )}
               </div>

@@ -6571,12 +6571,12 @@ if (!hasDatabase) {
       assert.equal(editLog.metadata.beforeData.amount, 500000);
       assert.equal(editLog.metadata.afterData.amount, 300000);
 
-      // 3: ganti bukti.
+      // 3: ganti bukti dilakukan Finance.
       const newProofAttachmentId = await uploadProof('baru');
       const proofChanged = await api(`/api/container-jobs/${jobAId}/expenses/${expenseId}/proof`, {
         method: 'PATCH',
-        token: operationalToken,
-        body: { proofAttachmentId: newProofAttachmentId, paidAt: `${batchDate}T08:00:00.000Z`, updatedBy: 'Sprint2C Operational' },
+        token: financeToken,
+        body: { proofAttachmentId: newProofAttachmentId, paidAt: `${batchDate}T08:00:00.000Z`, updatedBy: 'Sprint2C Finance' },
       });
       assert.equal(proofChanged.status, 200, JSON.stringify(proofChanged.body));
       assert.equal(proofChanged.body.data.proofAttachmentId, newProofAttachmentId);
@@ -6909,7 +6909,7 @@ if (!hasDatabase) {
       assert.equal(ledgerRows.rows.length, 0, 'tidak boleh ada baris ledger posted baru karena batch sudah closed');
     });
 
-    await t.test('rekening dropping: Operational bisa upload bukti transfer untuk UJ Perjalanan otomatis', async () => {
+    await t.test('rekening dropping: Finance bisa upload bukti transfer untuk UJ Perjalanan otomatis', async () => {
       const batchDate = '2099-03-22';
       await resetOperationalFundBatch(batchDate);
 
@@ -6989,7 +6989,7 @@ if (!hasDatabase) {
       assert.equal(manualExpense.status, 200);
       const rejectedForManual = await api(`/api/container-jobs/${jobId}/expenses/${manualExpense.body.data.id}/uj-transfer-proof`, {
         method: 'PATCH',
-        token: operationalToken,
+        token: financeToken,
         body: { proofAttachmentId: manualProofUpload.body.data.id },
       });
       assert.equal(rejectedForManual.status, 409);
@@ -7007,7 +7007,7 @@ if (!hasDatabase) {
           fileName: `uj-transfer-proof-${runId}.pdf`,
           mimeType: 'application/pdf',
           fileBase64: Buffer.from(`%PDF-1.4\n% uj transfer proof ${runId}\n`).toString('base64'),
-          uploadedByName: 'Sprint2C Operational',
+          uploadedByName: 'Sprint2C Finance',
         },
       });
       assert.equal(ujTransferProofUpload.status, 201);
@@ -7015,7 +7015,7 @@ if (!hasDatabase) {
 
       const ujProofSaved = await api(`/api/container-jobs/${jobId}/expenses/${autoExpenseId.id}/uj-transfer-proof`, {
         method: 'PATCH',
-        token: operationalToken,
+        token: financeToken,
         body: { proofAttachmentId: ujProofAttachmentId },
       });
       assert.equal(ujProofSaved.status, 200, JSON.stringify(ujProofSaved.body));
@@ -7036,7 +7036,7 @@ if (!hasDatabase) {
       await query('update container_job_expenses set payment_status = $2 where id = $1', [autoExpenseId.id, 'batal']);
       const rejectedForVoided = await api(`/api/container-jobs/${jobId}/expenses/${autoExpenseId.id}/uj-transfer-proof`, {
         method: 'PATCH',
-        token: operationalToken,
+        token: financeToken,
         body: { proofAttachmentId: ujProofAttachmentId },
       });
       assert.equal(rejectedForVoided.status, 409);
@@ -7232,5 +7232,477 @@ if (!hasDatabase) {
       holderClient.release();
       waiterClient.release();
     }
+  });
+
+  // Test ini sengaja ditaruh sebagai test top-level TERPISAH di akhir file (bukan t.test bersarang
+  // di dalam 'backend API flow utama...'), supaya order/activity log yang dibuatnya tidak ikut
+  // menggeser asersi "log paling baru" di test-test lain yang berjalan berurutan memakai state
+  // `created` bersama. Login sendiri karena token role dari test utama tidak ikut ke sini --
+  // TAPI sengaja TIDAK panggil seedUsers() lagi di sini: seedUsers() memanggil cleanupTestData(),
+  // dan pada titik ini test utama di atas sudah membuat container_jobs dengan driver_commission_items
+  // terkait (runId yang sama) -- cleanup ulang akan gagal kena foreign key constraint. User sales/admin
+  // sudah pasti ada dari seedUsers() yang dipanggil test utama di awal file ini.
+  test('sales order vendor: tidak membuat container job, tidak masuk Operational, dan menolak ditandai vendor kalau sudah ada ritasi', async () => {
+    const vendorSalesLogin = await login(users.sales.email);
+    const vendorAdminLogin = await login(users.admin.email);
+    const vendorSalesToken = vendorSalesLogin.body.data.token;
+    const vendorAdminToken = vendorAdminLogin.body.data.token;
+
+    const vendorSoNumber = `SO-${runId}-VENDOR`.toUpperCase();
+    const vendorOrder = await api('/api/sales-orders', {
+      method: 'POST',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: vendorSoNumber,
+        isVendorOrder: true,
+        vendorName: 'CV Truck Luar',
+        vendorNote: `Dikerjakan vendor ${runId}`,
+      }),
+    });
+    assert.equal(vendorOrder.status, 201);
+    assert.equal(vendorOrder.body.data.isVendorOrder, true);
+    assert.equal(vendorOrder.body.data.vendorName, 'CV Truck Luar');
+    assert.equal(vendorOrder.body.data.containers.length, 0);
+    const vendorOrderId = vendorOrder.body.data.id;
+
+    const vendorJobsInDb = await query('select id from container_jobs where sales_order_id = $1', [vendorOrderId]);
+    assert.equal(vendorJobsInDb.rows.length, 0);
+
+    // Order vendor tidak boleh muncul sebagai ritasi di halaman Operational (container-jobs).
+    const vendorNotInOperational = await api(`/api/container-jobs?query=${encodeURIComponent(vendorSoNumber)}`, { token: vendorAdminToken });
+    assert.equal(vendorNotInOperational.status, 200);
+    assert.equal(vendorNotInOperational.body.data.rows.length, 0);
+
+    // Edit order vendor (tetap vendor) -- tidak boleh tiba-tiba membuat container job.
+    const vendorUpdated = await api(`/api/sales-orders/${vendorOrderId}`, {
+      method: 'PATCH',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: vendorSoNumber,
+        isVendorOrder: true,
+        vendorName: 'CV Truck Luar',
+        vendorNote: `Dikerjakan vendor ${runId} - diedit`,
+        destination: 'Karawang',
+      }),
+    });
+    assert.equal(vendorUpdated.status, 200);
+    assert.equal(vendorUpdated.body.data.destination, 'Karawang');
+    assert.equal(vendorUpdated.body.data.containers.length, 0);
+    const vendorJobsAfterEdit = await query('select id from container_jobs where sales_order_id = $1', [vendorOrderId]);
+    assert.equal(vendorJobsAfterEdit.rows.length, 0);
+
+    // Phase 3: selama order ini MASIH berstatus vendor, order tidak boleh dihitung sebagai
+    // ritasi internal di laporan/dashboard. Cek ini sengaja dilakukan sebelum order dibalik
+    // jadi internal di bawah, supaya order yang diperiksa benar-benar masih is_vendor_order = true.
+    const vendorNotInSalesOrderReport = await api(`/api/reports/sales-orders?query=${encodeURIComponent(vendorSoNumber)}`, { token: vendorAdminToken });
+    assert.equal(vendorNotInSalesOrderReport.status, 200);
+    assert.equal(vendorNotInSalesOrderReport.body.data.rows.length, 0, 'laporan Sales Order (ritasi) tidak boleh menampilkan order vendor');
+
+    const inputMonitoring = await api('/api/reports/input-monitoring?limit=200', { token: vendorAdminToken });
+    assert.equal(inputMonitoring.status, 200);
+    assert.equal(
+      inputMonitoring.body.data.categories.missingSoNumber.some((row) => row.salesOrderId === vendorOrderId),
+      false,
+      'order vendor tidak boleh ditandai "belum ada nomor SO" ke tim Finance di Input Monitoring',
+    );
+
+    const expectedDashboardRevenue = await query('select coalesce(sum(total_amount), 0)::numeric as revenue from sales_orders where not is_vendor_order');
+    const dashboardReport = await api('/api/reports/dashboard', { token: vendorAdminToken });
+    assert.equal(dashboardReport.status, 200);
+    assert.equal(
+      Number(dashboardReport.body.data.salesOrders.revenue),
+      Number(expectedDashboardRevenue.rows[0].revenue),
+      'revenue di dashboard report harus mengecualikan total_amount order vendor',
+    );
+
+    // Phase 4: filter Internal/Vendor di daftar Sales Order.
+    assert.equal(vendorOrder.body.data.status, 'waiting_operational', 'order vendor baru default "Dicatat" (waiting_operational)');
+
+    const vendorFilterInternal = await api(`/api/sales-orders?query=${encodeURIComponent(vendorSoNumber)}&vendorFilter=internal`, { token: vendorAdminToken });
+    assert.equal(vendorFilterInternal.status, 200);
+    assert.equal(vendorFilterInternal.body.data.rows.some((row) => row.id === vendorOrderId), false, 'filter Internal tidak boleh menampilkan order vendor');
+
+    const vendorFilterVendor = await api(`/api/sales-orders?query=${encodeURIComponent(vendorSoNumber)}&vendorFilter=vendor`, { token: vendorAdminToken });
+    assert.equal(vendorFilterVendor.status, 200);
+    assert.equal(vendorFilterVendor.body.data.rows.some((row) => row.id === vendorOrderId), true, 'filter Vendor harus menampilkan order vendor');
+
+    // Phase 4: status sederhana order vendor (Dicatat/Selesai) independen dari status ritasi --
+    // "running" bukan status yang valid untuk order vendor karena itu bahasa status container job.
+    const invalidVendorStatus = await api(`/api/sales-orders/${vendorOrderId}`, {
+      method: 'PATCH',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: vendorSoNumber,
+        isVendorOrder: true,
+        status: 'running',
+      }),
+    });
+    assert.equal(invalidVendorStatus.status, 400);
+    assert.equal(invalidVendorStatus.body.error.code, 'VALIDATION_ERROR');
+
+    const vendorMarkedDone = await api(`/api/sales-orders/${vendorOrderId}`, {
+      method: 'PATCH',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: vendorSoNumber,
+        isVendorOrder: true,
+        status: 'completed',
+      }),
+    });
+    assert.equal(vendorMarkedDone.status, 200);
+    assert.equal(vendorMarkedDone.body.data.status, 'completed');
+    assert.equal(vendorMarkedDone.body.data.isVendorOrder, true);
+    const vendorJobsAfterMarkDone = await query('select id from container_jobs where sales_order_id = $1', [vendorOrderId]);
+    assert.equal(vendorJobsAfterMarkDone.rows.length, 0, 'menandai order vendor Selesai tidak boleh ikut membuat container job');
+
+    // Order vendor yang sudah ditandai Selesai sekarang boleh muncul di halaman dokumen customer
+    // (yang memfilter status=completed), lengkap dengan badge Vendor di baris yang sama.
+    const vendorInCompletedFilter = await api(`/api/sales-orders?query=${encodeURIComponent(vendorSoNumber)}&status=completed`, { token: vendorAdminToken });
+    assert.equal(vendorInCompletedFilter.status, 200);
+    const vendorRowInCompletedFilter = vendorInCompletedFilter.body.data.rows.find((row) => row.id === vendorOrderId);
+    assert.ok(vendorRowInCompletedFilter, 'order vendor yang sudah Selesai harus muncul saat filter status=completed');
+    assert.equal(vendorRowInCompletedFilter.isVendorOrder, true);
+
+    // Kembalikan ke "Dicatat" supaya tidak mengganggu langkah-langkah berikutnya di bawah.
+    const vendorBackToRecorded = await api(`/api/sales-orders/${vendorOrderId}`, {
+      method: 'PATCH',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: vendorSoNumber,
+        isVendorOrder: true,
+        status: 'waiting_operational',
+      }),
+    });
+    assert.equal(vendorBackToRecorded.status, 200);
+    assert.equal(vendorBackToRecorded.body.data.status, 'waiting_operational');
+
+    // Phase 5: setelah order ini dibuat, diedit, ditandai Selesai, lalu dikembalikan ke Dicatat --
+    // seluruh siklus di atas tidak boleh pernah memicu UJ/rekening dropping (container_job_expenses)
+    // atau komisi sopir (driver_commission_items). Keduanya mewajibkan container_job_id (not null di
+    // skema), jadi order vendor yang tidak pernah punya container job juga tidak mungkin punya baris
+    // di kedua tabel ini -- dicek langsung ke database supaya bukan cuma klaim dari baca kode.
+    const vendorExpenses = await query('select id from container_job_expenses where sales_order_id = $1', [vendorOrderId]);
+    assert.equal(vendorExpenses.rows.length, 0, 'order vendor tidak boleh memicu biaya UJ/rekening dropping');
+
+    const vendorCommissionItems = await query('select id from driver_commission_items where sales_order_id = $1', [vendorOrderId]);
+    assert.equal(vendorCommissionItems.rows.length, 0, 'order vendor tidak boleh masuk komisi sopir');
+
+    // Uncheck vendor (order kembali internal) -- container job harus mulai dibuat normal lagi,
+    // persis rule "is_vendor_order = false -> flow tetap seperti sekarang".
+    const vendorReverted = await api(`/api/sales-orders/${vendorOrderId}`, {
+      method: 'PATCH',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: vendorSoNumber,
+        isVendorOrder: false,
+      }),
+    });
+    assert.equal(vendorReverted.status, 200);
+    assert.equal(vendorReverted.body.data.isVendorOrder, false);
+    assert.equal(vendorReverted.body.data.containers.length, 1);
+    const jobsAfterRevert = await query('select id from container_jobs where sales_order_id = $1', [vendorOrderId]);
+    assert.equal(jobsAfterRevert.rows.length, 1);
+
+    // Order internal biasa yang sudah punya container job/ritasi tidak boleh tiba-tiba
+    // ditandai vendor -- harus ditolak, bukan diam-diam menyisakan ritasi "hantu".
+    const internalWithJobSoNumber = `SO-${runId}-VENDOR-BLOCK`.toUpperCase();
+    const internalWithJob = await api('/api/sales-orders', {
+      method: 'POST',
+      token: vendorSalesToken,
+      body: salesOrderPayload({ soNumber: internalWithJobSoNumber }),
+    });
+    assert.equal(internalWithJob.status, 201);
+    assert.equal(internalWithJob.body.data.containers.length, 1);
+
+    const blockedVendorFlip = await api(`/api/sales-orders/${internalWithJob.body.data.id}`, {
+      method: 'PATCH',
+      token: vendorSalesToken,
+      body: salesOrderPayload({
+        soNumber: internalWithJobSoNumber,
+        isVendorOrder: true,
+        vendorName: 'CV Truck Luar',
+      }),
+    });
+    assert.equal(blockedVendorFlip.status, 409);
+    assert.equal(blockedVendorFlip.body.error.code, 'SALES_ORDER_VENDOR_HAS_CONTAINER_JOBS');
+
+    const stillInternal = await api(`/api/sales-orders/${internalWithJob.body.data.id}`, { token: vendorAdminToken });
+    assert.equal(stillInternal.body.data.isVendorOrder, false);
+    assert.equal(stillInternal.body.data.containers.length, 1);
+  });
+
+  // Test ini juga sengaja ditaruh top-level TERPISAH di akhir file, dengan alasan yang sama persis
+  // seperti test vendor order di atas (state activity log/container job bersama yang dipakai test
+  // lain yang berjalan berurutan). Login sendiri, TIDAK memanggil seedUsers() lagi.
+  test('sales order backdate/ritasi susulan: bisa dicatat retroaktif tanpa memicu UJ otomatis, revenue dan komisi tetap tercatat', async () => {
+    const backdateSalesLogin = await login(users.sales.email);
+    const backdateAdminLogin = await login(users.admin.email);
+    const backdateFinanceLogin = await login(users.finance.email);
+    const backdateSalesToken = backdateSalesLogin.body.data.token;
+    const backdateAdminToken = backdateAdminLogin.body.data.token;
+    const backdateFinanceToken = backdateFinanceLogin.body.data.token;
+
+    // Bagian A: alasan wajib diisi minimal 8 karakter saat container ditandai backdate langsung
+    // dari pembuatan Sales Order (bukan cuma lewat update ritasi yang sudah ada).
+    const noReasonSoNumber = `SO-${runId}-BACKDATE-NOREASON`.toUpperCase();
+    const noReasonAttempt = await api('/api/sales-orders', {
+      method: 'POST',
+      token: backdateSalesToken,
+      body: salesOrderPayload({
+        soNumber: noReasonSoNumber,
+        containers: [{
+          id: '',
+          containerNumber: `${noReasonSoNumber}CNTR1`,
+          size: '20FT',
+          type: 'Dry',
+          status: 'received',
+          isBackdateEntry: true,
+          backdateReason: 'pendek',
+        }],
+      }),
+    });
+    assert.equal(noReasonAttempt.status, 400);
+    assert.equal(noReasonAttempt.body.error.code, 'BACKDATE_REASON_REQUIRED');
+
+    // Dengan alasan yang cukup panjang, container backdate boleh langsung dibuat sebagai bagian
+    // dari Sales Order baru, dan penandanya harus langsung terlihat di response (bukan cuma di DB).
+    const directCreateSoNumber = `SO-${runId}-BACKDATE-DIRECT`.toUpperCase();
+    const directCreateReason = `Ritasi ${runId} langsung dicatat sebagai susulan sejak awal dibuat`;
+    const directCreateAttempt = await api('/api/sales-orders', {
+      method: 'POST',
+      token: backdateSalesToken,
+      body: salesOrderPayload({
+        soNumber: directCreateSoNumber,
+        containers: [{
+          id: '',
+          containerNumber: `${directCreateSoNumber}CNTR1`,
+          size: '20FT',
+          type: 'Dry',
+          status: 'received',
+          isBackdateEntry: true,
+          backdateReason: directCreateReason,
+        }],
+      }),
+    });
+    assert.equal(directCreateAttempt.status, 201);
+    assert.equal(directCreateAttempt.body.data.containers[0].isBackdateEntry, true);
+    assert.equal(directCreateAttempt.body.data.containers[0].backdateReason, directCreateReason);
+
+    // Bagian B: ritasi susulan untuk tanggal yang batch harian (rekening dropping) DAN batch
+    // mingguan (komisi sopir) -nya SUDAH closed/paid sebelum ritasi ini sempat dicatat sama sekali.
+    const tripDate = '2099-05-18';
+    // Periode komisi mingguan sistem ini WAJIB Sabtu-Jumat (lihat isCommissionWeekPeriod) --
+    // tripDate di atas (Senin) sengaja jatuh di dalam rentang oldCommissionPeriod di bawah.
+    const oldCommissionPeriod = { periodStart: '2099-05-16', periodEnd: '2099-05-22' };
+    const currentCommissionPeriod = { periodStart: '2099-06-06', periodEnd: '2099-06-12' };
+
+    await resetOperationalFundBatch(tripDate);
+    await query(
+      "insert into operational_fund_batches (batch_date, status, created_by_name, updated_by_name) values ($1::date, 'closed', 'Test Setup', 'Test Setup')",
+      [tripDate],
+    );
+    for (const period of [oldCommissionPeriod, currentCommissionPeriod]) {
+      await query(
+        'delete from driver_commission_payments where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)',
+        [period.periodStart, period.periodEnd],
+      );
+      await query(
+        'delete from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+        [period.periodStart, period.periodEnd],
+      );
+    }
+    // Periode ASLI ritasi ini (14-20 Mei) sudah 'paid' -- sudah final, tidak boleh dibuka lagi.
+    await query(
+      "insert into driver_commission_batches (period_start, period_end, status) values ($1::date, $2::date, 'paid')",
+      [oldCommissionPeriod.periodStart, oldCommissionPeriod.periodEnd],
+    );
+
+    const backdateSoNumber = `SO-${runId}-BACKDATE-MAIN`.toUpperCase();
+    const backdateOrder = await api('/api/sales-orders', {
+      method: 'POST',
+      token: backdateSalesToken,
+      body: salesOrderPayload({ soNumber: backdateSoNumber }),
+    });
+    assert.equal(backdateOrder.status, 201);
+    const backdateOrderId = backdateOrder.body.data.id;
+    const backdateJobId = backdateOrder.body.data.containers[0].id;
+
+    // Nomor SO baru resmi tersimpan lewat verifikasi Finance (bukan langsung saat Sales membuat
+    // order) -- ritasi susulan harus tetap bisa lewat jalur normal ini seperti order lain.
+    const backdateSoVerified = await api(`/api/finance/order-verifications/${backdateOrderId}/so-number`, {
+      method: 'PATCH',
+      token: backdateFinanceToken,
+      body: { soNumber: backdateSoNumber },
+    });
+    assert.equal(backdateSoVerified.status, 200);
+    assert.equal(backdateSoVerified.body.data.soNumber, backdateSoNumber);
+    const backdateDriverName = `Driver Susulan ${runId}`;
+    const backdateReasonText = `Ritasi ${runId} baru dilaporkan sopir setelah selesai, telat dicatat dari lapangan`;
+    const backdateBasePayload = {
+      status: 'completed',
+      isBackdateEntry: true,
+      driver: backdateDriverName,
+      plateNumber: `B SUSUL ${runId}`,
+      runningAt: `${tripDate}T08:00:00+07:00`,
+      completedAt: `${tripDate}T17:00:00+07:00`,
+      hasDriverCommission: true,
+      driverCommissionAmount: 275000,
+      updatedBy: 'Sprint2C Admin',
+    };
+
+    // Alasan terlalu pendek harus ditolak juga di jalur update ritasi (bukan cuma jalur create SO).
+    const shortReasonAttempt = await api(`/api/container-jobs/${backdateJobId}`, {
+      method: 'PATCH',
+      token: backdateAdminToken,
+      body: { ...backdateBasePayload, backdateReason: 'telat' },
+    });
+    assert.equal(shortReasonAttempt.status, 400);
+    assert.equal(shortReasonAttempt.body.error.code, 'BACKDATE_REASON_REQUIRED');
+
+    const backdateComplete = await api(`/api/container-jobs/${backdateJobId}`, {
+      method: 'PATCH',
+      token: backdateAdminToken,
+      body: { ...backdateBasePayload, backdateReason: backdateReasonText },
+    });
+    assert.equal(
+      backdateComplete.status,
+      200,
+      'ritasi susulan harus bisa langsung selesai walau batch dropping harian dan periode komisi mingguan lama sudah closed/paid',
+    );
+    assert.equal(backdateComplete.body.data.status, 'completed');
+    assert.equal(backdateComplete.body.data.isBackdateEntry, true);
+    assert.equal(backdateComplete.body.data.backdateReason, backdateReasonText);
+
+    // Tidak ada UJ otomatis/rekening dropping yang terbentuk untuk ritasi ini.
+    const autoUjRows = await query(
+      "select id from container_job_expenses where container_job_id = $1 and source = 'auto_uj_order' and payment_status <> 'batal'",
+      [backdateJobId],
+    );
+    assert.equal(autoUjRows.rows.length, 0, 'ritasi susulan tidak boleh memicu UJ otomatis/rekening dropping');
+
+    // Audit log WAJIB tercatat untuk update ritasi susulan ini.
+    const updateBackdateLog = await latestActivityForEntity('UPDATE_BACKDATE_CONTAINER_JOB', backdateJobId);
+    assert.ok(updateBackdateLog, 'update ritasi susulan harus tercatat di audit log');
+    assert.equal(updateBackdateLog.metadata.backdateReason, backdateReasonText);
+    assert.equal(updateBackdateLog.metadata.isBackdateEntry, true);
+
+    // Revenue & laporan Sales Order (ritasi) tetap menghitung order ini seperti biasa -- beda
+    // dengan order vendor yang sengaja dikecualikan.
+    const soReport = await api(`/api/reports/sales-orders?query=${encodeURIComponent(backdateSoNumber)}`, { token: backdateAdminToken });
+    assert.equal(soReport.status, 200);
+    assert.ok(
+      soReport.body.data.rows.some((row) => row.id === backdateOrderId),
+      'ritasi susulan tetap harus muncul di laporan Sales Order (revenue/invoice)',
+    );
+
+    const expectedRevenue = await query('select coalesce(sum(total_amount), 0)::numeric as revenue from sales_orders where not is_vendor_order');
+    const dashboardAfterBackdate = await api('/api/reports/dashboard', { token: backdateAdminToken });
+    assert.equal(dashboardAfterBackdate.status, 200);
+    assert.equal(
+      Number(dashboardAfterBackdate.body.data.salesOrders.revenue),
+      Number(expectedRevenue.rows[0].revenue),
+      'revenue dashboard harus tetap menghitung total_amount order dengan ritasi susulan',
+    );
+
+    // Bagian C: periode ASLI ritasi ini sudah 'paid', jadi item ini harus disapu masuk ke batch
+    // periode yang SEDANG diproses sekarang, ditandai "Ritasi Susulan", TANPA mengubah batch lama.
+    const eligibleCurrentPeriod = await api(
+      `/api/driver-commissions/eligible?periodStart=${currentCommissionPeriod.periodStart}&periodEnd=${currentCommissionPeriod.periodEnd}`,
+      { token: backdateAdminToken },
+    );
+    assert.equal(eligibleCurrentPeriod.status, 200);
+    const sweptRow = eligibleCurrentPeriod.body.data.rows.find((row) => row.driverName === backdateDriverName);
+    assert.ok(sweptRow, 'ritasi susulan yang periode aslinya sudah closed harus muncul sebagai eligible di periode yang sedang diproses sekarang');
+    assert.equal(sweptRow.isBackdateCommission, true, 'item ini harus ditandai sebagai komisi susulan (Ritasi Susulan)');
+
+    const currentBatchSubmission = await api('/api/driver-commissions/batches', {
+      method: 'POST',
+      token: backdateAdminToken,
+      body: currentCommissionPeriod,
+    });
+    assert.equal(currentBatchSubmission.status, 201);
+    const sweptItem = currentBatchSubmission.body.data.items.find((item) => item.containerJobId === backdateJobId);
+    assert.ok(sweptItem, 'ritasi susulan harus ikut masuk ke batch komisi periode sekarang');
+    assert.equal(sweptItem.isBackdateCommission, true);
+    assert.equal(Number(sweptItem.amount), 275000);
+
+    const oldBatchAfterSweep = await query(
+      'select status, total_items from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+      [oldCommissionPeriod.periodStart, oldCommissionPeriod.periodEnd],
+    );
+    assert.equal(oldBatchAfterSweep.rows[0].status, 'paid', 'batch komisi lama yang sudah final tidak boleh ikut berubah statusnya');
+    assert.equal(Number(oldBatchAfterSweep.rows[0].total_items), 0);
+    const oldBatchItemCount = await query(
+      `
+        select count(*)::int as total
+        from driver_commission_items
+        where batch_id = (
+          select id from driver_commission_batches where period_start = $1::date and period_end = $2::date
+        )
+      `,
+      [oldCommissionPeriod.periodStart, oldCommissionPeriod.periodEnd],
+    );
+    assert.equal(oldBatchItemCount.rows[0].total, 0, 'batch komisi lama yang sudah final tidak boleh disisipi item baru');
+
+    // Bagian D: kalau periode komisi ASLI ritasi susulan masih terbuka (belum ada batch sama
+    // sekali), item tetap masuk normal lewat periode aslinya, bukan ditandai "Ritasi Susulan".
+    const openPeriod = { periodStart: '2099-06-20', periodEnd: '2099-06-26' };
+    await query(
+      'delete from driver_commission_payments where batch_id in (select id from driver_commission_batches where period_start = $1::date and period_end = $2::date)',
+      [openPeriod.periodStart, openPeriod.periodEnd],
+    );
+    await query(
+      'delete from driver_commission_batches where period_start = $1::date and period_end = $2::date',
+      [openPeriod.periodStart, openPeriod.periodEnd],
+    );
+
+    const openPeriodSoNumber = `SO-${runId}-BACKDATE-OPEN`.toUpperCase();
+    const openPeriodSo = await query(
+      `
+        insert into sales_orders (so_number, customer_name, shipment_type, origin, destination, status)
+        values ($1, $2, 'import', 'Tanjung Priok', 'Cikarang', 'completed')
+        returning id
+      `,
+      [openPeriodSoNumber, `Customer Susulan Terbuka ${runId}`],
+    );
+    const openPeriodDriverName = `Driver Susulan Terbuka ${runId}`;
+    const openPeriodJob = await query(
+      `
+        insert into container_jobs (
+          sales_order_id, container_number, container_size, status, completed_at,
+          has_driver_commission, driver_commission_amount, assignment_snapshot, destination, commission_status,
+          is_backdate_entry, backdate_reason
+        )
+        values ($1, $2, '20FT', 'completed', $3::timestamptz, true, 180000, $4::jsonb, $5, 'with_commission', true, $6)
+        returning id
+      `,
+      [
+        openPeriodSo.rows[0].id,
+        `${openPeriodSoNumber}CNTR1`,
+        '2099-06-22T09:00:00+07:00',
+        JSON.stringify({ driver: openPeriodDriverName }),
+        'Cikarang',
+        `Ritasi ${runId} susulan tapi periode aslinya masih terbuka`,
+      ],
+    );
+
+    const eligibleOpenPeriod = await api(
+      `/api/driver-commissions/eligible?periodStart=${openPeriod.periodStart}&periodEnd=${openPeriod.periodEnd}`,
+      { token: backdateAdminToken },
+    );
+    assert.equal(eligibleOpenPeriod.status, 200);
+    const normalRow = eligibleOpenPeriod.body.data.rows.find((row) => row.driverName === openPeriodDriverName);
+    assert.ok(normalRow, 'ritasi susulan dengan periode asli yang masih terbuka harus tetap eligible normal');
+    assert.equal(normalRow.isBackdateCommission, false, 'tidak boleh ditandai komisi susulan kalau periode aslinya belum ditutup batch apa pun');
+
+    const openPeriodSubmission = await api('/api/driver-commissions/batches', {
+      method: 'POST',
+      token: backdateAdminToken,
+      body: openPeriod,
+    });
+    assert.equal(openPeriodSubmission.status, 201);
+    const openPeriodItem = openPeriodSubmission.body.data.items.find((item) => item.containerJobId === openPeriodJob.rows[0].id);
+    assert.ok(openPeriodItem, 'ritasi susulan periode terbuka harus ikut masuk batch komisi periode tersebut');
+    assert.equal(openPeriodItem.isBackdateCommission, false);
   });
 }

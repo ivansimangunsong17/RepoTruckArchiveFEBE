@@ -35,6 +35,7 @@ function mapEligibleRow(row = {}) {
     reviewReasons: Array.isArray(row.review_reasons) ? row.review_reasons.filter(Boolean) : [],
     entrySource: row.entry_source || 'realtime',
     historicalPeriod: row.historical_period || '',
+    isBackdateCommission: Boolean(row.is_backdate_commission),
   };
 }
 
@@ -172,6 +173,7 @@ function mapItemRow(row = {}) {
     amount: toNumber(row.amount),
     sourceDestinationId: row.source_destination_id || null,
     commissionNote: row.commission_note || '',
+    isBackdateCommission: Boolean(row.is_backdate_commission),
     voidedAt: row.voided_at,
     voidedReason: row.voided_reason || '',
     createdAt: row.created_at,
@@ -398,6 +400,7 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
       paymentProofAttachmentId: row.paymentProofAttachmentId || null,
       paymentNote: row.paymentNote || '',
       source: row.source,
+      isBackdateCommission: Boolean(row.isBackdateCommission),
     });
     byDriver.set(key, current);
   }
@@ -454,13 +457,21 @@ async function findEligibleRows(period, db = { query }) {
         cj.driver_commission_note as commission_note,
         cj.commission_status,
         coalesce(cj.entry_source, 'realtime') as entry_source,
-        cj.historical_period
+        cj.historical_period,
+        -- Phase 4: item ini masuk batch periode $1-$2 yang SEDANG dibuat, tapi tanggal aslinya
+        -- (completed_date) jatuh di periode lain -- artinya ini "komisi susulan" yang disapu ke
+        -- batch sekarang karena periode aslinya sudah keburu approved/paid (lihat kondisi OR di
+        -- bawah). Ritasi susulan yang periode aslinya MASIH open tetap masuk lewat kondisi normal
+        -- (between $1 and $2), jadi tidak butuh flag ini.
+        case
+          when (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date then false
+          else true
+        end as is_backdate_commission
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
       where cj.status = 'completed'
         and cj.completed_at is not null
-        and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
         and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
@@ -471,6 +482,24 @@ async function findEligibleRows(period, db = { query }) {
           from driver_commission_items dci
           where dci.container_job_id = cj.id
             and dci.voided_at is null
+        )
+        and (
+          (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+          or (
+            -- Ritasi susulan/backdate (Phase 4): periode mingguan ASLI ritasi ini sudah
+            -- approved/paid, jadi tidak akan pernah bisa membuka batch baru untuk periode
+            -- itu sendiri (lihat DUPLICATE_COMMISSION_BATCH). Disapu ke batch $1-$2 yang
+            -- sedang dibuat sekarang, bukan menggantung selamanya, dan TIDAK menyentuh
+            -- batch lama yang sudah final sama sekali.
+            coalesce(cj.is_backdate_entry, false)
+            and exists (
+              select 1
+              from driver_commission_batches b2
+              where b2.period_start <= (cj.completed_at at time zone 'Asia/Jakarta')::date
+                and b2.period_end >= (cj.completed_at at time zone 'Asia/Jakarta')::date
+                and b2.status in ('approved', 'paid')
+            )
+          )
         )
       order by completed_date asc, driver_name asc, so.so_number asc, cj.container_number asc nulls last
     `,
@@ -860,13 +889,15 @@ export async function createDriverCommissionBatch(period, actor = {}) {
             batch_id, payment_id, container_job_id, sales_order_id,
             so_number, accurate_so_number, container_number, container_size,
             customer_name, destination, completed_date, completed_at,
-            driver_id, driver_name, amount, source_destination_id, commission_note
+            driver_id, driver_name, amount, source_destination_id, commission_note,
+            is_backdate_commission
           )
           values (
             $1::uuid, $2::uuid, $3::uuid, $4::uuid,
             $5, $6, $7, $8,
             $9, $10, $11::date, $12,
-            $13::uuid, $14, $15, $16::uuid, $17
+            $13::uuid, $14, $15, $16::uuid, $17,
+            $18
           )
         `,
         [
@@ -887,6 +918,7 @@ export async function createDriverCommissionBatch(period, actor = {}) {
           row.amount,
           row.sourceDestinationId,
           row.commissionNote || null,
+          Boolean(row.isBackdateCommission),
         ],
       );
     }

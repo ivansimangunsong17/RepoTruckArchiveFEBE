@@ -82,6 +82,24 @@ function historicalContainerMetadata(order = {}, container = {}) {
   };
 }
 
+// Ritasi susulan/backdate (Phase 2) -- audit log WAJIB setiap kali container job baru dibuat
+// dengan penanda ini, terpisah dari CREATE_CONTAINER_JOB biasa supaya mudah ditelusuri.
+function isBackdateContainer(container = {}) {
+  return Boolean(container?.isBackdateEntry);
+}
+
+function backdateContainerMetadata(order = {}, container = {}) {
+  return {
+    salesOrderId: order.id,
+    soNumber: order.soNumber || '',
+    containerNumber: container.containerNumber || '',
+    isBackdateEntry: true,
+    backdateReason: container.backdateReason || '',
+    createdAsCorrection: Boolean(container.createdAsCorrection),
+    status: container.status || '',
+  };
+}
+
 export async function listSalesOrdersController(request, response) {
   const result = await listSalesOrders(request.query);
   sendSuccess(response, result);
@@ -133,6 +151,16 @@ export async function createSalesOrderController(request, response) {
       entityId: container.id,
       afterData: container,
       metadata: historicalContainerMetadata(saved, container),
+    })));
+  await Promise.all((saved.containers || [])
+    .filter(isBackdateContainer)
+    .map((container) => safeRecordActivityLog(request, {
+      action: 'CREATE_BACKDATE_CONTAINER_JOB',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: container.id,
+      afterData: container,
+      metadata: backdateContainerMetadata(saved, container),
     })));
   sendSuccess(response, saved, 'Sales Order berhasil disimpan.', 201);
 }
@@ -229,6 +257,16 @@ export async function updateSalesOrderController(request, response) {
       entityId: container.id,
       afterData: container,
       metadata: historicalContainerMetadata(saved, container),
+    })));
+  await Promise.all((saved.containers || [])
+    .filter((container) => !beforeContainerIds.has(container.id) && isBackdateContainer(container))
+    .map((container) => safeRecordActivityLog(request, {
+      action: 'CREATE_BACKDATE_CONTAINER_JOB',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: container.id,
+      afterData: container,
+      metadata: backdateContainerMetadata(saved, container),
     })));
   sendSuccess(response, saved, 'Sales Order berhasil diperbarui.');
 }

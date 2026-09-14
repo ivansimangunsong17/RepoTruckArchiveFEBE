@@ -152,17 +152,6 @@ describe('OperationalDroppingAccountPage', () => {
         checked: 3,
       },
     });
-    uploadContainerJobExpenseProof.mockResolvedValue({
-      id: 'expense-1',
-      containerJobId: 'job-1',
-      category: 'tol',
-      amount: 125000,
-      description: 'Tol Cikampek',
-      paymentStatus: 'sudah_dibayar',
-      financeCheckStatus: 'belum_dicek',
-      proofAttachment: { name: 'transfer.pdf', path: 'attachment-proof-1' },
-      paidAt: '2026-08-20T03:00:00.000Z',
-    });
     correctContainerJobExpense.mockResolvedValue({
       id: 'expense-1',
       containerJobId: 'job-1',
@@ -192,6 +181,17 @@ describe('OperationalDroppingAccountPage', () => {
       paymentStatus: 'sudah_dibayar',
       financeCheckStatus: 'belum_dicek',
     });
+    uploadContainerJobExpenseProof.mockResolvedValue({
+      id: 'expense-1',
+      containerJobId: 'job-1',
+      category: 'tol',
+      amount: 125000,
+      description: 'Tol Cikampek',
+      paymentStatus: 'sudah_dibayar',
+      financeCheckStatus: 'belum_dicek',
+      proofAttachment: { name: 'transfer.pdf', path: 'attachment-proof-1' },
+      paidAt: '2026-08-20T03:00:00.000Z',
+    });
     uploadUjTransferProof.mockResolvedValue({
       id: 'expense-uj-1',
       containerJobId: 'job-1',
@@ -220,7 +220,7 @@ describe('OperationalDroppingAccountPage', () => {
     expect(screen.queryByText('Customer')).not.toBeInTheDocument();
     expect(screen.queryByText('Finance')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /export csv/i })).toBeEnabled();
-    expect(screen.getByRole('button', { name: /upload/i })).toBeInTheDocument();
+    expect(screen.getAllByText('Menunggu Finance').length).toBeGreaterThan(1);
   });
 
   it('mengekspor buku kas harian dengan saldo awal, total pengeluaran, dan sisa saldo', async () => {
@@ -238,23 +238,12 @@ describe('OperationalDroppingAccountPage', () => {
     expect(rows.at(-1)).toEqual(expect.arrayContaining(['SISA SALDO', 775000]));
   });
 
-  it('mengupload bukti pembayaran dari baris transaksi', async () => {
-    const user = userEvent.setup();
+  it('tidak menampilkan upload bukti di operational karena bukti divalidasi Finance', async () => {
     render(<OperationalDroppingAccountPage />);
 
-    await user.click(await screen.findByRole('button', { name: /upload/i }));
-    const proofFile = new File(['proof'], 'transfer.pdf', { type: 'application/pdf' });
-    await user.upload(screen.getByLabelText(/pilih bukti/i), proofFile);
-    await user.click(screen.getByRole('button', { name: /simpan bukti/i }));
-
-    await waitFor(() => {
-      expect(uploadContainerJobExpenseProof).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
-        proofFile,
-        updatedBy: 'Fitri Operational',
-        description: 'Tol Cikampek',
-      }));
-    });
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Bukti tersimpan' }));
+    expect(await screen.findByText('Tol Cikampek')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /upload bukti/i })).not.toBeInTheDocument();
+    expect(uploadContainerJobExpenseProof).not.toHaveBeenCalled();
   });
 
   it('mencatat biaya lainnya dari rekening dropping operational', async () => {
@@ -272,8 +261,8 @@ describe('OperationalDroppingAccountPage', () => {
     await user.selectOptions(screen.getByLabelText(/^keterangan$/i), 'custom');
     await user.type(screen.getByLabelText(/keterangan manual/i), 'Parkir depo');
     await user.selectOptions(screen.getByLabelText(/jenis biaya/i), 'operational');
-    const proofFile = new File(['proof'], 'parkir.pdf', { type: 'application/pdf' });
-    await user.upload(screen.getByLabelText(/pilih bukti/i), proofFile);
+    expect(screen.queryByLabelText(/pilih bukti/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/bukti pembayaran akan diupload finance/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /validasi biaya/i }));
 
     expect(createContainerJobExpense).not.toHaveBeenCalled();
@@ -290,11 +279,43 @@ describe('OperationalDroppingAccountPage', () => {
         description: 'Parkir depo',
         recipientName: 'Petugas Depo',
         paymentStatus: 'sudah_dibayar',
-        proofFile,
+        proofFile: null,
         updatedBy: 'Fitri Operational',
       }));
     });
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Biaya tersimpan' }));
+  });
+
+  it('mencatat Uang Admin TF tanpa attachment Ops karena bukti diupload Finance', async () => {
+    const user = userEvent.setup();
+    render(<OperationalDroppingAccountPage />);
+
+    await user.click(await screen.findByRole('button', { name: /catat biaya/i }));
+    const formDialog = await screen.findByRole('dialog', { name: /catat biaya penggunaan saldo/i });
+    await user.click(within(formDialog).getByLabelText(/^ritasi$/i));
+    await user.click(await screen.findByRole('button', { name: /SO-ARM-202608-0001/i }));
+    await user.type(within(formDialog).getByLabelText(/nominal/i), '50000');
+    await user.type(within(formDialog).getByPlaceholderText(/petugas depo/i), 'Admin Pelabuhan');
+    await user.selectOptions(within(formDialog).getByLabelText(/^keterangan$/i), 'Uang Admin TF');
+
+    expect(within(formDialog).queryByLabelText(/pilih bukti/i)).not.toBeInTheDocument();
+    expect(within(formDialog).getByText(/bukti pembayaran akan diupload finance/i)).toBeInTheDocument();
+
+    await user.click(within(formDialog).getByRole('button', { name: /validasi biaya/i }));
+    const validationDialog = await screen.findByRole('dialog', { name: /validasi catat biaya penggunaan saldo/i });
+    expect(validationDialog).toHaveTextContent('Uang Admin TF');
+    expect(validationDialog).toHaveTextContent('-');
+    await user.click(within(validationDialog).getByRole('button', { name: /ya, simpan biaya/i }));
+
+    await waitFor(() => {
+      expect(createContainerJobExpense).toHaveBeenCalledWith('job-1', expect.objectContaining({
+        category: 'uang_admin_tf',
+        expenseGroup: 'operational',
+        amount: 50000,
+        description: 'Uang Admin TF',
+        proofFile: null,
+      }));
+    });
   });
 
   it('menyediakan preset biaya ban di rekening dropping operational', async () => {
@@ -325,8 +346,7 @@ describe('OperationalDroppingAccountPage', () => {
     await user.selectOptions(screen.getByLabelText(/^keterangan$/i), 'Reimbursement Lainnya');
 
     expect(screen.queryByLabelText(/jenis biaya/i)).not.toBeInTheDocument();
-    const proofFile = new File(['proof'], 'reimbursement.pdf', { type: 'application/pdf' });
-    await user.upload(screen.getByLabelText(/pilih bukti/i), proofFile);
+    expect(screen.queryByLabelText(/pilih bukti/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /validasi biaya/i }));
 
     expect(screen.getByText('Isi keterangan untuk Reimbursement Lainnya agar pencatatan jelas.')).toBeInTheDocument();
@@ -448,7 +468,7 @@ describe('OperationalDroppingAccountPage', () => {
     expect(screen.queryByRole('button', { name: /^void$/i })).not.toBeInTheDocument();
   });
 
-  it('menampilkan tombol upload bukti transfer untuk UJ Perjalanan otomatis yang belum ada buktinya', async () => {
+  it('menampilkan UJ Perjalanan otomatis tanpa tombol upload bukti di Operational', async () => {
     const user = userEvent.setup();
     fetchContainerJobExpenseLedger.mockResolvedValue({
       rows: [
@@ -483,19 +503,7 @@ describe('OperationalDroppingAccountPage', () => {
     await screen.findByText('UJ PT Sumber Logistik Cikarang 20FT B 1234 XYZ');
     expect(screen.getAllByText('Belum Ada Bukti').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /upload bukti/i }));
-    const dialog = await screen.findByRole('dialog', { name: /upload bukti transfer uj/i });
-    const proofFile = new File(['proof'], 'transfer-uj.pdf', { type: 'application/pdf' });
-    await user.upload(within(dialog).getByLabelText(/pilih bukti/i), proofFile);
-    await user.click(within(dialog).getByRole('button', { name: /simpan bukti/i }));
-
-    await waitFor(() => {
-      expect(uploadUjTransferProof).toHaveBeenCalledWith('job-1', 'expense-uj-1', expect.objectContaining({
-        proofFile,
-        updatedBy: 'Fitri Operational',
-      }));
-    });
-    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Bukti transfer UJ tersimpan' }));
+    expect(screen.queryByRole('button', { name: /upload bukti/i })).not.toBeInTheDocument();
+    expect(uploadUjTransferProof).not.toHaveBeenCalled();
   });
 });

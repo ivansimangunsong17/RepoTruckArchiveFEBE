@@ -28,6 +28,9 @@ import {
 import { ensureHistoricalPeriodEditable } from '../historical-entry/historical-entry.service.js';
 
 const ADMIN_CORRECTION_REASON_MIN_LENGTH = 8;
+// Ritasi susulan/backdate (Phase 2) sengaja TIDAK admin-only seperti historical entry -- Operational
+// biasa boleh memakainya, asal alasannya diisi jelas (jadi jejak audit, bukan izin, adalah penjaganya).
+const BACKDATE_REASON_MIN_LENGTH = 8;
 const expenseCategories = new Set([
   'uj_awal',
   'top_up_uj',
@@ -39,6 +42,7 @@ const expenseCategories = new Set([
   'inap',
   'terminal_depo',
   'tunggu',
+  'uang_admin_tf',
   'reimbursement',
   'lainnya',
 ]);
@@ -127,6 +131,30 @@ function ensureAdminCorrectionContract(actor, payload = {}) {
     error.code = 'ADMIN_CORRECTION_REASON_REQUIRED';
     throw error;
   }
+}
+
+export function isBackdateEntryPayload(payload = {}, currentJob = null) {
+  return Object.prototype.hasOwnProperty.call(payload, 'isBackdateEntry')
+    ? (payload.isBackdateEntry === true || String(payload.isBackdateEntry || '').toLowerCase() === 'true')
+    : Boolean(currentJob?.isBackdateEntry);
+}
+
+export function backdateReason(payload = {}, currentJob = null) {
+  return normalizeText(
+    Object.prototype.hasOwnProperty.call(payload, 'backdateReason') ? payload.backdateReason : currentJob?.backdateReason,
+  );
+}
+
+// Ritasi susulan/backdate (Phase 2): "wajib alasan" adalah satu-satunya penjaga selain audit log --
+// tidak ada gerbang permission admin-only seperti historical entry, jadi validasi ini yang memastikan
+// setiap ritasi backdate punya jejak KENAPA dia telat dicatat, bukan cuma "iya, ini backdate".
+function ensureBackdateReasonRequired(payload, currentJob) {
+  if (!isBackdateEntryPayload(payload, currentJob)) return;
+  if (backdateReason(payload, currentJob).length >= BACKDATE_REASON_MIN_LENGTH) return;
+  const error = new Error(`Alasan ritasi susulan/backdate wajib diisi minimal ${BACKDATE_REASON_MIN_LENGTH} karakter.`);
+  error.statusCode = 400;
+  error.code = 'BACKDATE_REASON_REQUIRED';
+  throw error;
 }
 
 function shouldEnforceOperationalLock(actor, payload = {}) {
@@ -647,15 +675,9 @@ function normalizeExpenseText(value, field, maxLength = 500) {
 
 export function createContainerJobExpense(id, payload = {}, actor) {
   const paymentStatus = normalizeExpensePaymentStatus(payload.paymentStatus);
-  if (paymentStatus === 'sudah_dibayar' && !payload.proofAttachmentId) {
-    const error = new Error('Bukti pembayaran wajib diupload untuk biaya yang sudah dibayar.');
-    error.statusCode = 400;
-    error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
-    throw error;
-  }
-
+  const category = normalizeExpenseCategory(payload.category);
   return createContainerJobExpenseRecord(id, {
-    category: normalizeExpenseCategory(payload.category),
+    category,
     expenseGroup: normalizeExpenseGroup(payload.expenseGroup),
     amount: normalizeExpenseAmount(payload.amount),
     description: normalizeExpenseText(payload.description, 'Keterangan biaya'),
@@ -779,6 +801,7 @@ export async function saveContainerJob(id, payload, actor) {
 
   const currentJob = await getContainerJob(id);
   ensureAdminCorrectionContract(actor, normalizedPayload);
+  ensureBackdateReasonRequired(normalizedPayload, currentJob);
   const documentOnlyUpdate = isDocumentOnlyActor(actor);
   if (!documentOnlyUpdate) {
     ensureCanManageHistoricalEntry(actor, {

@@ -44,6 +44,17 @@ const SALES_INVOICE_DELIVERY_STATUSES = [
   'revisi_dispute',
 ];
 
+// Status order vendor (Phase 4) sengaja independen dari status ritasi/container job -- hanya
+// dua nilai yang boleh diset manual lewat form biasa: "Dicatat" (waiting_operational) dan
+// "Selesai" (completed). "Batal" tetap eksklusif lewat endpoint cancel/cancel-request yang
+// sudah ada (cascade, activity log, approval), bukan lewat field status di form biasa.
+const VENDOR_ORDER_ALLOWED_STATUSES = ['waiting_operational', 'completed'];
+
+// Sama seperti BACKDATE_REASON_MIN_LENGTH di container-jobs.service.js -- diduplikasi (bukan
+// diimpor) karena kedua modul memvalidasi bentuk payload yang berbeda (SO+containers vs container
+// job tunggal), dan supaya sales-orders module tidak perlu bergantung ke container-jobs module.
+const BACKDATE_CONTAINER_REASON_MIN_LENGTH = 8;
+
 function isContainerService(serviceName) {
   return serviceName === 'Jasa Angkut D20' || serviceName === 'Jasa Angkut D40';
 }
@@ -357,6 +368,9 @@ export async function ensureSalesOrderStillSafeForSalesRevision(order) {
 
 async function ensureSalesOrderUnlockedForSales(actor, order) {
   if (actor?.role !== 'sales') return;
+  // Order vendor tidak punya ritasi internal/biaya operasional yang perlu dikunci oleh flow
+  // Operational/Finance, jadi sales pemilik tetap boleh koreksi status vendor termasuk batal.
+  if (order?.isVendorOrder) return;
   await ensureSalesOrderStillSafeForSalesRevision(order);
 }
 
@@ -540,6 +554,24 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
+
+  if (payload.isVendorOrder && payload.status && !VENDOR_ORDER_ALLOWED_STATUSES.includes(payload.status)) {
+    const error = new Error('Status order vendor hanya boleh Dicatat atau Selesai. Gunakan menu batalkan untuk membatalkan order.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  // Ritasi susulan/backdate (Phase 2) bisa dibuat langsung sebagai container baru di Sales Order,
+  // bukan cuma lewat update ritasi yang sudah ada -- alasannya tetap wajib diisi di jalur ini juga.
+  const backdateContainerMissingReason = (Array.isArray(payload.containers) ? payload.containers : [])
+    .find((container) => container?.isBackdateEntry && String(container?.backdateReason || '').trim().length < BACKDATE_CONTAINER_REASON_MIN_LENGTH);
+  if (backdateContainerMissingReason) {
+    const error = new Error(`Alasan ritasi susulan/backdate wajib diisi minimal ${BACKDATE_CONTAINER_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'BACKDATE_REASON_REQUIRED';
+    throw error;
+  }
 }
 
 export function listSalesOrders(query) {
@@ -554,6 +586,7 @@ export function listSalesOrders(query) {
     historicalPeriod: query.historicalPeriod || '',
     dateFrom: query.dateFrom || '',
     dateTo: query.dateTo || '',
+    vendorFilter: query.vendorFilter || '',
   });
 }
 

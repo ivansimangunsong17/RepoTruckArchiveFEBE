@@ -71,6 +71,26 @@ describe('financeService correction endpoints', () => {
     });
   });
 
+  it('mengirim bukti pembayaran saat rekonsiliasi biaya container job', async () => {
+    const proofFile = new File(['proof'], 'bukti-transfer.pdf', { type: 'application/pdf' });
+
+    await reconcileFinanceContainerJobExpense('expense-1', {
+      financeCheckStatus: 'sudah_dicek',
+      financeNote: '',
+      proofFile,
+    });
+
+    expect(httpClient.patch).toHaveBeenCalledWith('/finance/container-job-expenses/expense-1/reconcile', expect.objectContaining({
+      financeCheckStatus: 'sudah_dicek',
+      financeNote: '',
+      proofFile: undefined,
+      fileName: 'bukti-transfer.pdf',
+      mimeType: 'application/pdf',
+      fileSize: proofFile.size,
+      fileBase64: expect.stringContaining('data:application/pdf;base64,'),
+    }));
+  });
+
   it('memanggil endpoint history koreksi SO dan invoice', async () => {
     await fetchFinanceOrderCorrections('order-1');
     await fetchFinanceInvoiceCorrections('invoice-1');

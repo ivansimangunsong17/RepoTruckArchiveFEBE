@@ -235,3 +235,62 @@ test('sales order historis memakai periode dari tanggal jalan', () => {
   assert.equal(row.trip_date, '2026-05-07');
   assert.equal(row.historical_period, '2026-05');
 });
+
+test('sales order mapper membaca dan menyimpan penanda order vendor', () => {
+  const mapped = mapSalesOrder({
+    id: 'order-vendor-1',
+    so_number: 'SO-VENDOR-001',
+    customer_name: 'PT Vendor',
+    is_vendor_order: true,
+    vendor_name: 'CV Truck Luar',
+    vendor_note: 'Dikerjakan vendor karena truck internal penuh.',
+    payment_type: 'cash',
+    quantity: 1,
+    price: 0,
+    total_amount: 0,
+  });
+
+  assert.equal(mapped.isVendorOrder, true);
+  assert.equal(mapped.vendorName, 'CV Truck Luar');
+  assert.equal(mapped.vendorNote, 'Dikerjakan vendor karena truck internal penuh.');
+
+  const vendorRow = toSalesOrderDb({
+    customer: 'PT Vendor',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+    isVendorOrder: true,
+    vendorName: '  CV Truck Luar  ',
+    vendorNote: '  Catatan vendor  ',
+  });
+
+  assert.equal(vendorRow.is_vendor_order, true);
+  assert.equal(vendorRow.vendor_name, 'CV Truck Luar');
+  assert.equal(vendorRow.vendor_note, 'Catatan vendor');
+
+  // Order internal biasa (checkbox tidak dicentang) tidak boleh punya default baru
+  // yang tiba-tiba true, dan vendor_name/vendor_note harus tetap kosong.
+  const internalRow = toSalesOrderDb({
+    customer: 'PT Internal',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+  });
+
+  assert.equal(internalRow.is_vendor_order, false);
+  assert.equal(internalRow.vendor_name, null);
+  assert.equal(internalRow.vendor_note, null);
+
+  // Uncheck vendor lagi (vendorName/vendorNote lama masih terisi di form) tidak boleh
+  // menyisakan data vendor basi di DB.
+  const revertedRow = toSalesOrderDb({
+    customer: 'PT Internal',
+    origin: 'Jakarta',
+    destination: 'Bekasi',
+    isVendorOrder: false,
+    vendorName: 'CV Truck Luar',
+    vendorNote: 'Catatan lama',
+  });
+
+  assert.equal(revertedRow.is_vendor_order, false);
+  assert.equal(revertedRow.vendor_name, null);
+  assert.equal(revertedRow.vendor_note, null);
+});

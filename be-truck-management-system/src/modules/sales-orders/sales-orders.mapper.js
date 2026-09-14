@@ -238,6 +238,9 @@ export function mapContainerJob(row, attachments = []) {
     entrySource: row.entry_source || 'realtime',
     historicalPeriod: row.historical_period || '',
     historicalNotes: row.historical_notes || '',
+    isBackdateEntry: Boolean(row.is_backdate_entry),
+    backdateReason: row.backdate_reason || '',
+    createdAsCorrection: Boolean(row.created_as_correction),
     createdBy: row.created_by_name,
     updatedBy: row.updated_by_name,
     updatedAt: row.updated_at,
@@ -312,6 +315,9 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     status: row.status,
     notes: row.notes,
     salesName: row.sales_name,
+    isVendorOrder: Boolean(row.is_vendor_order),
+    vendorName: row.vendor_name || '',
+    vendorNote: row.vendor_note || '',
     entrySource: row.entry_source || 'realtime',
     historicalPeriod: row.historical_period || '',
     historicalNotes: row.historical_notes || '',
@@ -421,6 +427,12 @@ export function toSalesOrderDb(form, customer) {
     destination: form.destination,
     status: form.status || 'waiting_operational',
     sales_name: customer?.sales_name || form.salesName || null,
+    // Vendor order (Phase 1) hanya penanda pencatatan -- vendor_name/vendor_note sengaja
+    // dikosongkan lagi kalau checkbox-nya di-uncheck, supaya tidak ada data vendor basi
+    // yang nyangkut di order yang sudah dibalik jadi internal.
+    is_vendor_order: Boolean(form.isVendorOrder),
+    vendor_name: form.isVendorOrder ? (String(form.vendorName || '').trim() || null) : null,
+    vendor_note: form.isVendorOrder ? (String(form.vendorNote || '').trim() || null) : null,
     entry_source: entrySource,
     historical_period: historicalPeriod,
     historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(form.historicalNotes) : null,
@@ -438,6 +450,16 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
   const historicalPeriod = entrySource === 'historical'
     ? historicalPeriodFromDate(order.trip_date || order.tripDate || container.tripDate, container.historicalPeriod || order.historical_period || order.historicalPeriod)
     : null;
+  // Ritasi susulan/backdate (Phase 2) -- independen dari entry_source historis di atas, boleh
+  // dibuat langsung lewat container di dalam Sales Order (bukan cuma lewat update ritasi yang
+  // sudah ada). Alasannya divalidasi wajib di service layer sebelum sampai ke mapper ini.
+  const isBackdateEntry = Boolean(container.isBackdateEntry ?? order.is_backdate_entry ?? order.isBackdateEntry);
+  const backdateReason = isBackdateEntry
+    ? (String(container.backdateReason || order.backdate_reason || order.backdateReason || '').trim() || null)
+    : null;
+  const createdAsCorrection = isBackdateEntry
+    ? Boolean(container.createdAsCorrection ?? order.created_as_correction ?? order.createdAsCorrection)
+    : false;
   return {
     sales_order_id: order.id,
     container_number: String(container.containerNumber || '').trim().toUpperCase() || null,
@@ -474,6 +496,9 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
     entry_source: entrySource,
     historical_period: historicalPeriod,
     historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(container.historicalNotes || order.historical_notes || order.historicalNotes) : null,
+    is_backdate_entry: isBackdateEntry,
+    backdate_reason: backdateReason,
+    created_as_correction: createdAsCorrection,
     created_by_name: order.created_by_name || actorName,
     updated_by_name: container.updatedBy || actorName,
   };

@@ -69,6 +69,10 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   const [expenseReconciliationNote, setExpenseReconciliationNote] = useState('');
   const [expenseReconciliationDecisionError, setExpenseReconciliationDecisionError] = useState('');
   const [expenseCheckConfirmId, setExpenseCheckConfirmId] = useState('');
+  const [expenseCheckProofFile, setExpenseCheckProofFile] = useState(null);
+  const [expenseCheckProofError, setExpenseCheckProofError] = useState('');
+  const [expenseCheckAdminFeeAmount, setExpenseCheckAdminFeeAmount] = useState('');
+  const [expenseCheckAdminFeeNote, setExpenseCheckAdminFeeNote] = useState('');
 
   const operationalFundDecisionRow = operationalFundRows.find((row) => row.id === operationalFundDecision?.id);
   const expenseReconciliationDecisionRow = expenseReconciliationRows.find((row) => row.id === expenseReconciliationDecisionId);
@@ -416,14 +420,34 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   }
 
   async function markExpenseChecked(id) {
+    const targetRow = expenseReconciliationRows.find((row) => row.id === id);
+    if (expenseCheckProofError) {
+      return;
+    }
+    if (targetRow?.paymentStatus === 'sudah_dibayar' && !targetRow?.proofAttachment && !expenseCheckProofFile) {
+      setExpenseCheckProofError('Bukti pembayaran wajib diupload Finance sebelum validasi.');
+      return;
+    }
+    const adminFeeAmount = Number(expenseCheckAdminFeeAmount || 0);
+    if (!Number.isFinite(adminFeeAmount) || adminFeeAmount < 0) {
+      setExpenseCheckProofError('Biaya admin transfer tidak valid.');
+      return;
+    }
     setExpenseReconciliationBusyId(id);
     setExpenseReconciliationError('');
+    setExpenseCheckProofError('');
     try {
       await reconcileFinanceContainerJobExpense(id, {
         financeCheckStatus: 'sudah_dicek',
         financeNote: '',
+        proofFile: expenseCheckProofFile,
+        adminFeeAmount,
+        adminFeeNote: expenseCheckAdminFeeNote.trim(),
       });
       setExpenseCheckConfirmId('');
+      setExpenseCheckProofFile(null);
+      setExpenseCheckAdminFeeAmount('');
+      setExpenseCheckAdminFeeNote('');
       await loadExpenseReconciliation();
       await loadOperationalFundBatch();
       await loadOperationalFundTransactions();
@@ -437,11 +461,39 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   function openExpenseCheckConfirm(id) {
     setExpenseReconciliationError('');
     setExpenseCheckConfirmId(id);
+    setExpenseCheckProofFile(null);
+    setExpenseCheckProofError('');
+    setExpenseCheckAdminFeeAmount('');
+    setExpenseCheckAdminFeeNote('');
   }
 
   function closeExpenseCheckConfirmModal() {
     if (expenseReconciliationBusyId) return;
     setExpenseCheckConfirmId('');
+    setExpenseCheckProofFile(null);
+    setExpenseCheckProofError('');
+    setExpenseCheckAdminFeeAmount('');
+    setExpenseCheckAdminFeeNote('');
+  }
+
+  function handleExpenseCheckProofSelect(file, error = '') {
+    setExpenseCheckProofFile(file || null);
+    setExpenseCheckProofError(error || '');
+  }
+
+  function clearExpenseCheckProofFile() {
+    setExpenseCheckProofFile(null);
+    setExpenseCheckProofError('');
+  }
+
+  function handleExpenseCheckAdminFeeAmountChange(value) {
+    setExpenseCheckAdminFeeAmount(value);
+    setExpenseCheckProofError('');
+  }
+
+  function handleExpenseCheckAdminFeeNoteChange(value) {
+    setExpenseCheckAdminFeeNote(value);
+    setExpenseCheckProofError('');
   }
 
   function confirmExpenseChecked(event) {
@@ -610,6 +662,10 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     expenseReconciliationDecisionRow,
     expenseCheckConfirmId,
     expenseCheckConfirmRow,
+    expenseCheckProofFile,
+    expenseCheckProofError,
+    expenseCheckAdminFeeAmount,
+    expenseCheckAdminFeeNote,
     handleOperationalFundBatchDateChange,
     openOperationalFundRequestModal,
     openOperationalFundDepositModal,
@@ -628,6 +684,10 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     markExpenseChecked,
     openExpenseCheckConfirm,
     closeExpenseCheckConfirmModal,
+    handleExpenseCheckProofSelect,
+    clearExpenseCheckProofFile,
+    handleExpenseCheckAdminFeeAmountChange,
+    handleExpenseCheckAdminFeeNoteChange,
     confirmExpenseChecked,
     submitExpenseClarification,
     openOperationalFundCloseValidationModal,

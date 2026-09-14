@@ -100,8 +100,26 @@ export function fetchFinanceContainerJobExpenses(params = {}) {
   return httpClient.get(`/finance/container-job-expenses${buildQuery(params)}`);
 }
 
-export function reconcileFinanceContainerJobExpense(id, payload = {}) {
-  return httpClient.patch(`/finance/container-job-expenses/${encodeURIComponent(id)}/reconcile`, payload);
+export async function reconcileFinanceContainerJobExpense(id, payload = {}) {
+  const proofFile = getRawFile(payload.proofFile);
+  if (!proofFile) {
+    return httpClient.patch(`/finance/container-job-expenses/${encodeURIComponent(id)}/reconcile`, payload);
+  }
+
+  const uploadFile = proofFile.type?.startsWith('image/') ? await compressImageFile(proofFile) : proofFile;
+  const validationError = validateArchiveFile(uploadFile, { label: 'Bukti pembayaran' })
+    || validateFinalUploadFile(uploadFile, { label: 'Bukti pembayaran' });
+  if (validationError) throw new Error(validationError);
+
+  const fileBase64 = await readFileAsDataUrl(uploadFile);
+  return httpClient.patch(`/finance/container-job-expenses/${encodeURIComponent(id)}/reconcile`, {
+    ...payload,
+    proofFile: undefined,
+    fileName: uploadFile.name,
+    mimeType: uploadFile.type || 'application/octet-stream',
+    fileSize: uploadFile.size,
+    fileBase64,
+  });
 }
 
 export function approveFinanceRpuj(id) {

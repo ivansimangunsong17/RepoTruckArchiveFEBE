@@ -3675,17 +3675,34 @@ async function getContainerJobExpenseReconciliationById(client, id) {
 
 export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id from container_job_expenses where id = $1', [id]);
+    const existing = await client.query('select id, category, payment_status, proof_attachment_id from container_job_expenses where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Transaksi biaya container job tidak ditemukan.');
       error.statusCode = 404;
       error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
       throw error;
     }
+    const existingExpense = existing.rows[0];
+    const proofAttachmentId = payload.proofAttachmentId || existingExpense.proof_attachment_id || null;
+    if (payload.financeCheckStatus === 'sudah_dicek' && existingExpense.payment_status === 'sudah_dibayar' && !proofAttachmentId) {
+      const error = new Error('Bukti pembayaran wajib diupload Finance sebelum transaksi ditandai sudah dicek.');
+      error.statusCode = 400;
+      error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
+      throw error;
+    }
 
     const batchResult = await client.query(
       `
-        select batch.status
+        select
+          batch.id as batch_id,
+          batch.status,
+          oft.transaction_date,
+          oft.container_job_id,
+          oft.description,
+          oft.top_name,
+          oft.driver_name,
+          oft.do_number,
+          oft.customer_name
         from operational_fund_transactions oft
         join operational_fund_batches batch on batch.id = oft.batch_id
         where oft.container_job_expense_id = $1
@@ -3710,17 +3727,136 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
             finance_checked_by_name = $2,
             finance_checked_at = now(),
             finance_note = $3,
+            proof_attachment_id = coalesce($4, proof_attachment_id),
             updated_by_name = $2,
             updated_at = now()
-        where id = $4
+        where id = $5
       `,
       [
         payload.financeCheckStatus,
         payload.actorName || 'Finance',
         payload.financeNote || null,
+        payload.proofAttachmentId || null,
         id,
       ],
     );
+    if (payload.proofAttachmentId) {
+      await client.query(
+        `
+          update operational_fund_transactions
+          set proof_attachment_id = $1,
+              updated_by_name = $2,
+              updated_at = now()
+          where container_job_expense_id = $3
+            and transaction_type = 'debit'
+            and status = 'posted'
+        `,
+        [payload.proofAttachmentId, payload.actorName || 'Finance', id],
+      );
+    }
+    const adminFeeAmount = Number(payload.adminFeeAmount || 0);
+    if (payload.financeCheckStatus === 'sudah_dicek' && adminFeeAmount > 0) {
+      const sourceRefId = `admin-transfer:${id}`;
+      const existingAdminFee = await client.query(
+        `
+          select id, amount
+          from operational_fund_transactions
+          where source = 'container_job_expense_admin_fee'
+            and source_ref_id = $1
+            and status = 'posted'
+          limit 1
+        `,
+        [sourceRefId],
+      );
+      const batchRow = batchResult.rows[0];
+      if (!batchRow?.batch_id) {
+        const error = new Error('Transaksi utama belum masuk batch rekening dropping.');
+        error.statusCode = 409;
+        error.code = 'OPERATIONAL_FUND_TRANSACTION_NOT_FOUND';
+        throw error;
+      }
+      const balanceResult = await client.query(
+        `
+          select
+            coalesce(sum(amount) filter (where transaction_type = 'credit' and status = 'posted'), 0)
+            - coalesce(sum(amount) filter (where transaction_type = 'debit' and status = 'posted'), 0)
+            + coalesce(sum(amount) filter (where transaction_type = 'adjustment' and status = 'posted'), 0)
+            as balance
+          from operational_fund_transactions
+          where batch_id = $1
+        `,
+        [batchRow.batch_id],
+      );
+      const existingAdminAmount = Number(existingAdminFee.rows[0]?.amount || 0);
+      const currentBalance = Number(balanceResult.rows[0]?.balance || 0);
+      if (currentBalance + existingAdminAmount < adminFeeAmount) {
+        const error = new Error('Saldo rekening dropping tidak cukup untuk biaya admin transfer.');
+        error.statusCode = 409;
+        error.code = 'OPERATIONAL_FUND_BALANCE_INSUFFICIENT';
+        throw error;
+      }
+      const description = payload.adminFeeNote
+        ? `Admin transfer - ${payload.adminFeeNote}`
+        : `Admin transfer - ${batchRow.description || 'Biaya rekening dropping'}`;
+      if (existingAdminFee.rows[0]) {
+        await client.query(
+          `
+            update operational_fund_transactions
+            set amount = $1,
+                description = $2,
+                proof_attachment_id = $3,
+                updated_by_name = $4,
+                updated_at = now()
+            where id = $5
+          `,
+          [
+            adminFeeAmount,
+            description,
+            proofAttachmentId,
+            payload.actorName || 'Finance',
+            existingAdminFee.rows[0].id,
+          ],
+        );
+      } else {
+        await client.query(
+          `
+            insert into operational_fund_transactions (
+              batch_id,
+              container_job_id,
+              transaction_date,
+              transaction_type,
+              category,
+              amount,
+              description,
+              proof_attachment_id,
+              top_name,
+              driver_name,
+              do_number,
+              customer_name,
+              source,
+              source_ref_id,
+              created_by_name,
+              updated_by_name
+            )
+            values ($1, $2, $3, 'debit', 'biaya_lainnya', $4, $5, $6, $7, $8, $9, $10, 'container_job_expense_admin_fee', $11, $12, $12)
+          `,
+          [
+            batchRow.batch_id,
+            batchRow.container_job_id || null,
+            batchRow.transaction_date,
+            adminFeeAmount,
+            description,
+            proofAttachmentId,
+            batchRow.top_name || payload.actorName || 'Finance',
+            batchRow.driver_name || null,
+            batchRow.do_number || null,
+            batchRow.customer_name || null,
+            sourceRefId,
+            payload.actorName || 'Finance',
+          ],
+        );
+      }
+    }
 
     return getContainerJobExpenseReconciliationById(client, id);
   });
