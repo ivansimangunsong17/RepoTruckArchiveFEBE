@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, FileText, RefreshCw, Send, UserRound, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, Download, FileText, RefreshCw, Send, UserRound, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -11,6 +11,7 @@ import {
 } from '../../services/finance/driverCommissionService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 import MonthFilterControl from '../finance/shared/MonthFilterControl';
 import { getMonthDateRange } from '../finance/shared/monthFilterUtils';
 
@@ -107,6 +108,36 @@ function currentCommissionPeriod() {
 
 function commissionPeriodKey(period = {}) {
   return `${period.periodStart || ''}|${period.periodEnd || ''}`;
+}
+
+function commissionReportFilename(prefix, periodStart, periodEnd) {
+  return `${prefix}-${String(periodStart || 'periode').replaceAll('-', '')}-${String(periodEnd || 'akhir').replaceAll('-', '')}.pdf`;
+}
+
+function commissionAmount(driver, field, fallback = 0) {
+  const value = Number(driver?.[field]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function buildCommissionPdfRows(drivers = [], statusResolver = driverPaymentStatus) {
+  return drivers.map((driver, index) => {
+    const grossAmount = commissionAmount(driver, 'grossAmount', commissionAmount(driver, 'totalAmount'));
+    const deductionAmount = commissionAmount(driver, 'deductionAmount');
+    const netAmount = commissionAmount(driver, 'netAmount', grossAmount - deductionAmount);
+    const unpaidAmount = commissionAmount(driver, 'unpaidAmount');
+    const status = statusResolver(driver);
+
+    return {
+      reportNumber: index + 1,
+      driverName: driver.driverName || '-',
+      totalItems: driver.totalItems || 0,
+      grossAmount,
+      deductionAmount,
+      netAmount,
+      unpaidAmount,
+      statusLabel: statusLabels[status] || status || '-',
+    };
+  });
 }
 
 function buildCommissionPeriodOptions(batches = [], selectedReport = null) {
@@ -643,6 +674,32 @@ function DriverCommissionOperationalPage() {
     }
   }
 
+  function handleDownloadPdf() {
+    downloadPdfReport({
+      reportLabel: 'Komisi Sopir',
+      title: 'Report Komisi Sopir',
+      subtitle: `Periode ${formatDate(periodStart)} - ${formatDate(periodEnd)}`,
+      filename: commissionReportFilename('komisi-sopir-operational', periodStart, periodEnd),
+      meta: [
+        { label: 'Sopir', value: `${summary.totalDrivers || 0}` },
+        { label: 'Job Komisi', value: `${summary.totalItems || 0}` },
+        { label: 'Total Komisi', value: formatCurrency(summary.totalAmount || 0) },
+        { label: 'Belum Dibayar', value: formatCurrency(summary.unpaidAmount || 0) },
+      ],
+      columns: [
+        { label: 'No', width: 0.4, value: (row) => row.reportNumber, align: 'center' },
+        { label: 'Sopir', width: 1.8, value: (row) => row.driverName, bold: true },
+        { label: 'Job', width: 0.55, value: (row) => row.totalItems, align: 'center' },
+        { label: 'Bruto', width: 1, value: (row) => formatCurrency(row.grossAmount), align: 'right' },
+        { label: 'Potongan', width: 1, value: (row) => (row.deductionAmount ? formatCurrency(row.deductionAmount) : '-'), align: 'right' },
+        { label: 'Net Dibayar', width: 1, value: (row) => formatCurrency(row.netAmount), align: 'right' },
+        { label: 'Belum Dibayar', width: 1, value: (row) => formatCurrency(row.unpaidAmount), align: 'right' },
+        { label: 'Status', width: 1.1, value: (row) => row.statusLabel },
+      ],
+      rows: buildCommissionPdfRows(drivers),
+    });
+  }
+
   return (
     <main className="space-y-5 p-4 md:p-6">
       <header className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -670,9 +727,14 @@ function DriverCommissionOperationalPage() {
               />
               <small className="mt-1 block text-xs font-semibold normal-case tracking-normal text-slate-500">Periode otomatis Sabtu sampai Jumat. Target pembayaran hari Rabu.</small>
             </div>
-            <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={() => loadReport(periodStart, periodEnd)} disabled={loading}>
-              <RefreshCw size={16} /> Refresh
-            </button>
+            <div className="flex gap-2 sm:flex-col">
+              <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={handleDownloadPdf} disabled={loading || !drivers.length}>
+                <Download size={16} /> Download PDF
+              </button>
+              <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={() => loadReport(periodStart, periodEnd)} disabled={loading}>
+                <RefreshCw size={16} /> Refresh
+              </button>
+            </div>
           </div>
         </div>
       </header>

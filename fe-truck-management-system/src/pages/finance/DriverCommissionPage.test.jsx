@@ -10,6 +10,7 @@ import {
   recordDriverCommissionDeduction,
   voidDriverCommissionDeduction,
 } from '../../services/finance/driverCommissionService';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 
 const notify = vi.fn();
 const confirmAction = vi.fn();
@@ -42,6 +43,10 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
   uploadDriverCommissionTransferProof: vi.fn(),
   voidDriverCommissionDeduction: vi.fn(),
   voidDriverCommissionPayment: vi.fn(),
+}));
+
+vi.mock('../../utils/simplePdfReport', () => ({
+  downloadPdfReport: vi.fn(),
 }));
 
 const periodReport = {
@@ -266,6 +271,22 @@ describe('DriverCommissionPage finance', () => {
 
     expect(await screen.findByRole('dialog', { name: /Rahmat/i })).toBeInTheDocument();
     expect(screen.getByText('CONT-001')).toBeInTheDocument();
+  });
+
+  it('mengunduh PDF pembayaran komisi yang sedang tampil', async () => {
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /download pdf/i }));
+
+    expect(downloadPdfReport).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Pembayaran Komisi Sopir',
+      filename: expect.stringContaining('komisi-sopir-finance'),
+      rows: expect.arrayContaining([
+        expect.objectContaining({ driverName: 'Rahmat', account: 'BCA 123456' }),
+      ]),
+    }));
   });
 
   it('mengganti report saat batch dipilih dari dropdown', async () => {

@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, FileText, Plus, RefreshCw, Upload, UserRound, X, XCircle } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, CreditCard, Download, FileText, Plus, RefreshCw, Upload, UserRound, X, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DocumentLink from '../../components/common/DocumentLink';
@@ -18,6 +18,7 @@ import {
 } from '../../services/finance/driverCommissionService';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 
 const emptyReport = {
   periodStart: '',
@@ -91,6 +92,36 @@ function currentCommissionPeriod() {
 
 function commissionPeriodKey(period = {}) {
   return `${period.periodStart || ''}|${period.periodEnd || ''}`;
+}
+
+function commissionReportFilename(prefix, periodStart, periodEnd) {
+  return `${prefix}-${String(periodStart || 'periode').replaceAll('-', '')}-${String(periodEnd || 'akhir').replaceAll('-', '')}.pdf`;
+}
+
+function commissionAmount(driver, field, fallback = 0) {
+  const value = Number(driver?.[field]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function buildCommissionPdfRows(drivers = [], statusResolver = driverFinanceStatus) {
+  return drivers.map((driver, index) => {
+    const grossAmount = commissionAmount(driver, 'grossAmount', commissionAmount(driver, 'totalAmount'));
+    const deductionAmount = commissionAmount(driver, 'deductionAmount');
+    const netAmount = commissionAmount(driver, 'netAmount', grossAmount - deductionAmount);
+    const status = statusResolver(driver);
+
+    return {
+      reportNumber: index + 1,
+      driverName: driver.driverName || '-',
+      account: paymentAccountLabel(driver),
+      totalItems: driver.totalItems || 0,
+      grossAmount,
+      deductionAmount,
+      netAmount,
+      statusLabel: statusLabels[status] || status || '-',
+      proofStatus: driver.paymentProofAttachment ? 'Ada' : 'Belum',
+    };
+  });
 }
 
 function StatusPill({ status }) {
@@ -1242,6 +1273,33 @@ function DriverCommissionPage() {
     }
   }
 
+  function handleDownloadPdf() {
+    downloadPdfReport({
+      reportLabel: 'Finance Report',
+      title: 'Pembayaran Komisi Sopir',
+      subtitle: `Periode ${formatDate(periodStart)} - ${formatDate(periodEnd)} | ${statusLabels[selectedBatch?.status || report.status] || '-'}`,
+      filename: commissionReportFilename('komisi-sopir-finance', periodStart, periodEnd),
+      meta: [
+        { label: 'Sopir', value: `${summary.totalDrivers || 0}` },
+        { label: 'Job Komisi', value: `${summary.totalItems || 0}` },
+        { label: 'Total Komisi', value: formatCurrency(summary.totalAmount || 0) },
+        { label: 'Sudah Dibayar', value: formatCurrency(summary.paidAmount || 0) },
+      ],
+      columns: [
+        { label: 'No', width: 0.4, value: (row) => row.reportNumber, align: 'center' },
+        { label: 'Sopir', width: 1.45, value: (row) => row.driverName, bold: true },
+        { label: 'Rekening', width: 1.45, value: (row) => row.account },
+        { label: 'Job', width: 0.5, value: (row) => row.totalItems, align: 'center' },
+        { label: 'Bruto', width: 0.95, value: (row) => formatCurrency(row.grossAmount), align: 'right' },
+        { label: 'Potongan', width: 0.95, value: (row) => (row.deductionAmount ? formatCurrency(row.deductionAmount) : '-'), align: 'right' },
+        { label: 'Net', width: 0.95, value: (row) => formatCurrency(row.netAmount), align: 'right' },
+        { label: 'Status', width: 0.9, value: (row) => row.statusLabel },
+        { label: 'Bukti', width: 0.65, value: (row) => row.proofStatus, align: 'center' },
+      ],
+      rows: buildCommissionPdfRows(drivers),
+    });
+  }
+
   return (
     <main className="space-y-5 p-4 md:p-6">
       <header className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1293,16 +1351,21 @@ function DriverCommissionPage() {
               <h2 className="text-base font-black text-slate-950">Report Per Sopir</h2>
               <p className="text-xs leading-relaxed text-slate-500">Daftar komisi dari batch yang dipilih.</p>
             </div>
-            {canFinance && selectedBatch?.status === 'submitted' ? (
-              <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
+              <button className="secondary-button inline-flex items-center gap-2" type="button" disabled={loading || !drivers.length} onClick={handleDownloadPdf}>
+                <Download size={16} /> Download PDF
+              </button>
+              {canFinance && selectedBatch?.status === 'submitted' ? (
+                <>
                 <button className="primary-button inline-flex items-center gap-2" type="button" disabled={saving} onClick={() => handleApprove(selectedBatch)}>
                   <CheckCircle2 size={16} /> Approve
                 </button>
                 <button className="secondary-button inline-flex items-center gap-2" type="button" disabled={saving} onClick={() => handleReject(selectedBatch)}>
                   <XCircle size={16} /> Reject
                 </button>
-              </div>
-            ) : null}
+                </>
+              ) : null}
+            </div>
           </div>
           {!selectedBatch ? (
             <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">

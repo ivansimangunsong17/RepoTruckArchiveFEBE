@@ -7,6 +7,7 @@ import {
   fetchDriverCommissionPeriodReport,
   submitDriverCommissionBatch,
 } from '../../services/finance/driverCommissionService';
+import { downloadPdfReport } from '../../utils/simplePdfReport';
 
 const notify = vi.fn();
 const confirmAction = vi.fn();
@@ -28,6 +29,10 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
   fetchDriverCommissionBatches: vi.fn(),
   fetchDriverCommissionPeriodReport: vi.fn(),
   submitDriverCommissionBatch: vi.fn(),
+}));
+
+vi.mock('../../utils/simplePdfReport', () => ({
+  downloadPdfReport: vi.fn(),
 }));
 
 const reportFixture = {
@@ -186,6 +191,22 @@ describe('DriverCommissionOperationalPage', () => {
 
     expect(await screen.findByRole('dialog', { name: /Rahmat/i })).toBeInTheDocument();
     expect(screen.getByText('CONT-001')).toBeInTheDocument();
+  });
+
+  it('mengunduh PDF report komisi yang sedang tampil', async () => {
+    const user = userEvent.setup();
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /download pdf/i }));
+
+    expect(downloadPdfReport).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Report Komisi Sopir',
+      filename: expect.stringContaining('komisi-sopir-operational'),
+      rows: expect.arrayContaining([
+        expect.objectContaining({ driverName: 'Rahmat', totalItems: 2 }),
+      ]),
+    }));
   });
 
   it('membuka detail sopir tanpa master driver id memakai driverKey', async () => {
