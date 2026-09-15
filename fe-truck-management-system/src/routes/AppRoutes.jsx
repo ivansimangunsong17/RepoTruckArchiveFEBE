@@ -58,6 +58,7 @@ const operationalRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL];
 const driverCommissionSubmitRoles = [USER_ROLES.ADMIN, USER_ROLES.OPERATIONAL, USER_ROLES.SALES];
 const adminRoles = [USER_ROLES.ADMIN];
 const viewerOnlyRoles = [USER_ROLES.OBSERVER];
+const customerReadOnlyRoles = [USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const observerRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
 const reportsPageRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const financeReadOnlyRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
@@ -112,7 +113,7 @@ export const router = createBrowserRouter([
         { path: 'destinations', children: [guardedPage(adminRoles, <LazyPage><DestinationsPage /></LazyPage>)] },
         { path: 'viewer/trucks', children: [guardedPage(viewerOnlyRoles, <LazyPage><TrucksPage readOnly /></LazyPage>)] },
         { path: 'viewer/drivers', children: [guardedPage(viewerOnlyRoles, <LazyPage><DriversPage readOnly /></LazyPage>)] },
-        { path: 'viewer/clients', children: [guardedPage(viewerOnlyRoles, <LazyPage><ClientsPage readOnly /></LazyPage>)] },
+        { path: 'viewer/clients', children: [guardedPage(customerReadOnlyRoles, <LazyPage><ClientsPage readOnly /></LazyPage>)] },
         { path: 'viewer/end-users', children: [guardedPage(viewerOnlyRoles, <LazyPage><EndUsersPage readOnly /></LazyPage>)] },
         { path: 'viewer/kir-chassis', children: [guardedPage(viewerOnlyRoles, <LazyPage><KirChassisPage readOnly /></LazyPage>)] },
         { path: 'viewer/depots', children: [guardedPage(viewerOnlyRoles, <LazyPage><DepotsPage readOnly /></LazyPage>)] },

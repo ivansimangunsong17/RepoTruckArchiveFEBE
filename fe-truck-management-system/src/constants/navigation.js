@@ -31,7 +31,8 @@ import { USER_ROLES } from './roles';
 
 const adminOnly = [USER_ROLES.ADMIN];
 const viewerOnly = [USER_ROLES.OBSERVER];
-const masterDataRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER];
+const masterDataRoles = [USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
+const customerReadOnlyRoles = [USER_ROLES.OBSERVER, USER_ROLES.FINANCE];
 const nonFinanceRoles = [
   USER_ROLES.ADMIN,
   USER_ROLES.SALES,
@@ -147,7 +148,7 @@ export const navigationGroups = [
         roles: masterDataRoles,
         children: [
           { to: '/clients', label: 'Customer', icon: Building2, roles: adminOnly },
-          { to: '/viewer/clients', label: 'Customer', icon: Building2, roles: viewerOnly },
+          { to: '/viewer/clients', label: 'Customer', icon: Building2, roles: customerReadOnlyRoles },
           { to: '/end-users', label: 'Lokasi', icon: Building2, roles: adminOnly },
           { to: '/viewer/end-users', label: 'Lokasi', icon: Building2, roles: viewerOnly },
           { to: '/drivers', label: 'Sopir', icon: IdCard, roles: adminOnly },

@@ -265,6 +265,7 @@ function CustomerBulkPaymentModal({ customer, rows, form, busy, error, onChange,
   const allocatedAmount = rows.reduce((sum, row) => sum + Number(allocations[row.id] || 0), 0);
   const totalAmount = Number(form.totalAmount || 0);
   const unallocatedAmount = Math.max(totalAmount - allocatedAmount, 0);
+  const selectedInvoiceCount = rows.filter((row) => Number(allocations[row.id] || 0) > 0).length;
 
   function updateAllocation(id, value) {
     onChange({
@@ -287,6 +288,10 @@ function CustomerBulkPaymentModal({ customer, rows, form, busy, error, onChange,
       }
     }
     onChange({ ...form, totalAmount: String(total), allocations: nextAllocations });
+  }
+
+  function fillRowOutstanding(row) {
+    updateAllocation(row.id, String(Number(row.outstandingAmount || 0)));
   }
 
   return (
@@ -372,35 +377,58 @@ function CustomerBulkPaymentModal({ customer, rows, form, busy, error, onChange,
 
               <fieldset className="master-fieldset">
                 <legend>Alokasi Invoice</legend>
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-slate-500">Isi nominal pembayaran untuk invoice yang tercover transfer ini.</p>
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500">Pilih invoice yang dibayar oleh transfer ini, lalu isi nominal alokasinya.</p>
+                    <p className="mt-1 text-[11px] font-bold uppercase text-slate-400">{selectedInvoiceCount} dari {rows.length} invoice dipilih</p>
+                  </div>
                   <button className="secondary-button" type="button" onClick={fillOutstanding}>Isi Semua Outstanding</button>
                 </div>
-                <div className="grid gap-2">
+                <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+                  <div className="hidden grid-cols-[1fr_150px_190px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[11px] font-black uppercase text-slate-500 md:grid">
+                    <span>Invoice</span>
+                    <span className="text-right">Outstanding</span>
+                    <span>Alokasi</span>
+                  </div>
                   {rows.map((row) => (
-                    <div className="grid gap-2 rounded-md border border-slate-100 bg-slate-50 p-3 md:grid-cols-[1fr_160px]" key={row.id}>
+                    <div className="grid grid-cols-1 gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 md:grid-cols-[1fr_150px_190px] md:items-center" key={row.id}>
                       <div className="min-w-0">
                         <strong className="block truncate text-sm text-slate-950">{row.invoiceNumber || row.soNumber}</strong>
-                        <span className="block text-xs font-semibold text-slate-500">{row.soNumber} - Outstanding {formatCurrency(row.outstandingAmount)}</span>
+                        <span className="block text-xs font-semibold text-slate-500">{row.soNumber}</span>
                       </div>
-                      <label className="master-field">
-                        <span>Alokasi</span>
-                        <input
-                          inputMode="numeric"
-                          max={row.outstandingAmount}
-                          min="0"
-                          onChange={(event) => updateAllocation(row.id, event.target.value)}
-                          type="number"
-                          value={allocations[row.id] || ''}
-                        />
-                      </label>
+                      <span className="text-sm font-black text-slate-950 md:text-right">{formatCurrency(row.outstandingAmount)}</span>
+                      <div className="flex items-end gap-2">
+                        <label className="master-field min-w-0 flex-1">
+                          <span>Alokasi</span>
+                          <input
+                            className="text-right"
+                            inputMode="numeric"
+                            max={row.outstandingAmount}
+                            min="0"
+                            onChange={(event) => updateAllocation(row.id, event.target.value)}
+                            placeholder="0"
+                            type="number"
+                            value={allocations[row.id] || ''}
+                          />
+                        </label>
+                        <button className="secondary-button h-10 px-3" type="button" onClick={() => fillRowOutstanding(row)}>Full</button>
+                      </div>
                     </div>
                   ))}
                 </div>
-                <div className="mt-3 grid gap-2 rounded-md border border-slate-200 bg-white p-3 text-xs font-bold text-slate-600 md:grid-cols-3">
-                  <span>Total Transfer: <strong className="text-slate-950">{formatCurrency(totalAmount)}</strong></span>
-                  <span>Dialokasikan: <strong className="text-slate-950">{formatCurrency(allocatedAmount)}</strong></span>
-                  <span>Sisa Transfer: <strong className={unallocatedAmount ? 'text-amber-700' : 'text-emerald-700'}>{formatCurrency(unallocatedAmount)}</strong></span>
+                <div className="mt-4 grid gap-2 text-xs font-bold text-slate-600 md:grid-cols-3">
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <span className="block text-[11px] font-black uppercase text-slate-400">Total Transfer</span>
+                    <strong className="mt-1 block text-base text-slate-950">{formatCurrency(totalAmount)}</strong>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-white p-3">
+                    <span className="block text-[11px] font-black uppercase text-slate-400">Dialokasikan</span>
+                    <strong className="mt-1 block text-base text-slate-950">{formatCurrency(allocatedAmount)}</strong>
+                  </div>
+                  <div className={`rounded-md border p-3 ${unallocatedAmount ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                    <span className="block text-[11px] font-black uppercase text-slate-400">Sisa Transfer</span>
+                    <strong className={`mt-1 block text-base ${unallocatedAmount ? 'text-amber-700' : 'text-emerald-700'}`}>{formatCurrency(unallocatedAmount)}</strong>
+                  </div>
                 </div>
               </fieldset>
 

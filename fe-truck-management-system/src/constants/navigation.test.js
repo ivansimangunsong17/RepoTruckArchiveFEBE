@@ -62,6 +62,15 @@ describe('navigationGroups', () => {
     expect(customerDocumentItem?.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.SALES]);
   });
 
+  it('memberikan finance akses read-only ke data customer master', () => {
+    const masterDataItems = groupItems('Master Data');
+    const adminCustomer = masterDataItems.find((item) => item.to === '/clients');
+    const readonlyCustomer = masterDataItems.find((item) => item.to === '/viewer/clients');
+
+    expect(adminCustomer?.roles).toEqual([USER_ROLES.ADMIN]);
+    expect(readonlyCustomer?.roles).toEqual([USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
+  });
+
   it('membatasi Input Data Lama hanya untuk admin', () => {
     const salesOrderGroup = navigationGroups.find((group) => group.label === 'Sales Order');
     const historicalEntryItem = salesOrderGroup?.items.find((item) => item.to === '/historical-entry');

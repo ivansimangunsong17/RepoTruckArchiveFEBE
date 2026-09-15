@@ -16,6 +16,8 @@ test('actorHasPermission role non-admin tetap mengikuti permission matrix', () =
   assert.equal(actorHasPermission({ role: 'operational' }, 'driver_commission.submit'), true);
   assert.equal(actorHasPermission({ role: 'sales' }, 'driver_commission.submit'), true);
   assert.equal(actorHasPermission({ role: 'sales' }, 'container_job.update'), false);
+  assert.equal(actorHasPermission({ role: 'finance' }, 'master_data.read'), true);
+  assert.equal(actorHasPermission({ role: 'finance' }, 'master_data.update'), false);
   assert.equal(actorHasPermission({ role: 'operational' }, 'future.permission.manage'), false);
 });
 
