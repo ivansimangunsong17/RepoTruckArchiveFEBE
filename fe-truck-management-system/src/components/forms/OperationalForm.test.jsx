@@ -37,6 +37,50 @@ function expectedDateTimeLocalValue(value) {
 }
 
 describe('OperationalForm', () => {
+  it('tidak mengirim field komisi ketika bagian komisi tidak diedit', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, hasDriverCommission: true, driverCommissionAmount: 100000 }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('hasDriverCommission');
+    expect(payload).not.toHaveProperty('driverCommissionAmount');
+    expect(payload).not.toHaveProperty('driverCommissionSourceDestinationId');
+    expect(payload).not.toHaveProperty('driverCommissionNote');
+    expect(payload).not.toHaveProperty('driverCommissionEdited');
+  });
+
+  it('mengirim intent eksplisit ketika checkbox komisi diubah', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, hasDriverCommission: true, driverCommissionAmount: 100000 }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await openOperationalPhase(user, /biaya perjalanan & spk/i);
+    await user.click(screen.getByRole('checkbox', { name: /ada komisi sopir/i }));
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      driverCommissionEdited: true,
+      hasDriverCommission: false,
+      driverCommissionAmount: 0,
+    })));
+  });
+
   it('membagi form operasional ke dalam phase kerja', async () => {
     const user = userEvent.setup();
 
@@ -518,6 +562,8 @@ describe('OperationalForm', () => {
           repoPickupMode: true,
           rpujStatus: 'paid',
           repoLocation: 'Repo Cakung',
+          hasDriverCommission: false,
+          driverCommissionAmount: 0,
         }}
         masterTrucks={[]}
         onClose={vi.fn()}
@@ -603,7 +649,7 @@ describe('OperationalForm', () => {
     const onSubmit = vi.fn();
     render(
       <OperationalForm
-        container={container}
+        container={{ ...container, hasDriverCommission: false, driverCommissionAmount: 0 }}
         masterDrivers={[
           { id: 'driver-1', name: 'Driver E Money', paymentMethod: 'emoney', emoneyProvider: 'DANA', emoneyNumber: '081299990000' },
         ]}
@@ -835,7 +881,7 @@ describe('OperationalForm', () => {
 
     render(
       <OperationalForm
-        container={container}
+        container={{ ...container, hasDriverCommission: false, driverCommissionAmount: 0 }}
         masterDestinations={[{ id: 'destination-1', name: 'Bandung', uj20ft: 500000, driverCommissionAmount: 50000 }]}
         masterTrucks={[
           { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Driver Aktif' },
@@ -853,6 +899,7 @@ describe('OperationalForm', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       rpujStatus: 'submitted',
+      driverCommissionEdited: true,
       hasDriverCommission: true,
       driverCommissionAmount: 50000,
       driverCommissionSourceDestinationId: 'destination-1',
@@ -1092,6 +1139,8 @@ describe('OperationalForm', () => {
         container={{
           ...container,
           status: 'completed',
+          hasDriverCommission: false,
+          driverCommissionAmount: 0,
         }}
         masterTrucks={[]}
         onClose={vi.fn()}

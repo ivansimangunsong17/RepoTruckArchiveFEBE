@@ -387,6 +387,11 @@ function financeRowsCte() {
         cj.received_at,
         cj.running_at,
         cj.completed_at,
+        cj.inap_started_at,
+        cj.inap_ended_at,
+        cj.inap_reason,
+        cj.inap_notes,
+        cj.inap_created_by_name,
         cj.assignment_snapshot,
         coalesce(
           nullif(tup.unit_price, 0),
@@ -4479,6 +4484,12 @@ function mapContainerBreakdownRow(row) {
     destination: row.destination || '',
     invoiceAmount: row.invoice_amount == null ? 0 : Number(row.invoice_amount),
     debitNoteAmount: row.debit_note_amount == null ? 0 : Number(row.debit_note_amount),
+    hasInap: Boolean(row.inap_started_at || row.inap_reason),
+    inapStartedAt: row.inap_started_at,
+    inapEndedAt: row.inap_ended_at,
+    inapReason: row.inap_reason || '',
+    inapNotes: row.inap_notes || '',
+    inapCreatedByName: row.inap_created_by_name || '',
   };
 }
 
@@ -4580,6 +4591,11 @@ export async function getInvoiceOrderDetail(id) {
           fr.container_number,
           fr.destination,
           fr.total_revenue as invoice_amount,
+          fr.inap_started_at,
+          fr.inap_ended_at,
+          fr.inap_reason,
+          fr.inap_notes,
+          fr.inap_created_by_name,
           coalesce(cje.debit_note_amount, 0)::numeric as debit_note_amount
         from finance_rows fr
         left join (

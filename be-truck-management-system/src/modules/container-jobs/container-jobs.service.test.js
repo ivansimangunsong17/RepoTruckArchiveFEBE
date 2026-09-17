@@ -30,14 +30,92 @@ const {
 } = await import('./container-jobs.controller.js');
 const {
   buildAutoJourneyMoneyDescription,
+  ensureDriverCommissionIsNotPosted,
   hasCompleteOperationalAssignment,
   hasRequiredRepoCompletionDocuments,
   normalizeCompletedAtForSave,
   resolveCompletedAtForSave,
+  resolveDriverCommissionUpdate,
   resolveJourneyMoneyAmountForSize,
   shouldValidateVehicleContainerSize,
   syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
+
+test('posted driver commission can only be changed after void/correction', async () => {
+  const queries = [];
+  const client = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows: [{ id: 'posted-item-1' }] };
+    },
+  };
+
+  await ensureDriverCommissionIsNotPosted(client, 'job-1', false);
+  assert.equal(queries.length, 0);
+
+  await assert.rejects(
+    ensureDriverCommissionIsNotPosted(client, 'job-1', true),
+    (error) => error.code === 'CONTAINER_JOB_COMMISSION_ALREADY_POSTED' && error.statusCode === 409,
+  );
+  assert.deepEqual(queries[0].params, ['job-1']);
+});
+
+const existingCommission = {
+  has_driver_commission: true,
+  driver_commission_amount: 100000,
+  driver_commission_source_destination_id: null,
+  driver_commission_note: 'Komisi tujuan',
+};
+
+test('update nonkomisi mempertahankan snapshot komisi lama', () => {
+  for (const payload of [
+    { travelDocument: 'SJ-001' },
+    { containerNumber: 'IAAU2879845' },
+    { runningAt: '2026-07-20T08:00:00+07:00' },
+    { driverId: 'driver-2', vehicleId: 'vehicle-2' },
+    { entrySource: 'historical', historicalPeriod: '2026-07' },
+    { isBackdateEntry: true, backdateReason: 'Input susulan dari lapangan' },
+  ]) {
+    assert.deepEqual(resolveDriverCommissionUpdate(existingCommission, payload), {
+      updateRequested: false,
+      hasCommission: true,
+      amount: 100000,
+      sourceDestinationId: null,
+      note: 'Komisi tujuan',
+    });
+  }
+});
+
+test('document-only mengabaikan default false dan nol', () => {
+  assert.deepEqual(resolveDriverCommissionUpdate(existingCommission, {
+    travelDocument: 'SJ-001',
+    hasDriverCommission: false,
+    driverCommissionAmount: 0,
+    driverCommissionSourceDestinationId: '',
+    driverCommissionNote: '',
+    driverCommissionEdited: true,
+  }, { documentOnlyUpdate: true }), {
+    updateRequested: false,
+    hasCommission: true,
+    amount: 100000,
+    sourceDestinationId: null,
+    note: 'Komisi tujuan',
+  });
+});
+
+test('koreksi eksplisit dapat menonaktifkan komisi', () => {
+  assert.deepEqual(resolveDriverCommissionUpdate(existingCommission, {
+    hasDriverCommission: false,
+    driverCommissionAmount: 0,
+    driverCommissionEdited: true,
+  }), {
+    updateRequested: true,
+    hasCommission: false,
+    amount: 0,
+    sourceDestinationId: null,
+    note: null,
+  });
+});
 
 test('mengenali pengisian pertama nomor container setelah UJ dikirim', () => {
   assert.equal(isInitialContainerNumberInput(
@@ -105,11 +183,15 @@ test('mengunci perubahan biaya lainnya saat ambil container titip', () => {
 test('mengenali perubahan snapshot komisi sopir', () => {
   assert.equal(hasDriverCommissionChange(
     { hasDriverCommission: false, driverCommissionAmount: 0 },
-    { hasDriverCommission: true, driverCommissionAmount: 50000 },
+    { hasDriverCommission: true, driverCommissionAmount: 50000, driverCommissionEdited: true },
   ), true);
   assert.equal(hasDriverCommissionChange(
     { hasDriverCommission: true, driverCommissionAmount: 50000, driverCommissionNote: 'Komisi Bandung' },
-    { hasDriverCommission: true, driverCommissionAmount: 50000, driverCommissionNote: 'Komisi Bandung' },
+    { hasDriverCommission: true, driverCommissionAmount: 50000, driverCommissionNote: 'Komisi Bandung', driverCommissionEdited: true },
+  ), false);
+  assert.equal(hasDriverCommissionChange(
+    { hasDriverCommission: true, driverCommissionAmount: 100000 },
+    { hasDriverCommission: false, driverCommissionAmount: 0 },
   ), false);
 });
 
@@ -117,17 +199,42 @@ test('mengunci perubahan komisi sopir operational setelah RPUJ disetujui atau di
   assert.equal(isDriverCommissionLockedForOperational(
     { role: 'operational' },
     { rpujStatus: 'approved', status: 'running', hasDriverCommission: true, driverCommissionAmount: 50000 },
-    { hasDriverCommission: true, driverCommissionAmount: 75000 },
+    { hasDriverCommission: true, driverCommissionAmount: 75000, driverCommissionEdited: true },
   ), true);
   assert.equal(isDriverCommissionLockedForOperational(
     { role: 'admin' },
     { rpujStatus: 'paid', status: 'running', hasDriverCommission: true, driverCommissionAmount: 50000 },
-    { hasDriverCommission: true, driverCommissionAmount: 75000 },
+    { hasDriverCommission: true, driverCommissionAmount: 75000, driverCommissionEdited: true },
   ), true);
   assert.equal(isDriverCommissionLockedForOperational(
     { role: 'admin' },
     { rpujStatus: 'paid', status: 'running', hasDriverCommission: true, driverCommissionAmount: 50000 },
-    { hasDriverCommission: true, driverCommissionAmount: 75000, adminCorrectionMode: true, adminCorrectionReason: 'Salah input komisi' },
+    { hasDriverCommission: true, driverCommissionAmount: 75000, driverCommissionEdited: true, adminCorrectionMode: true, adminCorrectionReason: 'Salah input komisi' },
+  ), false);
+});
+
+test('reset komisi job selesai membutuhkan intent eksplisit dan koreksi admin valid', () => {
+  const job = { status: 'completed', rpujStatus: 'paid', hasDriverCommission: true, driverCommissionAmount: 100000 };
+  assert.equal(isDriverCommissionLockedForOperational(
+    { role: 'admin' },
+    job,
+    { hasDriverCommission: false, driverCommissionAmount: 0 },
+  ), false);
+  assert.equal(isDriverCommissionLockedForOperational(
+    { role: 'admin' },
+    job,
+    { hasDriverCommission: false, driverCommissionAmount: 0, driverCommissionEdited: true },
+  ), true);
+  assert.equal(isDriverCommissionLockedForOperational(
+    { role: 'admin' },
+    job,
+    {
+      hasDriverCommission: false,
+      driverCommissionAmount: 0,
+      driverCommissionEdited: true,
+      adminCorrectionMode: true,
+      adminCorrectionReason: 'Koreksi komisi salah input',
+    },
   ), false);
 });
 
@@ -276,6 +383,10 @@ test('sales document-only hanya boleh mengirim field dokumen container job', () 
     travelDocumentFile: { path: 'surat-jalan.pdf' },
     loadingVoucher: 'BON-001',
     otherDocuments: [{ name: 'Foto bongkar', file: { path: 'foto.jpg' } }],
+    hasDriverCommission: false,
+    driverCommissionAmount: 0,
+    driverCommissionSourceDestinationId: '',
+    driverCommissionNote: '',
   }));
   assert.throws(
     () => assertDocumentOnlyPayload(salesActor, {

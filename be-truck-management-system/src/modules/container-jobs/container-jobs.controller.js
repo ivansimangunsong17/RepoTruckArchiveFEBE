@@ -87,6 +87,12 @@ const documentOnlyPayloadFields = new Set([
   'travelDocument',
   'travelDocumentFile',
   'otherDocuments',
+  // Kompatibilitas frontend lama: service selalu membuang field ini untuk actor document-only.
+  'hasDriverCommission',
+  'driverCommissionAmount',
+  'driverCommissionSourceDestinationId',
+  'driverCommissionNote',
+  'driverCommissionEdited',
 ]);
 
 const documentOnlyAuditLabels = {

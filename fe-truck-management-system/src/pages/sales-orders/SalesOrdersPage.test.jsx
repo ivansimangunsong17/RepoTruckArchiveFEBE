@@ -6,6 +6,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
+import { fetchContainerJob } from '../../services/archive/containerJobService';
 
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: vi.fn(),
@@ -21,6 +22,12 @@ vi.mock('../../hooks/useArchiveData', () => ({
 
 vi.mock('../../services/archive/salesOrderService', () => ({
   fetchSalesOrdersPage: vi.fn(),
+}));
+
+vi.mock('../../services/archive/containerJobService', () => ({
+  fetchContainerJob: vi.fn(),
+  fetchContainerJobAssignmentHistory: vi.fn().mockResolvedValue([]),
+  generateContainerJobSpk: vi.fn(),
 }));
 
 describe('SalesOrdersPage billing status flow', () => {
@@ -39,6 +46,14 @@ describe('SalesOrdersPage billing status flow', () => {
     HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,report');
     HTMLAnchorElement.prototype.click = vi.fn();
     confirmAction.mockResolvedValue(true);
+    fetchContainerJob.mockResolvedValue({
+      id: 'job-1',
+      containerNumber: 'MSCU1234567',
+      size: '20FT',
+      status: 'completed',
+      hasDriverCommission: true,
+      driverCommissionAmount: 100000,
+    });
     useAuth.mockReturnValue({
       user: { id: 'user-1', role: 'admin', fullName: 'Admin User' },
     });
@@ -150,6 +165,12 @@ describe('SalesOrdersPage billing status flow', () => {
 
     await waitFor(() => expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith('image/png'));
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    const canvasContext = HTMLCanvasElement.prototype.getContext.mock.results[0].value;
+    expect(canvasContext.fillText).toHaveBeenCalledWith(
+      expect.stringContaining('TGL JALAN 20 JULI 2026'),
+      expect.any(Number),
+      expect.any(Number),
+    );
     expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
       page: 1,
       pageSize: 500,

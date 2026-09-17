@@ -183,12 +183,27 @@ function hasRpujNotesChange(job, payload = {}) {
 }
 
 function hasDriverCommissionInput(payload = {}) {
-  return [
+  const explicitlyEdited = payload.driverCommissionEdited === true
+    || String(payload.driverCommissionEdited || '').toLowerCase() === 'true';
+  const unambiguousEnable = payload.hasDriverCommission === true
+    && Number(payload.driverCommissionAmount || 0) > 0;
+  return (explicitlyEdited || unambiguousEnable) && [
     'hasDriverCommission',
     'driverCommissionAmount',
     'driverCommissionSourceDestinationId',
     'driverCommissionNote',
   ].some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+}
+
+function preserveCommissionUnlessExplicit(payload = {}, documentOnlyUpdate = false) {
+  if (!documentOnlyUpdate && hasDriverCommissionInput(payload)) return payload;
+  const preserved = { ...payload };
+  delete preserved.hasDriverCommission;
+  delete preserved.driverCommissionAmount;
+  delete preserved.driverCommissionSourceDestinationId;
+  delete preserved.driverCommissionNote;
+  delete preserved.driverCommissionEdited;
+  return preserved;
 }
 
 export function hasDriverCommissionChange(job = {}, payload = {}) {
@@ -837,7 +852,10 @@ export async function saveContainerJob(id, payload, actor) {
   }
   ensureRepoPickupOtherCostLocked(actor, currentJob, normalizedPayload);
   ensureRepoHistoryCanCancel(actor, currentJob, normalizedPayload);
-  const payloadForUpdate = preserveLockedOtherCost(actor, currentJob, normalizedPayload);
+  const payloadForUpdate = preserveCommissionUnlessExplicit(
+    preserveLockedOtherCost(actor, currentJob, normalizedPayload),
+    documentOnlyUpdate,
+  );
   ensureOperationalCanChangeStatus(actor, currentJob, payloadForUpdate);
   if (!documentOnlyUpdate) {
     ensureRepoStoragePayload(currentJob, payloadForUpdate);

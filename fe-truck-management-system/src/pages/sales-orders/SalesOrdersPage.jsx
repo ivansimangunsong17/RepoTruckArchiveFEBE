@@ -28,7 +28,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
 import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
-import { generateContainerJobSpk } from '../../services/archive/containerJobService';
+import { fetchContainerJob, generateContainerJobSpk } from '../../services/archive/containerJobService';
 
 const PAGE_SIZE = 8;
 const LOCAL_BILLING_STATUS_KEY = 'tms-sales-order-billing-status-v2';
@@ -155,7 +155,8 @@ function buildDoReportSections(orders = []) {
     if (!sections.has(sectionKey)) sections.set(sectionKey, []);
     const vendorLabel = order.isVendorOrder ? ' - VENDOR' : '';
     const doLabel = order.doNumber ? ` - DO ${order.doNumber}` : '';
-    sections.get(sectionKey).push(`${order.customer || '-'} ${party} ${order.destination || '-'} - ${getDoReportStatusLabel(order)}${vendorLabel}${doLabel}`);
+    const tripDateLabel = formatDate(order.tripDate || order.plannedDate || order.soDate);
+    sections.get(sectionKey).push(`${order.customer || '-'} ${party} ${order.destination || '-'} - TGL JALAN ${tripDateLabel.toUpperCase()} - ${getDoReportStatusLabel(order)}${vendorLabel}${doLabel}`);
   });
   return [...sections.entries()].map(([title, lines]) => ({ title, lines }));
 }
@@ -940,6 +941,19 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
     }
   }
 
+  async function openContainerEditor(container) {
+    if (!archive.isDatabaseMode) {
+      setEditingContainer(container);
+      return;
+    }
+    try {
+      const freshJob = await fetchContainerJob(container.id);
+      setEditingContainer(freshJob);
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Form update gagal dibuka', message: requestError.message });
+    }
+  }
+
   async function generateContainerSpkFromDetail(form) {
     if (!editingContainer?.id) {
       throw new Error('Container Job belum dipilih.');
@@ -1415,7 +1429,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                       canRequestCancel={canRequestCancelContainer}
                       onRequestCancel={openRequestCancelContainer}
                       canEdit={canUpdateContainerJob}
-                      onEdit={setEditingContainer}
+                      onEdit={openContainerEditor}
                     />
                   ))
                 ) : (

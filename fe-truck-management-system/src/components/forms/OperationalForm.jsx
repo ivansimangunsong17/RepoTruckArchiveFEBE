@@ -195,6 +195,14 @@ function dateTimeInputToIso(value) {
   return date.toISOString();
 }
 
+function isLongTripOverOneDay(startValue, endValue) {
+  if (!startValue || !endValue) return false;
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  return end.getTime() - start.getTime() > 24 * 60 * 60 * 1000;
+}
+
 function SearchableDriverInput({ value, drivers = [], disabled = false, onChange, currentDriverExists = true }) {
   const [open, setOpen] = useState(false);
   const query = normalizeName(value);
@@ -488,7 +496,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   };
   const ujRecommendation = calculateUjRecommendation(container, masterDestinations);
   const defaultDriverCommissionAmount = Number(ujRecommendation.driverCommissionAmount || 0);
-  const existingHasDriverCommission = Boolean(container.hasDriverCommission);
+  const commissionDataLoaded = Object.prototype.hasOwnProperty.call(container, 'hasDriverCommission')
+    && Object.prototype.hasOwnProperty.call(container, 'driverCommissionAmount');
+  const existingHasDriverCommission = container.hasDriverCommission === true;
   const existingDriverCommissionAmount = Number(container.driverCommissionAmount || 0);
   const [form, setForm] = useState({
     containerNumber: container.containerNumber || '',
@@ -537,6 +547,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [defaultDriverSaving, setDefaultDriverSaving] = useState(false);
   const [defaultDriverError, setDefaultDriverError] = useState('');
   const submitInFlightRef = useRef(false);
+  const driverCommissionEditedRef = useRef(false);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const driverCommissionAmountValue = form.hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
   const rpujStatus = form.rpujStatus || 'pending';
@@ -553,7 +564,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       : '';
   const canAccessAdminCorrection = String(currentUser?.role || '').toLowerCase() === 'admin';
   const canReviseLockedFields = canAccessAdminCorrection && Boolean(form.adminCorrectionMode);
-  const canEditDriverCommission = canUpdateOperational && !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
+  const canEditDriverCommission = commissionDataLoaded && canUpdateOperational && !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
   const canFillMissingAssignment = canUpdateOperational && !hasCompleteAssignment && form.status !== 'completed';
   const canEditAssignment = canUpdateOperational && (canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed'));
   const originalAssignedDriver = String(container.driver || '').trim();
@@ -597,6 +608,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah truck dan driver lengkap.';
   const hasEirDocument = Boolean(form.eirDocument);
   const hasRepoHistory = Boolean(container.repoLocation || container.repoStoredAt || container.repoEirNumber || container.repoPickedUpAt || container.repoEirDocument);
+  const hasInapHistory = Boolean(container.inapStartedAt || container.inapReason);
+  const longTripNeedsInapReview = !hasInapHistory && isLongTripOverOneDay(form.runningAt, form.completedAt);
   const hasRepoEirReceipt = Boolean(String(container.repoEirNumber || '').trim() && container.repoEirDocument);
   const hasSpkDocument = Boolean(form.spkNumber || form.spkDocument);
   const isReadyToStart = form.status === 'received'
@@ -665,6 +678,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
 
   function updateDriverCommission(event) {
     const checked = event.target.checked;
+    driverCommissionEditedRef.current = true;
     setForm((current) => ({
       ...current,
       hasDriverCommission: checked,
@@ -1123,6 +1137,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       runningAt: dateTimeInputToIso(form.runningAt),
       completedAt: dateTimeInputToIso(form.completedAt),
     };
+    if (driverCommissionEditedRef.current) {
+      submitForm.driverCommissionEdited = true;
+    } else {
+      delete submitForm.hasDriverCommission;
+      delete submitForm.driverCommissionAmount;
+      delete submitForm.driverCommissionSourceDestinationId;
+      delete submitForm.driverCommissionNote;
+    }
     delete submitForm.rpujNotes;
     if (canReviseLockedFields) {
       const correctionReason = String(form.adminCorrectionReason || '').trim();
@@ -1443,7 +1465,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
 
                 {!canEditDriverCommission ? (
                   <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    {isRepoPickupMode ? 'Komisi sopir terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'Komisi sopir terkunci setelah pekerjaan selesai. Admin dapat membuka revisi jika diperlukan.'}
+                    {!commissionDataLoaded
+                      ? 'Detail komisi belum dimuat lengkap. Tutup modal lalu buka kembali dari detail Container Job.'
+                      : isRepoPickupMode
+                        ? 'Komisi sopir terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.'
+                        : 'Komisi sopir terkunci setelah pekerjaan selesai. Admin dapat membuka revisi jika diperlukan.'}
                   </div>
                 ) : null}
 
@@ -1713,6 +1739,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                   </div>
                 ))}
               </div>
+              {longTripNeedsInapReview ? (
+                <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-relaxed text-amber-800">
+                  Durasi ritasi lebih dari 24 jam. Jika ritasi ini benar kena inap, gunakan aksi Tandai Inap di daftar Operational sebelum closing. Jika bukan inap, lanjutkan closing seperti biasa; pivot tidak akan menandai INP tanpa konfirmasi inap.
+                </div>
+              ) : null}
               <div className="operational-timeline-grid">
                 <label className="operational-status-field">
                   Status Pekerjaan

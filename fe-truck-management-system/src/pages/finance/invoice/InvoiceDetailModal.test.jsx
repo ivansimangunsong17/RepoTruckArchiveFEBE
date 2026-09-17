@@ -179,6 +179,27 @@ describe('InvoiceDetailModal status pengiriman invoice (kontrol milik Finance)',
 });
 
 describe('InvoiceDetailModal biaya inap / revenue manual (milik Finance, masuk Invoice bukan Debit Note)', () => {
+  it('menampilkan indikator ritasi inap dari Operational sebelum Finance menambahkan revenue manual', () => {
+    renderModal(baseInvoice({
+      containerBreakdown: [
+        {
+          containerJobId: 'job-1',
+          containerNumber: 'CNTR001',
+          destination: 'Cilegon',
+          hasInap: true,
+          inapReason: 'Curfew malam, truk tidak boleh jalan sampai subuh',
+          inapStartedAt: '2026-07-11T20:00:00.000Z',
+          inapEndedAt: '2026-07-12T06:00:00.000Z',
+        },
+      ],
+    }));
+
+    expect(screen.getByText('Ritasi Inap Tercatat')).toBeInTheDocument();
+    expect(screen.getByText(/Cek apakah biaya inap perlu ditagihkan/)).toBeInTheDocument();
+    expect(screen.getByText(/CNTR001 - Cilegon/)).toBeInTheDocument();
+    expect(screen.getByText(/Curfew malam/)).toBeInTheDocument();
+  });
+
   it('menampilkan rincian manual revenue line dengan nominal di kartu Invoice / Revenue', () => {
     renderModal(baseInvoice({
       billingAmount: 2000000,

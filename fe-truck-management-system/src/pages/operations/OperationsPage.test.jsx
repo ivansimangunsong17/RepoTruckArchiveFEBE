@@ -5,7 +5,7 @@ import OperationsPage from './OperationsPage';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
 import { useArchiveData } from '../../hooks/useArchiveData';
-import { fetchContainerJobsPage } from '../../services/archive/containerJobService';
+import { fetchContainerJob, fetchContainerJobsPage } from '../../services/archive/containerJobService';
 
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: vi.fn(),
@@ -66,6 +66,11 @@ describe('OperationsPage status inap', () => {
       counts: { received: 0, running: 1, inap: 0, repo_stored: 0, completed: 0, cancelled: 0 },
       rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
     });
+    fetchContainerJob.mockImplementation(async (id) => ({
+      ...runningJobRow({ id }),
+      hasDriverCommission: true,
+      driverCommissionAmount: 100000,
+    }));
   });
 
   it('menandai job sebagai inap lewat modal, tanpa field harga sama sekali', async () => {

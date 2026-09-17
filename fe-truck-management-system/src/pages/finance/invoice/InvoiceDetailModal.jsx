@@ -680,8 +680,9 @@ function InvoiceDetailModal({
     invoice.debitNoteAmount > 0
     && (!invoice.debitNoteNumber || Number(invoice.debitNoteOutstandingAmount) > 0),
   );
+  const confirmedInapRows = (invoice.containerBreakdown || []).filter((row) => row.hasInap);
   const detailSections = [
-    { id: 'ringkasan', label: 'Ringkasan' },
+    { id: 'ringkasan', label: 'Ringkasan', needsAttention: confirmedInapRows.length > 0 },
     { id: 'debit-note', label: 'Debit Note', needsAttention: debitNoteNeedsAttention },
     { id: 'dokumen', label: 'Dokumen' },
     { id: 'file-operational', label: 'File Operational' },
@@ -891,6 +892,33 @@ function InvoiceDetailModal({
                     <div className="mt-2 flex gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-xs font-semibold leading-relaxed text-blue-800">
                       <Info className="mt-0.5 shrink-0" size={14} />
                       <span>{invoice.repoStoredNote}</span>
+                    </div>
+                  ) : null}
+
+                  {confirmedInapRows.length ? (
+                    <div className="mt-2.5 rounded-md border border-amber-200 bg-amber-50 p-2.5">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 shrink-0 text-amber-700" size={15} />
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Ritasi Inap Tercatat</p>
+                          <p className="mt-0.5 text-[11px] font-semibold leading-relaxed text-amber-800">
+                            Cek apakah biaya inap perlu ditagihkan sebagai revenue manual.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-2 grid gap-1.5">
+                        {confirmedInapRows.map((row) => (
+                          <div className="rounded-md border border-amber-200 bg-white/80 px-2 py-1.5 text-[11px] font-semibold text-slate-700" key={row.containerJobId || row.containerNumber}>
+                            <span className="block text-slate-950">{row.containerNumber || 'Container belum diisi'} - {row.destination || '-'}</span>
+                            <span className="block text-amber-800">
+                              {row.inapReason || 'Alasan inap belum diisi'}
+                              {row.inapStartedAt ? ` - mulai ${formatDate(row.inapStartedAt)}` : ''}
+                              {row.inapEndedAt ? ` sampai ${formatDate(row.inapEndedAt)}` : ''}
+                            </span>
+                            {row.inapNotes ? <span className="block text-slate-500">{row.inapNotes}</span> : null}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
 

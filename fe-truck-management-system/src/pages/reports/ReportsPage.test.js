@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCommissionWeekOptions,
   buildDriverPerformanceRows,
+  buildMonthlyCustomerTruckPivot,
   buildMonthlyDriverUtilizationPivot,
   buildMonthlyUtilizationPivot,
   buildRepoMonitoringRows,
@@ -186,6 +187,54 @@ describe('buildMonthlyUtilizationPivot', () => {
     expect(pivot.totalsByDay['2026-08-03']).toBe(1);
   });
 
+  it('tidak menandai INAP hanya karena durasi ritasi lebih dari 24 jam', () => {
+    const pivot = buildMonthlyUtilizationPivot(
+      [{ id: 'truck-1', plateNumber: 'B 9102 BEL', unitCode: 'TRK-102', capacity: '40FT' }],
+      [
+        {
+          vehicleId: 'truck-1',
+          plateNumber: 'B 9102 BEL',
+          runningAt: '2026-07-11T07:00:00',
+          completedAt: '2026-07-12T08:30:00',
+          destination: 'Cilegon',
+          status: 'completed',
+        },
+      ],
+      7,
+      2026,
+    );
+
+    expect(pivot.rows[0].cells['2026-07-11'].count).toBe(0);
+    expect(pivot.rows[0].cells['2026-07-11'].autoNote).toBeNull();
+    expect(pivot.rows[0].cells['2026-07-12'].count).toBe(1);
+    expect(pivot.rows[0].totalTrips).toBe(1);
+    expect(pivot.grandTotal).toBe(1);
+  });
+
+  it('menandai INAP pada pivot jika ritasi punya histori inap dari Operational', () => {
+    const pivot = buildMonthlyUtilizationPivot(
+      [{ id: 'truck-1', plateNumber: 'B 9102 BEL', unitCode: 'TRK-102', capacity: '40FT' }],
+      [
+        {
+          vehicleId: 'truck-1',
+          plateNumber: 'B 9102 BEL',
+          runningAt: '2026-07-11T07:00:00',
+          completedAt: '2026-07-12T08:30:00',
+          inapStartedAt: '2026-07-11T20:00:00',
+          inapEndedAt: '2026-07-12T06:00:00',
+          inapReason: 'Curfew malam, truk tidak boleh jalan sampai subuh',
+          destination: 'Cilegon',
+          status: 'completed',
+        },
+      ],
+      7,
+      2026,
+    );
+
+    expect(pivot.rows[0].cells['2026-07-11'].autoNote).toMatchObject({ reasonLabel: 'INAP' });
+    expect(pivot.rows[0].cells['2026-07-12'].count).toBe(1);
+  });
+
   it('menampilkan unit yang pindah chassis sebagai dua baris sesuai periode aktif', () => {
     const pivot = buildMonthlyUtilizationPivot(
       [
@@ -229,8 +278,8 @@ describe('buildMonthlyUtilizationPivot', () => {
     const before = pivot.rows.find((row) => row.plateNumber === 'B 9211 BEL' && row.size === '40FT');
     const after = pivot.rows.find((row) => row.plateNumber === 'B 9211 BEL' && row.size === '20FT');
 
-    expect(before.segmentBadge).toBe('Sebelum Pindah');
-    expect(after.segmentBadge).toBe('Setelah Pindah');
+    expect(before.segmentBadge).toBe('s.d. 7 Agu');
+    expect(after.segmentBadge).toBe('Mulai 8 Agu');
     expect(before.cells['2026-08-06'].count).toBe(1);
     expect(before.cells['2026-08-20'].inactive).toBe(true);
     expect(after.cells['2026-08-06'].inactive).toBe(true);
@@ -248,6 +297,64 @@ describe('buildMonthlyUtilizationPivot', () => {
       effectiveFrom: '2026-08-08',
     });
     expect(pivot.grandTotal).toBe(2);
+  });
+});
+
+describe('buildMonthlyCustomerTruckPivot', () => {
+  it('membuat pivot truck per customer pada bulan terpilih', () => {
+    const pivot = buildMonthlyCustomerTruckPivot(
+      [
+        {
+          customerName: 'PT A',
+          vehicleId: 'truck-1',
+          plateNumber: 'B 9102 BEL',
+          unitCode: 'TRK-102',
+          chassisSize: '40FT',
+          completedAt: '2026-07-01T10:00:00.000Z',
+          destination: 'Cikarang',
+          status: 'completed',
+        },
+        {
+          customerName: 'PT A',
+          vehicleId: 'truck-2',
+          plateNumber: 'B 9103 BEL',
+          unitCode: 'TRK-103',
+          chassisSize: '20FT',
+          completedAt: '2026-07-02',
+          destination: 'Cilegon',
+          status: 'completed',
+        },
+        {
+          customerName: 'PT B',
+          vehicleId: 'truck-1',
+          plateNumber: 'B 9102 BEL',
+          unitCode: 'TRK-102',
+          chassisSize: '40FT',
+          completedAt: '2026-07-01T11:00:00.000Z',
+          destination: 'Bekasi',
+          status: 'completed',
+        },
+      ],
+      7,
+      2026,
+      {},
+      [
+        { id: 'truck-1', plateNumber: 'B 9102 BEL', unitCode: 'TRK-102', capacity: '40FT' },
+        { id: 'truck-2', plateNumber: 'B 9103 BEL', unitCode: 'TRK-103', capacity: '20FT' },
+        { id: 'truck-3', plateNumber: 'B 9104 BEL', unitCode: 'TRK-104', capacity: '40FT' },
+      ],
+    );
+
+    expect(pivot.customers.map((customer) => customer.customerName)).toEqual(['PT A', 'PT B']);
+    expect(pivot.customers[0].grandTotal).toBe(2);
+    expect(pivot.customers[0].rows.map((truck) => truck.plateNumber)).toEqual(['B 9103 BEL', 'B 9102 BEL', 'B 9104 BEL']);
+    expect(pivot.customers[0].rows[1].cells['2026-07-01'].count).toBe(1);
+    expect(pivot.customers[0].rows[0].cells['2026-07-02'].labels).toEqual(['CILEGON']);
+    expect(pivot.customers[0].rows[2].totalTrips).toBe(0);
+    expect(pivot.customers[1].rows).toHaveLength(3);
+    expect(pivot.customers[0].totalsByDay['2026-07-01']).toBe(1);
+    expect(pivot.customers[0].totalsByDay['2026-07-02']).toBe(1);
+    expect(pivot.grandTotal).toBe(3);
   });
 });
 

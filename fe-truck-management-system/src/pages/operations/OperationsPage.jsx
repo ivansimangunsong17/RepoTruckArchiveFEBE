@@ -825,6 +825,23 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     }
   }
 
+  async function openJobEditor(job) {
+    if (!archive.isDatabaseMode) {
+      setEditing(job);
+      return;
+    }
+    setDetailLoadingId(job.id);
+    try {
+      const freshJob = await fetchContainerJob(job.id);
+      setEditing(freshJob);
+      setDetail(null);
+    } catch (requestError) {
+      notify({ type: 'error', title: 'Form update gagal dibuka', message: requestError.message });
+    } finally {
+      setDetailLoadingId('');
+    }
+  }
+
   function openResetAssignment(job) {
     setResetTarget(job);
     setResetReason('');
@@ -1283,7 +1300,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         {canEdit && !historicalLocked && canMarkInap(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(job)}><Moon size={14} /> Tandai Inap</button> : null}
                         {canEdit && !historicalLocked && isInapJob(job) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(job)}><CheckCircle2 size={14} /> Selesai Inap</button> : null}
                         {canEdit && !historicalLocked && !['cancelled'].includes(job.status) ? <button className="secondary-button" type="button" onClick={() => openResetAssignment(job)}><RotateCcw size={14} /> Reset</button> : null}
-                        {canEdit && !historicalLocked && !isRepoStoredJob(job) && !isInapJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => setEditing(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
+                        {canEdit && !historicalLocked && !isRepoStoredJob(job) && !isInapJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => openJobEditor(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
                     </article>
                   );
@@ -1407,7 +1424,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isInapJob(detail) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(detail)}><CheckCircle2 size={16} /> Selesai Inap</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !hasRepoStorageHistory(detail) && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !['cancelled'].includes(detail.status) ? <button className="secondary-button" type="button" onClick={() => openResetAssignment(detail)}><RotateCcw size={16} /> Reset Ritasi</button> : null}
-              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !isRepoStoredJob(detail) && !isInapJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => { setEditing(detail); setDetail(null); }}>Update Proses</button> : null}
+              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !isRepoStoredJob(detail) && !isInapJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => openJobEditor(detail)}>Update Proses</button> : null}
             </footer>
           </section>
         </div>

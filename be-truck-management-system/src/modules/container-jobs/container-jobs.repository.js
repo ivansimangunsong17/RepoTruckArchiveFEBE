@@ -756,6 +756,67 @@ function hasOwnInput(form, key) {
   return Object.prototype.hasOwnProperty.call(form, key);
 }
 
+function hasExplicitDriverCommissionInput(form = {}) {
+  const unambiguousEnable = form.hasDriverCommission === true
+    && Number(form.driverCommissionAmount || 0) > 0;
+  return (normalizeBooleanFlag(form.driverCommissionEdited) || unambiguousEnable) && [
+    'hasDriverCommission',
+    'driverCommissionAmount',
+    'driverCommissionSourceDestinationId',
+    'driverCommissionNote',
+  ].some((key) => hasOwnInput(form, key));
+}
+
+export function resolveDriverCommissionUpdate(existing = {}, form = {}, { documentOnlyUpdate = false } = {}) {
+  const updateRequested = !documentOnlyUpdate && hasExplicitDriverCommissionInput(form);
+  const hasCommission = updateRequested && hasOwnInput(form, 'hasDriverCommission')
+    ? Boolean(form.hasDriverCommission)
+    : Boolean(existing.has_driver_commission);
+  const amount = hasCommission
+    ? normalizeNonNegativeAmount(
+      updateRequested && hasOwnInput(form, 'driverCommissionAmount')
+        ? form.driverCommissionAmount
+        : existing.driver_commission_amount,
+      'Nominal komisi sopir',
+    )
+    : 0;
+  if (hasCommission && amount <= 0) {
+    throw validationError('Nominal komisi sopir wajib lebih dari 0 jika komisi aktif.', 'VALIDATION_ERROR', 400);
+  }
+  const sourceDestinationId = hasCommission
+    ? normalizeOptionalUuid(
+      updateRequested && hasOwnInput(form, 'driverCommissionSourceDestinationId')
+        ? form.driverCommissionSourceDestinationId
+        : existing.driver_commission_source_destination_id,
+      'Sumber komisi sopir',
+    )
+    : null;
+  const note = hasCommission
+    ? normalizeOptionalText(
+      updateRequested && hasOwnInput(form, 'driverCommissionNote')
+        ? form.driverCommissionNote
+        : existing.driver_commission_note,
+    )
+    : null;
+
+  return { updateRequested, hasCommission, amount, sourceDestinationId, note };
+}
+
+export async function ensureDriverCommissionIsNotPosted(client, containerJobId, commissionValuesChanged) {
+  if (!commissionValuesChanged) return;
+  const postedCommission = await client.query(
+    `select id from driver_commission_items where container_job_id = $1 and voided_at is null limit 1`,
+    [containerJobId],
+  );
+  if (postedCommission.rows[0]) {
+    throw validationError(
+      'Komisi sudah masuk daftar pembayaran. Lakukan void/koreksi melalui modul Komisi Sopir terlebih dahulu.',
+      'CONTAINER_JOB_COMMISSION_ALREADY_POSTED',
+      409,
+    );
+  }
+}
+
 export function hasCompleteOperationalAssignment(form = {}, driver = null, vehicle = null, existing = {}) {
   const assignment = existing?.assignment_snapshot || {};
   const driverName = assignmentValue(form.driver, driver?.name, assignment.driver);
@@ -2740,33 +2801,18 @@ async function updateContainerJobTransaction(id, form) {
     const nextTilaGatepassDocument = hasTilaInput
       ? form.tilaGatepassDocument || form.unloadingVoucher || form.weighingDocument || null
       : existing.rows[0].tila_gatepass_document_number || existing.rows[0].unloading_voucher_number || existing.rows[0].weighing_document_number || null;
-    const nextHasDriverCommission = hasOwnInput(form, 'hasDriverCommission')
-      ? Boolean(form.hasDriverCommission)
-      : Boolean(existing.rows[0].has_driver_commission);
-    const nextDriverCommissionAmount = nextHasDriverCommission
-      ? normalizeNonNegativeAmount(
-        hasOwnInput(form, 'driverCommissionAmount') ? form.driverCommissionAmount : existing.rows[0].driver_commission_amount,
-        'Nominal komisi sopir',
-      )
-      : 0;
-    if (nextHasDriverCommission && nextDriverCommissionAmount <= 0) {
-      throw validationError('Nominal komisi sopir wajib lebih dari 0 jika komisi aktif.', 'VALIDATION_ERROR', 400);
-    }
-    const nextDriverCommissionSourceDestinationId = nextHasDriverCommission
-      ? normalizeOptionalUuid(
-        hasOwnInput(form, 'driverCommissionSourceDestinationId')
-          ? form.driverCommissionSourceDestinationId
-          : existing.rows[0].driver_commission_source_destination_id,
-        'Sumber komisi sopir',
-      )
-      : null;
-    const nextDriverCommissionNote = nextHasDriverCommission
-      ? normalizeOptionalText(
-        hasOwnInput(form, 'driverCommissionNote')
-          ? form.driverCommissionNote
-          : existing.rows[0].driver_commission_note,
-      )
-      : null;
+    const commissionUpdate = resolveDriverCommissionUpdate(existing.rows[0], form, { documentOnlyUpdate });
+    const commissionUpdateRequested = commissionUpdate.updateRequested;
+    const nextHasDriverCommission = commissionUpdate.hasCommission;
+    const nextDriverCommissionAmount = commissionUpdate.amount;
+    const nextDriverCommissionSourceDestinationId = commissionUpdate.sourceDestinationId;
+    const nextDriverCommissionNote = commissionUpdate.note;
+    const commissionValuesChanged = commissionUpdateRequested && Boolean(
+      nextHasDriverCommission !== Boolean(existing.rows[0].has_driver_commission)
+      || Number(nextDriverCommissionAmount || 0) !== Number(existing.rows[0].driver_commission_amount || 0)
+      || String(nextDriverCommissionSourceDestinationId || '') !== String(existing.rows[0].driver_commission_source_destination_id || '')
+      || String(nextDriverCommissionNote || '') !== String(existing.rows[0].driver_commission_note || '')
+    );
     const actorName = form.updatedBy || 'Operational';
     const nextAssignmentSnapshot = toAssignmentSnapshot(
       nextAssignmentForm,
@@ -2774,6 +2820,7 @@ async function updateContainerJobTransaction(id, form) {
       vehicleIdentityChanging ? vehicle : null,
     );
     const shouldCaptureCommissionDriver = ['running', 'completed'].includes(nextStatus)
+      && (commissionValuesChanged || nextStatus !== currentJob.status)
       && !existing.rows[0].commission_driver_id
       && !normalizeOptionalText(existing.rows[0].commission_driver_name)
       && (nextDriverId || nextAssignmentSnapshot.driver);
@@ -2796,24 +2843,28 @@ async function updateContainerJobTransaction(id, form) {
         409,
       );
     }
+    await ensureDriverCommissionIsNotPosted(client, id, commissionValuesChanged);
     const shouldRefreshCommissionLock = nextStatus === 'completed'
+      && (commissionValuesChanged || nextStatus !== currentJob.status)
       && nextHasDriverCommission
       && nextDriverCommissionAmount > 0
-      && (!existing.rows[0].commission_locked_amount || (allowAdminCorrection && hasDriverCommissionInput(form)));
+      && (!existing.rows[0].commission_locked_amount || (allowAdminCorrection && commissionValuesChanged));
     const nextCommissionLockedAmount = shouldRefreshCommissionLock
       ? nextDriverCommissionAmount
       : existing.rows[0].commission_locked_amount;
     const nextCommissionLockedAt = shouldRefreshCommissionLock
       ? completedAtForUpdate || new Date().toISOString()
       : existing.rows[0].commission_locked_at;
-    const nextCommissionStatus = resolveCommissionStatus({
+    const nextCommissionStatus = !commissionValuesChanged && nextStatus === currentJob.status
+      ? existing.rows[0].commission_status
+      : resolveCommissionStatus({
       currentStatus: existing.rows[0].commission_status,
       jobStatus: nextStatus,
       hasCommission: nextHasDriverCommission,
       amount: nextStatus === 'completed' ? nextCommissionLockedAmount || nextDriverCommissionAmount : nextDriverCommissionAmount,
       driverId: nextCommissionDriverId || nextDriverId,
       driverName: nextCommissionDriverName || nextAssignmentSnapshot.driver,
-    });
+      });
 
     await client.query(
       `
