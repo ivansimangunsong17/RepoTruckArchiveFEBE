@@ -2788,6 +2788,7 @@ function ReportsPage() {
   const [outstandingBucketLoading, setOutstandingBucketLoading] = useState(false);
   const [outstandingBucketError, setOutstandingBucketError] = useState('');
   const [dataSource, setDataSource] = useState('all');
+  const [utilizationTableMode, setUtilizationTableMode] = useState('active');
   const [utilizationPivotMode, setUtilizationPivotMode] = useState('');
   const [customerUtilizationModalOpen, setCustomerUtilizationModalOpen] = useState(false);
   const [driverUtilizationModalOpen, setDriverUtilizationModalOpen] = useState(false);
@@ -3084,7 +3085,9 @@ function ReportsPage() {
     ? utilizationSummary.realizedTruckDays / utilizationSummary.period.days
     : 0;
   const utilizationPeriodLabel = formatUtilizationPeriod(utilizationSummary.period, activeMonthLabel, year);
-  const utilizationRowsWithTarget = utilizationSummary.rows;
+  const utilizationRowsWithTarget = utilizationTableMode === 'fleet'
+    ? fleetUtilizationSummary.rows
+    : utilizationSummary.rows;
   const activeUtilizationPivot = useMemo(() => {
     const trucks = (masterTruckRows || []).filter(isActiveTruck);
     return buildMonthlyUtilizationPivot(
@@ -3701,11 +3704,22 @@ function ReportsPage() {
               <h2 className="text-sm font-bold text-slate-950">Utilisasi Truck</h2>
               <p className="text-xs text-slate-500">
                 {utilizationSummary.period.days
-                  ? `Periode ${utilizationPeriodLabel}. Rata-rata ${formatDecimal(averageUsedTrucksPerDay)} dari ${utilizationSummary.activeTruckCount} truck aktif terpakai per hari.`
+                  ? utilizationTableMode === 'fleet'
+                    ? `Periode ${utilizationPeriodLabel}. Menampilkan ${fleetUtilizationSummary.activeTruckCount} unit, termasuk maintenance dan tidak aktif.`
+                    : `Periode ${utilizationPeriodLabel}. Menampilkan ${utilizationSummary.activeTruckCount} unit aktif.`
                   : utilizationPeriodLabel}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <select
+                className="h-10 min-w-[210px] rounded-md border border-sky-300 bg-white px-3 text-xs font-black text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                value={utilizationTableMode}
+                onChange={(event) => setUtilizationTableMode(event.target.value)}
+                aria-label="Pilih basis tabel utilisasi"
+              >
+                <option value="active">Tabel Asset Aktif</option>
+                <option value="fleet">Tabel Semua Asset</option>
+              </select>
               <button
                 type="button"
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 text-xs font-black text-sky-800 hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
@@ -3714,6 +3728,15 @@ function ReportsPage() {
               >
                 <Users size={15} />
                 View Per Customer
+              </button>
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 text-xs font-black text-sky-800 hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setUtilizationPivotMode(utilizationTableMode)}
+                disabled={utilizationLoading || Boolean(utilizationError)}
+              >
+                <Maximize2 size={15} />
+                Lihat Pivot Bulanan
               </button>
             </div>
           </div>
@@ -3726,14 +3749,6 @@ function ReportsPage() {
                 <span className="text-xs text-slate-500">{utilizationSummary.activeTruckCount} unit aktif</span>
               </div>
               <p className="mt-1 text-xs text-slate-500">Maintenance dan unit tidak aktif tidak masuk perhitungan.</p>
-              <button
-                type="button"
-                className="mt-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 text-xs font-black text-sky-800 hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => setUtilizationPivotMode('active')}
-                disabled={utilizationLoading || Boolean(utilizationError)}
-              >
-                <Maximize2 size={14} /> Buka Pivot
-              </button>
             </div>
             <div className="px-4 py-3">
               <p className="text-[11px] font-bold uppercase text-amber-700">Utilisasi Seluruh Armada</p>
@@ -3742,14 +3757,6 @@ function ReportsPage() {
                 <span className="text-xs text-slate-500">{fleetUtilizationSummary.activeTruckCount} total unit</span>
               </div>
               <p className="mt-1 text-xs text-slate-500">Termasuk unit maintenance dan tidak aktif; unit arsip tidak dihitung.</p>
-              <button
-                type="button"
-                className="mt-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-black text-amber-800 hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => setUtilizationPivotMode('fleet')}
-                disabled={utilizationLoading || Boolean(utilizationError)}
-              >
-                <Maximize2 size={14} /> Buka Pivot
-              </button>
             </div>
           </div>
 
