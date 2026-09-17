@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, Eye, Maximize2, Save, Trash2, Truck, Users, X } from 'lucide-react';
+import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, Eye, Maximize2, Save, Search, Trash2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
@@ -295,6 +295,11 @@ function isActiveTruck(row = {}) {
   return !['maintenance', 'maintanance', 'tidak aktif', 'nonaktif', 'inactive', 'archived', 'arsip'].includes(status);
 }
 
+function isFleetTruck(row = {}) {
+  const status = normalizeTruckStatus(row);
+  return !['archived', 'arsip'].includes(status);
+}
+
 function buildUtilizationPeriod(month, year, baseDate = new Date()) {
   const selectedYear = Number(year);
   const selectedMonth = Number(month);
@@ -527,6 +532,15 @@ function getUtilizationTruckKey(row = {}, activeTruckLookup = new Map()) {
   return keys.map((key) => activeTruckLookup.get(key)).find(Boolean) || '';
 }
 
+function filterUtilizationRowsByTrucks(masterTrucks = [], rows = []) {
+  const lookup = new Map();
+  masterTrucks.forEach((truck) => {
+    const id = getTruckId(truck) || getTruckPlate(truck);
+    addTruckIdentityKeys(lookup, truck, id);
+  });
+  return rows.filter((row) => Boolean(getUtilizationTruckKey(row, lookup)));
+}
+
 function previousDateKeyValue(value) {
   const key = String(value || '').slice(0, 10);
   if (!key) return '';
@@ -557,10 +571,11 @@ function createPivotCells(days, period = {}) {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], month, year, baseDate = new Date()) {
+export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], month, year, baseDate = new Date(), options = {}) {
   const period = buildUtilizationPeriod(month, year, baseDate);
+  const includeUnavailable = options.includeUnavailable === true;
   const activeTrucks = (masterTrucks || [])
-    .filter(isActiveTruck)
+    .filter(includeUnavailable ? isFleetTruck : isActiveTruck)
     .map((truck) => ({
       id: getTruckId(truck) || getTruckPlate(truck),
       plateNumber: getTruckPlate(truck),
@@ -2038,6 +2053,9 @@ export function MonthlyUtilizationModal({
   pivot,
   activeMonthLabel,
   year,
+  reportLabel = '',
+  reportMode = 'active',
+  onReportModeChange,
   utilizationNotesByKey = new Map(),
   utilizationNoteSuggestions = [],
   canEditNotes = false,
@@ -2081,12 +2099,21 @@ export function MonthlyUtilizationModal({
       <section className="monthly-utilization-modal flex max-h-[calc(100vh-3rem)] w-full max-w-[96rem] flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="monthly-utilization-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <span className="block text-[9px] font-black uppercase text-sky-700">Utilisasi Bulanan</span>
+            <span className="block text-[9px] font-black uppercase text-sky-700">{reportLabel || 'Utilisasi Bulanan'}</span>
             <h2 id="monthly-utilization-title" className="mt-0.5 text-sm font-black leading-tight text-slate-950">
               Pivot Utilisasi Truck {activeMonthLabel} {year}
             </h2>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
+            <select
+              className="h-8 min-w-[220px] rounded border border-sky-300 bg-white px-2 text-[11px] font-bold text-slate-900 outline-none focus:border-sky-500"
+              value={reportMode}
+              onChange={(event) => onReportModeChange?.(event.target.value)}
+              aria-label="Basis laporan utilisasi"
+            >
+              <option value="active">Utilisasi Unit Aktif</option>
+              <option value="fleet">Utilisasi Seluruh Armada</option>
+            </select>
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
               {uniqueUnitCount} Unit
             </span>
@@ -2322,6 +2349,8 @@ export function CustomerMonthlyUtilizationModal({
   year,
 }) {
   const [selectedCustomerKey, setSelectedCustomerKey] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -2341,10 +2370,20 @@ export function CustomerMonthlyUtilizationModal({
     });
   }, [open, pivot]);
 
+  useEffect(() => {
+    if (!open) return;
+    const selected = (pivot?.customers || []).find((customer) => customer.key === selectedCustomerKey);
+    if (selected) setCustomerSearch(`${selected.customerName} - ${selected.grandTotal} trip`);
+  }, [open, pivot, selectedCustomerKey]);
+
   if (!open) return null;
 
   const customers = pivot?.customers || [];
   const selectedCustomer = customers.find((customer) => customer.key === selectedCustomerKey) || customers[0] || null;
+  const normalizedCustomerSearch = customerSearch.trim().toLowerCase();
+  const matchingCustomers = customers.filter((customer) => (
+    `${customer.customerName} ${customer.grandTotal} trip`.toLowerCase().includes(normalizedCustomerSearch)
+  ));
   const displayRows = selectedCustomer ? buildPivotDisplayRows(selectedCustomer.rows, []) : [];
   const stickyNoWidth = 34;
   const truckLeftOffset = stickyNoWidth;
@@ -2360,18 +2399,56 @@ export function CustomerMonthlyUtilizationModal({
             </h2>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <select
-              className="h-8 min-w-[260px] max-w-[420px] rounded border border-slate-300 bg-white px-2 text-xs font-bold text-slate-900 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-              value={selectedCustomer?.key || ''}
-              onChange={(event) => setSelectedCustomerKey(event.target.value)}
-              aria-label="Pilih customer"
-            >
-              {customers.map((customer) => (
-                <option key={customer.key} value={customer.key}>
-                  {customer.customerName} - {customer.grandTotal} trip
-                </option>
-              ))}
-            </select>
+            <div className="relative min-w-[280px] max-w-[440px] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-2 text-slate-400" size={14} />
+              <input
+                type="search"
+                className="h-9 w-full rounded border border-sky-300 bg-white pl-8 pr-2 text-xs font-bold text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                value={customerSearch}
+                onChange={(event) => {
+                  setCustomerSearch(event.target.value);
+                  setCustomerSearchOpen(true);
+                }}
+                onFocus={(event) => {
+                  event.target.select();
+                  setCustomerSearchOpen(true);
+                }}
+                onBlur={() => window.setTimeout(() => setCustomerSearchOpen(false), 150)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setCustomerSearchOpen(false);
+                  if (event.key === 'Enter' && matchingCustomers[0]) {
+                    event.preventDefault();
+                    setSelectedCustomerKey(matchingCustomers[0].key);
+                    setCustomerSearchOpen(false);
+                  }
+                }}
+                placeholder="Ketik nama customer..."
+                aria-label="Cari customer"
+                autoComplete="off"
+              />
+              {customerSearchOpen ? (
+                <div className="absolute right-0 top-10 z-50 max-h-72 w-full min-w-[360px] overflow-y-auto rounded-md border border-slate-300 bg-white py-1 shadow-xl" role="listbox">
+                  {matchingCustomers.length ? matchingCustomers.map((customer) => (
+                    <button
+                      key={customer.key}
+                      type="button"
+                      role="option"
+                      aria-selected={customer.key === selectedCustomer?.key}
+                      className={`block w-full px-3 py-2 text-left text-xs hover:bg-sky-50 ${customer.key === selectedCustomer?.key ? 'bg-sky-100 font-black text-sky-900' : 'font-semibold text-slate-800'}`}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        setSelectedCustomerKey(customer.key);
+                        setCustomerSearchOpen(false);
+                      }}
+                    >
+                      {customer.customerName} - {customer.grandTotal} trip
+                    </button>
+                  )) : (
+                    <p className="px-3 py-3 text-xs text-slate-500">Customer tidak ditemukan.</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
               {customers.length} Customer
             </span>
@@ -2711,7 +2788,7 @@ function ReportsPage() {
   const [outstandingBucketLoading, setOutstandingBucketLoading] = useState(false);
   const [outstandingBucketError, setOutstandingBucketError] = useState('');
   const [dataSource, setDataSource] = useState('all');
-  const [utilizationModalOpen, setUtilizationModalOpen] = useState(false);
+  const [utilizationPivotMode, setUtilizationPivotMode] = useState('');
   const [customerUtilizationModalOpen, setCustomerUtilizationModalOpen] = useState(false);
   const [driverUtilizationModalOpen, setDriverUtilizationModalOpen] = useState(false);
   const [utilizationNotes, setUtilizationNotes] = useState([]);
@@ -2740,7 +2817,7 @@ function ReportsPage() {
   }, [searchParams, isFinanceOnly]);
 
   useEffect(() => {
-    if (selectedReport !== 'utilization') setUtilizationModalOpen(false);
+    if (selectedReport !== 'utilization') setUtilizationPivotMode('');
     if (selectedReport !== 'utilization') setCustomerUtilizationModalOpen(false);
     if (selectedReport !== 'driver') setDriverUtilizationModalOpen(false);
   }, [selectedReport]);
@@ -2992,15 +3069,42 @@ function ReportsPage() {
     () => buildTruckDayUtilizationSummary(masterTruckRows || [], utilizationSourceRows, month, year),
     [masterTruckRows, month, utilizationSourceRows, year],
   );
+  const fleetUtilizationSummary = useMemo(
+    () => buildTruckDayUtilizationSummary(
+      masterTruckRows || [],
+      utilizationSourceRows,
+      month,
+      year,
+      new Date(),
+      { includeUnavailable: true },
+    ),
+    [masterTruckRows, month, utilizationSourceRows, year],
+  );
   const averageUsedTrucksPerDay = utilizationSummary.period.days
     ? utilizationSummary.realizedTruckDays / utilizationSummary.period.days
     : 0;
   const utilizationPeriodLabel = formatUtilizationPeriod(utilizationSummary.period, activeMonthLabel, year);
   const utilizationRowsWithTarget = utilizationSummary.rows;
-  const utilizationPivot = useMemo(
-    () => buildMonthlyUtilizationPivot(masterTruckRows || [], utilizationSourceRows, month, year, holidaysByDate),
-    [holidaysByDate, masterTruckRows, month, utilizationSourceRows, year],
-  );
+  const activeUtilizationPivot = useMemo(() => {
+    const trucks = (masterTruckRows || []).filter(isActiveTruck);
+    return buildMonthlyUtilizationPivot(
+      trucks,
+      filterUtilizationRowsByTrucks(trucks, utilizationSourceRows),
+      month,
+      year,
+      holidaysByDate,
+    );
+  }, [holidaysByDate, masterTruckRows, month, utilizationSourceRows, year]);
+  const fleetUtilizationPivot = useMemo(() => {
+    const trucks = (masterTruckRows || []).filter(isFleetTruck);
+    return buildMonthlyUtilizationPivot(
+      trucks,
+      filterUtilizationRowsByTrucks(trucks, utilizationSourceRows),
+      month,
+      year,
+      holidaysByDate,
+    );
+  }, [holidaysByDate, masterTruckRows, month, utilizationSourceRows, year]);
   const customerUtilizationPivot = useMemo(
     () => buildMonthlyCustomerTruckPivot(utilizationSourceRows, month, year, holidaysByDate, masterTruckRows || []),
     [holidaysByDate, masterTruckRows, month, utilizationSourceRows, year],
@@ -3183,13 +3287,13 @@ function ReportsPage() {
           <>
             <SummaryToggleCard
               icon={Truck}
-              label="Utilization Performance"
+              label="Utilisasi Unit Aktif"
               value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
               helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
               secondaryLabel="AVG Truck Terpakai/Hari"
               secondaryValue={`${formatDecimal(averageUsedTrucksPerDay)} / ${utilizationSummary.activeTruckCount} truck`}
-              tertiaryLabel="Truck Aktif"
-              tertiaryValue={`${utilizationSummary.activeTruckCount} Unit`}
+              tertiaryLabel="Utilisasi Seluruh Armada"
+              tertiaryValue={`${fleetUtilizationSummary.utilizationPercent.toFixed(1)}% / ${fleetUtilizationSummary.activeTruckCount} unit`}
               tone="sky"
               expanded={selectedReport === 'utilization'}
               onClick={() => selectReport('utilization')}
@@ -3611,14 +3715,40 @@ function ReportsPage() {
                 <Users size={15} />
                 View Per Customer
               </button>
+            </div>
+          </div>
+
+          <div className="grid border-b border-slate-200 bg-white sm:grid-cols-2">
+            <div className="border-b border-slate-200 px-4 py-3 sm:border-b-0 sm:border-r">
+              <p className="text-[11px] font-bold uppercase text-sky-700">Utilisasi Unit Aktif</p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <strong className="text-xl text-slate-950">{utilizationSummary.utilizationPercent.toFixed(1)}%</strong>
+                <span className="text-xs text-slate-500">{utilizationSummary.activeTruckCount} unit aktif</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Maintenance dan unit tidak aktif tidak masuk perhitungan.</p>
               <button
                 type="button"
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 text-xs font-black text-sky-800 hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => setUtilizationModalOpen(true)}
+                className="mt-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 text-xs font-black text-sky-800 hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setUtilizationPivotMode('active')}
                 disabled={utilizationLoading || Boolean(utilizationError)}
               >
-                <Maximize2 size={15} />
-                Lihat Utilisasi Bulanan
+                <Maximize2 size={14} /> Buka Pivot
+              </button>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-[11px] font-bold uppercase text-amber-700">Utilisasi Seluruh Armada</p>
+              <div className="mt-1 flex items-baseline gap-2">
+                <strong className="text-xl text-slate-950">{fleetUtilizationSummary.utilizationPercent.toFixed(1)}%</strong>
+                <span className="text-xs text-slate-500">{fleetUtilizationSummary.activeTruckCount} total unit</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">Termasuk unit maintenance dan tidak aktif; unit arsip tidak dihitung.</p>
+              <button
+                type="button"
+                className="mt-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-black text-amber-800 hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setUtilizationPivotMode('fleet')}
+                disabled={utilizationLoading || Boolean(utilizationError)}
+              >
+                <Maximize2 size={14} /> Buka Pivot
               </button>
             </div>
           </div>
@@ -3666,11 +3796,14 @@ function ReportsPage() {
       ) : null}
 
       <MonthlyUtilizationModal
-        open={utilizationModalOpen}
-        onClose={() => setUtilizationModalOpen(false)}
-        pivot={utilizationPivot}
+        open={Boolean(utilizationPivotMode)}
+        onClose={() => setUtilizationPivotMode('')}
+        pivot={utilizationPivotMode === 'fleet' ? fleetUtilizationPivot : activeUtilizationPivot}
         activeMonthLabel={activeMonthLabel}
         year={year}
+        reportLabel={utilizationPivotMode === 'fleet' ? 'Utilisasi Seluruh Armada' : 'Utilisasi Unit Aktif'}
+        reportMode={utilizationPivotMode || 'active'}
+        onReportModeChange={setUtilizationPivotMode}
         utilizationNotesByKey={utilizationNotesByKey}
         utilizationNoteSuggestions={utilizationNoteSuggestions}
         canEditNotes={canEditUtilizationNotes}

@@ -393,6 +393,32 @@ describe('buildMonthlyDriverUtilizationPivot', () => {
 });
 
 describe('buildTruckDayUtilizationSummary', () => {
+  it('memisahkan utilisasi unit aktif dan seluruh armada', () => {
+    const trucks = [
+      { id: 'active-1', plateNumber: 'B 9101 ACT', status: 'Aktif' },
+      { id: 'maintenance-1', plateNumber: 'B 9102 MTN', status: 'Maintenance' },
+      { id: 'inactive-1', plateNumber: 'B 9103 OFF', status: 'Tidak Aktif' },
+      { id: 'archived-1', plateNumber: 'B 9104 ARC', status: 'Arsip' },
+    ];
+    const rows = [{
+      vehicleId: 'active-1',
+      plateNumber: 'B 9101 ACT',
+      completedAt: '2026-07-01T10:00:00.000Z',
+      status: 'completed',
+    }];
+    const baseDate = new Date('2026-07-02T08:00:00.000Z');
+
+    const active = buildTruckDayUtilizationSummary(trucks, rows, 7, 2026, baseDate);
+    const fleet = buildTruckDayUtilizationSummary(trucks, rows, 7, 2026, baseDate, { includeUnavailable: true });
+
+    expect(active.activeTruckCount).toBe(1);
+    expect(active.utilizationPercent).toBe(100);
+    expect(fleet.activeTruckCount).toBe(3);
+    expect(fleet.utilizationPercent).toBeCloseTo(33.333, 2);
+    expect(fleet.rows.map((truck) => truck.id)).toEqual(expect.arrayContaining(['active-1', 'maintenance-1', 'inactive-1']));
+    expect(fleet.rows.find((truck) => truck.id === 'archived-1')).toBeUndefined();
+  });
+
   it('menghitung utilisasi dari jumlah trip terhadap target 1 trip per truck per hari', () => {
     const trucks = Array.from({ length: 10 }, (_, index) => ({
       id: `truck-${index + 1}`,
