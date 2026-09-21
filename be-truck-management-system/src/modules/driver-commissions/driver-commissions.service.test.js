@@ -28,13 +28,13 @@ test('validasi bukti transfer komisi menerima payload file lengkap', () => {
   }));
 });
 
-test('submit batch komisi menolak periode selain Sabtu sampai Jumat', async () => {
+test('submit batch komisi menolak periode selain Minggu sampai Sabtu', async () => {
   await assert.rejects(
-    () => submitDriverCommissionBatch({ periodStart: '2026-08-08', periodEnd: '2026-08-13' }),
+    () => submitDriverCommissionBatch({ periodStart: '2026-08-09', periodEnd: '2026-08-14' }),
     (error) => {
       assert.equal(error.statusCode, 400);
       assert.equal(error.code, 'VALIDATION_ERROR');
-      assert.match(error.message, /Sabtu sampai Jumat/i);
+      assert.match(error.message, /Minggu sampai Sabtu/i);
       return true;
     },
   );

@@ -421,7 +421,7 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
   return { summary, drivers };
 }
 
-// Diambil hanya ritasi berkomisi yang selesai di periode Sabtu-Jumat yang sedang ditutup.
+// Diambil hanya ritasi berkomisi yang selesai di periode Minggu-Sabtu yang sedang ditutup.
 // Ritasi dari periode lain harus dicek lewat periodenya masing-masing agar batch mingguan rapi.
 // Tidak ada syarat jumlah ritasi minimum: berapa pun jumlahnya (termasuk 1) langsung eligible
 // untuk diajukan ke Finance.
