@@ -22,6 +22,7 @@ import {
   invoicePaymentsController,
   orderVerificationsController,
   outstandingByCustomerController,
+  outstandingByCustomerExportController,
   outstandingOrdersController,
   approveOperationalFundRequestController,
   reconcileContainerJobExpenseController,
@@ -191,6 +192,12 @@ export const financeRoutes = [
     path: '/api/finance/outstanding/by-customer',
     permission: 'finance.invoice.read',
     handler: outstandingByCustomerController,
+  },
+  {
+    method: 'GET',
+    path: '/api/finance/outstanding/by-customer/export',
+    permission: 'finance.invoice.read',
+    handler: outstandingByCustomerExportController,
   },
   {
     method: 'POST',

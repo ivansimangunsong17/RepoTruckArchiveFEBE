@@ -4493,6 +4493,36 @@ function mapContainerBreakdownRow(row) {
   };
 }
 
+export async function getCustomerOutstandingRollupExport(options = {}, db = { query }) {
+  const { whereSql, params } = buildCustomerOutstandingFilters(options);
+  const orderBySql = resolveCustomerOutstandingSort(options.sortBy);
+  const rows = await db.query(
+    `
+      ${outstandingOrdersCte()}
+      select
+        customer_name,
+        count(*)::int as invoice_count,
+        coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket = 'current'), 0)::numeric as current_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket not in ('current', 'unknown')), 0)::numeric as overdue_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_1_15'), 0)::numeric as overdue_1_15_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_16_30'), 0)::numeric as overdue_16_30_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket in ('overdue_1_15', 'overdue_16_30')), 0)::numeric as overdue_1_30_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_31_60'), 0)::numeric as overdue_31_60_amount,
+        coalesce(sum(outstanding_amount) filter (where aging_bucket = 'overdue_60_plus'), 0)::numeric as overdue_60_plus_amount,
+        coalesce(max(days_overdue), 0)::int as oldest_overdue_days,
+        bool_or(ots_data_review_status = 'perlu_dicek') as needs_review
+      from outstanding_orders
+      ${whereSql}
+      group by customer_name
+      order by ${orderBySql}
+    `,
+    params,
+  );
+
+  return { rows: rows.rows.map(mapCustomerOutstandingRollupRow) };
+}
+
 function mapManualRevenueLineRow(row) {
   return {
     id: row.id,

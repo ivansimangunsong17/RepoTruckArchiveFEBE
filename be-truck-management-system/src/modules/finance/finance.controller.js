@@ -26,6 +26,7 @@ import {
   depositOperationalFund,
   fetchInvoicePayments,
   fetchCustomerOutstandingRollup,
+  exportCustomerOutstandingRollup,
   fetchSalesOrderOutstanding,
   rejectFinanceCorrection,
   approveOperationalFundRequest,
@@ -335,6 +336,11 @@ export async function recordInvoicePaymentController(request, response) {
     },
   });
   sendSuccess(response, result, 'Pembayaran berhasil dicatat.');
+}
+
+export async function outstandingByCustomerExportController(request, response) {
+  const result = await exportCustomerOutstandingRollup(request.query);
+  sendSuccess(response, result);
 }
 
 export async function recordCustomerInvoicePaymentController(request, response) {

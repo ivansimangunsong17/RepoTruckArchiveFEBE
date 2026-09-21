@@ -1,5 +1,5 @@
 import { AlertTriangle, ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Download, RefreshCw, Search, Wallet, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../contexts/FeedbackContext';
@@ -13,6 +13,7 @@ import {
   fetchFinanceInvoicePayments,
   fetchFinanceOutstanding,
   fetchFinanceOutstandingByCustomer,
+  exportFinanceOutstandingByCustomer,
   recordFinanceCustomerPayment,
   recordFinanceInvoicePayment,
   voidFinanceInvoicePayment,
@@ -667,7 +668,9 @@ function CustomerOutstandingPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
+  const exportInFlightRef = useRef(false);
 
   const [detailCustomer, setDetailCustomer] = useState(null);
   const [detailRows, setDetailRows] = useState([]);
@@ -706,12 +709,24 @@ function CustomerOutstandingPage() {
     }
   }, [page, query, agingBucket, sortBy, dateFrom, dateTo]);
 
-  function exportCustomerRows() {
-    downloadCsv(
-      'customer-outstanding',
-      ['Customer', 'Total OTS', 'Current', 'Overdue', 'Oldest Overdue (Hari)', 'Jumlah Invoice'],
-      customerRollupCsvRows(customerRows),
-    );
+  async function exportCustomerRows() {
+    if (exportInFlightRef.current) return;
+    exportInFlightRef.current = true;
+    setExporting(true);
+    try {
+      const result = await exportFinanceOutstandingByCustomer({ query, agingBucket, sortBy, dateFrom, dateTo });
+      const uniqueRows = Array.from(new Map((result?.rows || []).map((row) => [row.customer, row])).values());
+      downloadCsv(
+        'customer-outstanding',
+        ['Customer', 'Total OTS', 'Current', 'Overdue', 'Oldest Overdue (Hari)', 'Jumlah Invoice'],
+        customerRollupCsvRows(uniqueRows),
+      );
+    } catch (exportError) {
+      notify({ type: 'error', title: 'Export CSV gagal', message: exportError.message || 'Data Customer Outstanding gagal diekspor.' });
+    } finally {
+      exportInFlightRef.current = false;
+      setExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -1005,8 +1020,8 @@ function CustomerOutstandingPage() {
                 ))}
               </select>
             </label>
-            <button className="secondary-button" onClick={exportCustomerRows} type="button" disabled={!customerRows.length}>
-              <Download size={15} /> Export CSV
+            <button className="secondary-button" onClick={exportCustomerRows} type="button" disabled={!customerRows.length || exporting}>
+              <Download size={15} /> {exporting ? 'Mengekspor...' : 'Export CSV'}
             </button>
             <button className="secondary-button" onClick={loadData} type="button" disabled={loading}>
               <RefreshCw size={15} /> Refresh
