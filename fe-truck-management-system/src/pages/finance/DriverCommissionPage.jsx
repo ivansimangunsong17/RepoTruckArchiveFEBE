@@ -94,6 +94,37 @@ function commissionPeriodKey(period = {}) {
   return `${period.periodStart || ''}|${period.periodEnd || ''}`;
 }
 
+const COMMISSION_PERIOD_LOOKBACK = 9;
+
+function addDateKeyDays(dateKeyValue, days) {
+  const [year, month, day] = String(dateKeyValue || '').split('-').map(Number);
+  if (!year || !month || !day) return '';
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+}
+
+function buildCommissionPeriodOptions(batches = []) {
+  const current = currentCommissionPeriod();
+  const byPeriod = new Map();
+
+  for (let offset = 0; offset < COMMISSION_PERIOD_LOOKBACK; offset += 1) {
+    const periodStart = addDateKeyDays(current.periodStart, -offset * 7);
+    const period = { periodStart, periodEnd: addDateKeyDays(periodStart, 6) };
+    byPeriod.set(commissionPeriodKey(period), { ...period, status: 'draft', totalItems: 0, totalAmount: 0 });
+  }
+
+  for (const batch of batches) {
+    const key = commissionPeriodKey(batch);
+    if (!byPeriod.has(key)) continue;
+    byPeriod.set(key, { ...byPeriod.get(key), ...batch, status: batch.status || 'draft' });
+  }
+
+  return Array.from(byPeriod.values()).sort((left, right) => (
+    String(right.periodStart || '').localeCompare(String(left.periodStart || ''))
+  ));
+}
+
 function commissionReportFilename(prefix, periodStart, periodEnd) {
   return `${prefix}-${String(periodStart || 'periode').replaceAll('-', '')}-${String(periodEnd || 'akhir').replaceAll('-', '')}.pdf`;
 }
@@ -1080,11 +1111,7 @@ function DriverCommissionPage() {
   const canManageDeduction = hasPermission(user, 'finance.driver_commission.deduction.manage');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
-  const dropdownBatches = useMemo(() => {
-    const current = currentCommissionPeriod();
-    if (batches.some((batch) => batch.periodStart === current.periodStart)) return batches;
-    return [{ periodStart: current.periodStart, periodEnd: current.periodEnd, status: 'draft', totalItems: 0, totalAmount: 0 }, ...batches];
-  }, [batches]);
+  const dropdownBatches = useMemo(() => buildCommissionPeriodOptions(batches), [batches]);
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const selectedPayment = resolveSelectedPayment(selectedBatch, selectedDriver);
 

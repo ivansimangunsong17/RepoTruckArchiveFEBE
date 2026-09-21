@@ -262,7 +262,8 @@ async function rollbackCreatedUploads(uploadResults) {
 }
 
 export async function updateContainerJob(id, form) {
-  if (form.status !== 'completed') {
+  const requiresDocumentsBeforeStatusUpdate = ['completed', 'repo_stored'].includes(form.status);
+  if (!requiresDocumentsBeforeStatusUpdate) {
     const saved = await httpClient.patch(`/container-jobs/${id}`, form);
     const uploadedDocuments = await uploadJobDocuments(id, form);
     return uploadedDocuments.length ? fetchContainerJob(id) : saved;

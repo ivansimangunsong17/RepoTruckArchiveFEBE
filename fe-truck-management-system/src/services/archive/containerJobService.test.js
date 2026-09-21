@@ -213,6 +213,42 @@ describe('containerJobService', () => {
     expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1', expect.objectContaining({ status: 'completed' }));
   });
 
+  it('mengupload EIR Titip sebelum mengubah status menjadi container titip', async () => {
+    const repoEirDocument = new File(['eir titip'], 'eir-titip.jpeg', { type: 'image/jpeg' });
+    uploadAttachmentFile.mockResolvedValue({ id: 'attachment-repo-eir-1' });
+    httpClient.patch.mockResolvedValue({ id: 'job-1', status: 'repo_stored' });
+
+    await updateContainerJob('job-1', {
+      status: 'repo_stored',
+      repoEirNumber: 'EIR-TITIP-001',
+      repoEirDocument: { rawFile: repoEirDocument },
+      updatedBy: 'Ops',
+    });
+
+    expect(uploadAttachmentFile).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: 'container_job',
+      entityId: 'job-1',
+      category: 'repoEirDocument',
+      file: repoEirDocument,
+    }));
+    expect(uploadAttachmentFile.mock.invocationCallOrder[0]).toBeLessThan(httpClient.patch.mock.invocationCallOrder[0]);
+    expect(httpClient.patch).toHaveBeenCalledWith('/container-jobs/job-1', expect.objectContaining({ status: 'repo_stored' }));
+  });
+
+  it('menghapus EIR Titip baru jika penyimpanan status titip gagal', async () => {
+    const repoEirDocument = new File(['eir titip'], 'eir-titip.jpeg', { type: 'image/jpeg' });
+    uploadAttachmentFile.mockResolvedValue({ id: 'attachment-repo-eir-1' });
+    httpClient.patch.mockRejectedValue(new Error('Penitipan gagal'));
+
+    await expect(updateContainerJob('job-1', {
+      status: 'repo_stored',
+      repoEirDocument: { rawFile: repoEirDocument },
+      updatedBy: 'Ops',
+    })).rejects.toThrow('Penitipan gagal');
+
+    expect(deleteAttachmentFile).toHaveBeenCalledWith('attachment-repo-eir-1');
+  });
+
   it('mengupload lampiran biaya lainnya dengan kategori terpisah dari SPK', async () => {
     const additionalCostDocument = new File(['biaya'], 'biaya.pdf', { type: 'application/pdf' });
     uploadAttachmentFile.mockResolvedValue({ id: 'attachment-cost-1' });

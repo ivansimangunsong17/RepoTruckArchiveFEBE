@@ -117,6 +117,7 @@ function normalizeFinanceInvoiceRow(row = {}) {
     debitNoteDocumentUploadedAt: row.debitNoteDocumentUploadedAt || '',
     debitNoteDocumentUploadedByName: row.debitNoteDocumentUploadedByName || '',
     containerNumbers: Array.isArray(row.containerNumbers) ? row.containerNumbers.filter(Boolean) : [],
+    containerBreakdown: Array.isArray(row.containerBreakdown) ? row.containerBreakdown : [],
     manualRevenueAmount: Number(row.manualRevenueAmount || 0),
     manualRevenueLines: Array.isArray(row.manualRevenueLines) ? row.manualRevenueLines : [],
     internalCost: row.internalCost || {
