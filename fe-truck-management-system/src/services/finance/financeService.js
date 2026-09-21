@@ -251,6 +251,7 @@ export function fetchFinanceInvoicePayments(id) {
 }
 
 export async function recordFinanceInvoicePayment(id, payload = {}, proofFile) {
+  if (!proofFile) return httpClient.post(`/finance/invoices/${encodeURIComponent(id)}/payments`, payload);
   const validationError = validateArchiveFile(proofFile, { label: 'Bukti transfer' })
     || validateFinalUploadFile(proofFile, { label: 'Bukti transfer' });
   if (validationError) throw new Error(validationError);
@@ -269,6 +270,7 @@ export async function recordFinanceInvoicePayment(id, payload = {}, proofFile) {
 }
 
 export async function recordFinanceCustomerPayment(payload = {}, proofFile) {
+  if (!proofFile) return httpClient.post('/finance/customer-payments', payload);
   const validationError = validateArchiveFile(proofFile, { label: 'Bukti transfer' })
     || validateFinalUploadFile(proofFile, { label: 'Bukti transfer' });
   if (validationError) throw new Error(validationError);

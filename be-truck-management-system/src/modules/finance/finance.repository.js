@@ -5131,13 +5131,6 @@ function ensurePaymentPayloadMatches(existingRow, payload) {
 
 export async function recordCustomerInvoicePayments(payload = {}) {
   return withTransaction(async (client) => {
-    if (!payload.proofAttachmentId) {
-      const error = new Error('Bukti transfer wajib dilampirkan sebelum pembayaran bisa dicatat.');
-      error.statusCode = 400;
-      error.code = 'SALES_ORDER_PAYMENT_PROOF_REQUIRED';
-      throw error;
-    }
-
     const allocations = Array.isArray(payload.allocations) ? payload.allocations : [];
     if (!allocations.length) {
       const error = new Error('Minimal satu invoice wajib dipilih untuk alokasi pembayaran.');
@@ -5330,7 +5323,7 @@ export async function recordCustomerInvoicePayments(payload = {}) {
 // Finance di sini. Ini sengaja menggantikan flip manual billing_status='lunas' yang sebelumnya
 // bisa dilakukan Sales/Admin lewat updateInvoiceDeliveryStatus (lihat sales-orders.service.js).
 //
-// Bukti transfer wajib (proofAttachmentId) dan idempotencyKey wajib dicek SEBELUM validasi saldo:
+// Idempotency key wajib dicek SEBELUM validasi saldo:
 // replay dari submit yang sama (double-click/retry jaringan) harus balik ke hasil yang sama tanpa
 // insert dobel dan tanpa divalidasi ulang terhadap sisa outstanding yang sudah berkurang akibat
 // pembayaran pertama (kalau tidak, replay yang sah bisa ditolak keliru sebagai "melebihi outstanding").
@@ -5358,13 +5351,6 @@ export async function recordSalesOrderPayment(id, payload = {}) {
       error.code = 'SALES_ORDER_PAYMENT_INVOICE_NUMBER_REQUIRED';
       throw error;
     }
-    if (!payload.proofAttachmentId) {
-      const error = new Error('Bukti transfer wajib dilampirkan sebelum pembayaran bisa dicatat.');
-      error.statusCode = 400;
-      error.code = 'SALES_ORDER_PAYMENT_PROOF_REQUIRED';
-      throw error;
-    }
-
     const idempotencyKey = payload.idempotencyKey || null;
     if (idempotencyKey) {
       const existing = await client.query(

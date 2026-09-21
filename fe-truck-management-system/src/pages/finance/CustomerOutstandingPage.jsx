@@ -360,7 +360,7 @@ function CustomerBulkPaymentModal({ customer, rows, form, busy, error, onChange,
                   <div className="master-field span-full">
                     <AttachmentUploadField
                       compact
-                      helper="Wajib. Format PDF, JPG, PNG."
+                      helper="Opsional. Bukti dapat dilengkapi kemudian. Format PDF, JPG, PNG."
                       id="customer-bulk-payment-proof"
                       label="Bukti Transfer"
                       onClear={() => onChange({ ...form, proofFile: null })}
@@ -437,7 +437,7 @@ function CustomerBulkPaymentModal({ customer, rows, form, busy, error, onChange,
 
             <div className="master-form-actions">
               <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Batal</button>
-              <button className="primary-button" type="submit" disabled={busy || !form.proofFile || allocatedAmount <= 0}>
+              <button className="primary-button" type="submit" disabled={busy || allocatedAmount <= 0}>
                 {busy ? 'Menyimpan...' : 'Simpan Alokasi'}
               </button>
             </div>
@@ -547,7 +547,7 @@ function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onCha
                   <div className="master-field span-full">
                     <AttachmentUploadField
                       compact
-                      helper="Wajib. Format PDF, JPG, PNG."
+                      helper="Opsional. Bukti dapat dilengkapi kemudian. Format PDF, JPG, PNG."
                       id="customer-outstanding-payment-proof"
                       label="Bukti Transfer"
                       onClear={() => onChange({ ...form, proofFile: null })}
@@ -584,7 +584,9 @@ function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onCha
                                 file={paymentProofFile(payment)}
                                 label="Lihat Bukti"
                               />
-                            ) : null}
+                            ) : (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase text-amber-700">Bukti menyusul</span>
+                            )}
                             {payment.voidedAt ? (
                               <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
                             ) : (
@@ -639,7 +641,7 @@ function RecordPaymentModal({ row, busy, error, payments, paymentsLoading, onCha
 
             <div className="master-form-actions">
               <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Batal</button>
-              <button className="primary-button" disabled={busy || Number(row.outstandingAmount) <= 0 || !form.proofFile} type="submit">
+              <button className="primary-button" disabled={busy || Number(row.outstandingAmount) <= 0} type="submit">
                 {busy ? 'Menyimpan...' : 'Simpan Pembayaran'}
               </button>
             </div>
@@ -811,11 +813,6 @@ function CustomerOutstandingPage() {
       setBulkPaymentError('Alokasi tidak boleh melebihi outstanding invoice.');
       return;
     }
-    if (!bulkPaymentForm.proofFile) {
-      setBulkPaymentError('Bukti transfer wajib dilampirkan.');
-      return;
-    }
-
     setSaving(true);
     setBulkPaymentError('');
     try {
@@ -853,11 +850,6 @@ function CustomerOutstandingPage() {
       setPaymentError(`Nominal pembayaran melebihi sisa outstanding ${formatCurrency(selectedRow.outstandingAmount)}.`);
       return;
     }
-    if (!paymentForm.proofFile) {
-      setPaymentError('Bukti transfer wajib dilampirkan sebelum pembayaran bisa dicatat.');
-      return;
-    }
-
     setSaving(true);
     setPaymentError('');
     try {
