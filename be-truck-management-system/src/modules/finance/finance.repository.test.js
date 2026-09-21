@@ -8,6 +8,7 @@ const {
   buildOrderVerificationFilters,
   buildOutstandingFilters,
   buildCustomerOutstandingFilters,
+  getCustomerOutstandingRollupExport,
   invoiceOrdersCte,
   outstandingOrdersCte,
 } = await import('./finance.repository.js');
@@ -49,6 +50,31 @@ test('filter customer outstanding rollup menerapkan rentang trip_date dari dateF
   assert.match(withRange.whereSql, /trip_date\s*>=\s*\$1/i);
   assert.match(withRange.whereSql, /trip_date\s*<=\s*\$2/i);
   assert.deepEqual(withRange.params, ['2026-09-01', '2026-09-30']);
+});
+
+test('export customer outstanding memakai satu query terfilter tanpa pagination atau summary', async () => {
+  const calls = [];
+  const db = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+
+  await getCustomerOutstandingRollupExport({
+    query: 'Kimia',
+    agingBucket: 'overdue_all',
+    sortBy: 'customer_asc',
+    dateFrom: '2026-09-01',
+    dateTo: '2026-09-30',
+  }, db);
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /group by customer_name/i);
+  assert.match(calls[0].sql, /order by customer_name asc/i);
+  assert.doesNotMatch(calls[0].sql, /\blimit\b/i);
+  assert.doesNotMatch(calls[0].sql, /\boffset\b/i);
+  assert.deepEqual(calls[0].params, ['2026-09-01', '2026-09-30', '%Kimia%']);
 });
 
 test('filter SO Terisi tetap memuat SO batal yang sudah punya nomor SO Finance', () => {

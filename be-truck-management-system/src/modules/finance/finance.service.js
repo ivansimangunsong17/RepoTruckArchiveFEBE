@@ -16,6 +16,7 @@ import {
   getInvoiceOrderDetail,
   getInvoiceOrdersPage,
   getCustomerOutstandingRollupPage,
+  getCustomerOutstandingRollupExport,
   getSalesOrderOutstandingPage,
   getContainerJobExpensesReconciliationPage,
   getOperationalFundRequestsPage,
@@ -569,6 +570,16 @@ export async function recordInvoicePayment(id, payload = {}, actor) {
     idempotencyKey: payload.idempotencyKey,
     actorUserId: actor?.id || null,
     actorName,
+  });
+}
+
+export function exportCustomerOutstandingRollup(query = {}) {
+  return getCustomerOutstandingRollupExport({
+    query: query.query || query.search || '',
+    agingBucket: query.agingBucket || '',
+    sortBy: query.sortBy || '',
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
   });
 }
 
