@@ -246,6 +246,10 @@ export function fetchFinanceOutstandingByCustomer(params = {}) {
   return httpClient.get(`/finance/outstanding/by-customer${buildQuery(params)}`);
 }
 
+export function exportFinanceOutstandingByCustomer(params = {}) {
+  return httpClient.get(`/finance/outstanding/by-customer/export${buildQuery(params)}`);
+}
+
 export function fetchFinanceInvoicePayments(id) {
   return httpClient.get(`/finance/invoices/${encodeURIComponent(id)}/payments`);
 }
