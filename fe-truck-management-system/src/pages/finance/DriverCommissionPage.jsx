@@ -19,6 +19,8 @@ import {
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
+import { downloadCsv } from '../../utils/csvExport';
+import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS } from '../../utils/driverCommissionCsv';
 
 const emptyReport = {
   periodStart: '',
@@ -1327,6 +1329,18 @@ function DriverCommissionPage() {
     });
   }
 
+  function handleDownloadCsv() {
+    downloadCsv(
+      commissionReportFilename('komisi-sopir-finance-detail', periodStart, periodEnd).replace(/\.pdf$/, '.csv'),
+      DRIVER_COMMISSION_CSV_HEADERS,
+      buildDriverCommissionCsvRows(drivers, {
+        periodStart,
+        periodEnd,
+        batchStatus: selectedBatch?.status || report.status,
+      }),
+    );
+  }
+
   return (
     <main className="space-y-5 p-4 md:p-6">
       <header className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -1381,6 +1395,9 @@ function DriverCommissionPage() {
             <div className="flex flex-wrap gap-2">
               <button className="secondary-button inline-flex items-center gap-2" type="button" disabled={loading || !drivers.length} onClick={handleDownloadPdf}>
                 <Download size={16} /> Download PDF
+              </button>
+              <button className="secondary-button inline-flex items-center gap-2" type="button" disabled={loading || !drivers.length} onClick={handleDownloadCsv}>
+                <Download size={16} /> Download CSV
               </button>
               {canFinance && selectedBatch?.status === 'submitted' ? (
                 <>

@@ -8,6 +8,7 @@ import {
   submitDriverCommissionBatch,
 } from '../../services/finance/driverCommissionService';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
+import { downloadCsv } from '../../utils/csvExport';
 
 const notify = vi.fn();
 const confirmAction = vi.fn();
@@ -33,6 +34,10 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
 
 vi.mock('../../utils/simplePdfReport', () => ({
   downloadPdfReport: vi.fn(),
+}));
+
+vi.mock('../../utils/csvExport', () => ({
+  downloadCsv: vi.fn(),
 }));
 
 const reportFixture = {
@@ -207,6 +212,23 @@ describe('DriverCommissionOperationalPage', () => {
         expect.objectContaining({ driverName: 'Rahmat', totalItems: 2 }),
       ]),
     }));
+  });
+
+  it('mengunduh CSV dengan satu baris untuk setiap rincian ritasi sopir', async () => {
+    const user = userEvent.setup();
+    render(<DriverCommissionOperationalPage />);
+
+    await screen.findByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /download csv/i }));
+
+    expect(downloadCsv).toHaveBeenCalledWith(
+      expect.stringContaining('komisi-sopir-operational-detail'),
+      expect.arrayContaining(['Nama Sopir', 'Nomor SO', 'Nomor Container', 'Komisi Ritasi']),
+      expect.arrayContaining([
+        expect.arrayContaining(['Rahmat', 'SO-001', 'CONT-001']),
+        expect.arrayContaining(['Jajam', 'SO-002', 'CONT-002']),
+      ]),
+    );
   });
 
   it('membuka detail sopir tanpa master driver id memakai driverKey', async () => {
