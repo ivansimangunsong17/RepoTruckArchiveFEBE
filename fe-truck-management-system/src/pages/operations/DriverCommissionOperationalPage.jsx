@@ -12,6 +12,8 @@ import {
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
+import { downloadCsv } from '../../utils/csvExport';
+import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS } from '../../utils/driverCommissionCsv';
 import MonthFilterControl from '../finance/shared/MonthFilterControl';
 import { getMonthDateRange } from '../finance/shared/monthFilterUtils';
 
@@ -700,6 +702,18 @@ function DriverCommissionOperationalPage() {
     });
   }
 
+  function handleDownloadCsv() {
+    downloadCsv(
+      commissionReportFilename('komisi-sopir-operational-detail', periodStart, periodEnd).replace(/\.pdf$/, '.csv'),
+      DRIVER_COMMISSION_CSV_HEADERS,
+      buildDriverCommissionCsvRows(drivers, {
+        periodStart,
+        periodEnd,
+        batchStatus: activeBatch?.status || report.status,
+      }),
+    );
+  }
+
   return (
     <main className="space-y-5 p-4 md:p-6">
       <header className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -730,6 +744,9 @@ function DriverCommissionOperationalPage() {
             <div className="flex gap-2 sm:flex-col">
               <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={handleDownloadPdf} disabled={loading || !drivers.length}>
                 <Download size={16} /> Download PDF
+              </button>
+              <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={handleDownloadCsv} disabled={loading || !drivers.length}>
+                <Download size={16} /> Download CSV
               </button>
               <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={() => loadReport(periodStart, periodEnd)} disabled={loading}>
                 <RefreshCw size={16} /> Refresh
