@@ -291,6 +291,11 @@ describe('DriverCommissionPage finance', () => {
       rows: expect.arrayContaining([
         expect.objectContaining({ driverName: 'Rahmat', account: 'BCA 123456' }),
       ]),
+      meta: expect.arrayContaining([
+        { label: 'Sebelum Potongan', value: expect.stringMatching(/Rp\s*125\.000/) },
+        { label: 'Potongan Finance', value: expect.stringMatching(/Rp\s*25\.000/) },
+        { label: 'Harus Dibayar', value: expect.stringMatching(/Rp\s*100\.000/) },
+      ]),
     }));
   });
 
@@ -303,9 +308,9 @@ describe('DriverCommissionPage finance', () => {
 
     expect(downloadCsv).toHaveBeenCalledWith(
       expect.stringContaining('komisi-sopir-finance-detail'),
-      expect.arrayContaining(['Nama Sopir', 'Nomor SO', 'Nomor Container', 'Komisi Ritasi']),
+      expect.arrayContaining(['Nama Sopir', 'Nomor SO', 'Nomor Container', 'Komisi Ritasi (Sebelum Potongan)', 'Total Harus Dibayar ke Sopir']),
       expect.arrayContaining([
-        expect.arrayContaining(['Rahmat', 'SO-001', 'CONT-001']),
+        expect.arrayContaining(['Rahmat', 'SO-001', 'CONT-001', 50000, 125000, 25000, 100000]),
       ]),
     );
   });
@@ -478,7 +483,7 @@ describe('DriverCommissionPage finance', () => {
     await screen.findAllByText('Rahmat');
     await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
 
-    expect(await screen.findByText(/Nominal yang harus ditransfer \(Net\): Rp\s*100\.000/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Nominal yang harus dibayarkan: Rp\s*100\.000/i)).toBeInTheDocument();
   });
 
   it('finance bisa membatalkan potongan yang belum paid', async () => {
