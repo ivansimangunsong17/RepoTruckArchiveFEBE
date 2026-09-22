@@ -47,4 +47,26 @@ describe('ujRecommendation', () => {
     expect(recommendation.currentContainerUj).toBe(0);
     expect(recommendation.hasConfiguredTariff).toBe(false);
   });
+
+  it('menambahkan surcharge Rp100.000 untuk container Reefer', () => {
+    const recommendation = calculateUjRecommendation(
+      { destination: 'Cikarang', size: '40FT', type: 'Reefer' },
+      [{ name: 'Cikarang', uj20ft: 600000, uj40ft: 750000 }],
+    );
+
+    expect(recommendation.baseContainerUj).toBe(750000);
+    expect(recommendation.reeferSurcharge).toBe(100000);
+    expect(recommendation.currentContainerUj).toBe(850000);
+  });
+
+  it('tidak menambahkan surcharge Reefer jika tarif dasar belum tersedia', () => {
+    const recommendation = calculateUjRecommendation(
+      { destination: 'Cikarang', size: '40FT', containerType: 'REEFER' },
+      [{ name: 'Cikarang', uj20ft: 600000, uj40ft: null }],
+    );
+
+    expect(recommendation.currentContainerUj).toBe(0);
+    expect(recommendation.reeferSurcharge).toBe(0);
+    expect(recommendation.hasConfiguredTariff).toBe(false);
+  });
 });
