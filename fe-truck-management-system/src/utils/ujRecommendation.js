@@ -23,6 +23,15 @@ function compactText(value) {
   return normalizeText(value).replace(/\s/g, '');
 }
 
+export const REEFER_UJ_SURCHARGE = 100000;
+
+export function isReeferContainer(job = {}) {
+  const containerType = normalizeText(
+    job.type || job.containerType || job.container_type || job.cargoType || job.cargo_type,
+  );
+  return containerType.includes('reefer');
+}
+
 function destinationSearchTerms(destination = {}) {
   return [
     destination.name,
@@ -108,7 +117,9 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
       : fallbackDriverCommissionAmount || driverCommission20ftAmount || driverCommission40ftAmount;
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
-  const currentContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
+  const baseContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
+  const reeferSurcharge = isReeferContainer(job) && baseContainerUj > 0 ? REEFER_UJ_SURCHARGE : 0;
+  const currentContainerUj = baseContainerUj + reeferSurcharge;
   const hasCurrentContainerTariff = currentSize === '40FT'
     ? uj40ft > 0
     : currentSize === '20FT'
@@ -121,6 +132,9 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
     destinationName: destination?.name || job.destination || '',
     currentSize: currentSize || '',
     currentContainerUj,
+    baseContainerUj,
+    reeferSurcharge,
+    isReefer: reeferSurcharge > 0,
     driverCommissionAmount,
     driverCommission20ftAmount,
     driverCommission40ftAmount,

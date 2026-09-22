@@ -31,6 +31,7 @@ const {
 const {
   buildAutoJourneyMoneyDescription,
   ensureDriverCommissionIsNotPosted,
+  findJourneyMoneyAmount,
   hasCompleteOperationalAssignment,
   hasRequiredRepoCompletionDocuments,
   normalizeCompletedAtForSave,
@@ -40,6 +41,26 @@ const {
   shouldValidateVehicleContainerSize,
   syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
+
+test('auto UJ menambahkan Rp100.000 untuk container Reefer', async () => {
+  const client = {
+    query: async () => ({ rows: [{ id: 'destination-reefer', uj_20ft: 600000, uj_40ft: 750000 }] }),
+  };
+
+  const reefer = await findJourneyMoneyAmount(client, {
+    destination: 'Cikarang',
+    container_size: '40FT',
+    container_type: 'Reefer',
+  });
+  const dry = await findJourneyMoneyAmount(client, {
+    destination: 'Cikarang',
+    container_size: '40FT',
+    container_type: 'Dry',
+  });
+
+  assert.equal(reefer.amount, 850000);
+  assert.equal(dry.amount, 750000);
+});
 
 test('posted driver commission can only be changed after void/correction', async () => {
   const queries = [];

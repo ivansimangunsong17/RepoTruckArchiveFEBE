@@ -833,7 +833,7 @@ function requireCompleteOperationalAssignment(form, driver, vehicle, existing, m
   );
 }
 
-async function findJourneyMoneyAmount(client, job = {}) {
+export async function findJourneyMoneyAmount(client, job = {}) {
   const destination = normalizeOptionalText(job.destination);
   if (!destination) return { amount: 0, destinationId: null };
   const result = await client.query(
@@ -848,8 +848,10 @@ async function findJourneyMoneyAmount(client, job = {}) {
     [destination],
   );
   const row = result.rows[0] || {};
+  const baseAmount = resolveJourneyMoneyAmountForSize(row, job.container_size);
+  const isReefer = String(job.container_type || '').trim().toLowerCase().includes('reefer');
   return {
-    amount: resolveJourneyMoneyAmountForSize(row, job.container_size),
+    amount: baseAmount > 0 && isReefer ? baseAmount + 100000 : baseAmount,
     destinationId: row.id || null,
   };
 }

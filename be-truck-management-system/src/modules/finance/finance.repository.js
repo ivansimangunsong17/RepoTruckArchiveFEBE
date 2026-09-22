@@ -82,8 +82,12 @@ function ujAmountExpression(cjAlias = 'cj', dlAlias = 'dl') {
     coalesce(
       nullif(${cjAlias}.uj_amount_snapshot, 0),
       case
-        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then nullif(${dlAlias}.uj_40ft, 0)
-        else nullif(${dlAlias}.uj_20ft, 0)
+        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then
+          nullif(${dlAlias}.uj_40ft, 0)
+          + case when lower(coalesce(${cjAlias}.container_type, '')) like '%reefer%' then 100000 else 0 end
+        else
+          nullif(${dlAlias}.uj_20ft, 0)
+          + case when lower(coalesce(${cjAlias}.container_type, '')) like '%reefer%' then 100000 else 0 end
       end
     )
   `;
