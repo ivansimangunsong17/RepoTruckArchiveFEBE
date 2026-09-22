@@ -92,7 +92,7 @@ function buildPageContent({
   const tableX = MARGIN;
   const tableWidth = PAGE_WIDTH - MARGIN * 2;
   const topY = PAGE_HEIGHT - MARGIN;
-  const cardY = PAGE_HEIGHT - 92;
+  const cardY = PAGE_HEIGHT - 117;
   const metaItems = meta.slice(0, 4);
   const cardGap = 8;
   const cardWidth = metaItems.length
