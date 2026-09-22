@@ -11,6 +11,7 @@ import {
   voidDriverCommissionDeduction,
 } from '../../services/finance/driverCommissionService';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
+import { downloadCsv } from '../../utils/csvExport';
 
 const notify = vi.fn();
 const confirmAction = vi.fn();
@@ -47,6 +48,10 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
 
 vi.mock('../../utils/simplePdfReport', () => ({
   downloadPdfReport: vi.fn(),
+}));
+
+vi.mock('../../utils/csvExport', () => ({
+  downloadCsv: vi.fn(),
 }));
 
 const periodReport = {
@@ -287,6 +292,22 @@ describe('DriverCommissionPage finance', () => {
         expect.objectContaining({ driverName: 'Rahmat', account: 'BCA 123456' }),
       ]),
     }));
+  });
+
+  it('mengunduh CSV pembayaran dengan rincian ritasi per sopir', async () => {
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getByRole('button', { name: /download csv/i }));
+
+    expect(downloadCsv).toHaveBeenCalledWith(
+      expect.stringContaining('komisi-sopir-finance-detail'),
+      expect.arrayContaining(['Nama Sopir', 'Nomor SO', 'Nomor Container', 'Komisi Ritasi']),
+      expect.arrayContaining([
+        expect.arrayContaining(['Rahmat', 'SO-001', 'CONT-001']),
+      ]),
+    );
   });
 
   it('mengganti report saat batch dipilih dari dropdown', async () => {
