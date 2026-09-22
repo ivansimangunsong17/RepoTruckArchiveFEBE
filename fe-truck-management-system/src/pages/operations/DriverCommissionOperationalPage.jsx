@@ -13,7 +13,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
 import { downloadCsv } from '../../utils/csvExport';
-import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS } from '../../utils/driverCommissionCsv';
+import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS, summarizeDriverCommissions } from '../../utils/driverCommissionCsv';
 import MonthFilterControl from '../finance/shared/MonthFilterControl';
 import { getMonthDateRange } from '../finance/shared/monthFilterUtils';
 
@@ -201,6 +201,7 @@ const metricCardTones = {
   slate: 'bg-slate-100 text-slate-600',
   sky: 'bg-sky-50 text-sky-600',
   amber: 'bg-amber-50 text-amber-600',
+  rose: 'bg-rose-50 text-rose-600',
   emerald: 'bg-emerald-50 text-emerald-600',
 };
 
@@ -525,7 +526,7 @@ function DriverDetailModal({ driver, open, onClose }) {
           ) : null}
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <span className="text-[11px] font-black uppercase text-slate-400">Komisi Bruto</span>
+              <span className="text-[11px] font-black uppercase text-slate-400">Sebelum Potongan</span>
               <strong className="mt-1 block text-lg text-slate-950">{formatCurrency(grossAmount)}</strong>
             </div>
             <div className="rounded-lg border border-rose-100 bg-rose-50 p-3">
@@ -533,7 +534,7 @@ function DriverDetailModal({ driver, open, onClose }) {
               <strong className="mt-1 block text-lg text-rose-700">{formatCurrency(deductionAmount)}</strong>
             </div>
             <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-              <span className="text-[11px] font-black uppercase text-emerald-600">Net Dibayar</span>
+              <span className="text-[11px] font-black uppercase text-emerald-600">Harus Dibayar</span>
               <strong className="mt-1 block text-lg text-emerald-700">{formatCurrency(netAmount)}</strong>
             </div>
           </div>
@@ -600,6 +601,7 @@ function DriverCommissionOperationalPage() {
   const canSubmit = hasPermission(user, 'driver_commission.submit') || hasPermission(user, 'operations.update');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
+  const commissionTotals = useMemo(() => summarizeDriverCommissions(drivers), [drivers]);
   const reviewRows = report.reviewRows || [];
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const activeBatch = report.activeBatch || null;
@@ -684,17 +686,17 @@ function DriverCommissionOperationalPage() {
       filename: commissionReportFilename('komisi-sopir-operational', periodStart, periodEnd),
       meta: [
         { label: 'Sopir', value: `${summary.totalDrivers || 0}` },
-        { label: 'Job Komisi', value: `${summary.totalItems || 0}` },
-        { label: 'Total Komisi', value: formatCurrency(summary.totalAmount || 0) },
-        { label: 'Belum Dibayar', value: formatCurrency(summary.unpaidAmount || 0) },
+        { label: 'Sebelum Potongan', value: formatCurrency(commissionTotals.grossAmount) },
+        { label: 'Potongan Finance', value: formatCurrency(commissionTotals.deductionAmount) },
+        { label: 'Harus Dibayar', value: formatCurrency(commissionTotals.netAmount) },
       ],
       columns: [
         { label: 'No', width: 0.4, value: (row) => row.reportNumber, align: 'center' },
         { label: 'Sopir', width: 1.8, value: (row) => row.driverName, bold: true },
         { label: 'Job', width: 0.55, value: (row) => row.totalItems, align: 'center' },
-        { label: 'Bruto', width: 1, value: (row) => formatCurrency(row.grossAmount), align: 'right' },
+        { label: 'Sebelum Potongan', width: 1, value: (row) => formatCurrency(row.grossAmount), align: 'right' },
         { label: 'Potongan', width: 1, value: (row) => (row.deductionAmount ? formatCurrency(row.deductionAmount) : '-'), align: 'right' },
-        { label: 'Net Dibayar', width: 1, value: (row) => formatCurrency(row.netAmount), align: 'right' },
+        { label: 'Harus Dibayar', width: 1, value: (row) => formatCurrency(row.netAmount), align: 'right' },
         { label: 'Belum Dibayar', width: 1, value: (row) => formatCurrency(row.unpaidAmount), align: 'right' },
         { label: 'Status', width: 1.1, value: (row) => row.statusLabel },
       ],
@@ -756,7 +758,7 @@ function DriverCommissionOperationalPage() {
         </div>
       </header>
 
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
         <MetricCard
           icon={CalendarDays}
           label="Periode"
@@ -766,7 +768,9 @@ function DriverCommissionOperationalPage() {
           onClick={() => setBatchPickerOpen(true)}
         />
         <MetricCard icon={UserRound} label="Sopir" tone="sky" value={`${summary.totalDrivers || 0} sopir`} helper={`${summary.totalItems || 0} job komisi`} />
-        <MetricCard icon={CircleDollarSign} label="Total Komisi" tone="amber" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.unpaidAmount || 0)} belum dibayar`} />
+        <MetricCard icon={CircleDollarSign} label="Sebelum Potongan" tone="amber" value={formatCurrency(commissionTotals.grossAmount)} helper="Total komisi bruto" />
+        <MetricCard icon={CircleDollarSign} label="Potongan Finance" tone="rose" value={formatCurrency(commissionTotals.deductionAmount)} helper="Total potongan aktif" />
+        <MetricCard icon={CircleDollarSign} label="Harus Dibayar" tone="emerald" value={formatCurrency(commissionTotals.netAmount)} helper="Bruto dikurangi potongan" />
         <MetricCard icon={AlertTriangle} label="Perlu Cek" tone="amber" value={`${summary.reviewItems || reviewRows.length || 0} ritasi`} helper={`${summary.noCommissionItems || report.noCommissionCount || 0} ritasi tanpa komisi`} />
         <MetricCard icon={BadgeCheck} label="Status" tone="emerald" pill value={<StatusPill status={report.status} />} helper={activeBatch ? `Diajukan ${formatDateTime(activeBatch.submittedAt)}` : 'Belum masuk batch Finance.'} />
       </section>
@@ -860,9 +864,9 @@ function DriverCommissionOperationalPage() {
                 <tr>
                   <th className="px-4 py-3">Sopir</th>
                   <th className="px-4 py-3 text-right">Job</th>
-                  <th className="px-4 py-3 text-right">Komisi Bruto</th>
+                  <th className="px-4 py-3 text-right">Sebelum Potongan</th>
                   <th className="px-4 py-3 text-right">Potongan Finance</th>
-                  <th className="px-4 py-3 text-right">Net Dibayar</th>
+                  <th className="px-4 py-3 text-right">Harus Dibayar</th>
                   <th className="px-4 py-3 text-right">Belum Dibayar</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Detail</th>

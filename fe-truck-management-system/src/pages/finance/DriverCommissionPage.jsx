@@ -20,7 +20,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
 import { downloadCsv } from '../../utils/csvExport';
-import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS } from '../../utils/driverCommissionCsv';
+import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS, summarizeDriverCommissions } from '../../utils/driverCommissionCsv';
 
 const emptyReport = {
   periodStart: '',
@@ -254,6 +254,7 @@ const metricCardTones = {
   slate: 'bg-slate-100 text-slate-600',
   sky: 'bg-sky-50 text-sky-600',
   amber: 'bg-amber-50 text-amber-600',
+  rose: 'bg-rose-50 text-rose-600',
   emerald: 'bg-emerald-50 text-emerald-600',
 };
 
@@ -393,7 +394,7 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
 
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-          <span className="block text-[10px] font-black uppercase text-slate-400">Komisi Bruto</span>
+          <span className="block text-[10px] font-black uppercase text-slate-400">Sebelum Potongan</span>
           <strong className="mt-0.5 block text-sm text-slate-800">{formatCurrency(grossAmount)}</strong>
         </div>
         <div className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2">
@@ -401,7 +402,7 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
           <strong className="mt-0.5 block text-sm text-rose-700">{formatCurrency(deductionAmount)}</strong>
         </div>
         <div className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2">
-          <span className="block text-[10px] font-black uppercase text-emerald-600">Net Dibayar</span>
+          <span className="block text-[10px] font-black uppercase text-emerald-600">Harus Dibayar</span>
           <strong className="mt-0.5 block text-sm text-emerald-700">{formatCurrency(netAmount)}</strong>
         </div>
       </div>
@@ -678,7 +679,7 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
                 <div>
                   <strong className="block">Ada potongan Finance untuk sopir ini</strong>
                   <p className="mt-0.5 font-semibold">
-                    Net dibayar {formatCurrency(netAmount)} dari bruto {formatCurrency(grossAmount)} setelah potongan {formatCurrency(deductionAmount)}. Catatan potongan akan terlihat di Operational.
+                    Harus dibayar {formatCurrency(netAmount)} dari nilai sebelum potongan {formatCurrency(grossAmount)}, setelah potongan {formatCurrency(deductionAmount)}. Catatan potongan akan terlihat di Operational.
                   </p>
                 </div>
               </div>
@@ -695,9 +696,9 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
               <span className="mt-1 block text-xs text-slate-500">{accountHolderLabel(accountSource)}</span>
             </div>
             <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-              <span className="block text-[11px] font-black uppercase text-emerald-600">Net Dibayar</span>
+              <span className="block text-[11px] font-black uppercase text-emerald-600">Harus Dibayar</span>
               <strong className="mt-1 block text-lg text-emerald-700">{formatCurrency(netAmount)}</strong>
-              {deductionAmount > 0 ? <span className="mt-0.5 block text-[11px] font-semibold text-rose-600">Bruto {formatCurrency(grossAmount)} - Potongan {formatCurrency(deductionAmount)}</span> : null}
+              {deductionAmount > 0 ? <span className="mt-0.5 block text-[11px] font-semibold text-rose-600">Sebelum potongan {formatCurrency(grossAmount)} - Potongan {formatCurrency(deductionAmount)}</span> : null}
             </div>
           </div>
 
@@ -775,8 +776,8 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
               <div className="mt-4">
                 {!alreadyPaid ? (
                   <p className="mb-2 text-xs font-bold text-emerald-700">
-                    Nominal yang harus ditransfer (Net): {formatCurrency(netAmount)}
-                    {deductionAmount > 0 ? <span className="font-medium text-slate-500"> (Bruto {formatCurrency(grossAmount)} - Potongan {formatCurrency(deductionAmount)})</span> : null}
+                    Nominal yang harus dibayarkan: {formatCurrency(netAmount)}
+                    {deductionAmount > 0 ? <span className="font-medium text-slate-500"> (Sebelum potongan {formatCurrency(grossAmount)} - Potongan {formatCurrency(deductionAmount)})</span> : null}
                   </p>
                 ) : null}
                 {pendingFile ? (
@@ -1113,6 +1114,7 @@ function DriverCommissionPage() {
   const canManageDeduction = hasPermission(user, 'finance.driver_commission.deduction.manage');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
+  const commissionTotals = useMemo(() => summarizeDriverCommissions(drivers), [drivers]);
   const dropdownBatches = useMemo(() => buildCommissionPeriodOptions(batches), [batches]);
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const selectedPayment = resolveSelectedPayment(selectedBatch, selectedDriver);
@@ -1278,7 +1280,7 @@ function DriverCommissionPage() {
     setSaving(true);
     try {
       const updated = await recordDriverCommissionDeduction(paymentId, payload);
-      notify({ title: 'Potongan komisi ditambahkan', message: `Net dibayar untuk sopir ini diperbarui.` });
+      notify({ title: 'Potongan komisi ditambahkan', message: 'Nilai yang harus dibayarkan kepada sopir sudah diperbarui.' });
       setSelectedBatch(updated);
       await loadData(updated.id);
     } catch (error) {
@@ -1292,7 +1294,7 @@ function DriverCommissionPage() {
     setSaving(true);
     try {
       const updated = await voidDriverCommissionDeduction(deductionId, reason);
-      notify({ title: 'Potongan komisi dibatalkan', message: 'Net dibayar untuk sopir ini diperbarui.' });
+      notify({ title: 'Potongan komisi dibatalkan', message: 'Nilai yang harus dibayarkan kepada sopir sudah diperbarui.' });
       setSelectedBatch(updated);
       await loadData(updated.id);
     } catch (error) {
@@ -1310,18 +1312,18 @@ function DriverCommissionPage() {
       filename: commissionReportFilename('komisi-sopir-finance', periodStart, periodEnd),
       meta: [
         { label: 'Sopir', value: `${summary.totalDrivers || 0}` },
-        { label: 'Job Komisi', value: `${summary.totalItems || 0}` },
-        { label: 'Total Komisi', value: formatCurrency(summary.totalAmount || 0) },
-        { label: 'Sudah Dibayar', value: formatCurrency(summary.paidAmount || 0) },
+        { label: 'Sebelum Potongan', value: formatCurrency(commissionTotals.grossAmount) },
+        { label: 'Potongan Finance', value: formatCurrency(commissionTotals.deductionAmount) },
+        { label: 'Harus Dibayar', value: formatCurrency(commissionTotals.netAmount) },
       ],
       columns: [
         { label: 'No', width: 0.4, value: (row) => row.reportNumber, align: 'center' },
         { label: 'Sopir', width: 1.45, value: (row) => row.driverName, bold: true },
         { label: 'Rekening', width: 1.45, value: (row) => row.account },
         { label: 'Job', width: 0.5, value: (row) => row.totalItems, align: 'center' },
-        { label: 'Bruto', width: 0.95, value: (row) => formatCurrency(row.grossAmount), align: 'right' },
+        { label: 'Sebelum Potongan', width: 0.95, value: (row) => formatCurrency(row.grossAmount), align: 'right' },
         { label: 'Potongan', width: 0.95, value: (row) => (row.deductionAmount ? formatCurrency(row.deductionAmount) : '-'), align: 'right' },
-        { label: 'Net', width: 0.95, value: (row) => formatCurrency(row.netAmount), align: 'right' },
+        { label: 'Harus Dibayar', width: 0.95, value: (row) => formatCurrency(row.netAmount), align: 'right' },
         { label: 'Status', width: 0.9, value: (row) => row.statusLabel },
         { label: 'Bukti', width: 0.65, value: (row) => row.proofStatus, align: 'center' },
       ],
@@ -1371,7 +1373,7 @@ function DriverCommissionPage() {
         </div>
       </header>
 
-      <section className="grid gap-3 md:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <MetricCard
           icon={CalendarDays}
           label="Periode"
@@ -1381,7 +1383,9 @@ function DriverCommissionPage() {
           onClick={() => setBatchPickerOpen(true)}
         />
         <MetricCard icon={UserRound} label="Sopir" tone="sky" value={`${summary.totalDrivers || 0} sopir`} helper={`${summary.totalItems || 0} job komisi`} />
-        <MetricCard icon={CircleDollarSign} label="Total Komisi" tone="amber" value={formatCurrency(summary.totalAmount || 0)} helper={`${formatCurrency(summary.paidAmount || 0)} sudah dibayar`} />
+        <MetricCard icon={CircleDollarSign} label="Sebelum Potongan" tone="amber" value={formatCurrency(commissionTotals.grossAmount)} helper="Total komisi bruto" />
+        <MetricCard icon={CircleDollarSign} label="Potongan Finance" tone="rose" value={formatCurrency(commissionTotals.deductionAmount)} helper="Total potongan aktif" />
+        <MetricCard icon={CircleDollarSign} label="Harus Dibayar" tone="emerald" value={formatCurrency(commissionTotals.netAmount)} helper="Nilai transfer setelah potongan" />
         <MetricCard icon={BadgeCheck} label="Status Batch" tone="emerald" pill value={<StatusPill status={selectedBatch?.status || report.status || ''} />} helper={selectedBatch ? `Diajukan ${formatDateTime(selectedBatch.submittedAt)}` : 'Belum ada pengajuan aktif.'} />
       </section>
 
@@ -1434,9 +1438,9 @@ function DriverCommissionPage() {
                   <th className="px-4 py-3">Sopir</th>
                   <th className="px-4 py-3">Rekening</th>
                   <th className="px-4 py-3 text-right">Job</th>
-                  <th className="px-4 py-3 text-right">Komisi Bruto</th>
+                  <th className="px-4 py-3 text-right">Sebelum Potongan</th>
                   <th className="px-4 py-3 text-right">Potongan Finance</th>
-                  <th className="px-4 py-3 text-right">Net Dibayar</th>
+                  <th className="px-4 py-3 text-right">Harus Dibayar</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-center">Detail</th>
                 </tr>
