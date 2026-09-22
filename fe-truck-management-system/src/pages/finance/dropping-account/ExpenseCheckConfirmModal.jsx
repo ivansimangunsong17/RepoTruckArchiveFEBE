@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import AmountField from '../shared/AmountField';
 import DetailField from '../shared/DetailField';
 import AttachmentUploadField from '../../../components/common/AttachmentUploadField';
@@ -11,6 +12,7 @@ function ExpenseCheckConfirmModal({
   busy,
   proofFile,
   proofError,
+  adminFeeError,
   adminFeeAmount,
   adminFeeNote,
   onProofSelect,
@@ -20,15 +22,37 @@ function ExpenseCheckConfirmModal({
   onClose,
   onConfirm,
 }) {
+  const proofFieldRef = useRef(null);
+  const adminFeeInputRef = useRef(null);
+  const proofRequired = Boolean(row && row.paymentStatus === 'sudah_dibayar' && !row.proofAttachment);
+  const proofReady = Boolean(row?.proofAttachment || proofFile);
+
+  useEffect(() => {
+    if (proofError) {
+      proofFieldRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      proofFieldRef.current?.querySelector('input[type="file"]')?.focus();
+      return;
+    }
+    if (adminFeeError) {
+      adminFeeInputRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      adminFeeInputRef.current?.focus();
+      return;
+    }
+    if (error) document.getElementById('expense-check-general-error')?.focus();
+  }, [adminFeeError, error, proofError]);
+
   if (!row) return null;
-  const proofRequired = row.paymentStatus === 'sudah_dibayar' && !row.proofAttachment;
+
   return (
     <FinanceActionModal
       busy={busy}
+      confirmDisabled={proofRequired && !proofReady}
       confirmLabel="Validasi Transaksi"
       description="Pastikan nominal, kategori, dan bukti pembayaran sudah sesuai. Bukti pembayaran diupload oleh Finance sekaligus saat validasi."
       onClose={onClose}
       onConfirm={onConfirm}
+      footerError={error}
+      footerErrorId="expense-check-general-error"
       title="Validasi Cek Biaya Lapangan"
       tone="approve"
       widthClassName="max-w-5xl"
@@ -49,19 +73,24 @@ function ExpenseCheckConfirmModal({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Bukti Pembayaran</span>
                 {row.proofAttachment ? (
-                  <DocumentLink
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-slate-50"
-                    file={row.proofAttachment}
-                    label="Lihat Bukti"
-                  />
+                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">Sudah diupload</span>
+                ) : proofFile ? (
+                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">Siap diupload</span>
                 ) : proofRequired ? (
                   <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700">Wajib upload</span>
                 ) : (
                   <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-500">Belum ada bukti</span>
                 )}
               </div>
+              {row.proofAttachment ? (
+                <DocumentLink
+                  className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-slate-50"
+                  file={row.proofAttachment}
+                  label="Lihat Bukti"
+                />
+              ) : null}
               {proofRequired ? (
-                <div className="mt-3">
+                <div className="mt-3" ref={proofFieldRef}>
                   <AttachmentUploadField
                     compact
                     id="finance-expense-proof-upload"
@@ -71,9 +100,16 @@ function ExpenseCheckConfirmModal({
                     title={proofFile?.name ? 'Ganti Bukti' : 'Upload Bukti Pembayaran'}
                     value={proofFile}
                   />
-                  <p className="mt-2 text-[11px] font-semibold leading-relaxed text-amber-700">
-                    Bukti pembayaran wajib diupload Finance sebelum transaksi bisa divalidasi.
-                  </p>
+                  {proofFile ? (
+                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-emerald-700">
+                      {proofFile.name}. Bukti akan disimpan saat transaksi divalidasi.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-amber-700">
+                      Bukti pembayaran wajib diupload Finance sebelum transaksi bisa divalidasi.
+                    </p>
+                  )}
+                  {proofError ? <p className="mt-2 text-xs font-semibold text-rose-700" role="alert">{proofError}</p> : null}
                 </div>
               ) : null}
             </div>
@@ -87,14 +123,18 @@ function ExpenseCheckConfirmModal({
                 <label className="block">
                   <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Biaya Admin Transfer</span>
                   <input
+                    aria-describedby={adminFeeError ? 'expense-check-admin-fee-error' : undefined}
+                    aria-invalid={Boolean(adminFeeError)}
                     className="mt-1 h-10 w-full rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400"
                     min="0"
                     placeholder="Contoh: 2500"
+                    ref={adminFeeInputRef}
                     type="number"
                     value={adminFeeAmount}
                     onWheel={(event) => event.currentTarget.blur()}
                     onChange={(event) => onAdminFeeAmountChange(event.target.value)}
                   />
+                  {adminFeeError ? <span className="mt-1 block text-xs font-semibold text-rose-700" id="expense-check-admin-fee-error" role="alert">{adminFeeError}</span> : null}
                 </label>
                 <label className="block">
                   <span className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Catatan Admin</span>
@@ -109,13 +149,11 @@ function ExpenseCheckConfirmModal({
             </div>
           </div>
 
-          {proofError ? <p className="lg:col-span-2 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{proofError}</p> : null}
           <div className="lg:col-span-2">
             <DetailField label="Keterangan" value={row.description} />
           </div>
         </div>
       </div>
-      {error ? <div className="alert error">{error}</div> : null}
     </FinanceActionModal>
   );
 }

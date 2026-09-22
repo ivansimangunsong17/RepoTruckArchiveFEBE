@@ -153,6 +153,30 @@ const invoiceSummary = {
   sentInvoiceDocuments: 2,
 };
 
+function mockPaidExpense(overrides = {}) {
+  fetchFinanceContainerJobExpenses.mockResolvedValue({
+    rows: [{
+      id: 'expense-1',
+      soNumber: 'SO-EXP-001',
+      containerNumber: 'CONT-EXP-001',
+      customer: 'PT Expense Test',
+      destination: 'Cikarang',
+      driverName: 'Driver Expense',
+      truck: 'B 2000 EX',
+      category: 'uang_admin_tf',
+      amount: 125000,
+      description: 'Uang Admin TF',
+      paymentStatus: 'sudah_dibayar',
+      paidAt: '2026-08-20',
+      financeCheckStatus: 'belum_dicek',
+      ...overrides,
+    }],
+    total: 1,
+    totalPages: 1,
+    summary: { belumDicek: 1, sudahDicek: 0, perluKlarifikasi: 0, dikoreksi: 0, totalAmount: 125000, pendingAmount: 125000 },
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuthState.user = { id: 'finance-1', role: 'finance', fullName: 'Fitri Finance' };
@@ -770,26 +794,7 @@ describe('FinanceWorkflowPage validation modals', () => {
 
   it('menampilkan dan menandai transaksi biaya D+1 sudah dicek', async () => {
     const user = userEvent.setup();
-    fetchFinanceContainerJobExpenses.mockResolvedValue({
-      rows: [{
-        id: 'expense-1',
-        soNumber: 'SO-EXP-001',
-        containerNumber: 'CONT-EXP-001',
-        customer: 'PT Expense Test',
-        destination: 'Cikarang',
-        driverName: 'Driver Expense',
-        truck: 'B 2000 EX',
-        category: 'uang_admin_tf',
-        amount: 125000,
-        description: 'Uang Admin TF',
-        paymentStatus: 'sudah_dibayar',
-        paidAt: '2026-08-20',
-        financeCheckStatus: 'belum_dicek',
-      }],
-      total: 1,
-      totalPages: 1,
-      summary: { belumDicek: 1, sudahDicek: 0, perluKlarifikasi: 0, dikoreksi: 0, totalAmount: 125000, pendingAmount: 125000 },
-    });
+    mockPaidExpense();
 
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
@@ -802,12 +807,16 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(await screen.findByText('Validasi Cek Biaya Lapangan')).toBeInTheDocument();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
-    expect(await screen.findByText('Bukti pembayaran wajib diupload Finance sebelum validasi.')).toBeInTheDocument();
+    expect(screen.getByText('Wajib upload')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
     const proofFile = new File(['proof'], 'bukti-transfer.pdf', { type: 'application/pdf' });
     await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), proofFile);
+    expect(screen.getByText('Siap diupload')).toBeInTheDocument();
+    expect(screen.queryByText('Wajib upload')).not.toBeInTheDocument();
+    expect(screen.getByText(/Bukti akan disimpan saat transaksi divalidasi/i)).toHaveTextContent('bukti-transfer.pdf');
+    expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
     await user.type(screen.getByLabelText(/biaya admin transfer/i), '2500');
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
 
@@ -820,6 +829,86 @@ describe('FinanceWorkflowPage validation modals', () => {
         adminFeeNote: '',
       });
     });
+  });
+
+  it('menampilkan error saldo di bawah biaya admin dan memfokuskan inputnya', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense();
+    const balanceError = new Error('Saldo tidak cukup.');
+    balanceError.payload = { error: { code: 'OPERATIONAL_FUND_BALANCE_INSUFFICIENT' } };
+    reconcileFinanceContainerJobExpense.mockRejectedValueOnce(balanceError);
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), new File(['proof'], 'bukti.pdf', { type: 'application/pdf' }));
+    const adminFeeInput = screen.getByLabelText(/biaya admin transfer/i);
+    await user.type(adminFeeInput, '2500');
+    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
+
+    expect(await screen.findByText(/Saldo rekening dropping tidak cukup untuk mencatat biaya admin transfer Rp\s*2\.500/i)).toBeInTheDocument();
+    expect(adminFeeInput).toHaveFocus();
+    expect(screen.queryByText(/upload bukti gagal/i)).not.toBeInTheDocument();
+  });
+
+  it('menampilkan error umum di footer modal yang tetap terlihat dan dapat difokuskan', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense();
+    reconcileFinanceContainerJobExpense.mockRejectedValueOnce(new Error('Server sedang bermasalah.'));
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), new File(['proof'], 'bukti.pdf', { type: 'application/pdf' }));
+    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
+
+    const generalError = await screen.findByRole('alert', { name: '' });
+    expect(generalError).toHaveTextContent('Server sedang bermasalah.');
+    expect(generalError).toHaveFocus();
+    expect(generalError.closest('.master-form-actions')).not.toBeNull();
+  });
+
+  it('mencegah submit ganda selama validasi transaksi berjalan', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense();
+    reconcileFinanceContainerJobExpense.mockReturnValue(new Promise(() => {}));
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), new File(['proof'], 'bukti.pdf', { type: 'application/pdf' }));
+    const form = screen.getByRole('button', { name: 'Validasi Transaksi' }).closest('form');
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: 'Memproses...' })).toBeDisabled();
+  });
+
+  it('berhasil memvalidasi dengan biaya admin nol dan bukti valid', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense();
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    const proofFile = new File(['proof'], 'bukti-nol.pdf', { type: 'application/pdf' });
+    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), proofFile);
+    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
+
+    await waitFor(() => expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', expect.objectContaining({
+      proofFile,
+      adminFeeAmount: 0,
+    })));
+  });
+
+  it('tetap kompatibel dengan bukti pembayaran yang sudah tersimpan', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense({
+      proofAttachment: { id: 'proof-existing', name: 'bukti-lama.pdf', path: 'proof-existing' },
+    });
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    expect(screen.getByText('Sudah diupload')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
+    expect(screen.queryByLabelText(/upload bukti pembayaran/i)).not.toBeInTheDocument();
   });
 
   it('menampilkan filter tanggal invoice di semua tab', async () => {
