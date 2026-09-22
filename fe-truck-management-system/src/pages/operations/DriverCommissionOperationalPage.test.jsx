@@ -211,6 +211,11 @@ describe('DriverCommissionOperationalPage', () => {
       rows: expect.arrayContaining([
         expect.objectContaining({ driverName: 'Rahmat', totalItems: 2 }),
       ]),
+      meta: expect.arrayContaining([
+        { label: 'Sebelum Potongan', value: expect.stringMatching(/Rp\s*225\.000/) },
+        { label: 'Potongan Finance', value: expect.stringMatching(/Rp\s*25\.000/) },
+        { label: 'Harus Dibayar', value: expect.stringMatching(/Rp\s*200\.000/) },
+      ]),
     }));
   });
 
@@ -223,9 +228,9 @@ describe('DriverCommissionOperationalPage', () => {
 
     expect(downloadCsv).toHaveBeenCalledWith(
       expect.stringContaining('komisi-sopir-operational-detail'),
-      expect.arrayContaining(['Nama Sopir', 'Nomor SO', 'Nomor Container', 'Komisi Ritasi']),
+      expect.arrayContaining(['Nama Sopir', 'Nomor SO', 'Nomor Container', 'Komisi Ritasi (Sebelum Potongan)', 'Total Harus Dibayar ke Sopir']),
       expect.arrayContaining([
-        expect.arrayContaining(['Rahmat', 'SO-001', 'CONT-001']),
+        expect.arrayContaining(['Rahmat', 'SO-001', 'CONT-001', 50000, 125000, 25000, 100000]),
         expect.arrayContaining(['Jajam', 'SO-002', 'CONT-002']),
       ]),
     );
@@ -393,9 +398,9 @@ describe('DriverCommissionOperationalPage', () => {
     await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
 
     const dialog = await screen.findByRole('dialog', { name: /Rahmat/i });
-    expect(within(dialog).getByText('Komisi Bruto')).toBeInTheDocument();
+    expect(within(dialog).getByText('Sebelum Potongan')).toBeInTheDocument();
     expect(within(dialog).getByText('Potongan Finance')).toBeInTheDocument();
-    expect(within(dialog).getByText('Net Dibayar')).toBeInTheDocument();
+    expect(within(dialog).getByText('Harus Dibayar')).toBeInTheDocument();
     expect(within(dialog).getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
     expect(within(dialog).getAllByText(/Rp\s*25\.000/i).length).toBeGreaterThan(0);
     expect(within(dialog).getAllByText(/Rp\s*100\.000/i).length).toBeGreaterThan(0);
