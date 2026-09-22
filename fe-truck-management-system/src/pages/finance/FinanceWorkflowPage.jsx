@@ -674,6 +674,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     expenseCheckConfirmRow,
     expenseCheckProofFile,
     expenseCheckProofError,
+    expenseCheckAdminFeeError,
+    expenseCheckGeneralError,
     expenseCheckAdminFeeAmount,
     expenseCheckAdminFeeNote,
     handleOperationalFundRequestFormChange,
@@ -953,10 +955,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
       />
       <ExpenseCheckConfirmModal
         busy={expenseReconciliationBusyId === expenseCheckConfirmId}
-        error={expenseReconciliationError}
+        error={expenseCheckGeneralError}
         onProofClear={clearExpenseCheckProofFile}
         onProofSelect={handleExpenseCheckProofSelect}
         adminFeeAmount={expenseCheckAdminFeeAmount}
+        adminFeeError={expenseCheckAdminFeeError}
         adminFeeNote={expenseCheckAdminFeeNote}
         onAdminFeeAmountChange={handleExpenseCheckAdminFeeAmountChange}
         onAdminFeeNoteChange={handleExpenseCheckAdminFeeNoteChange}

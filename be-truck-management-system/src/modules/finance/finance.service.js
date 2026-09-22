@@ -48,6 +48,7 @@ import {
 } from './finance.repository.js';
 import {
   createAttachment,
+  deleteAttachment,
   listAttachments,
   updateAttachment,
 } from '../attachments/attachments.service.js';
@@ -310,7 +311,7 @@ export function fetchContainerJobExpensesForReconciliation(query = {}) {
   });
 }
 
-export async function reconcileContainerJobExpense(id, payload = {}, actor) {
+export async function reconcileContainerJobExpense(id, payload = {}, actor, dependencies = {}) {
   const financeCheckStatus = String(payload.financeCheckStatus || payload.status || '').trim();
   if (!['belum_dicek', 'sudah_dicek', 'perlu_klarifikasi', 'dikoreksi'].includes(financeCheckStatus)) {
     const error = new Error('Status cek Finance biaya container job tidak valid.');
@@ -346,9 +347,13 @@ export async function reconcileContainerJobExpense(id, payload = {}, actor) {
     throw error;
   }
   const actorName = actor?.name || actor?.email || 'Finance';
+  const createAttachmentFn = dependencies.createAttachment || createAttachment;
+  const deleteAttachmentFn = dependencies.deleteAttachment || deleteAttachment;
+  const reconcileRecordFn = dependencies.reconcileRecord || reconcileContainerJobExpenseRecord;
   let proofAttachmentId = payload.proofAttachmentId || null;
+  let createdProofAttachment = null;
   if (!proofAttachmentId && payload.fileName && payload.fileBase64) {
-    const attachment = await createAttachment({
+    createdProofAttachment = await createAttachmentFn({
       fileName: payload.fileName,
       mimeType: payload.mimeType,
       fileSize: payload.fileSize,
@@ -359,16 +364,29 @@ export async function reconcileContainerJobExpense(id, payload = {}, actor) {
       uploadedByName: actorName,
       notes: payload.proofNote || payload.financeNote || 'Bukti pembayaran biaya rekening dropping',
     });
-    proofAttachmentId = attachment.id;
+    proofAttachmentId = createdProofAttachment.id;
   }
-  return reconcileContainerJobExpenseRecord(id, {
-    financeCheckStatus,
-    financeNote,
-    proofAttachmentId,
-    adminFeeAmount,
-    adminFeeNote,
-    actorName,
-  });
+  try {
+    return await reconcileRecordFn(id, {
+      financeCheckStatus,
+      financeNote,
+      proofAttachmentId,
+      adminFeeAmount,
+      adminFeeNote,
+      actorName,
+    });
+  } catch (error) {
+    if (createdProofAttachment?.id) {
+      await deleteAttachmentFn(
+        createdProofAttachment.id,
+        actor || { name: actorName },
+        'Rollback bukti pembayaran karena rekonsiliasi biaya gagal',
+      ).catch((cleanupError) => {
+        console.error(`Cleanup bukti rekonsiliasi gagal: ${cleanupError.message}`);
+      });
+    }
+    throw error;
+  }
 }
 
 export function approveRpuj(id, payload = {}, actor) {

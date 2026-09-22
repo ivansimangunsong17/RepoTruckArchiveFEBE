@@ -132,6 +132,59 @@ test('rekonsiliasi biaya container job memvalidasi status dan catatan klarifikas
   );
 });
 
+test('rekonsiliasi gagal membersihkan attachment bukti yang baru dibuat', async () => {
+  const deleted = [];
+  const balanceError = new Error('Saldo rekening dropping tidak cukup.');
+  balanceError.code = 'OPERATIONAL_FUND_BALANCE_INSUFFICIENT';
+  balanceError.statusCode = 409;
+
+  await assert.rejects(
+    () => reconcileContainerJobExpense('expense-1', {
+      financeCheckStatus: 'sudah_dicek',
+      adminFeeAmount: 2500,
+      fileName: 'bukti.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 5,
+      fileBase64: 'data:application/pdf;base64,cHJvb2Y=',
+    }, { name: 'Finance Test' }, {
+      createAttachment: async () => ({ id: 'attachment-new' }),
+      reconcileRecord: async () => { throw balanceError; },
+      deleteAttachment: async (id, actor, reason) => { deleted.push({ id, actor, reason }); },
+    }),
+    (error) => error === balanceError,
+  );
+
+  assert.equal(deleted.length, 1);
+  assert.equal(deleted[0].id, 'attachment-new');
+  assert.equal(deleted[0].actor.name, 'Finance Test');
+  assert.match(deleted[0].reason, /Rollback bukti pembayaran/);
+});
+
+test('rekonsiliasi biaya admin nol dengan bukti valid tidak menjalankan cleanup', async () => {
+  let cleanupCalled = false;
+  let reconciledPayload;
+  const result = await reconcileContainerJobExpense('expense-1', {
+    financeCheckStatus: 'sudah_dicek',
+    adminFeeAmount: 0,
+    fileName: 'bukti.pdf',
+    mimeType: 'application/pdf',
+    fileSize: 5,
+    fileBase64: 'data:application/pdf;base64,cHJvb2Y=',
+  }, { name: 'Finance Test' }, {
+    createAttachment: async () => ({ id: 'attachment-new' }),
+    reconcileRecord: async (_id, payload) => {
+      reconciledPayload = payload;
+      return { id: 'expense-1', financeCheckStatus: 'sudah_dicek' };
+    },
+    deleteAttachment: async () => { cleanupCalled = true; },
+  });
+
+  assert.equal(result.financeCheckStatus, 'sudah_dicek');
+  assert.equal(reconciledPayload.adminFeeAmount, 0);
+  assert.equal(reconciledPayload.proofAttachmentId, 'attachment-new');
+  assert.equal(cleanupCalled, false);
+});
+
 test('setiap container memiliki empat slot dokumen tanpa menggabungkan file yang sama', () => {
   const base = {
     id: 'attachment-1',
