@@ -82,8 +82,12 @@ function ujAmountExpression(cjAlias = 'cj', dlAlias = 'dl') {
     coalesce(
       nullif(${cjAlias}.uj_amount_snapshot, 0),
       case
-        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then nullif(${dlAlias}.uj_40ft, 0)
-        else nullif(${dlAlias}.uj_20ft, 0)
+        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then
+          nullif(${dlAlias}.uj_40ft, 0)
+          + case when lower(coalesce(${cjAlias}.container_type, '')) like '%reefer%' then 100000 else 0 end
+        else
+          nullif(${dlAlias}.uj_20ft, 0)
+          + case when lower(coalesce(${cjAlias}.container_type, '')) like '%reefer%' then 100000 else 0 end
       end
     )
   `;
@@ -3727,7 +3731,7 @@ async function getContainerJobExpenseReconciliationById(client, id) {
 
 export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, category, amount, payment_status, proof_attachment_id from container_job_expenses where id = $1', [id]);
+    const existing = await client.query('select id, category, amount, payment_status, proof_attachment_id, source, source_ref_id from container_job_expenses where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Transaksi biaya container job tidak ditemukan.');
       error.statusCode = 404;
@@ -3756,6 +3760,8 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
     const batchResult = await client.query(
       `
         select
+          oft.id as transaction_id,
+          oft.amount as transaction_amount,
           batch.id as batch_id,
           batch.status,
           oft.transaction_date,
@@ -3767,13 +3773,21 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
           oft.customer_name
         from operational_fund_transactions oft
         join operational_fund_batches batch on batch.id = oft.batch_id
-        where oft.container_job_expense_id = $1
+        where (
+            oft.container_job_expense_id = $1
+            or (
+              oft.container_job_expense_id is null
+              and oft.source = $2
+              and oft.source_ref_id = $3
+            )
+          )
           and oft.transaction_type = 'debit'
           and oft.status = 'posted'
+        order by case when oft.container_job_expense_id = $1 then 0 else 1 end, oft.created_at asc
         limit 1
         for update of batch
       `,
-      [id],
+      [id, existingExpense.source, existingExpense.source_ref_id],
     );
     if (batchResult.rows[0]?.status === 'closed') {
       const error = new Error('Batch rekening dropping biaya ini sudah ditutup. Status cek tidak bisa diubah lagi.');
@@ -3781,32 +3795,36 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
       error.code = 'OPERATIONAL_FUND_BATCH_CLOSED';
       throw error;
     }
+    if (payload.financeCheckStatus === 'sudah_dicek' && !batchResult.rows[0]?.transaction_id) {
+      const error = new Error('Transaksi UJ belum terhubung ke Catatan Saldo. Muat ulang data atau hubungi Admin sebelum validasi.');
+      error.statusCode = 409;
+      error.code = 'OPERATIONAL_FUND_TRANSACTION_NOT_FOUND';
+      throw error;
+    }
 
     if (payload.financeCheckStatus === 'sudah_dicek' && batchResult.rows[0]?.batch_id) {
-      const mainTransaction = await client.query(
-        `select id, amount from operational_fund_transactions
-         where container_job_expense_id = $1 and transaction_type = 'debit' and status = 'posted'
-         order by created_at asc limit 1 for update`,
-        [id],
-      );
+      const mainTransaction = batchResult.rows[0];
       const balance = await client.query(
         `select coalesce(sum(case when transaction_type = 'credit' then amount when transaction_type = 'debit' then -amount when transaction_type = 'adjustment' then amount else 0 end), 0)::numeric as balance
          from operational_fund_transactions where batch_id = $1 and status = 'posted'`,
         [batchResult.rows[0].batch_id],
       );
-      const existingAmount = Number(mainTransaction.rows[0]?.amount || 0);
+      const existingAmount = Number(mainTransaction.transaction_amount || 0);
       if (Number(balance.rows[0]?.balance || 0) + existingAmount < totalActualTransfer) {
         const error = new Error('Saldo rekening dropping tidak cukup untuk menyesuaikan total transfer aktual.');
         error.statusCode = 409;
         error.code = 'OPERATIONAL_FUND_BALANCE_INSUFFICIENT';
         throw error;
       }
-      if (mainTransaction.rows[0]) {
-        await client.query(
-          'update operational_fund_transactions set amount = $1, updated_by_name = $2, updated_at = now() where id = $3',
-          [totalActualTransfer, payload.actorName || 'Finance', mainTransaction.rows[0].id],
-        );
-      }
+      await client.query(
+        `update operational_fund_transactions
+         set container_job_expense_id = $1,
+             amount = $2,
+             updated_by_name = $3,
+             updated_at = now()
+         where id = $4`,
+        [id, totalActualTransfer, payload.actorName || 'Finance', mainTransaction.transaction_id],
+      );
     }
 
     await client.query(
