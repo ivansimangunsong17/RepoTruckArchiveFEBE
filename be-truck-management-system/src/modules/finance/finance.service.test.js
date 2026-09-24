@@ -4,10 +4,13 @@ import test from 'node:test';
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
 
 const {
+  addContainerJobExpenseTransferProof,
   approveFinanceCorrection,
   createOperationalFundRequest,
   depositOperationalFund,
+  editContainerJobExpenseTransferProof,
   reconcileContainerJobExpense,
+  removeContainerJobExpenseTransferProof,
   rejectFinanceCorrection,
   rejectOperationalFundRequest,
   rejectRpuj,
@@ -130,6 +133,128 @@ test('rekonsiliasi biaya container job memvalidasi status dan catatan klarifikas
     () => reconcileContainerJobExpense('expense-1', { financeCheckStatus: 'sudah_dicek', adminFeeNote: 'a'.repeat(501) }, { name: 'Finance Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_ADMIN_FEE_NOTE_TOO_LONG' && error.statusCode === 400,
   );
+});
+
+test('rekonsiliasi gagal membersihkan attachment bukti yang baru dibuat', async () => {
+  const deleted = [];
+  const balanceError = new Error('Saldo rekening dropping tidak cukup.');
+  balanceError.code = 'OPERATIONAL_FUND_BALANCE_INSUFFICIENT';
+  balanceError.statusCode = 409;
+
+  await assert.rejects(
+    () => reconcileContainerJobExpense('expense-1', {
+      financeCheckStatus: 'sudah_dicek',
+      adminFeeAmount: 2500,
+      fileName: 'bukti.pdf',
+      mimeType: 'application/pdf',
+      fileSize: 5,
+      fileBase64: 'data:application/pdf;base64,cHJvb2Y=',
+    }, { name: 'Finance Test' }, {
+      createAttachment: async () => ({ id: 'attachment-new' }),
+      reconcileRecord: async () => { throw balanceError; },
+      deleteAttachment: async (id, actor, reason) => { deleted.push({ id, actor, reason }); },
+    }),
+    (error) => error === balanceError,
+  );
+
+  assert.equal(deleted.length, 1);
+  assert.equal(deleted[0].id, 'attachment-new');
+  assert.equal(deleted[0].actor.name, 'Finance Test');
+  assert.match(deleted[0].reason, /Rollback bukti pembayaran/);
+});
+
+test('rekonsiliasi biaya admin nol dengan bukti valid tidak menjalankan cleanup', async () => {
+  let cleanupCalled = false;
+  let reconciledPayload;
+  const result = await reconcileContainerJobExpense('expense-1', {
+    financeCheckStatus: 'sudah_dicek',
+    adminFeeAmount: 0,
+    fileName: 'bukti.pdf',
+    mimeType: 'application/pdf',
+    fileSize: 5,
+    fileBase64: 'data:application/pdf;base64,cHJvb2Y=',
+  }, { name: 'Finance Test' }, {
+    createAttachment: async () => ({ id: 'attachment-new' }),
+    reconcileRecord: async (_id, payload) => {
+      reconciledPayload = payload;
+      return { id: 'expense-1', financeCheckStatus: 'sudah_dicek' };
+    },
+    deleteAttachment: async () => { cleanupCalled = true; },
+  });
+
+  assert.equal(result.financeCheckStatus, 'sudah_dicek');
+  assert.equal(reconciledPayload.adminFeeAmount, 0);
+  assert.equal(reconciledPayload.proofAttachmentId, 'attachment-new');
+  assert.equal(cleanupCalled, false);
+});
+
+test('bukti transfer UJ memvalidasi file, nominal, tanggal, dan panjang catatan', async () => {
+  await assert.rejects(
+    () => addContainerJobExpenseTransferProof('expense-1', { amount: 1000, transferDate: '2026-09-24' }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_FILE_REQUIRED',
+  );
+  await assert.rejects(
+    () => addContainerJobExpenseTransferProof('expense-1', { amount: 0, transferDate: '2026-09-24' }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_AMOUNT_INVALID',
+  );
+  await assert.rejects(
+    () => editContainerJobExpenseTransferProof('expense-1', 'proof-1', { amount: 1000, transferDate: '24-09-2026' }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_DATE_INVALID',
+  );
+  await assert.rejects(
+    () => editContainerJobExpenseTransferProof('expense-1', 'proof-1', {
+      amount: 1000,
+      transferDate: '2026-09-24',
+      note: 'a'.repeat(501),
+    }, { name: 'Finance Test' }),
+    (error) => error.code === 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_NOTE_TOO_LONG',
+  );
+});
+
+test('tambah bukti transfer UJ membersihkan attachment jika detail gagal disimpan', async () => {
+  const deleted = [];
+  const databaseError = new Error('Batch sudah ditutup.');
+  await assert.rejects(
+    () => addContainerJobExpenseTransferProof('expense-1', {
+      amount: 250000,
+      transferDate: '2026-09-24',
+      fileName: 'transfer.pdf',
+      fileBase64: 'data:application/pdf;base64,cHJvb2Y=',
+    }, { name: 'Finance Test' }, {
+      createAttachment: async () => ({ id: 'attachment-1' }),
+      createRecord: async () => { throw databaseError; },
+      deleteAttachment: async (id) => { deleted.push(id); },
+    }),
+    (error) => error === databaseError,
+  );
+  assert.deepEqual(deleted, ['attachment-1']);
+});
+
+test('edit bukti dapat mengganti file dan hapus bukti meneruskan attachment terkait', async () => {
+  let updatedAttachmentId;
+  const edited = await editContainerJobExpenseTransferProof('expense-1', 'proof-1', {
+    amount: 300000,
+    transferDate: '2026-09-24',
+    note: 'Transfer susulan',
+    fileName: 'susulan.pdf',
+    fileBase64: 'data:application/pdf;base64,cHJvb2Y=',
+  }, { name: 'Finance Test' }, {
+    updateRecord: async () => ({ id: 'proof-1', attachmentId: 'attachment-1', amount: 300000 }),
+    updateAttachment: async (id) => {
+      updatedAttachmentId = id;
+      return { id, name: 'susulan.pdf' };
+    },
+  });
+  assert.equal(updatedAttachmentId, 'attachment-1');
+  assert.equal(edited.attachment.name, 'susulan.pdf');
+
+  let deletedAttachmentId;
+  const deleted = await removeContainerJobExpenseTransferProof('expense-1', 'proof-1', { name: 'Finance Test' }, {
+    deleteRecord: async () => ({ id: 'proof-1', attachmentId: 'attachment-1', amount: 300000 }),
+    deleteAttachment: async (id) => { deletedAttachmentId = id; },
+  });
+  assert.equal(deleted.id, 'proof-1');
+  assert.equal(deletedAttachmentId, 'attachment-1');
 });
 
 test('setiap container memiliki empat slot dokumen tanpa menggabungkan file yang sama', () => {

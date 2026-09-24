@@ -1,5 +1,6 @@
 import {
   approveFinanceCorrectionController,
+  addContainerJobExpenseTransferProofController,
   approveRpujController,
   completedTripDetailController,
   completedTripsController,
@@ -12,6 +13,9 @@ import {
   financeDashboardController,
   closeOperationalFundBatchController,
   containerJobExpenseReconciliationController,
+  containerJobExpenseTransferProofsController,
+  deleteContainerJobExpenseTransferProofController,
+  editContainerJobExpenseTransferProofController,
   depositOperationalFundController,
   operationalFundRequestsController,
   operationalFundBatchesController,
@@ -22,6 +26,7 @@ import {
   invoicePaymentsController,
   orderVerificationsController,
   outstandingByCustomerController,
+  outstandingByCustomerExportController,
   outstandingOrdersController,
   approveOperationalFundRequestController,
   reconcileContainerJobExpenseController,
@@ -157,6 +162,30 @@ export const financeRoutes = [
     handler: reconcileContainerJobExpenseController,
   },
   {
+    method: 'GET',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs',
+    permission: 'finance.operational_fund.read',
+    handler: containerJobExpenseTransferProofsController,
+  },
+  {
+    method: 'POST',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs',
+    permission: 'finance.operational_fund.reconcile',
+    handler: addContainerJobExpenseTransferProofController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs/:proofId',
+    permission: 'finance.operational_fund.reconcile',
+    handler: editContainerJobExpenseTransferProofController,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs/:proofId',
+    permission: 'finance.operational_fund.reconcile',
+    handler: deleteContainerJobExpenseTransferProofController,
+  },
+  {
     method: 'PATCH',
     path: '/api/finance/rpuj-requests/:id/approve',
     permission: 'finance.rpuj_approval.approve',
@@ -191,6 +220,12 @@ export const financeRoutes = [
     path: '/api/finance/outstanding/by-customer',
     permission: 'finance.invoice.read',
     handler: outstandingByCustomerController,
+  },
+  {
+    method: 'GET',
+    path: '/api/finance/outstanding/by-customer/export',
+    permission: 'finance.invoice.read',
+    handler: outstandingByCustomerExportController,
   },
   {
     method: 'POST',

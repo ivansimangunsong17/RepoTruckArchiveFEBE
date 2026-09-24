@@ -3,6 +3,7 @@ import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js
 import { getContainerJobExpense } from '../container-jobs/container-jobs.service.js';
 import {
   approveFinanceCorrection,
+  addContainerJobExpenseTransferProof,
   approveRpuj,
   fetchCompletedTripDetail,
   fetchCompletedTrips,
@@ -15,6 +16,7 @@ import {
   fetchInvoiceOrderDetail,
   fetchInvoiceOrders,
   fetchContainerJobExpensesForReconciliation,
+  fetchContainerJobExpenseTransferProofs,
   closeOperationalFundBatch,
   fetchOperationalFundBatches,
   fetchOperationalFundRequests,
@@ -26,10 +28,13 @@ import {
   depositOperationalFund,
   fetchInvoicePayments,
   fetchCustomerOutstandingRollup,
+  exportCustomerOutstandingRollup,
   fetchSalesOrderOutstanding,
   rejectFinanceCorrection,
   approveOperationalFundRequest,
   reconcileContainerJobExpense,
+  editContainerJobExpenseTransferProof,
+  removeContainerJobExpenseTransferProof,
   recordCustomerInvoicePaymentAllocations,
   recordDebitNotePaymentForOrder,
   recordInvoicePayment,
@@ -335,6 +340,50 @@ export async function recordInvoicePaymentController(request, response) {
     },
   });
   sendSuccess(response, result, 'Pembayaran berhasil dicatat.');
+}
+
+export async function containerJobExpenseTransferProofsController(request, response) {
+  const result = await fetchContainerJobExpenseTransferProofs(request.params.id);
+  sendSuccess(response, result);
+}
+
+export async function addContainerJobExpenseTransferProofController(request, response) {
+  const result = await addContainerJobExpenseTransferProof(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_ADD_UJ_TRANSFER_PROOF', module: 'finance',
+    entityType: 'container_job_expense_transfer_proof', entityId: result.id, afterData: result,
+    metadata: { containerJobExpenseId: request.params.id, amount: result.amount, transferDate: result.transferDate },
+  });
+  sendSuccess(response, result, 'Bukti transfer UJ berhasil ditambahkan.', 201);
+}
+
+export async function editContainerJobExpenseTransferProofController(request, response) {
+  const result = await editContainerJobExpenseTransferProof(
+    request.params.id, request.params.proofId, request.body, request.user,
+  );
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_UPDATE_UJ_TRANSFER_PROOF', module: 'finance',
+    entityType: 'container_job_expense_transfer_proof', entityId: result.id, afterData: result,
+    metadata: { containerJobExpenseId: request.params.id, amount: result.amount, transferDate: result.transferDate },
+  });
+  sendSuccess(response, result, 'Bukti transfer UJ berhasil diperbarui.');
+}
+
+export async function deleteContainerJobExpenseTransferProofController(request, response) {
+  const result = await removeContainerJobExpenseTransferProof(
+    request.params.id, request.params.proofId, request.user,
+  );
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_DELETE_UJ_TRANSFER_PROOF', module: 'finance',
+    entityType: 'container_job_expense_transfer_proof', entityId: result.id, beforeData: result, afterData: null,
+    metadata: { containerJobExpenseId: request.params.id, amount: result.amount, transferDate: result.transferDate },
+  });
+  sendSuccess(response, result, 'Bukti transfer UJ berhasil dihapus.');
+}
+
+export async function outstandingByCustomerExportController(request, response) {
+  const result = await exportCustomerOutstandingRollup(request.query);
+  sendSuccess(response, result);
 }
 
 export async function recordCustomerInvoicePaymentController(request, response) {

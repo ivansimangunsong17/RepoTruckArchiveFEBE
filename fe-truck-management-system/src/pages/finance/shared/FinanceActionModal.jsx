@@ -8,6 +8,8 @@ function FinanceActionModal({
   busy,
   confirmDisabled = false,
   confirmLabel,
+  footerError = '',
+  footerErrorId = '',
   onClose,
   onConfirm,
   widthClassName = 'max-w-md',
@@ -35,6 +37,16 @@ function FinanceActionModal({
           </div>
           <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-5 py-4">{children}</div>
           <div className="master-form-actions">
+            {footerError ? (
+              <div
+                className="mr-auto rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700"
+                id={footerErrorId || undefined}
+                role="alert"
+                tabIndex={-1}
+              >
+                {footerError}
+              </div>
+            ) : null}
             <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Batal</button>
             <button className={`inline-flex min-h-[42px] items-center justify-center gap-2 rounded-[7px] px-4 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 ${toneClasses}`} disabled={busy || confirmDisabled} type="submit">
               {busy ? 'Memproses...' : confirmLabel}
