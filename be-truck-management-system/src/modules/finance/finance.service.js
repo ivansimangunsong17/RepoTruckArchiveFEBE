@@ -39,6 +39,10 @@ import {
   rejectFinanceCorrectionRequest,
   reopenOperationalFundBatchRecord,
   createManualRevenueLine,
+  createContainerJobExpenseTransferProofRecord,
+  deleteContainerJobExpenseTransferProofRecord,
+  listContainerJobExpenseTransferProofs,
+  updateContainerJobExpenseTransferProofRecord,
   updateDebitNoteNumber,
   updateInvoiceNumber,
   updateManualRevenueLine,
@@ -49,6 +53,7 @@ import {
 } from './finance.repository.js';
 import {
   createAttachment,
+  deleteAttachment,
   listAttachments,
   updateAttachment,
 } from '../attachments/attachments.service.js';
@@ -311,7 +316,7 @@ export function fetchContainerJobExpensesForReconciliation(query = {}) {
   });
 }
 
-export async function reconcileContainerJobExpense(id, payload = {}, actor) {
+export async function reconcileContainerJobExpense(id, payload = {}, actor, dependencies = {}) {
   const financeCheckStatus = String(payload.financeCheckStatus || payload.status || '').trim();
   if (!['belum_dicek', 'sudah_dicek', 'perlu_klarifikasi', 'dikoreksi'].includes(financeCheckStatus)) {
     const error = new Error('Status cek Finance biaya container job tidak valid.');
@@ -346,10 +351,21 @@ export async function reconcileContainerJobExpense(id, payload = {}, actor) {
     error.code = 'CONTAINER_JOB_EXPENSE_ADMIN_FEE_NOTE_TOO_LONG';
     throw error;
   }
+  const adjustmentNote = String(payload.adjustmentNote || payload.financeNote || '').trim();
+  if (adjustmentNote.length > 500) {
+    const error = new Error('Catatan penyesuaian maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_ADJUSTMENT_NOTE_TOO_LONG';
+    throw error;
+  }
   const actorName = actor?.name || actor?.email || 'Finance';
+  const createAttachmentFn = dependencies.createAttachment || createAttachment;
+  const deleteAttachmentFn = dependencies.deleteAttachment || deleteAttachment;
+  const reconcileRecordFn = dependencies.reconcileRecord || reconcileContainerJobExpenseRecord;
   let proofAttachmentId = payload.proofAttachmentId || null;
+  let createdProofAttachment = null;
   if (!proofAttachmentId && payload.fileName && payload.fileBase64) {
-    const attachment = await createAttachment({
+    createdProofAttachment = await createAttachmentFn({
       fileName: payload.fileName,
       mimeType: payload.mimeType,
       fileSize: payload.fileSize,
@@ -360,16 +376,119 @@ export async function reconcileContainerJobExpense(id, payload = {}, actor) {
       uploadedByName: actorName,
       notes: payload.proofNote || payload.financeNote || 'Bukti pembayaran biaya rekening dropping',
     });
-    proofAttachmentId = attachment.id;
+    proofAttachmentId = createdProofAttachment.id;
   }
-  return reconcileContainerJobExpenseRecord(id, {
-    financeCheckStatus,
-    financeNote,
-    proofAttachmentId,
-    adminFeeAmount,
-    adminFeeNote,
-    actorName,
+  try {
+    return await reconcileRecordFn(id, {
+      financeCheckStatus,
+      financeNote,
+      proofAttachmentId,
+      adminFeeAmount,
+      adminFeeNote,
+      adjustmentNote: adjustmentNote || null,
+      actorName,
+    });
+  } catch (error) {
+    if (createdProofAttachment?.id) {
+      await deleteAttachmentFn(
+        createdProofAttachment.id,
+        actor || { name: actorName },
+        'Rollback bukti pembayaran karena rekonsiliasi biaya gagal',
+      ).catch((cleanupError) => {
+        console.error(`Cleanup bukti rekonsiliasi gagal: ${cleanupError.message}`);
+      });
+    }
+    throw error;
+  }
+}
+
+function normalizeTransferProofPayload(payload = {}, { requireFile = false } = {}) {
+  const amount = Number(payload.amount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error('Nominal bukti transfer wajib lebih dari 0.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_AMOUNT_INVALID';
+    throw error;
+  }
+  const transferDate = String(payload.transferDate || payload.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(transferDate)) {
+    const error = new Error('Tanggal bukti transfer tidak valid.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_DATE_INVALID';
+    throw error;
+  }
+  const note = String(payload.note || '').trim();
+  if (note.length > 500) {
+    const error = new Error('Catatan bukti transfer maksimal 500 karakter.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_NOTE_TOO_LONG';
+    throw error;
+  }
+  if (requireFile && (!payload.fileName || !payload.fileBase64)) {
+    const error = new Error('File bukti transfer wajib diupload.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_FILE_REQUIRED';
+    throw error;
+  }
+  return { amount: Math.round(amount), transferDate, note };
+}
+
+export function fetchContainerJobExpenseTransferProofs(id) {
+  return listContainerJobExpenseTransferProofs(id);
+}
+
+export async function addContainerJobExpenseTransferProof(id, payload = {}, actor, dependencies = {}) {
+  const normalized = normalizeTransferProofPayload(payload, { requireFile: true });
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const createAttachmentFn = dependencies.createAttachment || createAttachment;
+  const createRecordFn = dependencies.createRecord || createContainerJobExpenseTransferProofRecord;
+  const deleteAttachmentFn = dependencies.deleteAttachment || deleteAttachment;
+  const attachment = await createAttachmentFn({
+    fileName: payload.fileName,
+    mimeType: payload.mimeType,
+    fileSize: payload.fileSize,
+    fileBase64: payload.fileBase64,
+    entityType: 'container_job_expense',
+    entityId: id,
+    category: 'expensePaymentProof',
+    uploadedByName: actorName,
+    notes: normalized.note || 'Bukti transfer UJ',
   });
+  try {
+    return await createRecordFn(id, { ...normalized, attachmentId: attachment.id, actorName });
+  } catch (error) {
+    await deleteAttachmentFn(attachment.id, actor || { name: actorName }, 'Rollback bukti transfer UJ gagal disimpan').catch(() => {});
+    throw error;
+  }
+}
+
+export async function editContainerJobExpenseTransferProof(id, proofId, payload = {}, actor, dependencies = {}) {
+  const normalized = normalizeTransferProofPayload(payload);
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const updateRecordFn = dependencies.updateRecord || updateContainerJobExpenseTransferProofRecord;
+  const updateAttachmentFn = dependencies.updateAttachment || updateAttachment;
+  const saved = await updateRecordFn(id, proofId, { ...normalized, actorName });
+  if (payload.fileBase64) {
+    const attachment = await updateAttachmentFn(saved.attachmentId, {
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      fileSize: payload.fileSize,
+      fileBase64: payload.fileBase64,
+      notes: normalized.note || 'Bukti transfer UJ',
+      uploadedByName: actorName,
+    });
+    return { ...saved, attachment };
+  }
+  return saved;
+}
+
+export async function removeContainerJobExpenseTransferProof(id, proofId, actor, dependencies = {}) {
+  const actorName = actor?.name || actor?.email || 'Finance';
+  const deleteRecordFn = dependencies.deleteRecord || deleteContainerJobExpenseTransferProofRecord;
+  const deleteAttachmentFn = dependencies.deleteAttachment || deleteAttachment;
+  const deleted = await deleteRecordFn(id, proofId, { actorName });
+  await deleteAttachmentFn(deleted.attachmentId, actor || { name: actorName }, 'Bukti transfer UJ dihapus oleh Finance');
+  return deleted;
 }
 
 export function approveRpuj(id, payload = {}, actor) {

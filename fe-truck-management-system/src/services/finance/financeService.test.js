@@ -1,23 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { httpClient } from '../api/httpClient';
 import {
+  addExpenseTransferProof,
   approveOperationalFundRequest,
   approveFinanceCorrection,
   closeOperationalFundBatch,
   createOperationalFundRequest,
   depositOperationalFund,
+  deleteExpenseTransferProof,
   fetchFinanceCorrections,
   fetchFinanceInvoiceCorrections,
   fetchFinanceContainerJobExpenses,
+  fetchExpenseTransferProofs,
   fetchFinanceOrderCorrections,
+  exportFinanceOutstandingByCustomer,
   fetchOperationalFundBatches,
   fetchOperationalFundRequests,
   fetchOperationalFundTransactions,
   reconcileFinanceContainerJobExpense,
+  recordFinanceCustomerPayment,
+  recordFinanceInvoicePayment,
   rejectOperationalFundRequest,
   rejectFinanceCorrection,
   requestFinanceInvoiceCorrection,
   requestFinanceOrderSoCorrection,
+  updateExpenseTransferProof,
 } from './financeService';
 
 vi.mock('../api/httpClient', () => ({
@@ -25,6 +32,7 @@ vi.mock('../api/httpClient', () => ({
     get: vi.fn(),
     post: vi.fn(),
     patch: vi.fn(),
+    delete: vi.fn(),
   },
 }));
 
@@ -33,9 +41,36 @@ beforeEach(() => {
   httpClient.get.mockResolvedValue({ rows: [] });
   httpClient.post.mockResolvedValue({});
   httpClient.patch.mockResolvedValue({});
+  httpClient.delete.mockResolvedValue({});
 });
 
 describe('financeService correction endpoints', () => {
+  it('mengirim semua filter ke endpoint export Customer Outstanding', async () => {
+    await exportFinanceOutstandingByCustomer({
+      query: 'Kimia',
+      agingBucket: 'overdue_all',
+      sortBy: 'customer_asc',
+      dateFrom: '2026-09-01',
+      dateTo: '2026-09-30',
+    });
+
+    expect(httpClient.get).toHaveBeenCalledWith('/finance/outstanding/by-customer/export?query=Kimia&agingBucket=overdue_all&sortBy=customer_asc&dateFrom=2026-09-01&dateTo=2026-09-30');
+  });
+
+  it('mencatat pembayaran invoice tanpa bukti transfer', async () => {
+    const invoicePayload = { amount: 400000, referenceNumber: 'TRF-MENYUSUL' };
+    const customerPayload = {
+      totalAmount: 400000,
+      allocations: [{ salesOrderId: 'so-1', amount: 400000 }],
+    };
+
+    await recordFinanceInvoicePayment('so-1', invoicePayload);
+    await recordFinanceCustomerPayment(customerPayload);
+
+    expect(httpClient.post).toHaveBeenCalledWith('/finance/invoices/so-1/payments', invoicePayload);
+    expect(httpClient.post).toHaveBeenCalledWith('/finance/customer-payments', customerPayload);
+  });
+
   it('memanggil endpoint saldo operasional harian', async () => {
     const payload = { requestDate: '2026-08-20', amount: 20000000, purpose: 'Dropping operasional harian' };
     await fetchOperationalFundBatches({ dateFrom: '2026-08-20', dateTo: '2026-08-20' });
@@ -89,6 +124,23 @@ describe('financeService correction endpoints', () => {
       fileSize: proofFile.size,
       fileBase64: expect.stringContaining('data:application/pdf;base64,'),
     }));
+  });
+
+  it('mengelola beberapa bukti transfer biaya container job', async () => {
+    const proofFile = new File(['proof'], 'bukti-susulan.pdf', { type: 'application/pdf' });
+    await fetchExpenseTransferProofs('expense-1');
+    await addExpenseTransferProof('expense-1', { amount: 100000, transferDate: '2026-09-24', note: 'Transfer awal', proofFile });
+    await updateExpenseTransferProof('expense-1', 'proof-1', { amount: 125000, transferDate: '2026-09-24', note: 'Nominal diperbaiki' });
+    await deleteExpenseTransferProof('expense-1', 'proof-1');
+
+    expect(httpClient.get).toHaveBeenCalledWith('/finance/container-job-expenses/expense-1/transfer-proofs');
+    expect(httpClient.post).toHaveBeenCalledWith('/finance/container-job-expenses/expense-1/transfer-proofs', expect.objectContaining({
+      amount: 100000, fileName: 'bukti-susulan.pdf', fileBase64: expect.stringContaining('data:application/pdf;base64,'),
+    }));
+    expect(httpClient.patch).toHaveBeenCalledWith('/finance/container-job-expenses/expense-1/transfer-proofs/proof-1', {
+      amount: 125000, transferDate: '2026-09-24', note: 'Nominal diperbaiki',
+    });
+    expect(httpClient.delete).toHaveBeenCalledWith('/finance/container-job-expenses/expense-1/transfer-proofs/proof-1');
   });
 
   it('memanggil endpoint history koreksi SO dan invoice', async () => {

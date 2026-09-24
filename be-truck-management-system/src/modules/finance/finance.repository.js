@@ -82,12 +82,8 @@ function ujAmountExpression(cjAlias = 'cj', dlAlias = 'dl') {
     coalesce(
       nullif(${cjAlias}.uj_amount_snapshot, 0),
       case
-        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then
-          nullif(${dlAlias}.uj_40ft, 0)
-          + case when lower(coalesce(${cjAlias}.container_type, '')) like '%reefer%' then 100000 else 0 end
-        else
-          nullif(${dlAlias}.uj_20ft, 0)
-          + case when lower(coalesce(${cjAlias}.container_type, '')) like '%reefer%' then 100000 else 0 end
+        when upper(replace(${cjAlias}.container_size, ' ', '')) = '40FT' then nullif(${dlAlias}.uj_40ft, 0)
+        else nullif(${dlAlias}.uj_20ft, 0)
       end
     )
   `;
@@ -2614,24 +2610,31 @@ function operationalFundBatchSelect() {
       count(oft.id) filter (
         where oft.transaction_type = 'debit'
           and oft.status = 'posted'
-          and expense.id is not null
-          and coalesce(expense.finance_check_status, 'belum_dicek') in ('belum_dicek', 'dikoreksi')
+          and coalesce(expense.id, admin_expense.id) is not null
+          and coalesce(expense.finance_check_status, admin_expense.finance_check_status, 'belum_dicek') in ('belum_dicek', 'dikoreksi')
       )::int as unchecked_count,
       count(oft.id) filter (
         where oft.transaction_type = 'debit'
           and oft.status = 'posted'
-          and expense.id is not null
-          and expense.finance_check_status = 'perlu_klarifikasi'
+          and coalesce(expense.id, admin_expense.id) is not null
+          and coalesce(expense.finance_check_status, admin_expense.finance_check_status) = 'perlu_klarifikasi'
       )::int as need_clarification_count,
       count(oft.id) filter (
         where oft.transaction_type = 'debit'
           and oft.status = 'posted'
-          and expense.id is not null
-          and expense.finance_check_status = 'sudah_dicek'
+          and coalesce(expense.id, admin_expense.id) is not null
+          and coalesce(expense.finance_check_status, admin_expense.finance_check_status) = 'sudah_dicek'
       )::int as checked_count
     from operational_fund_batches batch
     left join operational_fund_transactions oft on oft.batch_id = batch.id
     left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+    left join container_job_expenses admin_expense
+      on oft.source = 'container_job_expense_admin_fee'
+      and admin_expense.id = case
+        when oft.source_ref_id ~ '^admin-transfer:[0-9a-fA-F-]{36}$'
+          then split_part(oft.source_ref_id, ':', 2)::uuid
+        else null
+      end
   `;
 }
 
@@ -2737,11 +2740,18 @@ export async function closeOperationalFundBatchRecord(id, payload = {}) {
         select count(*)::int as total
         from operational_fund_transactions oft
         left join container_job_expenses expense on expense.id = oft.container_job_expense_id
+        left join container_job_expenses admin_expense
+          on oft.source = 'container_job_expense_admin_fee'
+          and admin_expense.id = case
+            when oft.source_ref_id ~ '^admin-transfer:[0-9a-fA-F-]{36}$'
+              then split_part(oft.source_ref_id, ':', 2)::uuid
+            else null
+          end
         where oft.batch_id = $1
           and oft.status = 'posted'
           and oft.transaction_type = 'debit'
-          and expense.id is not null
-          and coalesce(expense.finance_check_status, 'belum_dicek') <> 'sudah_dicek'
+          and coalesce(expense.id, admin_expense.id) is not null
+          and coalesce(expense.finance_check_status, admin_expense.finance_check_status, 'belum_dicek') <> 'sudah_dicek'
       `,
       [id],
     );
@@ -3540,6 +3550,13 @@ function mapFinanceContainerJobExpenseRow(row) {
     financeCheckedByName: row.finance_checked_by_name || '',
     financeCheckedAt: row.finance_checked_at || null,
     financeNote: row.finance_note || '',
+    adminFeeAmount: Number(row.admin_fee_amount || 0),
+    adjustmentNote: row.adjustment_note || '',
+    normalTransferAmount: Number(row.normal_transfer_amount || 0),
+    totalActualTransfer: Number(row.total_actual_transfer || 0),
+    adjustmentAmount: Number(row.adjustment_amount || 0),
+    transferProofCount: Number(row.transfer_proof_count || 0),
+    batchStatus: row.batch_status || 'open',
     source: row.source || 'manual',
     sourceRefId: row.source_ref_id || '',
     createdByName: row.created_by_name || '',
@@ -3568,11 +3585,33 @@ function containerJobExpenseReconciliationSelect() {
       proof.file_name as proof_file_name,
       proof.mime_type as proof_mime_type,
       proof.file_size as proof_file_size,
-      proof.storage_path as proof_storage_path
+      proof.storage_path as proof_storage_path,
+      greatest(expense.amount - coalesce(expense.admin_fee_amount, 0), 0) as normal_transfer_amount,
+      coalesce(transfer_proofs.total_actual_transfer, 0) as total_actual_transfer,
+      coalesce(transfer_proofs.total_actual_transfer, 0)
+        - greatest(expense.amount - coalesce(expense.admin_fee_amount, 0), 0) as adjustment_amount,
+      coalesce(transfer_proofs.transfer_proof_count, 0) as transfer_proof_count
+      , coalesce(expense_batch.batch_status, 'open') as batch_status
     from container_job_expenses expense
     join container_jobs cj on cj.id = expense.container_job_id
     join sales_orders so on so.id = cj.sales_order_id
     left join attachments proof on proof.id = expense.proof_attachment_id
+    left join lateral (
+      select coalesce(sum(item.amount), 0)::numeric as total_actual_transfer,
+             count(*)::int as transfer_proof_count
+      from container_job_expense_transfer_proofs item
+      where item.container_job_expense_id = expense.id
+    ) transfer_proofs on true
+    left join lateral (
+      select batch.status as batch_status
+      from operational_fund_transactions transaction
+      join operational_fund_batches batch on batch.id = transaction.batch_id
+      where transaction.container_job_expense_id = expense.id
+        and transaction.transaction_type = 'debit'
+        and transaction.status = 'posted'
+      order by transaction.created_at asc
+      limit 1
+    ) expense_batch on true
   `;
 }
 
@@ -3688,7 +3727,7 @@ async function getContainerJobExpenseReconciliationById(client, id) {
 
 export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, category, payment_status, proof_attachment_id from container_job_expenses where id = $1', [id]);
+    const existing = await client.query('select id, category, amount, payment_status, proof_attachment_id from container_job_expenses where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Transaksi biaya container job tidak ditemukan.');
       error.statusCode = 404;
@@ -3697,7 +3736,17 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
     }
     const existingExpense = existing.rows[0];
     const proofAttachmentId = payload.proofAttachmentId || existingExpense.proof_attachment_id || null;
-    if (payload.financeCheckStatus === 'sudah_dicek' && existingExpense.payment_status === 'sudah_dibayar' && !proofAttachmentId) {
+    const proofSummary = await client.query(
+      `select coalesce(sum(amount), 0)::numeric as total_actual_transfer, count(*)::int as proof_count
+       from container_job_expense_transfer_proofs where container_job_expense_id = $1`,
+      [id],
+    );
+    const totalActualTransfer = Number(proofSummary.rows[0]?.total_actual_transfer || 0);
+    const transferProofCount = Number(proofSummary.rows[0]?.proof_count || 0);
+    const adminFeeAmount = Number(payload.adminFeeAmount || 0);
+    const normalTransferAmount = Math.max(0, Number(existingExpense.amount || 0) - adminFeeAmount);
+    const adjustmentAmount = totalActualTransfer - normalTransferAmount;
+    if (payload.financeCheckStatus === 'sudah_dicek' && existingExpense.payment_status === 'sudah_dibayar' && transferProofCount === 0) {
       const error = new Error('Bukti pembayaran wajib diupload Finance sebelum transaksi ditandai sudah dicek.');
       error.statusCode = 400;
       error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';
@@ -3733,6 +3782,33 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
       throw error;
     }
 
+    if (payload.financeCheckStatus === 'sudah_dicek' && batchResult.rows[0]?.batch_id) {
+      const mainTransaction = await client.query(
+        `select id, amount from operational_fund_transactions
+         where container_job_expense_id = $1 and transaction_type = 'debit' and status = 'posted'
+         order by created_at asc limit 1 for update`,
+        [id],
+      );
+      const balance = await client.query(
+        `select coalesce(sum(case when transaction_type = 'credit' then amount when transaction_type = 'debit' then -amount when transaction_type = 'adjustment' then amount else 0 end), 0)::numeric as balance
+         from operational_fund_transactions where batch_id = $1 and status = 'posted'`,
+        [batchResult.rows[0].batch_id],
+      );
+      const existingAmount = Number(mainTransaction.rows[0]?.amount || 0);
+      if (Number(balance.rows[0]?.balance || 0) + existingAmount < totalActualTransfer) {
+        const error = new Error('Saldo rekening dropping tidak cukup untuk menyesuaikan total transfer aktual.');
+        error.statusCode = 409;
+        error.code = 'OPERATIONAL_FUND_BALANCE_INSUFFICIENT';
+        throw error;
+      }
+      if (mainTransaction.rows[0]) {
+        await client.query(
+          'update operational_fund_transactions set amount = $1, updated_by_name = $2, updated_at = now() where id = $3',
+          [totalActualTransfer, payload.actorName || 'Finance', mainTransaction.rows[0].id],
+        );
+      }
+    }
+
     await client.query(
       `
         update container_job_expenses
@@ -3741,15 +3817,19 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
             finance_checked_at = now(),
             finance_note = $3,
             proof_attachment_id = coalesce($4, proof_attachment_id),
+            admin_fee_amount = $5,
+            adjustment_note = $6,
             updated_by_name = $2,
             updated_at = now()
-        where id = $5
+        where id = $7
       `,
       [
         payload.financeCheckStatus,
         payload.actorName || 'Finance',
         payload.financeNote || null,
         payload.proofAttachmentId || null,
+        Number(payload.adminFeeAmount || 0),
+        payload.adjustmentNote || null,
         id,
       ],
     );
@@ -3767,7 +3847,6 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
         [payload.proofAttachmentId, payload.actorName || 'Finance', id],
       );
     }
-    const adminFeeAmount = Number(payload.adminFeeAmount || 0);
     if (payload.financeCheckStatus === 'sudah_dicek' && adminFeeAmount > 0) {
       const sourceRefId = `admin-transfer:${id}`;
       const existingAdminFee = await client.query(
@@ -3872,6 +3951,186 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
     }
 
     return getContainerJobExpenseReconciliationById(client, id);
+  });
+}
+
+function mapContainerJobExpenseTransferProof(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    containerJobExpenseId: row.container_job_expense_id,
+    attachmentId: row.attachment_id,
+    amount: Number(row.amount || 0),
+    transferDate: row.transfer_date,
+    note: row.note || '',
+    createdByName: row.created_by_name || '',
+    updatedByName: row.updated_by_name || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    attachment: {
+      id: row.attachment_id,
+      name: row.file_name || '',
+      size: row.file_size == null ? 0 : Number(row.file_size),
+      type: row.mime_type || '',
+      path: row.attachment_id,
+      storagePath: row.storage_path || '',
+    },
+  };
+}
+
+const containerJobExpenseTransferProofSelect = `
+  select
+    proof.*,
+    attachment.file_name,
+    attachment.file_size,
+    attachment.mime_type,
+    attachment.storage_path
+  from container_job_expense_transfer_proofs proof
+  join attachments attachment on attachment.id = proof.attachment_id
+`;
+
+async function lockOpenExpenseBatch(client, expenseId) {
+  const result = await client.query(
+    `
+      select expense.id, batch.status as batch_status
+      from container_job_expenses expense
+      left join operational_fund_transactions transaction
+        on transaction.container_job_expense_id = expense.id
+        and transaction.transaction_type = 'debit'
+        and transaction.status = 'posted'
+      left join operational_fund_batches batch on batch.id = transaction.batch_id
+      where expense.id = $1
+      order by transaction.created_at asc
+      limit 1
+      for update of expense
+    `,
+    [expenseId],
+  );
+  if (!result.rows[0]) {
+    const error = new Error('Transaksi biaya container job tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
+    throw error;
+  }
+  if (result.rows[0].batch_status === 'closed') {
+    const error = new Error('Batch rekening dropping biaya ini sudah ditutup. Bukti transfer tidak dapat diubah.');
+    error.statusCode = 409;
+    error.code = 'OPERATIONAL_FUND_BATCH_CLOSED';
+    throw error;
+  }
+}
+
+export async function listContainerJobExpenseTransferProofs(id) {
+  const expense = await query('select id from container_job_expenses where id = $1', [id]);
+  if (!expense.rows[0]) {
+    const error = new Error('Transaksi biaya container job tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'CONTAINER_JOB_EXPENSE_NOT_FOUND';
+    throw error;
+  }
+  const result = await query(
+    `${containerJobExpenseTransferProofSelect}
+     where proof.container_job_expense_id = $1
+     order by proof.transfer_date asc, proof.created_at asc`,
+    [id],
+  );
+  return result.rows.map(mapContainerJobExpenseTransferProof);
+}
+
+export async function createContainerJobExpenseTransferProofRecord(id, payload = {}) {
+  return withTransaction(async (client) => {
+    await lockOpenExpenseBatch(client, id);
+    const result = await client.query(
+      `
+        insert into container_job_expense_transfer_proofs (
+          container_job_expense_id, attachment_id, amount, transfer_date, note,
+          created_by_name, updated_by_name
+        )
+        values ($1, $2, $3, $4, $5, $6, $6)
+        returning id
+      `,
+      [id, payload.attachmentId, payload.amount, payload.transferDate, payload.note || null, payload.actorName],
+    );
+    await client.query(
+      `update container_job_expenses
+       set proof_attachment_id = coalesce(proof_attachment_id, $1),
+           updated_by_name = $2, updated_at = now()
+       where id = $3`,
+      [payload.attachmentId, payload.actorName, id],
+    );
+    const saved = await client.query(
+      `${containerJobExpenseTransferProofSelect} where proof.id = $1`,
+      [result.rows[0].id],
+    );
+    return mapContainerJobExpenseTransferProof(saved.rows[0]);
+  });
+}
+
+export async function updateContainerJobExpenseTransferProofRecord(id, proofId, payload = {}) {
+  return withTransaction(async (client) => {
+    await lockOpenExpenseBatch(client, id);
+    const result = await client.query(
+      `
+        update container_job_expense_transfer_proofs
+        set amount = $1, transfer_date = $2, note = $3,
+            updated_by_name = $4, updated_at = now()
+        where id = $5 and container_job_expense_id = $6
+        returning id
+      `,
+      [payload.amount, payload.transferDate, payload.note || null, payload.actorName, proofId, id],
+    );
+    if (!result.rows[0]) {
+      const error = new Error('Bukti transfer UJ tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_NOT_FOUND';
+      throw error;
+    }
+    if (payload.financeCheckStatus === 'sudah_dicek' && adjustmentAmount !== 0 && !String(payload.adjustmentNote || '').trim()) {
+      const error = new Error('Catatan penyesuaian wajib diisi karena total aktual berbeda dari nominal normal.');
+      error.statusCode = 400;
+      error.code = 'CONTAINER_JOB_EXPENSE_ADJUSTMENT_NOTE_REQUIRED';
+      throw error;
+    }
+    const saved = await client.query(
+      `${containerJobExpenseTransferProofSelect} where proof.id = $1`,
+      [proofId],
+    );
+    return mapContainerJobExpenseTransferProof(saved.rows[0]);
+  });
+}
+
+export async function deleteContainerJobExpenseTransferProofRecord(id, proofId, payload = {}) {
+  return withTransaction(async (client) => {
+    await lockOpenExpenseBatch(client, id);
+    const result = await client.query(
+      `delete from container_job_expense_transfer_proofs
+       where id = $1 and container_job_expense_id = $2
+       returning *`,
+      [proofId, id],
+    );
+    if (!result.rows[0]) {
+      const error = new Error('Bukti transfer UJ tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'CONTAINER_JOB_EXPENSE_TRANSFER_PROOF_NOT_FOUND';
+      throw error;
+    }
+    await client.query(
+      `
+        update container_job_expenses expense
+        set proof_attachment_id = (
+              select proof.attachment_id
+              from container_job_expense_transfer_proofs proof
+              where proof.container_job_expense_id = expense.id
+              order by proof.transfer_date asc, proof.created_at asc
+              limit 1
+            ),
+            updated_by_name = $1,
+            updated_at = now()
+        where expense.id = $2 and expense.proof_attachment_id = $3
+      `,
+      [payload.actorName, id, result.rows[0].attachment_id],
+    );
+    return mapContainerJobExpenseTransferProof(result.rows[0]);
   });
 }
 
@@ -4129,16 +4388,13 @@ export function outstandingOrdersCte() {
     ),
     -- Difilter dari sisa outstanding yang dihitung ulang (bukan dari billing_status='lunas' yang
     -- tersimpan), karena billing_amount dihitung live dari finance_rows dan bisa berubah setelah
-    -- sebuah SO ditandai lunas (mis. koreksi revenue). Data sebelum Agustus 2026 yang belum punya
-    -- nomor invoice dianggap sudah tidak perlu masuk outstanding OTS.
+    -- sebuah SO ditandai lunas (mis. koreksi revenue). Rentang trip_date (kalau ada) difilter di
+    -- buildOutstandingFilters/buildCustomerOutstandingFilters lewat whereSql di luar CTE ini, bukan
+    -- di sini, supaya default-nya menampilkan semua bulan outstanding.
     outstanding_orders as (
       select *
       from outstanding_orders_all
       where outstanding_amount > 0
-        and (
-          trip_date >= date '2026-08-01'
-          or nullif(btrim(invoice_number), '') is not null
-        )
     )
   `;
 }

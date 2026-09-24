@@ -122,6 +122,49 @@ export async function reconcileFinanceContainerJobExpense(id, payload = {}) {
   });
 }
 
+export function fetchExpenseTransferProofs(id) {
+  return httpClient.get(`/finance/container-job-expenses/${encodeURIComponent(id)}/transfer-proofs`);
+}
+
+async function buildExpenseTransferProofPayload(payload = {}, requireFile = false) {
+  const proofFile = getRawFile(payload.proofFile);
+  if (requireFile && !proofFile) throw new Error('File bukti transfer wajib dipilih.');
+  if (!proofFile) return { amount: payload.amount, transferDate: payload.transferDate, note: payload.note };
+  const uploadFile = proofFile.type?.startsWith('image/') ? await compressImageFile(proofFile) : proofFile;
+  const validationError = validateArchiveFile(uploadFile, { label: 'Bukti transfer' })
+    || validateFinalUploadFile(uploadFile, { label: 'Bukti transfer' });
+  if (validationError) throw new Error(validationError);
+  return {
+    amount: payload.amount,
+    transferDate: payload.transferDate,
+    note: payload.note,
+    fileName: uploadFile.name,
+    mimeType: uploadFile.type || 'application/octet-stream',
+    fileSize: uploadFile.size,
+    fileBase64: await readFileAsDataUrl(uploadFile),
+  };
+}
+
+export async function addExpenseTransferProof(id, payload = {}) {
+  return httpClient.post(
+    `/finance/container-job-expenses/${encodeURIComponent(id)}/transfer-proofs`,
+    await buildExpenseTransferProofPayload(payload, true),
+  );
+}
+
+export async function updateExpenseTransferProof(id, proofId, payload = {}) {
+  return httpClient.patch(
+    `/finance/container-job-expenses/${encodeURIComponent(id)}/transfer-proofs/${encodeURIComponent(proofId)}`,
+    await buildExpenseTransferProofPayload(payload),
+  );
+}
+
+export function deleteExpenseTransferProof(id, proofId) {
+  return httpClient.delete(
+    `/finance/container-job-expenses/${encodeURIComponent(id)}/transfer-proofs/${encodeURIComponent(proofId)}`,
+  );
+}
+
 export function approveFinanceRpuj(id) {
   return httpClient.patch(`/finance/rpuj-requests/${encodeURIComponent(id)}/approve`, {});
 }

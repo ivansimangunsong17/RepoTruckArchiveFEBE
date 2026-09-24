@@ -224,6 +224,13 @@ function normalizeExpenseReconciliationRow(row = {}) {
     financeCheckedByName: row.financeCheckedByName || row.finance_checked_by_name || '',
     financeCheckedAt: formatDisplayDate(row.financeCheckedAt || row.finance_checked_at),
     financeNote: row.financeNote || row.finance_note || '',
+    adminFeeAmount: Number(row.adminFeeAmount || row.admin_fee_amount || 0),
+    adjustmentNote: row.adjustmentNote || row.adjustment_note || '',
+    normalTransferAmount: Number(row.normalTransferAmount || row.normal_transfer_amount || 0),
+    totalActualTransfer: Number(row.totalActualTransfer || row.total_actual_transfer || 0),
+    adjustmentAmount: Number(row.adjustmentAmount || row.adjustment_amount || 0),
+    transferProofCount: Number(row.transferProofCount || row.transfer_proof_count || 0),
+    batchStatus: row.batchStatus || row.batch_status || 'open',
     createdByName: row.createdByName || row.created_by_name || '',
     createdAt: formatDisplayDate(row.createdAt || row.created_at),
   };
