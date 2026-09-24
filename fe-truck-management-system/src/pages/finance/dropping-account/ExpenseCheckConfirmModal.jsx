@@ -8,7 +8,7 @@ import DetailField from '../shared/DetailField';
 import FinanceActionModal from '../shared/FinanceActionModal';
 import { expenseCategoryLabels, readableLabel } from './operationalFundUtils';
 
-const emptyForm = () => ({ amount: '', transferDate: new Date().toISOString().slice(0, 10), note: '', proofFile: null });
+const emptyForm = (amount = '') => ({ amount, transferDate: new Date().toISOString().slice(0, 10), note: '', proofFile: null });
 
 function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmount, adminFeeNote, adjustmentNote, onAdminFeeAmountChange, onAdminFeeNoteChange, onAdjustmentNoteChange, onProofsChange, onClose, onConfirm }) {
   const [proofs, setProofs] = useState([]);
@@ -31,6 +31,11 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
       const result = await fetchExpenseTransferProofs(row.id);
       const next = Array.isArray(result) ? result : (result?.rows || []);
       setProofs(next);
+      setForm((current) => (
+        !editingId && !current.proofFile
+          ? emptyForm(next.length === 0 && normalAmount > 0 ? String(normalAmount) : '')
+          : current
+      ));
       onProofsChange?.(next);
       setProofError('');
     } catch (loadError) {
@@ -43,7 +48,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
   useEffect(() => {
     setProofs([]);
     setEditingId('');
-    setForm(emptyForm());
+    setForm(emptyForm(normalAmount > 0 ? String(normalAmount) : ''));
     if (row?.id) loadProofs();
   }, [row?.id]);
 
@@ -143,7 +148,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
         <section className={`rounded-md border border-slate-200 bg-white p-4 ${locked ? 'pointer-events-none opacity-50' : ''}`}>
           <div className="mb-3 flex justify-between"><div><h3 className="text-sm font-black text-slate-950">{editingId ? 'Edit Bukti Transfer' : 'Form Bukti Transfer'}</h3><p className="mt-0.5 text-xs font-medium text-slate-500">Isi data lalu simpan. Form akan kosong kembali untuk bukti berikutnya.</p></div>{editingId ? <button className="flex items-center gap-1 text-xs font-bold text-slate-600" onClick={cancelEdit} type="button"><X size={14} /> Batal Edit</button> : null}</div>
           <div className="master-form-grid">
-            <label className="master-field span-quarter"><span>Nominal Transfer <em>Wajib</em></span><input aria-label="Nominal bukti transfer" min="1" placeholder="Contoh: 740000" type="number" value={form.amount} onChange={(event) => change('amount', event.target.value)} /></label>
+            <label className="master-field span-quarter"><span>Nominal Transfer <em>Wajib</em></span><input aria-label="Nominal bukti transfer" min="1" placeholder="Contoh: 740000" type="number" value={form.amount} onChange={(event) => change('amount', event.target.value)} /><small>{proofs.length === 0 && !editingId ? 'Otomatis mengikuti nominal normal. Ubah hanya jika transfer aktual berbeda.' : 'Isi sesuai nominal pada bukti transfer ini.'}</small></label>
             <label className="master-field span-quarter"><span>Tanggal Transfer <em>Wajib</em></span><input aria-label="Tanggal bukti transfer" type="date" value={form.transferDate} onChange={(event) => change('transferDate', event.target.value)} /></label>
             <label className="master-field"><span>Catatan Bukti</span><input aria-label="Catatan bukti transfer" maxLength={500} placeholder="Opsional" value={form.note} onChange={(event) => change('note', event.target.value)} /></label>
           </div>
