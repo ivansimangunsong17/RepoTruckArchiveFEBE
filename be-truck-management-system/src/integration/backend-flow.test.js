@@ -7491,10 +7491,10 @@ if (!hasDatabase) {
     // Bagian B: ritasi susulan untuk tanggal yang batch harian (rekening dropping) DAN batch
     // mingguan (komisi sopir) -nya SUDAH closed/paid sebelum ritasi ini sempat dicatat sama sekali.
     const tripDate = '2099-05-18';
-    // Periode komisi mingguan sistem ini WAJIB Sabtu-Jumat (lihat isCommissionWeekPeriod) --
+    // Periode komisi mingguan sistem ini WAJIB Minggu-Sabtu (lihat isCommissionWeekPeriod) --
     // tripDate di atas (Senin) sengaja jatuh di dalam rentang oldCommissionPeriod di bawah.
-    const oldCommissionPeriod = { periodStart: '2099-05-16', periodEnd: '2099-05-22' };
-    const currentCommissionPeriod = { periodStart: '2099-06-06', periodEnd: '2099-06-12' };
+    const oldCommissionPeriod = { periodStart: '2099-05-17', periodEnd: '2099-05-23' };
+    const currentCommissionPeriod = { periodStart: '2099-06-07', periodEnd: '2099-06-13' };
 
     await resetOperationalFundBatch(tripDate);
     await query(

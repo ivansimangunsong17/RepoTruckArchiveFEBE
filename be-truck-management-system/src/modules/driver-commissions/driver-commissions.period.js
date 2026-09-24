@@ -42,9 +42,9 @@ export function buildCommissionPeriod(dateKey = currentJakartaDateKey()) {
   }
 
   const day = date.getUTCDay();
-  const daysSinceSaturday = (day - 6 + 7) % 7;
+  const daysSinceSunday = day;
   const start = new Date(date);
-  start.setUTCDate(start.getUTCDate() - daysSinceSaturday);
+  start.setUTCDate(start.getUTCDate() - daysSinceSunday);
 
   const end = new Date(start);
   end.setUTCDate(end.getUTCDate() + 6);

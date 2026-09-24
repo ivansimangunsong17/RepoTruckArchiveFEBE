@@ -379,7 +379,7 @@ describe('DriverCommissionOperationalPage', () => {
 
     expect(screen.queryByLabelText('Dari')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Sampai')).not.toBeInTheDocument();
-    expect(screen.getByText(/otomatis sabtu sampai jumat/i)).toBeInTheDocument();
+    expect(screen.getByText(/otomatis minggu sampai sabtu/i)).toBeInTheDocument();
   });
 
   it('menampilkan badge "Ada Potongan Finance" untuk sopir yang komisinya dipotong', async () => {

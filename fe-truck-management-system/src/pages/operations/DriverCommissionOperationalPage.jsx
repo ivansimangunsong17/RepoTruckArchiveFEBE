@@ -76,7 +76,7 @@ function addDateKeyDays(value, days) {
 
 function isWeeklyCommissionPeriod(periodStart, periodEnd) {
   const start = parseDateKeyUtc(periodStart);
-  return Boolean(start && start.getUTCDay() === 6 && addDateKeyDays(periodStart, 6) === periodEnd);
+  return Boolean(start && start.getUTCDay() === 0 && addDateKeyDays(periodStart, 6) === periodEnd);
 }
 
 function addDays(date, days) {
@@ -88,23 +88,23 @@ function addDays(date, days) {
 function defaultCompletedCommissionPeriod() {
   const today = new Date();
   const day = today.getDay();
-  const daysSinceSaturday = (day - 6 + 7) % 7;
-  const currentSaturday = addDays(today, -daysSinceSaturday);
-  const previousSaturday = addDays(currentSaturday, -7);
+  const daysSinceSunday = day;
+  const currentSunday = addDays(today, -daysSinceSunday);
+  const previousSunday = addDays(currentSunday, -7);
   return {
-    periodStart: dateKey(previousSaturday),
-    periodEnd: dateKey(addDays(previousSaturday, 6)),
+    periodStart: dateKey(previousSunday),
+    periodEnd: dateKey(addDays(previousSunday, 6)),
   };
 }
 
 function currentCommissionPeriod() {
   const today = new Date();
   const day = today.getDay();
-  const daysSinceSaturday = (day - 6 + 7) % 7;
-  const currentSaturday = addDays(today, -daysSinceSaturday);
+  const daysSinceSunday = day;
+  const currentSunday = addDays(today, -daysSinceSunday);
   return {
-    periodStart: dateKey(currentSaturday),
-    periodEnd: dateKey(addDays(currentSaturday, 6)),
+    periodStart: dateKey(currentSunday),
+    periodEnd: dateKey(addDays(currentSunday, 6)),
   };
 }
 
@@ -653,7 +653,7 @@ function DriverCommissionOperationalPage() {
       return;
     }
     if (!validBatchPeriod) {
-      notify({ type: 'error', title: 'Periode belum sesuai', message: 'Pengajuan komisi wajib Sabtu sampai Jumat.' });
+      notify({ type: 'error', title: 'Periode belum sesuai', message: 'Pengajuan komisi wajib Minggu sampai Sabtu.' });
       return;
     }
 
@@ -724,7 +724,7 @@ function DriverCommissionOperationalPage() {
             <p className="text-xs font-black uppercase tracking-wide text-slate-500">Komisi Sopir</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">Report Komisi Sopir</h1>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
-              Cek komisi per sopir sebelum diajukan ke Finance untuk periode Sabtu sampai Jumat.
+              Cek komisi per sopir sebelum diajukan ke Finance untuk periode Minggu sampai Sabtu.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:min-w-[420px] sm:flex-row sm:items-end">
@@ -741,7 +741,7 @@ function DriverCommissionOperationalPage() {
                 selectedPeriodStart={periodStart}
                 selectedStatus={report.status}
               />
-              <small className="mt-1 block text-xs font-semibold normal-case tracking-normal text-slate-500">Periode otomatis Sabtu sampai Jumat. Target pembayaran hari Rabu.</small>
+              <small className="mt-1 block text-xs font-semibold normal-case tracking-normal text-slate-500">Periode otomatis Minggu sampai Sabtu. Target pembayaran hari Rabu.</small>
             </div>
             <div className="flex gap-2 sm:flex-col">
               <button className="secondary-button inline-flex items-center justify-center gap-2" type="button" onClick={handleDownloadPdf} disabled={loading || !drivers.length}>
@@ -848,7 +848,7 @@ function DriverCommissionOperationalPage() {
                 <button className="primary-button inline-flex items-center justify-center gap-2" type="button" disabled={submitDisabled} onClick={handleSubmitBatch}>
                   <Send size={16} /> Ajukan ke Finance
                 </button>
-                {!validBatchPeriod ? <small className="text-xs font-semibold text-amber-700">Periode submit wajib Sabtu-Jumat.</small> : null}
+                {!validBatchPeriod ? <small className="text-xs font-semibold text-amber-700">Periode submit wajib Minggu-Sabtu.</small> : null}
                 {reviewRows.length ? <small className="text-xs font-semibold text-amber-700">Submit dikunci karena masih ada ritasi perlu cek.</small> : null}
               </div>
             ) : null}
