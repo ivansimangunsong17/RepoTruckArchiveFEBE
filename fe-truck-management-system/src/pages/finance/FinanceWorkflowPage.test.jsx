@@ -5,11 +5,13 @@ import FinanceWorkflowPage from './FinanceWorkflowPage';
 import { downloadCsv } from '../../utils/csvExport';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
 import {
+  addExpenseTransferProof,
   approveOperationalFundRequest,
   closeOperationalFundBatch,
   createOperationalFundRequest,
   depositOperationalFund,
   fetchFinanceContainerJobExpenses,
+  fetchExpenseTransferProofs,
   fetchFinanceDebitNotePayments,
   fetchFinanceInvoiceCorrections,
   fetchFinanceInvoiceDetail,
@@ -42,11 +44,15 @@ vi.mock('../../hooks/useAuth', () => ({
 }));
 
 vi.mock('../../services/finance/financeService', () => ({
+  addExpenseTransferProof: vi.fn(),
   approveOperationalFundRequest: vi.fn(),
   closeOperationalFundBatch: vi.fn(),
   createOperationalFundRequest: vi.fn(),
   depositOperationalFund: vi.fn(),
   fetchFinanceContainerJobExpenses: vi.fn(),
+  fetchExpenseTransferProofs: vi.fn(),
+  deleteExpenseTransferProof: vi.fn(),
+  updateExpenseTransferProof: vi.fn(),
   fetchFinanceDebitNotePayments: vi.fn().mockResolvedValue([]),
   fetchFinanceInvoiceCorrections: vi.fn(),
   fetchFinanceInvoiceDetail: vi.fn(),
@@ -179,6 +185,7 @@ function mockPaidExpense(overrides = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fetchExpenseTransferProofs.mockResolvedValue([]);
   mockAuthState.user = { id: 'finance-1', role: 'finance', fullName: 'Fitri Finance' };
   fetchFinanceOrderVerifications.mockResolvedValue({ rows: [orderRow, cancelledOrderRow] });
   fetchFinanceRpujRequests.mockResolvedValue({
@@ -340,6 +347,23 @@ beforeEach(() => {
     ],
   });
 });
+
+async function addTransferProof(user, amount = 125000, name = 'bukti-transfer.pdf') {
+  const proof = {
+    id: 'transfer-proof-1',
+    amount,
+    transferDate: '2026-08-20',
+    note: '',
+    attachment: { id: 'attachment-1', name, path: 'attachment-1' },
+  };
+  fetchExpenseTransferProofs.mockResolvedValue([proof]);
+  addExpenseTransferProof.mockResolvedValue(proof);
+  await user.type(screen.getByLabelText('Nominal bukti transfer'), String(amount));
+  await user.upload(screen.getByLabelText(/file bukti/i), new File(['proof'], name, { type: 'application/pdf' }));
+  await user.click(screen.getByRole('button', { name: 'Tambah Bukti' }));
+  await screen.findByText(name);
+  return proof;
+}
 
 describe('FinanceWorkflowPage validation modals', () => {
   it('mengirim filter bulan dan tanggal order dibuat untuk verifikasi order', async () => {
@@ -804,29 +828,27 @@ describe('FinanceWorkflowPage validation modals', () => {
 
     await user.click(screen.getByRole('button', { name: 'Validasi' }));
 
-    expect(await screen.findByText('Validasi Cek Biaya Lapangan')).toBeInTheDocument();
+    expect(await screen.findByText('Validasi UJ dan Bukti Transfer')).toBeInTheDocument();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
-    expect(screen.getByText('Wajib upload')).toBeInTheDocument();
+    expect(screen.getByText('Belum ada bukti transfer.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
-    const proofFile = new File(['proof'], 'bukti-transfer.pdf', { type: 'application/pdf' });
-    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), proofFile);
-    expect(screen.getByText('Siap diupload')).toBeInTheDocument();
-    expect(screen.queryByText('Wajib upload')).not.toBeInTheDocument();
-    expect(screen.getByText(/Bukti akan disimpan saat transaksi divalidasi/i)).toHaveTextContent('bukti-transfer.pdf');
+    await addTransferProof(user);
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
     await user.type(screen.getByLabelText(/biaya admin transfer/i), '2500');
+    await user.type(screen.getByLabelText('Catatan Penyesuaian'), 'Selisih biaya admin transfer');
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
 
     await waitFor(() => {
       expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', {
         financeCheckStatus: 'sudah_dicek',
         financeNote: '',
-        proofFile,
+        proofFile: null,
         adminFeeAmount: 2500,
         adminFeeNote: '',
+        adjustmentNote: 'Selisih biaya admin transfer',
       });
     });
   });
@@ -840,7 +862,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), new File(['proof'], 'bukti.pdf', { type: 'application/pdf' }));
+    await addTransferProof(user, 122500, 'bukti.pdf');
     const adminFeeInput = screen.getByLabelText(/biaya admin transfer/i);
     await user.type(adminFeeInput, '2500');
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
@@ -857,7 +879,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), new File(['proof'], 'bukti.pdf', { type: 'application/pdf' }));
+    await addTransferProof(user, 125000, 'bukti.pdf');
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
 
     const generalError = await screen.findByRole('alert', { name: '' });
@@ -873,7 +895,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), new File(['proof'], 'bukti.pdf', { type: 'application/pdf' }));
+    await addTransferProof(user, 125000, 'bukti.pdf');
     const form = screen.getByRole('button', { name: 'Validasi Transaksi' }).closest('form');
     fireEvent.submit(form);
     fireEvent.submit(form);
@@ -888,12 +910,11 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    const proofFile = new File(['proof'], 'bukti-nol.pdf', { type: 'application/pdf' });
-    await user.upload(screen.getByLabelText(/upload bukti pembayaran/i), proofFile);
+    await addTransferProof(user, 125000, 'bukti-nol.pdf');
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
 
     await waitFor(() => expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', expect.objectContaining({
-      proofFile,
+      proofFile: null,
       adminFeeAmount: 0,
     })));
   });
@@ -903,12 +924,34 @@ describe('FinanceWorkflowPage validation modals', () => {
     mockPaidExpense({
       proofAttachment: { id: 'proof-existing', name: 'bukti-lama.pdf', path: 'proof-existing' },
     });
+    fetchExpenseTransferProofs.mockResolvedValue([{
+      id: 'transfer-proof-existing', amount: 125000, transferDate: '2026-08-20', note: '',
+      attachment: { id: 'proof-existing', name: 'bukti-lama.pdf', path: 'proof-existing' },
+    }]);
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    expect(screen.getByText('Sudah diupload')).toBeInTheDocument();
+    expect(await screen.findByText('bukti-lama.pdf')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
-    expect(screen.queryByLabelText(/upload bukti pembayaran/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/file bukti/i)).toBeInTheDocument();
+  });
+
+  it('mengunci bukti dan nominal ketika batch rekening dropping sudah ditutup', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense({ batchStatus: 'closed' });
+    fetchExpenseTransferProofs.mockResolvedValue([{
+      id: 'transfer-proof-closed', amount: 125000, transferDate: '2026-08-20', note: '',
+      attachment: { id: 'attachment-closed', name: 'bukti-closed.pdf', path: 'attachment-closed' },
+    }]);
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    expect(await screen.findByText('Batch ditutup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit bukti transfer' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Hapus bukti transfer' })).toBeDisabled();
+    expect(screen.getByLabelText('Biaya Admin Transfer')).toBeDisabled();
+    expect(screen.getByLabelText('Catatan Penyesuaian')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
   });
 
   it('menampilkan filter tanggal invoice di semua tab', async () => {

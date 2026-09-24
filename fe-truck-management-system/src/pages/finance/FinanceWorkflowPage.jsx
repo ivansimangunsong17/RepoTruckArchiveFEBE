@@ -678,6 +678,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     expenseCheckGeneralError,
     expenseCheckAdminFeeAmount,
     expenseCheckAdminFeeNote,
+    expenseCheckAdjustmentNote,
     handleOperationalFundRequestFormChange,
     submitOperationalFundRequest,
     closeOperationalFundRequestModal,
@@ -694,6 +695,8 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     clearExpenseCheckProofFile,
     handleExpenseCheckAdminFeeAmountChange,
     handleExpenseCheckAdminFeeNoteChange,
+    handleExpenseCheckAdjustmentNoteChange,
+    handleExpenseCheckProofsChange,
     confirmExpenseChecked,
     closeOperationalFundCloseValidationModal,
     confirmCloseOperationalFundBatch,
@@ -961,8 +964,11 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         adminFeeAmount={expenseCheckAdminFeeAmount}
         adminFeeError={expenseCheckAdminFeeError}
         adminFeeNote={expenseCheckAdminFeeNote}
+        adjustmentNote={expenseCheckAdjustmentNote}
         onAdminFeeAmountChange={handleExpenseCheckAdminFeeAmountChange}
         onAdminFeeNoteChange={handleExpenseCheckAdminFeeNoteChange}
+        onAdjustmentNoteChange={handleExpenseCheckAdjustmentNoteChange}
+        onProofsChange={handleExpenseCheckProofsChange}
         onClose={closeExpenseCheckConfirmModal}
         onConfirm={confirmExpenseChecked}
         proofError={expenseCheckProofError}

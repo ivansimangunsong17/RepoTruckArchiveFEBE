@@ -76,6 +76,8 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   const [expenseCheckGeneralError, setExpenseCheckGeneralError] = useState('');
   const [expenseCheckAdminFeeAmount, setExpenseCheckAdminFeeAmount] = useState('');
   const [expenseCheckAdminFeeNote, setExpenseCheckAdminFeeNote] = useState('');
+  const [expenseCheckAdjustmentNote, setExpenseCheckAdjustmentNote] = useState('');
+  const [expenseCheckProofCount, setExpenseCheckProofCount] = useState(0);
   const expenseCheckSubmittingRef = useRef(false);
 
   const operationalFundDecisionRow = operationalFundRows.find((row) => row.id === operationalFundDecision?.id);
@@ -429,7 +431,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     if (expenseCheckProofError) {
       return;
     }
-    if (targetRow?.paymentStatus === 'sudah_dibayar' && !targetRow?.proofAttachment && !expenseCheckProofFile) {
+    if (targetRow?.paymentStatus === 'sudah_dibayar' && expenseCheckProofCount === 0) {
       setExpenseCheckProofError('Bukti pembayaran wajib diupload Finance sebelum validasi.');
       return;
     }
@@ -450,11 +452,14 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
         proofFile: expenseCheckProofFile,
         adminFeeAmount,
         adminFeeNote: expenseCheckAdminFeeNote.trim(),
+        adjustmentNote: expenseCheckAdjustmentNote.trim(),
       });
       setExpenseCheckConfirmId('');
       setExpenseCheckProofFile(null);
       setExpenseCheckAdminFeeAmount('');
       setExpenseCheckAdminFeeNote('');
+      setExpenseCheckAdjustmentNote('');
+      setExpenseCheckProofCount(0);
       await loadExpenseReconciliation();
       await loadOperationalFundBatch();
       await loadOperationalFundTransactions();
@@ -482,6 +487,8 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     setExpenseCheckGeneralError('');
     setExpenseCheckAdminFeeAmount('');
     setExpenseCheckAdminFeeNote('');
+    setExpenseCheckAdjustmentNote('');
+    setExpenseCheckProofCount(0);
   }
 
   function closeExpenseCheckConfirmModal() {
@@ -493,6 +500,8 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     setExpenseCheckGeneralError('');
     setExpenseCheckAdminFeeAmount('');
     setExpenseCheckAdminFeeNote('');
+    setExpenseCheckAdjustmentNote('');
+    setExpenseCheckProofCount(0);
   }
 
   function handleExpenseCheckProofSelect(file, error = '') {
@@ -516,6 +525,15 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   function handleExpenseCheckAdminFeeNoteChange(value) {
     setExpenseCheckAdminFeeNote(value);
     setExpenseCheckGeneralError('');
+  }
+
+  function handleExpenseCheckAdjustmentNoteChange(value) {
+    setExpenseCheckAdjustmentNote(value);
+    setExpenseCheckGeneralError('');
+  }
+
+  function handleExpenseCheckProofsChange(proofs = []) {
+    setExpenseCheckProofCount(proofs.length);
   }
 
   function confirmExpenseChecked(event) {
@@ -690,6 +708,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     expenseCheckGeneralError,
     expenseCheckAdminFeeAmount,
     expenseCheckAdminFeeNote,
+    expenseCheckAdjustmentNote,
     handleOperationalFundBatchDateChange,
     openOperationalFundRequestModal,
     openOperationalFundDepositModal,
@@ -712,6 +731,8 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     clearExpenseCheckProofFile,
     handleExpenseCheckAdminFeeAmountChange,
     handleExpenseCheckAdminFeeNoteChange,
+    handleExpenseCheckAdjustmentNoteChange,
+    handleExpenseCheckProofsChange,
     confirmExpenseChecked,
     submitExpenseClarification,
     openOperationalFundCloseValidationModal,

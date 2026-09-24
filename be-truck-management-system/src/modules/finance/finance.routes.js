@@ -1,5 +1,6 @@
 import {
   approveFinanceCorrectionController,
+  addContainerJobExpenseTransferProofController,
   approveRpujController,
   completedTripDetailController,
   completedTripsController,
@@ -12,6 +13,9 @@ import {
   financeDashboardController,
   closeOperationalFundBatchController,
   containerJobExpenseReconciliationController,
+  containerJobExpenseTransferProofsController,
+  deleteContainerJobExpenseTransferProofController,
+  editContainerJobExpenseTransferProofController,
   depositOperationalFundController,
   operationalFundRequestsController,
   operationalFundBatchesController,
@@ -156,6 +160,30 @@ export const financeRoutes = [
     path: '/api/finance/container-job-expenses/:id/reconcile',
     permission: 'finance.operational_fund.reconcile',
     handler: reconcileContainerJobExpenseController,
+  },
+  {
+    method: 'GET',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs',
+    permission: 'finance.operational_fund.read',
+    handler: containerJobExpenseTransferProofsController,
+  },
+  {
+    method: 'POST',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs',
+    permission: 'finance.operational_fund.reconcile',
+    handler: addContainerJobExpenseTransferProofController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs/:proofId',
+    permission: 'finance.operational_fund.reconcile',
+    handler: editContainerJobExpenseTransferProofController,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/finance/container-job-expenses/:id/transfer-proofs/:proofId',
+    permission: 'finance.operational_fund.reconcile',
+    handler: deleteContainerJobExpenseTransferProofController,
   },
   {
     method: 'PATCH',
