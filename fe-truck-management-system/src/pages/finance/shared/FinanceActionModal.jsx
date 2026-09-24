@@ -10,6 +10,8 @@ function FinanceActionModal({
   confirmLabel,
   footerError = '',
   footerErrorId = '',
+  footerNotice = '',
+  footerNoticeReady = false,
   onClose,
   onConfirm,
   widthClassName = 'max-w-md',
@@ -45,6 +47,10 @@ function FinanceActionModal({
                 tabIndex={-1}
               >
                 {footerError}
+              </div>
+            ) : footerNotice ? (
+              <div className={`mr-auto max-w-xl text-xs font-semibold leading-relaxed ${footerNoticeReady ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {footerNotice}
               </div>
             ) : null}
             <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Batal</button>
