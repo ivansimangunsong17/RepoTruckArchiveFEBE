@@ -114,7 +114,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
   const verificationReady = !locked && !loading && proofs.length > 0 && !needsNote;
 
   return (
-    <FinanceActionModal busy={busy || proofBusy} confirmDisabled={locked || loading || proofs.length === 0 || needsNote} confirmLabel="Validasi Transaksi" description="Cocokkan nominal sistem dengan seluruh transfer aktual." onClose={onClose} onConfirm={onConfirm} footerError={error} footerErrorId="expense-check-general-error" title="Validasi UJ dan Bukti Transfer" tone="approve" widthClassName="max-w-5xl">
+    <FinanceActionModal busy={busy || proofBusy} confirmDisabled={locked || loading || proofs.length === 0 || needsNote} confirmLabel="Validasi Transaksi" description="Cocokkan nominal sistem dengan seluruh transfer aktual." onClose={onClose} onConfirm={onConfirm} footerError={error} footerErrorId="expense-check-general-error" footerNotice={verificationMessage} footerNoticeReady={verificationReady} title="Validasi UJ dan Bukti Transfer" tone="approve" widthClassName="max-w-5xl">
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <DetailField label="UJ Sistem" value={formatCurrency(row.amount)} />

@@ -833,6 +833,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
     expect(screen.getByText('Belum ada bukti yang disimpan.')).toBeInTheDocument();
+    expect(screen.getAllByText('Simpan minimal satu bukti transfer untuk melanjutkan validasi.').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
