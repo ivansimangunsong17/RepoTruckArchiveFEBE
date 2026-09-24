@@ -360,7 +360,8 @@ async function addTransferProof(user, amount = 125000, name = 'bukti-transfer.pd
   addExpenseTransferProof.mockResolvedValue(proof);
   await user.type(screen.getByLabelText('Nominal bukti transfer'), String(amount));
   await user.upload(screen.getByLabelText(/file bukti/i), new File(['proof'], name, { type: 'application/pdf' }));
-  await user.click(screen.getByRole('button', { name: 'Tambah Bukti' }));
+  expect(screen.getByText(/File sudah dipilih.*Simpan Bukti/i)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Simpan Bukti' }));
   await screen.findByText(name);
   return proof;
 }
@@ -831,7 +832,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(await screen.findByText('Validasi UJ dan Bukti Transfer')).toBeInTheDocument();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
-    expect(screen.getByText('Belum ada bukti transfer.')).toBeInTheDocument();
+    expect(screen.getByText('Belum ada bukti yang disimpan.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
