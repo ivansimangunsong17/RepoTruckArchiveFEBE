@@ -110,6 +110,9 @@ const documentOnlyAuditLabels = {
 };
 
 export function isDocumentOnlyActor(actor) {
+  if (String(actor?.role || '').trim().toLowerCase() === 'sales') {
+    return actorHasPermission(actor, 'container_job.document.update');
+  }
   return actorHasPermission(actor, 'container_job.document.update')
     && !actorHasPermission(actor, 'container_job.update')
     && !actorHasPermission(actor, 'container_job.update_status')

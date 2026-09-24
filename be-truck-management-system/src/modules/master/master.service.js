@@ -61,6 +61,10 @@ function isSameChassis(chassis, value) {
   ].some((candidate) => normalizeLookupValue(candidate) === normalizedValue);
 }
 
+export function isSameTruckChassis(currentTruck = {}, nextChassis = '') {
+  return normalizeLookupValue(currentTruck.kirChassisNumber) === normalizeLookupValue(nextChassis);
+}
+
 async function normalizeTruckPayload(payload) {
   const normalizedPayload = {
     ...payload,
@@ -121,6 +125,11 @@ async function saveTruckRow(payload, id) {
   }
 
   if (!hasChassisField) {
+    return upsertMasterRow('trucks', payload, id);
+  }
+
+  const currentTruck = await findMasterRowById('trucks', id);
+  if (currentTruck && isSameTruckChassis(currentTruck, payload.kirChassisNumber)) {
     return upsertMasterRow('trucks', payload, id);
   }
 

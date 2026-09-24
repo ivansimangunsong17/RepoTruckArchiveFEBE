@@ -2614,16 +2614,19 @@ function operationalFundBatchSelect() {
       count(oft.id) filter (
         where oft.transaction_type = 'debit'
           and oft.status = 'posted'
+          and expense.id is not null
           and coalesce(expense.finance_check_status, 'belum_dicek') in ('belum_dicek', 'dikoreksi')
       )::int as unchecked_count,
       count(oft.id) filter (
         where oft.transaction_type = 'debit'
           and oft.status = 'posted'
+          and expense.id is not null
           and expense.finance_check_status = 'perlu_klarifikasi'
       )::int as need_clarification_count,
       count(oft.id) filter (
         where oft.transaction_type = 'debit'
           and oft.status = 'posted'
+          and expense.id is not null
           and expense.finance_check_status = 'sudah_dicek'
       )::int as checked_count
     from operational_fund_batches batch
@@ -2737,6 +2740,7 @@ export async function closeOperationalFundBatchRecord(id, payload = {}) {
         where oft.batch_id = $1
           and oft.status = 'posted'
           and oft.transaction_type = 'debit'
+          and expense.id is not null
           and coalesce(expense.finance_check_status, 'belum_dicek') <> 'sudah_dicek'
       `,
       [id],
@@ -4125,13 +4129,16 @@ export function outstandingOrdersCte() {
     ),
     -- Difilter dari sisa outstanding yang dihitung ulang (bukan dari billing_status='lunas' yang
     -- tersimpan), karena billing_amount dihitung live dari finance_rows dan bisa berubah setelah
-    -- sebuah SO ditandai lunas (mis. koreksi revenue). Rentang trip_date (kalau ada) difilter di
-    -- buildOutstandingFilters/buildCustomerOutstandingFilters lewat whereSql di luar CTE ini, bukan
-    -- di sini, supaya default-nya menampilkan semua bulan outstanding.
+    -- sebuah SO ditandai lunas (mis. koreksi revenue). Data sebelum Agustus 2026 yang belum punya
+    -- nomor invoice dianggap sudah tidak perlu masuk outstanding OTS.
     outstanding_orders as (
       select *
       from outstanding_orders_all
       where outstanding_amount > 0
+        and (
+          trip_date >= date '2026-08-01'
+          or nullif(btrim(invoice_number), '') is not null
+        )
     )
   `;
 }

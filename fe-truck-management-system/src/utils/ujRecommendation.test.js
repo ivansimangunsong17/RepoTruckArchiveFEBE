@@ -14,6 +14,19 @@ describe('ujRecommendation', () => {
     expect(destination?.name).toBe('Gudang Customer Cikarang');
   });
 
+  it('memprioritaskan nama persis daripada master parsial yang muncul lebih dahulu', () => {
+    const recommendation = calculateUjRecommendation(
+      { destination: 'Marunda', size: '20FT' },
+      [
+        { name: 'IDWI MARUNDA', uj20ft: 300000, status: 'Aktif' },
+        { name: 'Marunda', uj20ft: 400000, status: 'Aktif' },
+      ],
+    );
+
+    expect(recommendation.destinationName).toBe('Marunda');
+    expect(recommendation.currentContainerUj).toBe(400000);
+  });
+
   it('membaca nominal UJ dengan format rupiah bertitik', () => {
     const recommendation = calculateUjRecommendation(
       { destination: 'Cikarang', size: '20FT' },

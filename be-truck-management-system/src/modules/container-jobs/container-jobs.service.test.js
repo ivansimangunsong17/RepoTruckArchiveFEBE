@@ -380,6 +380,15 @@ test('sales document-only dikenali untuk upload dokumen container job historical
     role: 'admin',
     permissions: ['container_job.update', 'container_job.document.update', 'historical_entry.manage'],
   }), false);
+  assert.equal(isDocumentOnlyContainerJobUpdateActor({
+    role: 'sales',
+    permissions: [
+      'container_job.document.update',
+      'container_job.update',
+      'container_job.update_status',
+      'container_job.assign',
+    ],
+  }), true);
 });
 
 test('reset ritasi salah assign hanya untuk operational/admin dan wajib alasan', () => {

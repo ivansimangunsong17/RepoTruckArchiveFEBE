@@ -163,6 +163,9 @@ function shouldEnforceOperationalLock(actor, payload = {}) {
 }
 
 function isDocumentOnlyActor(actor) {
+  if (normalizeRole(actor) === 'sales') {
+    return actorHasPermission(actor, 'container_job.document.update');
+  }
   return actorHasPermission(actor, 'container_job.document.update')
     && !actorHasPermission(actor, 'container_job.update')
     && !actorHasPermission(actor, 'container_job.update_status')

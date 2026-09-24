@@ -536,15 +536,22 @@ export async function findSalesOrdersPage(options = {}) {
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
   const orderColumns = await getSalesOrderColumns();
+  const hasOrderCompletedAtColumn = columnSet.has('completed_at');
+  const completedAtExpression = hasOrderCompletedAtColumn
+    ? 'completed_at'
+    : '(select max(cj.completed_at) from container_jobs cj where cj.sales_order_id = sales_orders.id)';
+  const selectColumns = hasOrderCompletedAtColumn
+    ? orderColumns
+    : `${orderColumns}, ${completedAtExpression} as completed_at`;
   const sortByCompletedAt = options.status === 'completed' || Boolean(options.invoiced) || Boolean(options.invoiceDocumentStatus);
   const orderBySql = sortByCompletedAt
-    ? 'order by updated_at desc nulls last, trip_date desc, created_at desc'
+    ? `order by ${completedAtExpression} desc nulls last, trip_date desc, created_at desc`
     : 'order by trip_date asc, created_at desc';
 
   const [rowsResult, countResult, summaryResult] = await Promise.all([
     query(
       `
-        select ${orderColumns}, ${dueDateAndOutstandingSelectSql}
+        select ${selectColumns}, ${dueDateAndOutstandingSelectSql}
         from sales_orders
         ${whereSql}
         ${orderBySql}

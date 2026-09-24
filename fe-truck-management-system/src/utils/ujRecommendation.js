@@ -70,13 +70,30 @@ function isDestinationMatch(destination, destinationName) {
   });
 }
 
-export function findDestinationMaster(destinations = [], destinationName = '') {
-  if (!normalizeText(destinationName)) return null;
-  const matches = destinations.filter((destination) => isDestinationMatch(destination, destinationName));
+function isExactDestinationMatch(destination, destinationName) {
+  const normalizedTarget = normalizeText(destinationName);
+  const compactTarget = compactText(destinationName);
+  if (!normalizedTarget) return false;
+
+  return destinationSearchTerms(destination).some((term) => {
+    const normalizedTerm = normalizeText(term);
+    const compactTerm = compactText(term);
+    return normalizedTerm === normalizedTarget || compactTerm === compactTarget;
+  });
+}
+
+function selectPreferredDestination(matches = []) {
   return matches.find((destination) => isActiveDestination(destination) && hasAnyTariff(destination))
     || matches.find(isActiveDestination)
     || matches[0]
     || null;
+}
+
+export function findDestinationMaster(destinations = [], destinationName = '') {
+  if (!normalizeText(destinationName)) return null;
+  const matches = destinations.filter((destination) => isDestinationMatch(destination, destinationName));
+  const exactMatches = matches.filter((destination) => isExactDestinationMatch(destination, destinationName));
+  return selectPreferredDestination(exactMatches) || selectPreferredDestination(matches);
 }
 
 export function calculateUjRecommendation(job = {}, destinations = []) {

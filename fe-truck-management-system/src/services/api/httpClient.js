@@ -1,4 +1,4 @@
-import { clearAuthToken, getAuthToken } from '../auth/authTokenStore';
+import { AUTH_UNAUTHORIZED_EVENT, clearAuthToken, getAuthToken } from '../auth/authTokenStore';
 import { API_BASE_URL } from '../config/dataSource';
 
 async function parseJson(response) {
@@ -36,7 +36,10 @@ async function request(path, options = {}) {
   const payload = await parseJson(response);
 
   if (!response.ok) {
-    if (response.status === 401 && options.auth !== false) clearAuthToken();
+    if (response.status === 401 && options.auth !== false) {
+      clearAuthToken();
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
+    }
     const message = payload?.error?.message || payload?.message || 'Request API gagal.';
     const error = new Error(message);
     error.status = response.status;

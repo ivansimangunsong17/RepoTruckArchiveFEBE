@@ -1,4 +1,5 @@
 const AUTH_TOKEN_KEY = 'tms-api-auth-token';
+export const AUTH_UNAUTHORIZED_EVENT = 'tms-auth-unauthorized';
 
 export function getAuthToken() {
   return localStorage.getItem(AUTH_TOKEN_KEY) || '';

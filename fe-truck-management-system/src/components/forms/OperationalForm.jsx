@@ -535,7 +535,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     adminCorrectionMode: false,
     adminCorrectionReason: '',
   });
-  const canUpdateOperational = !currentUser || hasPermission(currentUser, 'operations.update');
+  const isSalesRole = String(currentUser?.role || '').trim().toLowerCase() === 'sales';
+  const canUpdateOperational = !isSalesRole && (!currentUser || hasPermission(currentUser, 'operations.update'));
   const canUpdateDocuments = hasPermission(currentUser, 'documents.operational.update') || canUpdateOperational;
   const isDocumentOnlyMode = canUpdateDocuments && !canUpdateOperational;
   const [activePhase, setActivePhase] = useState(() => (isDocumentOnlyMode ? 'closing' : initialPhase));
@@ -1229,7 +1230,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
     }
     const selectedTruck = trucks.find((truck) => truck.plateNumber === submitForm.plateNumber);
-    if (selectedTruck && !isTruckCompatibleWithContainer(selectedTruck, containerSize)) {
+    const truckAssignmentChanged = selectedTruck
+      && selectedTruck.plateNumber !== container.plateNumber;
+    if (truckAssignmentChanged && !isTruckCompatibleWithContainer(selectedTruck, containerSize)) {
       showSubmitNotification(`Truck ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }

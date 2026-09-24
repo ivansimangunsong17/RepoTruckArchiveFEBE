@@ -29,8 +29,17 @@ function getDriverIdentityNames(row = {}) {
 }
 
 function getDriverTruck(row, trucks) {
+  const driverId = String(row?.id || '').trim();
+  if (driverId) {
+    const truckById = (trucks || []).find((item) => String(item.defaultDriverId || '').trim() === driverId);
+    if (truckById) return truckById;
+  }
+
   const driverNames = getDriverIdentityNames(row);
-  return (trucks || []).find((item) => driverNames.includes(normalizeName(item.defaultDriver)));
+  return (trucks || []).find((item) => {
+    if (String(item.defaultDriverId || '').trim()) return false;
+    return driverNames.includes(normalizeName(item.defaultDriver));
+  });
 }
 
 function getUnitSequence(unitCode) {

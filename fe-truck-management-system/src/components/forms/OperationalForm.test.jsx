@@ -454,6 +454,65 @@ describe('OperationalForm', () => {
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('plateNumber');
   });
 
+  it('tetap membatasi Sales ke mode dokumen saat permission operational terlalu luas', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, status: 'completed', size: '40FT', plateNumber: 'B 9103 BEL' }}
+        currentUser={{
+          role: 'sales',
+          fullName: 'Sales A',
+          permissions: ['container_job.document.update', 'container_job.update', 'container_job.update_status', 'container_job.assign'],
+        }}
+        masterDrivers={[]}
+        masterTrucks={[{ id: 'truck-20', plateNumber: 'B 9103 BEL', capacity: '20FT', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /simpan container job - simpan dokumen/i }));
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('plateNumber');
+    expect(screen.queryByText(/kapasitas 20FT tidak sesuai/i)).not.toBeInTheDocument();
+  });
+
+  it('dokumen job lama tidak terblokir mismatch kapasitas truck historis', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          containerNumber: 'CSNU6471266',
+          size: '40FT',
+          status: 'completed',
+          plateNumber: 'B 9103 BEL',
+          driver: 'Driver Lama',
+          runningAt: '2026-09-21T08:00:00.000Z',
+          completedAt: '2026-09-21T16:00:00.000Z',
+          spkDocument: { name: 'spk.pdf' },
+          eirDocument: { name: 'eir.pdf' },
+          travelDocument: '',
+          travelDocumentFile: null,
+        }}
+        currentUser={{ role: 'admin' }}
+        initialPhase="closing"
+        masterDrivers={[]}
+        masterTrucks={[{ id: 'truck-20', plateNumber: 'B 9103 BEL', capacity: '20FT', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /simpan container job - simpan closing/i }));
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/kapasitas 20FT tidak sesuai/i)).not.toBeInTheDocument();
+  });
+
   it('memulai perjalanan secara eksplisit dari tahap closing ketika UJ dan SPK siap', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

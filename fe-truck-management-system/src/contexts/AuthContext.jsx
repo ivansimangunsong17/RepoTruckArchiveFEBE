@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { USER_ROLES } from '../constants/roles';
 import * as authService from '../services/auth/authService';
+import { AUTH_UNAUTHORIZED_EVENT } from '../services/auth/authTokenStore';
 
 const AuthContext = createContext(null);
 const DEMO_STORAGE_KEY = 'tms-demo-session';
@@ -33,6 +34,16 @@ export function AuthProvider({ children }) {
   const databaseMode = authService.isConfigured();
   const [user, setUser] = useState(() => databaseMode ? null : getStoredDemoUser());
   const [loading, setLoading] = useState(databaseMode);
+
+  useEffect(() => {
+    function handleUnauthorized() {
+      setUser(null);
+      setLoading(false);
+    }
+
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, []);
 
   useEffect(() => {
     if (!databaseMode) return undefined;

@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
+import { AUTH_UNAUTHORIZED_EVENT } from '../services/auth/authTokenStore';
 
 vi.mock('../services/auth/authService', () => ({
   isConfigured: () => false,
@@ -60,5 +61,15 @@ describe('AuthContext mode demo', () => {
 
     expect(screen.getByText('Belum Login')).toBeInTheDocument();
     expect(localStorage.getItem('tms-demo-session')).toBeNull();
+  });
+
+  it('mengosongkan user ketika sesi API dinyatakan tidak valid', async () => {
+    const user = userEvent.setup();
+    render(<AuthProvider><AuthHarness /></AuthProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'Login Sales' }));
+    window.dispatchEvent(new Event(AUTH_UNAUTHORIZED_EVENT));
+
+    expect(await screen.findByText('Belum Login')).toBeInTheDocument();
   });
 });

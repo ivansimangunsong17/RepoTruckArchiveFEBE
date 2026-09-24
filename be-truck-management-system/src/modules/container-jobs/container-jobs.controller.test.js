@@ -90,6 +90,24 @@ test('sales dengan akses dokumen hanya boleh mengirim payload dokumen operationa
   );
 });
 
+test('sales tetap document-only walau permission operational terkonfigurasi terlalu luas', () => {
+  const salesActor = {
+    role: 'sales',
+    permissions: [
+      'container_job.document.update',
+      'container_job.update',
+      'container_job.update_status',
+      'container_job.assign',
+    ],
+  };
+
+  assert.equal(isDocumentOnlyActor(salesActor), true);
+  assert.throws(
+    () => assertDocumentOnlyPayload(salesActor, { status: 'completed', plateNumber: 'B 9103 BEL' }),
+    /hanya boleh mengubah dokumen/i,
+  );
+});
+
 test('operational tetap bukan mode dokumen saja karena punya akses update job penuh', () => {
   const operationalActor = { role: 'operational' };
   assert.equal(isDocumentOnlyActor(operationalActor), false);

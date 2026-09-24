@@ -816,7 +816,6 @@ export async function ensureDriverCommissionIsNotPosted(client, containerJobId, 
     );
   }
 }
-
 export function hasCompleteOperationalAssignment(form = {}, driver = null, vehicle = null, existing = {}) {
   const assignment = existing?.assignment_snapshot || {};
   const driverName = assignmentValue(form.driver, driver?.name, assignment.driver);
@@ -989,9 +988,21 @@ export async function syncAutoJourneyMoneyExpense(client, {
         payment_status = 'sudah_dibayar',
         paid_at = excluded.paid_at,
         paid_by_name = excluded.paid_by_name,
-        finance_check_status = 'belum_dicek',
-        finance_checked_by_name = null,
-        finance_checked_at = null,
+        finance_check_status = case
+          when container_job_expenses.finance_check_status = 'sudah_dicek'
+            then container_job_expenses.finance_check_status
+          else 'belum_dicek'
+        end,
+        finance_checked_by_name = case
+          when container_job_expenses.finance_check_status = 'sudah_dicek'
+            then container_job_expenses.finance_checked_by_name
+          else null
+        end,
+        finance_checked_at = case
+          when container_job_expenses.finance_check_status = 'sudah_dicek'
+            then container_job_expenses.finance_checked_at
+          else null
+        end,
         updated_by_name = excluded.updated_by_name,
         updated_at = now()
       returning id
