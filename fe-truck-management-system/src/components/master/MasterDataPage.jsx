@@ -403,6 +403,7 @@ function MasterDataPage({
   beforeSave,
   extraDetailContent,
   extraFormContent,
+  detailModalClassName = '',
   readOnly = false,
   hideRowNumber = false,
 }) {
@@ -1183,7 +1184,7 @@ function MasterDataPage({
 
       {detailRow ? (
         <div className="master-modal-backdrop" role="presentation" onMouseDown={() => setDetailRow(null)}>
-          <section className="master-detail-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+          <section className={`master-detail-modal ${detailModalClassName}`.trim()} role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
             <header>
               <div><span>Detail Data</span><h2>{detailRow.name || detailRow.plateNumber || detailRow.unitCode}</h2></div>
               <button className="modal-close-button" type="button" aria-label="Tutup detail data" onClick={() => setDetailRow(null)}><X size={19} /></button>

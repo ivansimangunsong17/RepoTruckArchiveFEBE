@@ -253,6 +253,12 @@ function buildProgressReportSections(rows = [], reportDate) {
   });
   const orderSections = Array.from(groups.values()).map((items) => {
     const first = items[0]?.job || {};
+    const completedItems = items.filter((item) => item.job?.status === 'completed');
+    const runningItems = items.filter((item) => ['running', 'repo_stored', 'inap'].includes(item.job?.status));
+    const waitingItems = items.filter((item) => !['completed', 'running', 'repo_stored', 'inap'].includes(item.job?.status));
+    const actionableItems = items.filter((item) => item.job?.status !== 'completed');
+    const assignedItems = actionableItems.filter((item) => reportDriverPlateLabel(item) !== '-');
+    const unassignedItems = actionableItems.filter((item) => reportDriverPlateLabel(item) === '-');
     const sizeCounts = items.reduce((accumulator, item) => {
       const size = normalizeReportSize(item.job?.size || item.job?.containerSize || item.truck?.chassisSize);
       accumulator[size] = (accumulator[size] || 0) + 1;
@@ -269,21 +275,22 @@ function buildProgressReportSections(rows = [], reportDate) {
         normalizeReportText(first.destination),
         party,
       ].filter((part) => part && part !== '-').join(' '),
-      lines: [
-        `PROGRESS: ${items.filter((item) => item.job?.status === 'completed').length} SELESAI | ${items.filter((item) => item.job?.status !== 'completed').length} BERJALAN | TOTAL ${items.length} RITASI`,
-        ...items.map((item) => `${reportDriverPlateLabel(item)} - ${normalizeReportStatus(item.job?.status)}`),
+      metrics: [
+        { label: 'SELESAI', value: completedItems.length, color: '#047857' },
+        { label: 'BERJALAN', value: runningItems.length, color: '#334155' },
+        { label: 'BELUM JALAN', value: waitingItems.length, color: '#334155' },
+        { label: 'TOTAL RITASI', value: items.length, color: '#0f172a' },
       ],
+      numbered: true,
+      lines: assignedItems.map((item) => `${reportDriverPlateLabel(item)} - ${normalizeReportStatus(item.job?.status)}`),
+      footer: unassignedItems.length ? `BELUM JALAN: ${unassignedItems.length} RITASI` : '',
     };
   });
   const waitingRows = rows.filter((row) => !row.job && !isTruckMaintenance(row.truck));
   const maintenanceRows = rows.filter((row) => isTruckMaintenance(row.truck));
-  const sections = [
-    {
-      title: `REPORT PROGRESS ORDER TGL ${formatReportDate(reportDate)}`,
-      lines: orderSections.length ? [] : ['BELUM ADA ORDER BERJALAN'],
-    },
-    ...orderSections,
-  ];
+  const sections = orderSections.length
+    ? [...orderSections]
+    : [{ title: `BELUM ADA ORDER TGL ${formatReportDate(reportDate)}`, lines: ['BELUM ADA ORDER BERJALAN'] }];
   if (waitingRows.length) {
     sections.push({
       title: 'DI GARASI / TUNGGU ORDER',
@@ -328,14 +335,21 @@ function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
   const wrappedSections = sections.map((section) => {
     context.font = '900 25px Arial';
     const titleLines = wrapCanvasText(context, section.title, contentWidth);
-    context.font = '600 23px Arial';
+    context.font = '600 21px Arial';
+    const summaryLines = section.summary ? wrapCanvasText(context, section.summary, contentWidth) : [];
     const bodyLines = (section.lines || []).flatMap((line, index) => (
-      wrapCanvasText(context, section.lines.length > 1 ? `${index + 1}. ${line}` : line, contentWidth)
+      wrapCanvasText(context, section.numbered ? `${index + 1}. ${line}` : line, contentWidth)
     ));
-    return { ...section, titleLines, bodyLines };
+    const footerLines = section.footer ? wrapCanvasText(context, section.footer, contentWidth) : [];
+    return { ...section, titleLines, summaryLines, bodyLines, footerLines, metricHeight: section.metrics?.length ? 54 : 0 };
   });
   const height = Math.max(480, padding * 2 + 78 + wrappedSections.reduce((total, section) => (
-    total + 10 + section.titleLines.length * 34 + Math.max(1, section.bodyLines.length) * lineHeight + sectionGap
+    total + 10 + section.titleLines.length * 34
+      + section.summaryLines.length * lineHeight
+      + section.metricHeight
+      + section.bodyLines.length * lineHeight
+      + section.footerLines.length * lineHeight
+      + sectionGap
   ), 0));
   canvas.width = width;
   canvas.height = height;
@@ -362,10 +376,36 @@ function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
       context.fillText(line, padding, y);
       y += 34;
     });
+    if (section.metrics?.length) {
+      const metricGap = 8;
+      const metricWidth = (contentWidth - metricGap * (section.metrics.length - 1)) / section.metrics.length;
+      section.metrics.forEach((metric, index) => {
+        const metricX = padding + index * (metricWidth + metricGap);
+        if (metric.background) {
+          context.fillStyle = metric.background;
+          context.fillRect(metricX, y, metricWidth, 40);
+        }
+        context.fillStyle = metric.color;
+        context.font = '800 17px Arial';
+        context.fillText(`${metric.value} ${metric.label}`, metricX, y + 22);
+      });
+      y += 54;
+    }
+    context.fillStyle = '#475569';
+    context.font = '700 21px Arial';
+    section.summaryLines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += lineHeight;
+    });
     context.fillStyle = '#111827';
-    context.font = '600 23px Arial';
-    const lines = section.bodyLines.length ? section.bodyLines : ['-'];
-    lines.forEach((line) => {
+    context.font = '600 21px Arial';
+    section.bodyLines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += lineHeight;
+    });
+    context.fillStyle = '#b45309';
+    context.font = '700 21px Arial';
+    section.footerLines.forEach((line) => {
       context.fillText(line, padding, y);
       y += lineHeight;
     });

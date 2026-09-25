@@ -104,6 +104,7 @@ function ClientsPage({ readOnly = false }) {
       singular="Client"
       description="Kelola identitas customer, alamat, PIC, informasi kontak, NPWP, dan umbrella contract."
       fields={fields}
+      detailModalClassName="customer-detail-modal compact-master-detail-modal"
       columns={[
         { key: 'rowNumber', label: 'No', render: (_, __, meta) => <span className="customer-number-cell">{meta.rowNumber}</span> },
         { key: 'name', label: 'Customer', render: (_, row) => <CustomerName row={row} /> },

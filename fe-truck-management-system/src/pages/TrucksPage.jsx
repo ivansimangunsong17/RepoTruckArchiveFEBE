@@ -16,6 +16,7 @@ import {
   updateVehicleDocument,
 } from '../services/master-data/vehicleDocumentService';
 import { hasPermission } from '../constants/roles';
+import { formatMasterExpiryDate, getMasterExpiryState } from '../utils/masterExpiry';
 
 const DOCUMENT_TYPES = [
   { value: 'STNK', label: 'STNK' },
@@ -526,7 +527,9 @@ function TruckDocumentSummary({ row, renderViewerDocumentNote = null }) {
       <div className={`truck-document-summary-table ${showNotes ? 'has-notes' : ''}`}>
         <div className="truck-document-summary-head">
           <strong>Jenis</strong>
-          <strong>Dokumen</strong>
+          <strong>Nomor Dokumen</strong>
+          <strong>Berlaku Sampai</strong>
+          <strong>Status</strong>
           <strong>File</strong>
           {showNotes ? <strong>Catatan</strong> : null}
         </div>
@@ -534,12 +537,16 @@ function TruckDocumentSummary({ row, renderViewerDocumentNote = null }) {
           <div className="truck-document-summary-row" key={document.key}>
             <strong>{document.label}</strong>
             <div className="truck-document-summary-info">
-              <span className={document.number || document.extra ? '' : 'is-empty'}>
-                {document.number || '-'}
-                {document.extra ? <small>{document.extra}</small> : null}
-              </span>
-              {document.showExpiry === false ? null : <MasterExpiryDate value={document.expiryDate} label={document.expiryLabel} />}
+              <span className={document.number ? '' : 'is-empty'}>{document.number || '-'}</span>
+              {document.extra ? <small>{document.extra}</small> : null}
             </div>
+            <span className="truck-document-date">{document.showExpiry === false ? '-' : formatMasterExpiryDate(document.expiryDate)}</span>
+            {document.showExpiry === false ? (
+              <span className="truck-document-status is-neutral">Tidak Berlaku</span>
+            ) : (() => {
+              const expiryState = getMasterExpiryState(document.expiryDate);
+              return <span className={`truck-document-status is-${expiryState.key}`}>{expiryState.label}</span>;
+            })()}
             <DetailDocumentActions file={document.file} />
             {showNotes ? renderViewerDocumentNote(document.key, document.label) : null}
           </div>
@@ -754,6 +761,7 @@ function TrucksPage({ readOnly = false }) {
       description="Kelola identitas unit truck, pasangan chassis, data KIR, STNK, dan driver tetap."
       fields={fields}
       detailFields={detailFields}
+      detailModalClassName="truck-detail-modal compact-master-detail-modal"
       columns={[
         { key: 'unitCode', label: 'No Lambung', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },

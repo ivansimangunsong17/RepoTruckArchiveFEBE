@@ -335,6 +335,7 @@ function DriversPage({ readOnly = false }) {
       description="Daftar sopir untuk assignment truck dan perjalanan harian."
       fields={fields}
       detailFields={detailFields}
+      detailModalClassName="driver-detail-modal compact-master-detail-modal"
       columns={[
         { key: 'truckNumber', label: 'No Lambung', render: (_, row) => <DriverNumber row={row} trucks={truckRows} /> },
         { key: 'nickname', label: 'Nama Panggilan', render: (_, row) => <DriverIdentity row={row} /> },

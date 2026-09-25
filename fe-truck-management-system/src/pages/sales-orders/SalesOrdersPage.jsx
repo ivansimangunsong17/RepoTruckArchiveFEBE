@@ -88,8 +88,8 @@ function getDoReportDateRange(referenceDate = new Date()) {
   const end = new Date(referenceDate);
   start.setHours(12, 0, 0, 0);
   end.setHours(12, 0, 0, 0);
-  start.setDate(start.getDate() - 2);
-  end.setDate(end.getDate() + 2);
+  start.setDate(start.getDate() - 3);
+  end.setDate(end.getDate() + 3);
   return {
     dateFrom: reportDateKey(start),
     dateTo: reportDateKey(end),
@@ -184,8 +184,8 @@ function buildDoReportSections(orders = []) {
       const sectionKey = `${dateKey}-${size}`;
       if (!sections.has(sectionKey)) {
         sections.set(sectionKey, {
-          title: `LIST ORDER ${type} TGL ${dateLabel}`,
-          lines: [],
+          title: `ORDER ${type} / ${size} - ${dateLabel}`,
+          entries: [],
           dateKey,
           size,
         });
@@ -195,10 +195,20 @@ function buildDoReportSections(orders = []) {
       const vendorLabel = order.isVendorOrder ? '(VENDOR)' : '';
       const note = String(order.jobDescription || order.notes || '').trim();
       const noteLabel = note ? ` (${note.toUpperCase()})` : '';
-      const suffix = [vendorLabel, noteLabel, statusLabel].filter(Boolean).join(' ');
-      sections.get(sectionKey).lines.push(
-        `${String(order.customer || '-').toUpperCase()} ${quantities[size]}X${size.replace('FT', '')} ${String(order.destination || '-').toUpperCase()}${suffix ? ` ${suffix}` : ''}`,
-      );
+      const suffix = [vendorLabel, noteLabel].filter(Boolean).join(' ');
+      const sizeContainers = getOrderContainers(order).filter((container) => {
+        const containerSize = String(container.size || container.containerSize || '').toUpperCase();
+        return containerSize.includes(size.replace('FT', ''));
+      });
+      const completed = sizeContainers.filter((container) => container.status === 'completed').length;
+      const cancelled = sizeContainers.filter((container) => container.status === 'cancelled' || container.cancelRequestStatus === 'approved').length;
+      const running = sizeContainers.filter((container) => ['running', 'repo_stored', 'inap'].includes(container.status)).length;
+      const waiting = Math.max(0, quantities[size] - completed - cancelled - running);
+      sections.get(sectionKey).entries.push({
+        text: `${String(order.customer || '-').toUpperCase()}  /  ${quantities[size]}X${size.replace('FT', '')}  /  ${String(order.destination || '-').toUpperCase()}${suffix ? `  ${suffix}` : ''}`,
+        status: order.isVendorOrder ? statusLabel : '',
+        progress: order.isVendorOrder ? null : { completed, running, waiting, cancelled },
+      });
     });
   });
   return [...sections.values()]
@@ -213,25 +223,30 @@ function downloadDoReportPng({ orders, dateFrom, dateTo }) {
   const width = 1180;
   const padding = 52;
   const contentWidth = width - padding * 2;
-  const lineHeight = 29;
-  const sectionGap = 24;
+  const lineHeight = 27;
+  const sectionGap = 30;
+  const statusWidth = 190;
+  const entryGap = 24;
   const sections = buildDoReportSections(orders);
   const periodLabel = dateFrom || dateTo
     ? `${dateFrom ? formatDate(dateFrom) : 'Awal'} - ${dateTo ? formatDate(dateTo) : 'Akhir'}`
     : 'Semua tanggal';
 
   const wrappedSections = sections.length ? sections.map((section) => {
-    context.font = '900 25px Arial, "Segoe UI Emoji"';
+    context.font = '900 22px Arial, "Segoe UI Emoji"';
     const titleLines = wrapCanvasText(context, section.title, contentWidth);
-    context.font = '600 22px Arial, "Segoe UI Emoji"';
-    const bodyLines = section.lines.flatMap((line, index) => (
-      wrapCanvasText(context, `${index + 1}. ${line}`, contentWidth)
-    ));
-    return { ...section, titleLines, bodyLines };
-  }) : [{ title: 'BELUM ADA DO', titleLines: ['BELUM ADA DO'], bodyLines: ['Tidak ada Sales Order pada filter ini.'] }];
+    context.font = '600 20px Arial, "Segoe UI Emoji"';
+    const entries = section.entries.map((entry, index) => ({
+      ...entry,
+      lines: wrapCanvasText(context, `${index + 1}. ${entry.text}`, contentWidth - statusWidth - entryGap),
+    }));
+    return { ...section, titleLines, entries };
+  }) : [{ title: 'BELUM ADA DO', titleLines: ['BELUM ADA DO'], entries: [{ lines: ['Tidak ada Sales Order pada periode ini.'], status: '' }] }];
 
   const height = Math.max(460, padding * 2 + 90 + wrappedSections.reduce((total, section) => (
-    total + section.titleLines.length * 34 + section.bodyLines.length * lineHeight + sectionGap
+    total + section.titleLines.length * 30
+      + section.entries.reduce((entryTotal, entry) => entryTotal + Math.max(lineHeight, entry.lines.length * lineHeight) + (entry.progress ? 14 : 0) + 16, 0)
+      + sectionGap
   ), 0));
   canvas.width = width;
   canvas.height = height;
@@ -253,16 +268,50 @@ function downloadDoReportPng({ orders, dateFrom, dateTo }) {
   wrappedSections.forEach((section) => {
     y += 8;
     context.fillStyle = '#b91c1c';
-    context.font = '900 25px Arial, "Segoe UI Emoji"';
+    context.font = '900 22px Arial, "Segoe UI Emoji"';
     section.titleLines.forEach((line) => {
       context.fillText(line, padding, y);
-      y += 34;
+      y += 30;
     });
-    context.fillStyle = '#111827';
-    context.font = '600 22px Arial, "Segoe UI Emoji"';
-    section.bodyLines.forEach((line) => {
-      context.fillText(line, padding, y);
-      y += lineHeight;
+    section.entries.forEach((entry) => {
+      context.fillStyle = '#1e293b';
+      context.font = '600 20px Arial, "Segoe UI Emoji"';
+      const entryY = y;
+      entry.lines.forEach((line) => {
+        context.fillText(line, padding, y);
+        y += lineHeight;
+      });
+      if (entry.status) {
+        context.fillStyle = entry.status === 'SELESAI' ? '#047857' : '#475569';
+        context.font = '800 17px Arial, "Segoe UI Emoji"';
+        const statusX = width - padding - context.measureText(entry.status).width;
+        context.fillText(entry.status, statusX, entryY);
+      }
+      if (entry.progress) {
+        const progressY = y - 1;
+        let progressX = padding + 28;
+        const drawProgressPart = (text, color, gap = 14) => {
+          context.fillStyle = color;
+          context.fillText(text, progressX, progressY);
+          progressX += context.measureText(text).width + gap;
+        };
+        context.font = '900 14px Arial, "Segoe UI Emoji"';
+        drawProgressPart('PROGRESS RITASI:', '#0f172a', 18);
+        context.font = '800 14px Arial, "Segoe UI Emoji"';
+        drawProgressPart(`${entry.progress.completed} SELESAI`, '#047857');
+        drawProgressPart('|', '#cbd5e1');
+        drawProgressPart(`${entry.progress.running} SEDANG JALAN`, '#475569');
+        drawProgressPart('|', '#cbd5e1');
+        drawProgressPart(`${entry.progress.waiting} BELUM JALAN`, '#475569');
+        if (entry.progress.cancelled) {
+          drawProgressPart('|', '#cbd5e1');
+          drawProgressPart(`${entry.progress.cancelled} BATAL`, '#475569', 0);
+        }
+        y += 14;
+      }
+      context.fillStyle = '#e2e8f0';
+      context.fillRect(padding + 28, y + 2, contentWidth - 28, 1);
+      y += 16;
     });
     y += sectionGap;
   });
