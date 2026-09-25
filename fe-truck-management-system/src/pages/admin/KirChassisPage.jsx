@@ -161,6 +161,7 @@ function KirChassisPage({ readOnly = false }) {
       description="Kelola data chassis, kapasitas container, masa berlaku chassis, dan dokumen pendukung."
       fields={fields}
       detailFields={detailFields}
+      detailModalClassName="chassis-detail-modal compact-master-detail-modal"
       columns={[
         { key: 'chassisCode', label: 'Kode Chassis', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
         { key: 'plateNumber', label: 'Plat / Identitas', render: (_, row) => <ConnectedTruckPlate row={row} trucks={truckRows} /> },

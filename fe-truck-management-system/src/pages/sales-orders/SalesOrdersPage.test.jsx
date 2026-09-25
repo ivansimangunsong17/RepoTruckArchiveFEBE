@@ -160,8 +160,8 @@ describe('SalesOrdersPage billing status flow', () => {
     const user = userEvent.setup();
     const reportStart = new Date();
     const reportEnd = new Date();
-    reportStart.setDate(reportStart.getDate() - 2);
-    reportEnd.setDate(reportEnd.getDate() + 2);
+    reportStart.setDate(reportStart.getDate() - 3);
+    reportEnd.setDate(reportEnd.getDate() + 3);
     const localDateKey = (value) => [
       value.getFullYear(),
       String(value.getMonth() + 1).padStart(2, '0'),
@@ -176,15 +176,20 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     const canvasContext = HTMLCanvasElement.prototype.getContext.mock.results[0].value;
     expect(canvasContext.fillText).toHaveBeenCalledWith(
-      'LIST ORDER PENDEK TGL 20/07/2026',
+      'ORDER PENDEK / 20FT - 20/07/2026',
       expect.any(Number),
       expect.any(Number),
     );
     expect(canvasContext.fillText).toHaveBeenCalledWith(
-      expect.stringContaining('PT CONTOH 3X20 CIKARANG SELESAI'),
+      expect.stringContaining('PT CONTOH / 3X20 / CIKARANG'),
       expect.any(Number),
       expect.any(Number),
     );
+    expect(canvasContext.fillText).toHaveBeenCalledWith('2 SELESAI', expect.any(Number), expect.any(Number));
+    expect(canvasContext.fillText).toHaveBeenCalledWith('PROGRESS RITASI:', expect.any(Number), expect.any(Number));
+    expect(canvasContext.fillText).toHaveBeenCalledWith('0 SEDANG JALAN', expect.any(Number), expect.any(Number));
+    expect(canvasContext.fillText).toHaveBeenCalledWith('0 BELUM JALAN', expect.any(Number), expect.any(Number));
+    expect(canvasContext.fillText).toHaveBeenCalledWith('1 BATAL', expect.any(Number), expect.any(Number));
     expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
       page: 1,
       pageSize: 500,

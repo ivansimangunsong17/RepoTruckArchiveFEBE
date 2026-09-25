@@ -159,8 +159,12 @@ describe('TodayTruckDashboard', () => {
     expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith('image/png');
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     expect(canvasFillTextCalls.join('\n')).toContain('AGUS / B 1234 XYZ');
-    expect(canvasFillTextCalls.join('\n')).toContain('PROGRESS: 1 SELESAI | 1 BERJALAN | TOTAL 2 RITASI');
-    expect(canvasFillTextCalls.join('\n')).toContain('BUDI / B 1111 XYZ - SELESAI');
+    expect(canvasFillTextCalls.join('\n')).toContain('1 SELESAI');
+    expect(canvasFillTextCalls.join('\n')).toContain('1 BERJALAN');
+    expect(canvasFillTextCalls.join('\n')).toContain('0 BELUM JALAN');
+    expect(canvasFillTextCalls.join('\n')).toContain('2 TOTAL RITASI');
+    expect(canvasFillTextCalls.join('\n')).toContain('1. AGUS / B 1234 XYZ - SEDANG JALAN');
+    expect(canvasFillTextCalls.join('\n')).not.toContain('BUDI / B 1111 XYZ - SELESAI');
   });
 
   it('menampilkan hanya size chassis di dashboard', async () => {
