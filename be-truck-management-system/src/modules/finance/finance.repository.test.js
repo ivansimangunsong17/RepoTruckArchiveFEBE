@@ -34,10 +34,10 @@ test('customer outstanding CTE tidak lagi membatasi trip_date ke Juni-Agustus 20
   assert.match(sql, /where\s+outstanding_amount\s*>\s*0/i);
 });
 
-test('outstanding CTE menganggap SO sebelum Agustus 2026 tanpa nomor invoice sebagai lunas', () => {
+test('outstanding CTE mengecualikan data historis sebelum Agustus tanpa nomor invoice', () => {
   const sql = outstandingOrdersCte();
 
-  assert.match(sql, /trip_date\s*>=\s*date\s*'2026-08-01'/i);
+  assert.match(sql, /so_date\s*>=\s*date\s*'2026-08-01'/i);
   assert.match(sql, /nullif\(btrim\(invoice_number\),\s*''\)\s+is\s+not\s+null/i);
 });
 
