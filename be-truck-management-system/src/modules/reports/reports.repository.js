@@ -612,6 +612,8 @@ export function summarizeCustomerPerformanceRows(rows = []) {
   };
 }
 
+export const DASHBOARD_SO_NUMBER_SQL = 'coalesce(so.accurate_so_number, so.so_number)';
+
 export async function getDashboardReport() {
   const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs, progressJobs] = await Promise.all([
     // Dikecualikan is_vendor_order (Phase 3): dashboard ini meringkas ritasi/revenue operasional,
@@ -666,7 +668,7 @@ export async function getDashboardReport() {
              assigned_driver.nickname as driver_nickname,
              cj.repo_location, cj.repo_stored_at, cj.repo_reason,
              cj.repo_notes, cj.repo_container_condition,
-             so.id as sales_order_id, so.so_number, so.customer_name,
+             so.id as sales_order_id, ${DASHBOARD_SO_NUMBER_SQL} as so_number, so.customer_name,
              so.shipment_type, so.origin, cj.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj
@@ -686,7 +688,7 @@ export async function getDashboardReport() {
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
              assigned_driver.name as driver_full_name,
              assigned_driver.nickname as driver_nickname,
-             so.id as sales_order_id, so.so_number, so.customer_name,
+             so.id as sales_order_id, ${DASHBOARD_SO_NUMBER_SQL} as so_number, so.customer_name,
              so.shipment_type, so.origin, cj.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj
@@ -703,7 +705,7 @@ export async function getDashboardReport() {
              cj.received_at, cj.running_at, cj.completed_at, cj.updated_at, cj.assignment_snapshot,
              assigned_driver.name as driver_full_name,
              assigned_driver.nickname as driver_nickname,
-             so.id as sales_order_id, so.so_number, so.customer_name,
+             so.id as sales_order_id, ${DASHBOARD_SO_NUMBER_SQL} as so_number, so.customer_name,
              so.shipment_type, so.origin, cj.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj

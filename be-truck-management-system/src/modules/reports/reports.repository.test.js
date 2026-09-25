@@ -13,7 +13,12 @@ const {
   summarizeCustomerPerformanceRows,
   summarizeSalesPerformanceRows,
   splitDriverCommissionPaymentAmount,
+  DASHBOARD_SO_NUMBER_SQL,
 } = await import('./reports.repository.js');
+
+test('dashboard memakai nomor Accurate saat so_number kosong', () => {
+  assert.equal(DASHBOARD_SO_NUMBER_SQL, 'coalesce(so.accurate_so_number, so.so_number)');
+});
 
 test('monthly revenue memakai harga per container agar cancelled job tidak menggandakan revenue', () => {
   assert.equal(calculateCompletedJobRevenue({

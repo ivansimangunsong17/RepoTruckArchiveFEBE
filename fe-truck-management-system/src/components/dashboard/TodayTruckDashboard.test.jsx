@@ -167,6 +167,63 @@ describe('TodayTruckDashboard', () => {
     expect(canvasFillTextCalls.join('\n')).not.toContain('BUDI / B 1111 XYZ - SELESAI');
   });
 
+  it('memisahkan progress dua Sales Order berbeda meski customer, shipment, dan tujuan sama', async () => {
+    const user = userEvent.setup();
+    const common = {
+      shipment: 'export',
+      customer: 'PT. Tirta Amerta Jaya Logistik',
+      destination: 'Purwakarta',
+      size: '40FT',
+    };
+    const makeJobs = ({ orderId, soNumber, counts }) => [
+      ...Array.from({ length: counts.completed }, (_, index) => ({
+        ...common, id: `${orderId}-completed-${index}`, orderId, soNumber, status: 'completed',
+      })),
+      ...Array.from({ length: counts.running }, (_, index) => ({
+        ...common, id: `${orderId}-running-${index}`, orderId, soNumber, status: 'running',
+        driver: `Driver ${index + 1}`, plateNumber: `B 9${String(index).padStart(3, '0')} TEST`,
+      })),
+      ...Array.from({ length: counts.waiting }, (_, index) => ({
+        ...common, id: `${orderId}-waiting-${index}`, orderId, soNumber, status: 'received',
+      })),
+    ];
+
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [],
+      activeJobs: [],
+      progressJobs: [
+        ...makeJobs({
+          orderId: '039393ea-380f-405d-a87d-8034c06c0d0a',
+          soNumber: '2609/23-00250',
+          counts: { completed: 4, running: 10, waiting: 6 },
+        }),
+        ...makeJobs({
+          orderId: 'e5ac9498-6535-49fc-9bfd-a1f93d6691c5',
+          soNumber: '2609/25-00269',
+          counts: { completed: 0, running: 0, waiting: 12 },
+        }),
+      ],
+    });
+
+    render(<TodayTruckDashboard />);
+    await screen.findByText(/Last Update/i);
+    await user.click(screen.getByRole('button', { name: /download report/i }));
+
+    const reportText = canvasFillTextCalls.join('\n');
+    expect(canvasFillTextCalls.filter((text) => text === 'EXPORT PT. TIRTA AMERTA JAYA LOGISTIK PURWAKARTA')).toHaveLength(2);
+    expect(reportText).toContain('SO 2609/23-00250 - 20X40');
+    expect(reportText).toContain('SO 2609/25-00269 - 12X40');
+    expect(reportText).toContain('4 SELESAI');
+    expect(reportText).toContain('10 BERJALAN');
+    expect(reportText).toContain('6 BELUM JALAN');
+    expect(reportText).toContain('20 TOTAL RITASI');
+    expect(reportText).toContain('0 SELESAI');
+    expect(reportText).toContain('0 BERJALAN');
+    expect(reportText).toContain('12 BELUM JALAN');
+    expect(reportText).toContain('12 TOTAL RITASI');
+    expect(reportText).not.toContain('32 TOTAL RITASI');
+  });
+
   it('menampilkan hanya size chassis di dashboard', async () => {
     const user = userEvent.setup();
     render(<TodayTruckDashboard />);

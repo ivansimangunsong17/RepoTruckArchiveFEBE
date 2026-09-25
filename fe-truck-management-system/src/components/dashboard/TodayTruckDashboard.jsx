@@ -235,8 +235,10 @@ function reportDriverPlateLabel(row) {
 }
 
 function reportGroupKey(job) {
+  const orderIdentity = job?.orderId || job?.salesOrderId || job?.soNumber || job?.salesOrderNumber;
+  if (orderIdentity) return `order:${orderIdentity}`;
   return [
-    job?.soNumber || job?.salesOrderNumber || '',
+    'fallback',
     job?.shipment || '',
     job?.customer || '',
     job?.destination || '',
@@ -273,8 +275,8 @@ function buildProgressReportSections(rows = [], reportDate) {
         normalizeReportText(formatShipment(first.shipment)),
         normalizeReportText(first.customer || first.salesName || first.soNumber),
         normalizeReportText(first.destination),
-        party,
       ].filter((part) => part && part !== '-').join(' '),
+      subtitle: [first.soNumber ? `SO ${normalizeReportText(first.soNumber)}` : '', party].filter(Boolean).join(' - '),
       metrics: [
         { label: 'SELESAI', value: completedItems.length, color: '#047857' },
         { label: 'BERJALAN', value: runningItems.length, color: '#334155' },
@@ -335,16 +337,19 @@ function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
   const wrappedSections = sections.map((section) => {
     context.font = '900 25px Arial';
     const titleLines = wrapCanvasText(context, section.title, contentWidth);
+    context.font = '800 20px Arial';
+    const subtitleLines = section.subtitle ? wrapCanvasText(context, section.subtitle, contentWidth) : [];
     context.font = '600 21px Arial';
     const summaryLines = section.summary ? wrapCanvasText(context, section.summary, contentWidth) : [];
     const bodyLines = (section.lines || []).flatMap((line, index) => (
       wrapCanvasText(context, section.numbered ? `${index + 1}. ${line}` : line, contentWidth)
     ));
     const footerLines = section.footer ? wrapCanvasText(context, section.footer, contentWidth) : [];
-    return { ...section, titleLines, summaryLines, bodyLines, footerLines, metricHeight: section.metrics?.length ? 54 : 0 };
+    return { ...section, titleLines, subtitleLines, summaryLines, bodyLines, footerLines, metricHeight: section.metrics?.length ? 54 : 0 };
   });
   const height = Math.max(480, padding * 2 + 78 + wrappedSections.reduce((total, section) => (
     total + 10 + section.titleLines.length * 34
+      + section.subtitleLines.length * 28
       + section.summaryLines.length * lineHeight
       + section.metricHeight
       + section.bodyLines.length * lineHeight
@@ -375,6 +380,12 @@ function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
     section.titleLines.forEach((line) => {
       context.fillText(line, padding, y);
       y += 34;
+    });
+    context.fillStyle = '#475569';
+    context.font = '800 20px Arial';
+    section.subtitleLines.forEach((line) => {
+      context.fillText(line, padding, y);
+      y += 28;
     });
     if (section.metrics?.length) {
       const metricGap = 8;
