@@ -83,6 +83,19 @@ function reportDateKey(value = new Date()) {
   ].join('-');
 }
 
+function getDoReportDateRange(referenceDate = new Date()) {
+  const start = new Date(referenceDate);
+  const end = new Date(referenceDate);
+  start.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
+  start.setDate(start.getDate() - 2);
+  end.setDate(end.getDate() + 2);
+  return {
+    dateFrom: reportDateKey(start),
+    dateTo: reportDateKey(end),
+  };
+}
+
 function wrapCanvasText(context, text, maxWidth) {
   const words = String(text || '').split(/\s+/).filter(Boolean);
   const lines = [];
@@ -123,11 +136,13 @@ function formatShipmentLabel(value) {
 function getDoReportStatusLabel(order) {
   if (order?.status === 'cancelled') return 'BATAL';
   if (order?.status === 'completed') return 'SELESAI';
+  if (order?.status === 'repo_stored') return 'CONTAINER TITIP';
+  if (order?.status === 'inap') return 'INAP';
   if (order?.status === 'running') return 'SEDANG JALAN';
   return 'BELUM JALAN';
 }
 
-function getDoReportParty(order) {
+function getDoReportQuantities(order) {
   const lineItems = getOrderLineItems(order);
   const quantities = lineItems.reduce((accumulator, item) => {
     const qty = Math.max(0, Number(item.qty || 0));
@@ -141,24 +156,53 @@ function getDoReportParty(order) {
     const fallbackSize = String(order?.container || order?.cargoType || '').toUpperCase().includes('40') ? '40FT' : '20FT';
     quantities[fallbackSize] = fallbackQuantity;
   }
-  return ['20FT', '40FT']
-    .filter((size) => quantities[size])
-    .map((size) => `${quantities[size]}x${size.replace('FT', '')}`)
-    .join(' + ') || '-';
+  return quantities;
+}
+
+function formatDoReportDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  }).format(date);
 }
 
 function buildDoReportSections(orders = []) {
   const sections = new Map();
   orders.forEach((order) => {
-    const party = getDoReportParty(order);
-    const sectionKey = party.includes('40') && !party.includes('20') ? 'LIST ORDER PANJANG / 40FT' : 'LIST ORDER PENDEK / 20FT';
-    if (!sections.has(sectionKey)) sections.set(sectionKey, []);
-    const vendorLabel = order.isVendorOrder ? ' - VENDOR' : '';
-    const doLabel = order.doNumber ? ` - DO ${order.doNumber}` : '';
-    const tripDateLabel = formatDate(order.tripDate || order.plannedDate || order.soDate);
-    sections.get(sectionKey).push(`${order.customer || '-'} ${party} ${order.destination || '-'} - TGL JALAN ${tripDateLabel.toUpperCase()} - ${getDoReportStatusLabel(order)}${vendorLabel}${doLabel}`);
+    const tripDate = order.tripDate || order.plannedDate || order.soDate;
+    const dateKey = reportDateKey(tripDate);
+    const dateLabel = formatDoReportDate(tripDate);
+    const quantities = getDoReportQuantities(order);
+
+    ['20FT', '40FT'].forEach((size) => {
+      if (!quantities[size]) return;
+      const type = size === '40FT' ? 'PANJANG' : 'PENDEK';
+      const sectionKey = `${dateKey}-${size}`;
+      if (!sections.has(sectionKey)) {
+        sections.set(sectionKey, {
+          title: `LIST ORDER ${type} TGL ${dateLabel}`,
+          lines: [],
+          dateKey,
+          size,
+        });
+      }
+
+      const statusLabel = getDoReportStatusLabel(order);
+      const vendorLabel = order.isVendorOrder ? '(VENDOR)' : '';
+      const note = String(order.jobDescription || order.notes || '').trim();
+      const noteLabel = note ? ` (${note.toUpperCase()})` : '';
+      const suffix = [vendorLabel, noteLabel, statusLabel].filter(Boolean).join(' ');
+      sections.get(sectionKey).lines.push(
+        `${String(order.customer || '-').toUpperCase()} ${quantities[size]}X${size.replace('FT', '')} ${String(order.destination || '-').toUpperCase()}${suffix ? ` ${suffix}` : ''}`,
+      );
+    });
   });
-  return [...sections.entries()].map(([title, lines]) => ({ title, lines }));
+  return [...sections.values()]
+    .sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.size.localeCompare(right.size));
 }
 
 function downloadDoReportPng({ orders, dateFrom, dateTo }) {
@@ -177,9 +221,9 @@ function downloadDoReportPng({ orders, dateFrom, dateTo }) {
     : 'Semua tanggal';
 
   const wrappedSections = sections.length ? sections.map((section) => {
-    context.font = '900 25px Arial';
+    context.font = '900 25px Arial, "Segoe UI Emoji"';
     const titleLines = wrapCanvasText(context, section.title, contentWidth);
-    context.font = '600 22px Arial';
+    context.font = '600 22px Arial, "Segoe UI Emoji"';
     const bodyLines = section.lines.flatMap((line, index) => (
       wrapCanvasText(context, `${index + 1}. ${line}`, contentWidth)
     ));
@@ -198,24 +242,24 @@ function downloadDoReportPng({ orders, dateFrom, dateTo }) {
   context.fillRect(0, 0, width, 10);
   let y = padding;
   context.fillStyle = '#111827';
-  context.font = '900 34px Arial';
+  context.font = '900 34px Arial, "Segoe UI Emoji"';
   context.fillText('LIST DO MASUK', padding, y);
   y += 36;
   context.fillStyle = '#64748b';
-  context.font = '700 18px Arial';
+  context.font = '700 18px Arial, "Segoe UI Emoji"';
   context.fillText(`Periode ${periodLabel} - ${orders.length} SO`, padding, y);
   y += 40;
 
   wrappedSections.forEach((section) => {
     y += 8;
     context.fillStyle = '#b91c1c';
-    context.font = '900 25px Arial';
+    context.font = '900 25px Arial, "Segoe UI Emoji"';
     section.titleLines.forEach((line) => {
       context.fillText(line, padding, y);
       y += 34;
     });
     context.fillStyle = '#111827';
-    context.font = '600 22px Arial';
+    context.font = '600 22px Arial, "Segoe UI Emoji"';
     section.bodyLines.forEach((line) => {
       context.fillText(line, padding, y);
       y += lineHeight;
@@ -1003,23 +1047,23 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
     if (downloadDoLoading) return;
     setDownloadDoLoading(true);
     try {
-      let reportOrders = visibleOrders;
+      const reportRange = getDoReportDateRange();
+      let reportOrders = filteredDemoOrders.filter((order) => {
+        const tripDate = reportDateKey(order.tripDate || order.plannedDate || order.soDate);
+        return tripDate >= reportRange.dateFrom && tripDate <= reportRange.dateTo;
+      });
       if (archive.isDatabaseMode) {
-        const serverFilter = getServerFilter(status, customerDocumentsOnly);
         const result = await fetchSalesOrdersPage({
           page: 1,
           pageSize: DO_REPORT_PAGE_SIZE,
           query,
-          dateFrom,
-          dateTo,
+          dateFrom: reportRange.dateFrom,
+          dateTo: reportRange.dateTo,
           vendorFilter,
-          ...serverFilter,
         });
         reportOrders = result.rows || [];
-      } else {
-        reportOrders = filteredDemoOrders;
       }
-      downloadDoReportPng({ orders: reportOrders, dateFrom, dateTo });
+      downloadDoReportPng({ orders: reportOrders, ...reportRange });
     } catch (requestError) {
       notify({ type: 'error', title: 'Download report gagal', message: requestError.message || 'List DO masuk gagal dibuat.' });
     } finally {
@@ -1519,6 +1563,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
           masterTrucks={archive.masters.trucks}
           masterDrivers={archive.masters.drivers}
           masterDestinations={archive.masters.destinations}
+          masterLocations={archive.masters['end-users']}
           activeJobs={activeJobsForContainerUpdate}
           currentUser={user}
           onClose={() => setEditingContainer(null)}

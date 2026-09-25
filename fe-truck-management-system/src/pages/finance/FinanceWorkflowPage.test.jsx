@@ -9,6 +9,7 @@ import {
   approveOperationalFundRequest,
   closeOperationalFundBatch,
   createOperationalFundRequest,
+  deleteExpenseTransferProof,
   depositOperationalFund,
   fetchFinanceContainerJobExpenses,
   fetchExpenseTransferProofs,
@@ -837,14 +838,15 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByText('Belum ada bukti yang disimpan.')).toBeInTheDocument();
     expect(screen.getByLabelText('Nominal bukti transfer')).toHaveValue(125000);
     expect(screen.getByText(/Otomatis mengikuti nominal normal/i)).toBeInTheDocument();
-    expect(screen.getAllByText('Simpan minimal satu bukti transfer untuk melanjutkan validasi.').length).toBeGreaterThan(0);
+    expect(screen.getByText('Pilih file bukti transfer, lalu klik Simpan Bukti.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
     expect(reconcileFinanceContainerJobExpense).not.toHaveBeenCalled();
 
     await addTransferProof(user);
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Tambah biaya admin' }));
     await user.type(screen.getByLabelText(/biaya admin transfer/i), '2500');
-    await user.type(screen.getByLabelText('Catatan Penyesuaian'), 'Selisih biaya admin transfer');
+    expect(screen.queryByLabelText('Catatan Penyesuaian')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
 
     await waitFor(() => {
@@ -854,7 +856,7 @@ describe('FinanceWorkflowPage validation modals', () => {
         proofFile: null,
         adminFeeAmount: 2500,
         adminFeeNote: '',
-        adjustmentNote: 'Selisih biaya admin transfer',
+        adjustmentNote: 'Biaya admin',
       });
     });
   });
@@ -869,6 +871,7 @@ describe('FinanceWorkflowPage validation modals', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
     await addTransferProof(user, 122500, 'bukti.pdf');
+    await user.click(screen.getByRole('button', { name: 'Tambah biaya admin' }));
     const adminFeeInput = screen.getByLabelText(/biaya admin transfer/i);
     await user.type(adminFeeInput, '2500');
     await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
@@ -939,11 +942,85 @@ describe('FinanceWorkflowPage validation modals', () => {
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
     expect(await screen.findByText('bukti-lama.pdf')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
+    expect(screen.queryByLabelText(/file bukti/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Tambah Bukti' }));
     expect(screen.getByLabelText(/file bukti/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Nominal bukti transfer')).toHaveValue(null);
+  });
+
+  it('membuka kembali transaksi tervalidasi untuk diedit selama batch masih open', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense({
+      financeCheckStatus: 'sudah_dicek',
+      batchStatus: 'open',
+      adminFeeAmount: 2500,
+      adjustmentNote: 'Biaya admin',
+      financeCheckedByName: 'Finance Demo',
+      financeCheckedAt: '2026-08-20T10:00:00.000Z',
+    });
+    fetchExpenseTransferProofs.mockResolvedValue([{
+      id: 'transfer-proof-checked', amount: 125000, transferDate: '2026-08-20', note: '',
+      attachment: { id: 'proof-checked', name: 'bukti-checked.pdf', path: 'proof-checked' },
+    }]);
+    fetchOperationalFundTransactions.mockResolvedValue({
+      rows: [{
+        id: 'ledger-expense-1', batchId: 'batch-2026-08-20', batchStatus: 'open',
+        containerJobExpenseId: 'expense-1', transactionDate: '2026-08-20', transactionType: 'debit',
+        category: 'container_job_expense', amount: 125000, moneyOut: 125000, runningBalance: 9875000,
+        description: 'Uang Admin TF', financeCheckStatus: 'sudah_dicek',
+        transferProofs: [{ id: 'proof-checked', name: 'bukti-checked.pdf', path: 'proof-checked' }],
+      }],
+      total: 1,
+      totalPages: 1,
+      summary: { totalCredit: 10000000, totalDebit: 125000, balance: 9875000, creditCount: 1, debitCount: 1, voidCount: 0 },
+    });
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Edit transaksi tervalidasi' }));
+    expect(await screen.findByText('Edit UJ dan Bukti Transfer')).toBeInTheDocument();
+    expect(screen.getByText('bukti-checked.pdf')).toBeInTheDocument();
+    expect(screen.getByLabelText('Biaya Admin Transfer')).toHaveValue(2500);
+    expect(screen.getByRole('button', { name: 'Simpan Perubahan' })).toBeEnabled();
+    expect(screen.queryByLabelText('Catatan Penyesuaian')).not.toBeInTheDocument();
+    expect(screen.getByText(/Terakhir oleh Finance Demo/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Hapus biaya admin' }));
+    await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));
+    await waitFor(() => expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', expect.objectContaining({
+      adminFeeAmount: 0,
+      adjustmentNote: '',
+    })));
+  });
+
+  it('meminta konfirmasi melalui modal sebelum menghapus bukti transfer', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense();
+    const proof = {
+      id: 'transfer-proof-delete', amount: 150000, transferDate: '2026-08-20', note: '',
+      attachment: { id: 'proof-delete', name: 'bukti-hapus.pdf', path: 'proof-delete' },
+    };
+    fetchExpenseTransferProofs.mockResolvedValue([proof]);
+    deleteExpenseTransferProof.mockResolvedValue({ id: proof.id });
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    expect(await screen.findByText('bukti-hapus.pdf')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hapus bukti transfer' }));
+    const deleteDialog = screen.getByRole('alertdialog', { name: 'Hapus bukti transfer?' });
+    expect(deleteDialog).toBeInTheDocument();
+    expect(within(deleteDialog).getByText(/Rp\s*150\.000/i)).toBeInTheDocument();
+
+    await user.click(within(deleteDialog).getByRole('button', { name: 'Batal' }));
+    expect(deleteExpenseTransferProof).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Hapus bukti transfer' }));
+    fetchExpenseTransferProofs.mockResolvedValue([]);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Hapus Bukti' }));
+    await waitFor(() => expect(deleteExpenseTransferProof).toHaveBeenCalledWith('expense-1', proof.id));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
   it('mengunci bukti dan nominal ketika batch rekening dropping sudah ditutup', async () => {
-    const user = userEvent.setup();
     mockPaidExpense({ batchStatus: 'closed' });
     fetchExpenseTransferProofs.mockResolvedValue([{
       id: 'transfer-proof-closed', amount: 125000, transferDate: '2026-08-20', note: '',
@@ -951,13 +1028,8 @@ describe('FinanceWorkflowPage validation modals', () => {
     }]);
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
-    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    expect(await screen.findByText('Batch ditutup')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Edit bukti transfer' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Hapus bukti transfer' })).toBeDisabled();
-    expect(screen.getByLabelText('Biaya Admin Transfer')).toBeDisabled();
-    expect(screen.getByLabelText('Catatan Penyesuaian')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Validasi' })).toBeDisabled();
+    expect(screen.queryByText('Validasi UJ dan Bukti Transfer')).not.toBeInTheDocument();
   });
 
   it('menampilkan filter tanggal invoice di semua tab', async () => {

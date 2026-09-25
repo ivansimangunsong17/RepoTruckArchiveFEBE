@@ -1,4 +1,4 @@
-import { AlertTriangle, Banknote, CheckCircle2, Download, ReceiptText } from 'lucide-react';
+import { AlertTriangle, Banknote, CheckCircle2, Download, Pencil, ReceiptText } from 'lucide-react';
 import DocumentLink from '../../../components/common/DocumentLink';
 import { downloadCsv } from '../../../utils/csvExport';
 import { downloadPdfReport } from '../../../utils/simplePdfReport';
@@ -293,7 +293,7 @@ function DailyOperationalFundPanel({
                     <th className="px-4 py-3 text-right">Uang Masuk</th>
                     <th className="px-4 py-3 text-right">Uang Keluar</th>
                     <th className="px-4 py-3 text-right">Saldo</th>
-                    <th className="px-4 py-3 text-right">Bukti</th>
+                    <th className="px-4 py-3 text-right">Bukti / Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -310,15 +310,16 @@ function DailyOperationalFundPanel({
                       <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{row.moneyOut ? formatCurrency(row.moneyOut) : <span className="text-slate-300">-</span>}</td>
                       <td className="px-4 py-3 text-right text-xs font-semibold text-slate-900">{row.runningBalance == null ? '-' : formatCurrency(row.runningBalance)}</td>
                       <td className="px-4 py-3 text-right">
-                        {row.proofAttachment ? (
-                          <DocumentLink
-                            className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-[10px] font-bold text-slate-800 hover:bg-slate-50"
-                            file={row.proofAttachment}
-                            label="View"
-                          />
-                        ) : (
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {row.transferProofs?.length ? (
+                            row.transferProofs.map((proof, proofIndex) => <DocumentLink className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-[10px] font-bold text-slate-800 hover:bg-slate-50" file={proof} key={proof.id} label={row.transferProofs.length > 1 ? `View ${proofIndex + 1}` : 'View'} />)
+                          ) : row.proofAttachment ? (
+                          <DocumentLink className="inline-flex h-7 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-[10px] font-bold text-slate-800 hover:bg-slate-50" file={row.proofAttachment} label="View" />
+                          ) : (
                           <span className="text-[10px] font-semibold text-slate-400">-</span>
-                        )}
+                          )}
+                          {canReconcile && row.containerJobExpenseId && row.financeCheckStatus === 'sudah_dicek' && row.batchStatus !== 'closed' ? <button aria-label="Edit transaksi tervalidasi" className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-slate-400 bg-white px-2 text-[10px] font-bold text-slate-800 hover:bg-slate-100" onClick={() => onOpenExpenseCheckConfirm(row.containerJobExpenseId)} title="Edit transaksi tervalidasi" type="button"><Pencil size={12} /> Edit</button> : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -385,6 +386,7 @@ function DailyOperationalFundPanel({
                   {expenseRows.map((row, index) => {
                     const busy = expenseBusyId === row.id;
                     const alreadyChecked = row.financeCheckStatus === 'sudah_dicek';
+                    const batchClosed = row.batchStatus === 'closed';
                     return (
                       <tr className="align-middle hover:bg-slate-50" key={row.id}>
                         <td className="px-3 py-2 text-center text-xs font-black text-slate-600">{index + 1}</td>
@@ -423,17 +425,18 @@ function DailyOperationalFundPanel({
                             <span className="mt-1 block text-[10px] font-semibold text-slate-500">Normal: menunggu Finance validasi.</span>
                           ) : null}
                           {row.financeNote ? <span className="mt-1 line-clamp-2 block text-[10px] font-medium text-slate-500">{row.financeNote}</span> : null}
+                          {alreadyChecked && row.financeCheckedByName ? <span className="mt-1 block text-[10px] font-semibold text-slate-500">Terakhir oleh {row.financeCheckedByName}{row.financeCheckedAt ? `, ${row.financeCheckedAt}` : ''}</span> : null}
                         </td>
                         <td className="px-3 py-2">
                           {canReconcile ? (
                             <div className="grid min-w-[160px] grid-cols-2 gap-1.5">
                               <button
                                 className="inline-flex h-8 items-center justify-center rounded-md bg-emerald-600 px-2 text-[10px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-                                disabled={busy || alreadyChecked}
+                                disabled={busy || batchClosed}
                                 onClick={() => onOpenExpenseCheckConfirm(row.id)}
                                 type="button"
                               >
-                                Validasi
+                                {alreadyChecked ? 'Edit' : 'Validasi'}
                               </button>
                               <button
                                 className="inline-flex h-8 items-center justify-center rounded-md border border-amber-200 bg-white px-2 text-[10px] font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-40"

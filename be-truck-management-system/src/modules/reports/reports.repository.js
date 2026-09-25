@@ -613,7 +613,7 @@ export function summarizeCustomerPerformanceRows(rows = []) {
 }
 
 export async function getDashboardReport() {
-  const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs] = await Promise.all([
+  const [orders, jobs, documents, masters, trucks, activeJobs, upcomingJobs, progressJobs] = await Promise.all([
     // Dikecualikan is_vendor_order (Phase 3): dashboard ini meringkas ritasi/revenue operasional,
     // dan order vendor tidak pernah punya ritasi -- revenue-nya juga bukan revenue otomatis internal.
     query(`
@@ -645,10 +645,13 @@ export async function getDashboardReport() {
     `),
     query(`
       select v.id, v.unit_code, v.plate_number, v.container_size, v.default_driver_name,
+             default_driver.name as default_driver_full_name,
+             default_driver.nickname as default_driver_nickname,
              v.operational_status, v.kir_chassis_number,
              kc.chassis_code, kc.container_size as chassis_size
       from vehicles v
       left join kir_chassis kc on kc.id = v.current_chassis_id
+      left join drivers default_driver on default_driver.id = v.default_driver_id
       where v.archived_at is null
       order by v.unit_code asc, v.plate_number asc
     `),
@@ -659,6 +662,8 @@ export async function getDashboardReport() {
              cj.weighing_document_number, cj.tila_gatepass_document_number,
              cj.received_at, cj.running_at,
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
+             assigned_driver.name as driver_full_name,
+             assigned_driver.nickname as driver_nickname,
              cj.repo_location, cj.repo_stored_at, cj.repo_reason,
              cj.repo_notes, cj.repo_container_condition,
              so.id as sales_order_id, so.so_number, so.customer_name,
@@ -666,6 +671,7 @@ export async function getDashboardReport() {
              so.sales_name, so.created_by_name
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
+      left join drivers assigned_driver on assigned_driver.id = cj.driver_id
       where so.status <> 'cancelled'
         and cj.status in ('received', 'running', 'repo_stored')
       order by so.trip_date asc, cj.created_at asc
@@ -678,16 +684,42 @@ export async function getDashboardReport() {
              cj.weighing_document_number, cj.tila_gatepass_document_number,
              cj.received_at, cj.running_at,
              cj.completed_at, cj.updated_at, cj.assignment_snapshot,
+             assigned_driver.name as driver_full_name,
+             assigned_driver.nickname as driver_nickname,
              so.id as sales_order_id, so.so_number, so.customer_name,
              so.shipment_type, so.origin, cj.destination, so.trip_date,
              so.sales_name, so.created_by_name
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
+      left join drivers assigned_driver on assigned_driver.id = cj.driver_id
       where so.status <> 'cancelled'
         and cj.status in ('received', 'running')
         and so.trip_date >= current_date
       order by so.trip_date asc, cj.created_at asc
       limit 500
+    `),
+    query(`
+      select cj.id, cj.container_number, cj.container_size, cj.container_type, cj.status,
+             cj.received_at, cj.running_at, cj.completed_at, cj.updated_at, cj.assignment_snapshot,
+             assigned_driver.name as driver_full_name,
+             assigned_driver.nickname as driver_nickname,
+             so.id as sales_order_id, so.so_number, so.customer_name,
+             so.shipment_type, so.origin, cj.destination, so.trip_date,
+             so.sales_name, so.created_by_name
+      from container_jobs cj
+      join sales_orders so on so.id = cj.sales_order_id
+      left join drivers assigned_driver on assigned_driver.id = cj.driver_id
+      where not so.is_vendor_order
+        and so.status <> 'cancelled'
+        and cj.status <> 'cancelled'
+        and exists (
+          select 1
+          from container_jobs pending
+          where pending.sales_order_id = so.id
+            and pending.status not in ('completed', 'cancelled')
+        )
+      order by so.trip_date asc, so.created_at asc, cj.created_at asc
+      limit 1000
     `),
   ]);
 
@@ -720,6 +752,8 @@ export async function getDashboardReport() {
       chassisCode: row.chassis_code || '',
       chassisSize: row.chassis_size || '',
       defaultDriver: row.default_driver_name || '',
+      defaultDriverFullName: row.default_driver_full_name || row.default_driver_name || '',
+      defaultDriverNickname: row.default_driver_nickname || '',
       status: row.operational_status || 'Aktif',
     })),
     activeJobs: activeJobs.rows.map((row) => ({
@@ -743,6 +777,8 @@ export async function getDashboardReport() {
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,
       driver: row.assignment_snapshot?.driver || null,
+      driverFullName: row.driver_full_name || row.assignment_snapshot?.driver || null,
+      driverNickname: row.driver_nickname || null,
       plateNumber: row.assignment_snapshot?.plateNumber || null,
       tripDate: row.trip_date,
       tripDateKey: row.trip_date,
@@ -754,6 +790,29 @@ export async function getDashboardReport() {
       repoReason: row.repo_reason || '',
       repoNotes: row.repo_notes || '',
       repoContainerCondition: row.repo_container_condition || '',
+      updatedAt: row.updated_at,
+    })),
+    progressJobs: progressJobs.rows.map((row) => ({
+      id: row.id,
+      orderId: row.sales_order_id,
+      soNumber: row.so_number,
+      customer: row.customer_name,
+      shipment: row.shipment_type,
+      origin: row.origin,
+      destination: row.destination,
+      salesName: row.sales_name || row.created_by_name,
+      containerNumber: row.container_number,
+      size: row.container_size,
+      type: row.container_type,
+      status: row.status,
+      driver: row.assignment_snapshot?.driver || null,
+      driverFullName: row.driver_full_name || row.assignment_snapshot?.driver || null,
+      driverNickname: row.driver_nickname || null,
+      plateNumber: row.assignment_snapshot?.plateNumber || null,
+      tripDate: row.trip_date,
+      receivedAt: row.received_at,
+      runningAt: row.running_at,
+      completedAt: row.completed_at,
       updatedAt: row.updated_at,
     })),
     upcomingJobs: upcomingJobs.rows.map((row) => ({
@@ -777,6 +836,8 @@ export async function getDashboardReport() {
       travelDocument: row.travel_document_number,
       weighingDocument: row.weighing_document_number,
       driver: row.assignment_snapshot?.driver || null,
+      driverFullName: row.driver_full_name || row.assignment_snapshot?.driver || null,
+      driverNickname: row.driver_nickname || null,
       plateNumber: row.assignment_snapshot?.plateNumber || null,
       tripDate: row.trip_date,
       tripDateKey: row.trip_date,

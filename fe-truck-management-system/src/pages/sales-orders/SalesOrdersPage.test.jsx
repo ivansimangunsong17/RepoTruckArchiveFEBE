@@ -158,6 +158,15 @@ describe('SalesOrdersPage billing status flow', () => {
 
   it('mendownload list DO masuk dalam bentuk PNG sesuai filter Sales Order', async () => {
     const user = userEvent.setup();
+    const reportStart = new Date();
+    const reportEnd = new Date();
+    reportStart.setDate(reportStart.getDate() - 2);
+    reportEnd.setDate(reportEnd.getDate() + 2);
+    const localDateKey = (value) => [
+      value.getFullYear(),
+      String(value.getMonth() + 1).padStart(2, '0'),
+      String(value.getDate()).padStart(2, '0'),
+    ].join('-');
     render(<SalesOrdersPage />);
 
     const downloadButton = await screen.findByRole('button', { name: /download list do/i });
@@ -167,15 +176,22 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     const canvasContext = HTMLCanvasElement.prototype.getContext.mock.results[0].value;
     expect(canvasContext.fillText).toHaveBeenCalledWith(
-      expect.stringContaining('TGL JALAN 20 JULI 2026'),
+      'LIST ORDER PENDEK TGL 20/07/2026',
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(canvasContext.fillText).toHaveBeenCalledWith(
+      expect.stringContaining('PT CONTOH 3X20 CIKARANG SELESAI'),
       expect.any(Number),
       expect.any(Number),
     );
     expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.objectContaining({
       page: 1,
       pageSize: 500,
-      status: 'waiting_operational',
+      dateFrom: localDateKey(reportStart),
+      dateTo: localDateKey(reportEnd),
     }));
+    expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.not.objectContaining({ status: expect.anything() }));
   });
 
   it('membuka form update container job langsung dari detail Sales Order', async () => {

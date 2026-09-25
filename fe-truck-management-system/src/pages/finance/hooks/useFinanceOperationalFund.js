@@ -425,7 +425,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     setExpenseReconciliationDecisionError('');
   }
 
-  async function markExpenseChecked(id) {
+  async function markExpenseChecked(id, options = {}) {
     if (expenseCheckSubmittingRef.current) return;
     const targetRow = expenseReconciliationRows.find((row) => row.id === id);
     if (expenseCheckProofError) {
@@ -452,7 +452,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
         proofFile: expenseCheckProofFile,
         adminFeeAmount,
         adminFeeNote: expenseCheckAdminFeeNote.trim(),
-        adjustmentNote: expenseCheckAdjustmentNote.trim(),
+        adjustmentNote: options.adjustmentNote ?? expenseCheckAdjustmentNote.trim(),
       });
       setExpenseCheckConfirmId('');
       setExpenseCheckProofFile(null);
@@ -479,15 +479,16 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
   }
 
   function openExpenseCheckConfirm(id) {
+    const targetRow = expenseReconciliationRows.find((row) => row.id === id);
     setExpenseReconciliationError('');
     setExpenseCheckConfirmId(id);
     setExpenseCheckProofFile(null);
     setExpenseCheckProofError('');
     setExpenseCheckAdminFeeError('');
     setExpenseCheckGeneralError('');
-    setExpenseCheckAdminFeeAmount('');
-    setExpenseCheckAdminFeeNote('');
-    setExpenseCheckAdjustmentNote('');
+    setExpenseCheckAdminFeeAmount(targetRow?.adminFeeAmount ? String(targetRow.adminFeeAmount) : '');
+    setExpenseCheckAdminFeeNote(targetRow?.adminFeeNote || '');
+    setExpenseCheckAdjustmentNote(targetRow?.adjustmentNote || '');
     setExpenseCheckProofCount(0);
   }
 
@@ -536,10 +537,10 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     setExpenseCheckProofCount(proofs.length);
   }
 
-  function confirmExpenseChecked(event) {
+  function confirmExpenseChecked(event, options) {
     event.preventDefault();
     if (!expenseCheckConfirmId) return undefined;
-    return markExpenseChecked(expenseCheckConfirmId);
+    return markExpenseChecked(expenseCheckConfirmId, options);
   }
 
   async function submitExpenseClarification(event) {

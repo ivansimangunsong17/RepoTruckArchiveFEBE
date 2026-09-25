@@ -33,7 +33,15 @@ function normalizeTruck(truck) {
     chassisCode: truck.chassisCode || truck.chassis_code || truck.kirChassisNumber || truck.kir_chassis_number || '',
     chassisSize: normalizeSize(truck.chassisSize || truck.chassis_size),
     driver: truck.defaultDriver || truck.default_driver_name || truck.defaultDriverName || truck.lastDriver || '-',
+    driverFullName: truck.defaultDriverFullName || truck.defaultDriver || truck.default_driver_name || truck.defaultDriverName || truck.lastDriver || '-',
+    driverNickname: truck.defaultDriverNickname || truck.default_driver_nickname || '',
   };
+}
+
+function getRowDriverIdentity(row) {
+  const fullName = row?.job?.driverFullName || row?.job?.driver || row?.truck?.driverFullName || row?.truck?.driver || '-';
+  const displayName = row?.job?.driverNickname || row?.truck?.driverNickname || fullName;
+  return { displayName, fullName };
 }
 
 function isTruckAvailableForDashboard(truck) {
@@ -220,7 +228,7 @@ function normalizeReportSize(value) {
 }
 
 function reportDriverPlateLabel(row) {
-  const driver = normalizeReportText(row?.job?.driver || row?.truck?.driver || row?.truck?.plateNumber);
+  const driver = normalizeReportText(getRowDriverIdentity(row).displayName || row?.truck?.plateNumber);
   const plate = normalizeReportText(row?.job?.plateNumber || row?.job?.truck || row?.truck?.plateNumber);
   if (!plate || plate === '-' || plate === driver) return driver;
   return `${driver} / ${plate}`;
@@ -261,14 +269,17 @@ function buildProgressReportSections(rows = [], reportDate) {
         normalizeReportText(first.destination),
         party,
       ].filter((part) => part && part !== '-').join(' '),
-      lines: items.map((item) => `${reportDriverPlateLabel(item)} - ${normalizeReportStatus(item.job?.status)}`),
+      lines: [
+        `PROGRESS: ${items.filter((item) => item.job?.status === 'completed').length} SELESAI | ${items.filter((item) => item.job?.status !== 'completed').length} BERJALAN | TOTAL ${items.length} RITASI`,
+        ...items.map((item) => `${reportDriverPlateLabel(item)} - ${normalizeReportStatus(item.job?.status)}`),
+      ],
     };
   });
   const waitingRows = rows.filter((row) => !row.job && !isTruckMaintenance(row.truck));
   const maintenanceRows = rows.filter((row) => isTruckMaintenance(row.truck));
   const sections = [
     {
-      title: `REPORT PROGRESS UNIT TGL ${formatReportDate(reportDate)}`,
+      title: `REPORT PROGRESS ORDER TGL ${formatReportDate(reportDate)}`,
       lines: orderSections.length ? [] : ['BELUM ADA ORDER BERJALAN'],
     },
     ...orderSections,
@@ -324,7 +335,7 @@ function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
     return { ...section, titleLines, bodyLines };
   });
   const height = Math.max(480, padding * 2 + 78 + wrappedSections.reduce((total, section) => (
-    total + section.titleLines.length * 34 + Math.max(1, section.bodyLines.length) * lineHeight + sectionGap
+    total + 10 + section.titleLines.length * 34 + Math.max(1, section.bodyLines.length) * lineHeight + sectionGap
   ), 0));
   canvas.width = width;
   canvas.height = height;
@@ -336,7 +347,7 @@ function downloadProgressReportPng({ sections, reportDate, lastUpdateLabel }) {
   let y = padding;
   context.fillStyle = '#111827';
   context.font = '900 34px Arial';
-  context.fillText('REPORT PROGRESS UNIT', padding, y);
+  context.fillText('REPORT PROGRESS ORDER', padding, y);
   y += 36;
   context.fillStyle = '#64748b';
   context.font = '700 18px Arial';
@@ -402,7 +413,7 @@ function formatRunningDate(value) {
 
 function TodayTruckDashboard() {
   const [selectedRow, setSelectedRow] = useState(null);
-  const [dashboard, setDashboard] = useState({ trucks: [], activeJobs: [] });
+  const [dashboard, setDashboard] = useState({ trucks: [], activeJobs: [], progressJobs: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const currentDateKey = todayKey();
@@ -418,11 +429,12 @@ function TodayTruckDashboard() {
         setDashboard({
           trucks: Array.isArray(result.trucks) ? result.trucks : [],
           activeJobs: Array.isArray(result.activeJobs) ? result.activeJobs : [],
+          progressJobs: Array.isArray(result.progressJobs) ? result.progressJobs : [],
         });
       })
       .catch((requestError) => {
         if (!active) return;
-        setDashboard({ trucks: [], activeJobs: [] });
+        setDashboard({ trucks: [], activeJobs: [], progressJobs: [] });
         setError(requestError.message || 'Order berjalan gagal dimuat.');
       })
       .finally(() => {
@@ -444,8 +456,19 @@ function TodayTruckDashboard() {
   const lastOperationalUpdateLabel = formatDateTime(lastOperationalUpdate);
 
   function handleDownloadReport() {
+    const reportRows = dashboard.progressJobs.length
+      ? dashboard.progressJobs.map((job) => ({
+        job,
+        truck: {
+          plateNumber: job.plateNumber,
+          defaultDriver: job.driver,
+          defaultDriverFullName: job.driverFullName,
+          defaultDriverNickname: job.driverNickname,
+        },
+      }))
+      : rows;
     downloadProgressReportPng({
-      sections: buildProgressReportSections(rows, currentDateKey),
+      sections: buildProgressReportSections(reportRows, currentDateKey),
       reportDate: currentDateKey,
       lastUpdateLabel: lastOperationalUpdateLabel,
     });
@@ -575,7 +598,7 @@ function TodayTruckDashboard() {
                       {isTruckMaintenance(row.truck) ? <span className="rounded-full bg-amber-100 px-1.5 py-0 text-[9px] font-black uppercase text-amber-800">Maint</span> : null}
                     </div>
                   </td>
-                  <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Nama Sopir" title={row.job?.driver || row.truck.driver || '-'}>{row.job?.driver || row.truck.driver || '-'}</td>
+                  <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Nama Sopir" title={getRowDriverIdentity(row).fullName}>{getRowDriverIdentity(row).displayName}</td>
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="No Container" title={row.job?.containerNumber || '-'}>{row.job?.containerNumber || '-'}</td>
                   <td className="truncate px-2.5 py-0.5 text-slate-700" data-label="Jenis Order" title={formatShipment(row.job?.shipment)}>{formatShipment(row.job?.shipment)}</td>
                   <td className="truncate px-2.5 py-0.5 font-bold text-slate-700" data-label="Chassis / Size" title={chassisSizeLabel(row.truck)}>{chassisSizeLabel(row.truck)}</td>
@@ -617,7 +640,7 @@ function TodayTruckDashboard() {
               <div className="today-live-mobile-grid">
                 <div>
                   <span>Sopir</span>
-                  <strong>{row.job?.driver || row.truck.driver || '-'}</strong>
+                  <strong title={getRowDriverIdentity(row).fullName}>{getRowDriverIdentity(row).displayName}</strong>
                 </div>
                 <div>
                   <span>Container</span>
@@ -663,7 +686,7 @@ function TodayTruckDashboard() {
               <div className="today-truck-detail-grid">
                 <div><span>No Lambung</span><strong>{selectedRow.truck.unitCode || '-'}</strong></div>
                 <div><span>Plat</span><strong>{selectedRow.truck.plateNumber || '-'}</strong></div>
-                <div><span>Nama Sopir</span><strong>{selectedRow.job?.driver || selectedRow.truck.driver || '-'}</strong></div>
+                <div><span>Nama Sopir</span><strong title={getRowDriverIdentity(selectedRow).fullName}>{getRowDriverIdentity(selectedRow).displayName}</strong></div>
                 <div><span>Status</span><strong>{rowStatusLabel(selectedRow)}</strong></div>
                 <div><span>Nomor SO</span><strong>{selectedRow.job?.soNumber || '-'}</strong></div>
                 <div><span>Customer</span><strong>{selectedRow.job?.customer || '-'}</strong></div>
