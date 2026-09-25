@@ -60,6 +60,18 @@ describe('TodayTruckDashboard', () => {
           receivedAt: '2026-08-16T02:00:00.000Z',
         },
       ],
+      progressJobs: [
+        {
+          id: 'job-done', orderId: 'order-1', soNumber: 'SO-001', plateNumber: 'B 1111 XYZ',
+          status: 'completed', shipment: 'export', customer: 'INDOBARAT', destination: 'PWK',
+          driver: 'Budi', size: '40FT',
+        },
+        {
+          id: 'job-1', orderId: 'order-1', soNumber: 'SO-001', plateNumber: 'B 1234 XYZ',
+          status: 'running', shipment: 'export', customer: 'INDOBARAT', destination: 'PWK',
+          driver: 'Agus', size: '40FT',
+        },
+      ],
     });
 
     render(<TodayTruckDashboard />);
@@ -68,6 +80,36 @@ describe('TodayTruckDashboard', () => {
     expect(screen.getByText(/^[A-Za-z]+, \d{2} [A-Za-z]+ \d{4}$/i)).toBeInTheDocument();
     expect(screen.queryByText('Data truck yang berjalan dan belum selesai.')).not.toBeInTheDocument();
     expect(screen.queryByText('Tanggal')).not.toBeInTheDocument();
+  });
+
+  it('menampilkan nama panggilan sopir dan menyimpan nama lengkap sebagai tooltip', async () => {
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [{
+        id: 'truck-1',
+        plateNumber: 'B 1234 XYZ',
+        unitCode: 'TRK-001',
+        chassisSize: '20FT',
+        status: 'Aktif',
+        defaultDriver: 'MUHAMAD SATIRI',
+        defaultDriverFullName: 'MUHAMAD SATIRI',
+        defaultDriverNickname: 'SATIR',
+      }],
+      activeJobs: [{
+        id: 'job-1',
+        plateNumber: 'B 1234 XYZ',
+        status: 'running',
+        driver: 'MUHAMAD SATIRI',
+        driverFullName: 'MUHAMAD SATIRI',
+        driverNickname: 'SATIR',
+      }],
+    });
+
+    render(<TodayTruckDashboard />);
+
+    const nicknames = await screen.findAllByText('SATIR');
+    expect(nicknames.length).toBeGreaterThan(0);
+    expect(nicknames[0]).toHaveAttribute('title', 'MUHAMAD SATIRI');
+    expect(screen.queryByText('MUHAMAD SATIRI')).not.toBeInTheDocument();
   });
 
   it('mendownload report gambar progress unit dari dashboard Order Berjalan', async () => {
@@ -96,6 +138,18 @@ describe('TodayTruckDashboard', () => {
           size: '40FT',
         },
       ],
+      progressJobs: [
+        {
+          id: 'job-done', orderId: 'order-1', soNumber: 'SO-001', plateNumber: 'B 1111 XYZ',
+          status: 'completed', shipment: 'export', customer: 'INDOBARAT', destination: 'PWK',
+          driver: 'Budi', size: '40FT',
+        },
+        {
+          id: 'job-1', orderId: 'order-1', soNumber: 'SO-001', plateNumber: 'B 1234 XYZ',
+          status: 'running', shipment: 'export', customer: 'INDOBARAT', destination: 'PWK',
+          driver: 'Agus', size: '40FT',
+        },
+      ],
     });
 
     render(<TodayTruckDashboard />);
@@ -105,6 +159,8 @@ describe('TodayTruckDashboard', () => {
     expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith('image/png');
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
     expect(canvasFillTextCalls.join('\n')).toContain('AGUS / B 1234 XYZ');
+    expect(canvasFillTextCalls.join('\n')).toContain('PROGRESS: 1 SELESAI | 1 BERJALAN | TOTAL 2 RITASI');
+    expect(canvasFillTextCalls.join('\n')).toContain('BUDI / B 1111 XYZ - SELESAI');
   });
 
   it('menampilkan hanya size chassis di dashboard', async () => {

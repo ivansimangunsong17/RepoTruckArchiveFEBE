@@ -1,4 +1,5 @@
-import { CheckCircle2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import AttachmentUploadField from '../../../components/common/AttachmentUploadField';
 import DocumentLink from '../../../components/common/DocumentLink';
@@ -10,12 +11,31 @@ import { expenseCategoryLabels, readableLabel } from './operationalFundUtils';
 
 const emptyForm = (amount = '') => ({ amount, transferDate: new Date().toISOString().slice(0, 10), note: '', proofFile: null });
 
+function DeleteProofConfirmDialog({ proof, busy, onCancel, onConfirm }) {
+  if (!proof) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4" role="presentation" onMouseDown={busy ? undefined : onCancel}>
+      <section aria-labelledby="delete-proof-title" aria-modal="true" className="w-full max-w-md rounded-md border border-slate-200 bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="alertdialog">
+        <div className="flex gap-3 border-b border-slate-200 p-5">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600"><AlertTriangle size={20} /></div>
+          <div><h3 className="text-base font-black text-slate-950" id="delete-proof-title">Hapus bukti transfer?</h3><p className="mt-1 text-sm leading-relaxed text-slate-600">Bukti <strong>{proof.attachment?.name || 'transfer'}</strong> sebesar <strong>{formatCurrency(proof.amount)}</strong> akan dihapus dari ritasi ini.</p></div>
+        </div>
+        <div className="flex justify-end gap-2 p-4"><button className="secondary-button" disabled={busy} onClick={onCancel} type="button">Batal</button><button className="inline-flex min-h-[42px] items-center gap-2 rounded-[7px] bg-rose-600 px-4 text-[13px] font-bold text-white hover:bg-rose-700 disabled:opacity-40" disabled={busy} onClick={onConfirm} type="button"><Trash2 size={15} /> {busy ? 'Menghapus...' : 'Hapus Bukti'}</button></div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
 function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmount, adminFeeNote, adjustmentNote, onAdminFeeAmountChange, onAdminFeeNoteChange, onAdjustmentNoteChange, onProofsChange, onClose, onConfirm }) {
   const [proofs, setProofs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [proofBusy, setProofBusy] = useState(false);
   const [proofError, setProofError] = useState('');
   const [editingId, setEditingId] = useState('');
+  const [showProofForm, setShowProofForm] = useState(true);
+  const [showAdminFee, setShowAdminFee] = useState(false);
+  const [proofToDelete, setProofToDelete] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const adminFeeInputRef = useRef(null);
   const adminFee = Math.max(0, Number(adminFeeAmount || 0));
@@ -31,6 +51,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
       const result = await fetchExpenseTransferProofs(row.id);
       const next = Array.isArray(result) ? result : (result?.rows || []);
       setProofs(next);
+      if (next.length > 0 && !editingId) setShowProofForm(false);
       setForm((current) => (
         !editingId && !current.proofFile
           ? emptyForm(next.length === 0 && normalAmount > 0 ? String(normalAmount) : '')
@@ -48,6 +69,8 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
   useEffect(() => {
     setProofs([]);
     setEditingId('');
+    setShowProofForm(true);
+    setShowAdminFee(Number(adminFeeAmount || 0) > 0);
     setForm(emptyForm(normalAmount > 0 ? String(normalAmount) : ''));
     if (row?.id) loadProofs();
   }, [row?.id]);
@@ -64,12 +87,14 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
 
   function edit(proof) {
     setEditingId(proof.id);
+    setShowProofForm(true);
     setForm({ amount: String(proof.amount || ''), transferDate: String(proof.transferDate || '').slice(0, 10), note: proof.note || '', proofFile: null });
   }
 
   function cancelEdit() {
     setEditingId('');
     setForm(emptyForm());
+    setShowProofForm(false);
   }
 
   async function saveProof() {
@@ -83,6 +108,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
       else await addExpenseTransferProof(row.id, payload);
       cancelEdit();
       await loadProofs();
+      setShowProofForm(false);
     } catch (saveError) {
       setProofError(saveError.message || 'Bukti transfer gagal disimpan.');
     } finally {
@@ -90,11 +116,13 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
     }
   }
 
-  async function removeProof(proof) {
-    if (!window.confirm(`Hapus bukti transfer ${formatCurrency(proof.amount)}?`)) return;
+  async function removeProof() {
+    if (!proofToDelete) return;
+    const proof = proofToDelete;
     setProofBusy(true);
     try {
       await deleteExpenseTransferProof(row.id, proof.id);
+      setProofToDelete(null);
       if (editingId === proof.id) cancelEdit();
       await loadProofs();
     } catch (deleteError) {
@@ -105,27 +133,34 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
   }
 
   if (!row) return null;
-  const needsNote = adjustment !== 0 && !String(adjustmentNote || '').trim();
+  const hasProofs = proofs.length > 0;
+  const hasAdjustment = hasProofs && adjustment !== 0;
+  const isAdminFeeAdjustment = hasAdjustment && adminFee > 0 && adjustment === adminFee;
+  const manualAdjustmentNote = String(adjustmentNote || '').trim() === 'Biaya admin' ? '' : String(adjustmentNote || '').trim();
+  const effectiveAdjustmentNote = isAdminFeeAdjustment ? 'Biaya admin' : manualAdjustmentNote;
+  const needsNote = hasAdjustment && !isAdminFeeAdjustment && !effectiveAdjustmentNote;
+  const editingValidatedTransaction = row.financeCheckStatus === 'sudah_dicek';
   const proofReadyToSave = Number(form.amount) > 0 && Boolean(form.transferDate) && (Boolean(editingId) || Boolean(form.proofFile));
   const verificationMessage = locked
     ? 'Batch sudah ditutup dan tidak dapat diubah.'
     : loading
       ? 'Daftar bukti transfer sedang dimuat.'
-      : proofs.length === 0
-        ? 'Simpan minimal satu bukti transfer untuk melanjutkan validasi.'
+      : !hasProofs && form.proofFile
+        ? 'File sudah dipilih. Klik Simpan Bukti untuk melanjutkan.'
+        : !hasProofs
+          ? 'Pilih file bukti transfer, lalu klik Simpan Bukti.'
         : needsNote
-          ? 'Isi catatan penyesuaian karena total aktual berbeda dari nominal normal.'
+          ? 'Isi alasan selisih untuk melanjutkan validasi.'
           : 'Data bukti sudah lengkap dan transaksi siap divalidasi.';
-  const verificationReady = !locked && !loading && proofs.length > 0 && !needsNote;
+  const verificationReady = !locked && !loading && hasProofs && !needsNote;
 
   return (
-    <FinanceActionModal busy={busy || proofBusy} confirmDisabled={locked || loading || proofs.length === 0 || needsNote} confirmLabel="Validasi Transaksi" description="Cocokkan nominal sistem dengan seluruh transfer aktual." onClose={onClose} onConfirm={onConfirm} footerError={error} footerErrorId="expense-check-general-error" footerNotice={verificationMessage} footerNoticeReady={verificationReady} title="Validasi UJ dan Bukti Transfer" tone="approve" widthClassName="max-w-5xl">
+    <FinanceActionModal busy={busy || proofBusy} confirmDisabled={locked || loading || proofs.length === 0 || needsNote} confirmLabel={editingValidatedTransaction ? 'Simpan Perubahan' : 'Validasi Transaksi'} description={editingValidatedTransaction ? 'Perbarui bukti transfer dan nominal selama batch masih terbuka.' : 'Cocokkan nominal sistem dengan seluruh transfer aktual.'} onClose={onClose} onConfirm={(event) => onConfirm(event, { adjustmentNote: effectiveAdjustmentNote })} footerError={error} footerErrorId="expense-check-general-error" footerNotice={verificationMessage} footerNoticeReady={verificationReady} title={editingValidatedTransaction ? 'Edit UJ dan Bukti Transfer' : 'Validasi UJ dan Bukti Transfer'} tone="approve" widthClassName="max-w-5xl">
       <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           <DetailField label="UJ Sistem" value={formatCurrency(row.amount)} />
-          <DetailField label="Nominal Normal" value={formatCurrency(normalAmount)} />
-          <DetailField label="Total Aktual" value={formatCurrency(totalActual)} />
-          <DetailField label="Penyesuaian" value={formatCurrency(adjustment)} />
+          <DetailField label="Total Transfer" value={formatCurrency(totalActual)} />
+          <DetailField label="Selisih Akhir" value={formatCurrency(adjustment)} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <DetailField label="Nomor SO" value={row.soNumber} /><DetailField label="Container" value={row.containerNumber} />
@@ -133,19 +168,19 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
         </div>
 
         <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-black text-slate-950">Daftar Bukti Transfer</h3><p className="mt-0.5 text-xs font-medium text-slate-500">Semua bukti yang sudah disimpan akan dijumlahkan sebagai total aktual.</p></div><span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-600">{locked ? 'Batch ditutup' : `${proofs.length} bukti tersimpan`}</span></div>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-black text-slate-950">Bukti Transfer</h3><p className="mt-0.5 text-xs font-medium text-slate-500">Total seluruh bukti dihitung untuk ritasi ini.</p></div><div className="flex items-center gap-2"><span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-600">{locked ? 'Batch ditutup' : `${proofs.length} bukti`}</span>{hasProofs && !showProofForm && !locked ? <button className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-bold text-white hover:bg-slate-800" onClick={() => { setForm(emptyForm()); setShowProofForm(true); }} type="button"><Plus size={14} /> Tambah Bukti</button> : null}</div></div>
           {loading ? <p className="text-sm text-slate-500">Memuat bukti...</p> : null}
           {!loading && !proofs.length ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">Belum ada bukti yang disimpan.</p> : null}
           {proofs.map((proof) => (
             <div className="mt-2 grid items-center gap-2 rounded-md border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_140px_110px_auto]" key={proof.id}>
               <div className="min-w-0"><DocumentLink file={proof.attachment} label={proof.attachment?.name || 'Lihat bukti'} />{proof.note ? <p className="truncate text-xs text-slate-500">{proof.note}</p> : null}</div>
               <strong className="text-sm">{formatCurrency(proof.amount)}</strong><span className="text-xs font-semibold">{String(proof.transferDate || '').slice(0, 10)}</span>
-              <div className="flex gap-1"><button aria-label="Edit bukti transfer" className="flex size-9 items-center justify-center rounded-md border" disabled={locked || proofBusy} onClick={() => edit(proof)} type="button"><Pencil size={15} /></button><button aria-label="Hapus bukti transfer" className="flex size-9 items-center justify-center rounded-md border border-rose-200 text-rose-700" disabled={locked || proofBusy} onClick={() => removeProof(proof)} type="button"><Trash2 size={15} /></button></div>
+              <div className="flex gap-1"><button aria-label="Edit bukti transfer" className="flex size-9 items-center justify-center rounded-md border" disabled={locked || proofBusy} onClick={() => edit(proof)} type="button"><Pencil size={15} /></button><button aria-label="Hapus bukti transfer" className="flex size-9 items-center justify-center rounded-md border border-rose-200 text-rose-700" disabled={locked || proofBusy} onClick={() => setProofToDelete(proof)} type="button"><Trash2 size={15} /></button></div>
             </div>
           ))}
         </section>
 
-        <section className={`rounded-md border border-slate-200 bg-white p-4 ${locked ? 'pointer-events-none opacity-50' : ''}`}>
+        {(!hasProofs || showProofForm || editingId) ? <section className={`rounded-md border border-slate-200 bg-white p-4 ${locked ? 'pointer-events-none opacity-50' : ''}`}>
           <div className="mb-3 flex justify-between"><div><h3 className="text-sm font-black text-slate-950">{editingId ? 'Edit Bukti Transfer' : 'Form Bukti Transfer'}</h3><p className="mt-0.5 text-xs font-medium text-slate-500">Isi data lalu simpan. Form akan kosong kembali untuk bukti berikutnya.</p></div>{editingId ? <button className="flex items-center gap-1 text-xs font-bold text-slate-600" onClick={cancelEdit} type="button"><X size={14} /> Batal Edit</button> : null}</div>
           <div className="master-form-grid">
             <label className="master-field span-quarter"><span>Nominal Transfer <em>Wajib</em></span><input aria-label="Nominal bukti transfer" min="1" placeholder="Contoh: 740000" type="number" value={form.amount} onChange={(event) => change('amount', event.target.value)} /><small>{proofs.length === 0 && !editingId ? 'Otomatis mengikuti nominal normal. Ubah hanya jika transfer aktual berbeda.' : 'Isi sesuai nominal pada bukti transfer ini.'}</small></label>
@@ -153,20 +188,16 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
             <label className="master-field"><span>Catatan Bukti</span><input aria-label="Catatan bukti transfer" maxLength={500} placeholder="Opsional" value={form.note} onChange={(event) => change('note', event.target.value)} /></label>
           </div>
           <div className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_auto]"><div className="neutral-document-upload"><AttachmentUploadField compact helper={editingId ? 'Opsional jika file tidak diganti' : 'Wajib. PDF, JPG, atau PNG'} id="finance-expense-transfer-proof" label="File Bukti Transfer" onClear={() => change('proofFile', null)} onSelect={(file) => change('proofFile', file)} title={editingId ? 'Ganti File Bukti' : 'Pilih File Bukti'} value={form.proofFile} /></div><button className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-[7px] bg-slate-900 px-4 text-[13px] font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" disabled={!proofReadyToSave || proofBusy} onClick={saveProof} type="button"><Plus size={16} /> {editingId ? 'Simpan Perubahan' : 'Simpan Bukti'}</button></div>
-          {form.proofFile && !editingId ? <p className="mt-2 text-xs font-semibold text-slate-600">File sudah dipilih. Klik tombol Simpan Bukti agar bukti masuk ke daftar.</p> : null}
           {proofError ? <p className="mt-2 text-xs font-semibold text-rose-700" role="alert">{proofError}</p> : null}
-        </section>
+        </section> : null}
 
-        <div className="master-form-grid">
-          <label className="master-field"><span>Biaya Admin Transfer</span><input aria-label="Biaya Admin Transfer" disabled={locked} min="0" placeholder="Isi 0 jika tidak ada" ref={adminFeeInputRef} type="number" value={adminFeeAmount} onChange={(event) => onAdminFeeAmountChange(event.target.value)} />{adminFeeError ? <small className="master-field-warning">{adminFeeError}</small> : null}</label>
-          <label className="master-field"><span>Catatan Admin</span><input aria-label="Catatan Admin" disabled={locked} maxLength={500} placeholder="Opsional" value={adminFeeNote} onChange={(event) => onAdminFeeNoteChange(event.target.value)} /></label>
-          <label className="master-field span-full"><span>Catatan Penyesuaian {adjustment !== 0 ? <em>Wajib diisi</em> : null}</span><textarea aria-label="Catatan Penyesuaian" className="min-h-20 resize-y" disabled={locked} maxLength={500} placeholder="Isi alasan jika total aktual kurang atau lebih dari nominal normal" value={adjustmentNote} onChange={(event) => onAdjustmentNoteChange(event.target.value)} />{needsNote ? <small className="master-field-warning">Isi alasan karena total aktual berbeda dari nominal normal.</small> : null}</label>
-        </div>
-        <div className={`flex items-start gap-2 rounded-md border px-3 py-2.5 ${verificationReady ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-          {verificationReady ? <CheckCircle2 className="mt-0.5 shrink-0" size={16} /> : <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px] font-black">!</span>}
-          <p className="text-xs font-semibold leading-relaxed">{verificationMessage}</p>
-        </div>
+        {!locked ? <section className={`rounded-md border px-4 py-3 ${showAdminFee ? 'border-slate-300 bg-white' : 'border-dashed border-slate-300 bg-white'}`}>
+          {showAdminFee ? <div className="max-w-md"><div className="mb-2 flex items-center gap-2"><label className="text-sm font-black text-slate-900" htmlFor="expense-admin-fee">Biaya admin bank</label><span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-600">Opsional</span></div><div className="finance-admin-fee-row"><div className="finance-admin-fee-control"><span>Rp</span><input aria-label="Biaya Admin Transfer" id="expense-admin-fee" min="0" placeholder="0" ref={adminFeeInputRef} type="number" value={adminFeeAmount} onChange={(event) => onAdminFeeAmountChange(event.target.value)} /></div><button aria-label="Hapus biaya admin" className="finance-admin-fee-remove" onClick={() => { onAdminFeeAmountChange(''); setShowAdminFee(false); }} title="Hapus biaya admin" type="button"><X size={18} /></button></div>{adminFeeError ? <p className="mt-2 text-xs font-bold text-rose-700">{adminFeeError}</p> : <p className="mt-2 text-xs font-semibold text-slate-600">Isi hanya jika ada potongan biaya dari bank.</p>}</div> : <button className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-400 bg-white px-3 text-xs font-bold text-slate-800 hover:bg-slate-100" onClick={() => setShowAdminFee(true)} type="button"><Plus size={14} /> Tambah biaya admin</button>}
+        </section> : null}
+
+        {hasAdjustment && !isAdminFeeAdjustment ? <section className="rounded-md border border-amber-200 bg-amber-50 p-4"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><label className="text-xs font-bold text-slate-800" htmlFor="expense-adjustment-note">Alasan selisih <span className="text-rose-600">Wajib</span></label><strong className="text-xs text-amber-800">{adjustment > 0 ? 'Lebih bayar' : 'Kurang bayar'} {formatCurrency(Math.abs(adjustment))}</strong></div><textarea aria-label="Catatan Penyesuaian" className="min-h-20 w-full resize-y rounded-md border border-amber-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100" disabled={locked} id="expense-adjustment-note" maxLength={500} placeholder="Tuliskan alasan selisih pembayaran" value={adjustmentNote} onChange={(event) => onAdjustmentNoteChange(event.target.value)} /></section> : null}
       </div>
+      <DeleteProofConfirmDialog busy={proofBusy} onCancel={() => setProofToDelete(null)} onConfirm={removeProof} proof={proofToDelete} />
     </FinanceActionModal>
   );
 }
