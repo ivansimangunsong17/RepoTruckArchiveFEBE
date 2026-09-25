@@ -982,7 +982,7 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByLabelText('Biaya Admin Transfer')).toHaveValue(2500);
     expect(screen.getByRole('button', { name: 'Simpan Perubahan' })).toBeEnabled();
     expect(screen.queryByLabelText('Catatan Penyesuaian')).not.toBeInTheDocument();
-    expect(screen.getByText(/Terakhir oleh Finance Demo/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Terakhir oleh Finance Demo/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Hapus biaya admin' }));
     await user.click(screen.getByRole('button', { name: 'Simpan Perubahan' }));

@@ -82,10 +82,11 @@ function DailyOperationalFundPanel({
     dikoreksi: Number(expenseSummary.dikoreksi || 0),
     pendingAmount: Number(expenseSummary.pendingAmount || 0),
   };
-  const expenseNeedProofCount = expenseRows.filter((row) => row.paymentStatus === 'sudah_dibayar' && !row.proofAttachment).length;
+  const validationExpenseRows = expenseRows.filter((row) => row.financeCheckStatus !== 'sudah_dicek');
+  const expenseNeedProofCount = validationExpenseRows.filter((row) => row.paymentStatus === 'sudah_dibayar' && !row.proofAttachment).length;
   const expenseQueueCount = normalizedExpenseSummary.belumDicek + normalizedExpenseSummary.dikoreksi;
   const pendingFundRows = fundRows.filter((row) => row.status === 'submitted');
-  const hasActionRows = pendingFundRows.length > 0 || expenseRows.length > 0;
+  const hasActionRows = pendingFundRows.length > 0 || validationExpenseRows.length > 0;
   const normalizedBatch = { ...defaultOperationalFundBatch, ...batch };
   const unresolvedBatchExpenses = Number(normalizedBatch.uncheckedCount || 0) + Number(normalizedBatch.needClarificationCount || 0);
   const canCloseBatch = canReconcile
@@ -358,12 +359,12 @@ function DailyOperationalFundPanel({
               <strong className="mt-1 block text-base font-black text-sky-900">{formatCurrency(normalizedExpenseSummary.pendingAmount)}</strong>
             </div>
           </div>
-          {!expenseLoading && !expenseError && !expenseRows.length ? (
+          {!expenseLoading && !expenseError && !validationExpenseRows.length ? (
             <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold text-slate-500">
               Tidak ada biaya yang perlu dicek.
             </div>
           ) : null}
-          {!expenseLoading && !expenseError && expenseRows.length ? (
+          {!expenseLoading && !expenseError && validationExpenseRows.length ? (
             <div className="table-wrap rounded-md border border-slate-200">
               <table className="data-table master-table finance-master-table min-w-[1060px] table-fixed">
                 <colgroup>
@@ -383,7 +384,7 @@ function DailyOperationalFundPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {expenseRows.map((row, index) => {
+                  {validationExpenseRows.map((row, index) => {
                     const busy = expenseBusyId === row.id;
                     const alreadyChecked = row.financeCheckStatus === 'sudah_dicek';
                     const batchClosed = row.batchStatus === 'closed';
