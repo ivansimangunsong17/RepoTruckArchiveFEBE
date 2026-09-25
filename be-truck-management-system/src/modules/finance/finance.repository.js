@@ -1535,6 +1535,7 @@ export function invoiceOrdersCte() {
         ) as destinations,
         so.customer_name,
         so.destination,
+        so.so_date,
         so.trip_date,
         so.updated_at,
         ${paymentTermsExpression('so')} as payment_terms,
@@ -4500,15 +4501,16 @@ export function outstandingOrdersCte() {
       join sales_orders so on so.id = io.id
       left join payment_totals pt on pt.sales_order_id = io.id
     ),
-    -- Difilter dari sisa outstanding yang dihitung ulang (bukan dari billing_status='lunas' yang
-    -- tersimpan), karena billing_amount dihitung live dari finance_rows dan bisa berubah setelah
-    -- sebuah SO ditandai lunas (mis. koreksi revenue). Rentang trip_date (kalau ada) difilter di
-    -- buildOutstandingFilters/buildCustomerOutstandingFilters lewat whereSql di luar CTE ini, bukan
-    -- di sini, supaya default-nya menampilkan semua bulan outstanding.
+    -- Data historis sebelum Agustus 2026 hanya menjadi piutang jika memiliki nomor invoice.
+    -- Mulai Agustus, seluruh sisa tagihan dipantau karena proses invoice dikelola di sistem ini.
     outstanding_orders as (
       select *
       from outstanding_orders_all
       where outstanding_amount > 0
+        and (
+          so_date >= date '2026-08-01'
+          or nullif(btrim(invoice_number), '') is not null
+        )
     )
   `;
 }

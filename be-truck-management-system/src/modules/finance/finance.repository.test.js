@@ -34,6 +34,13 @@ test('customer outstanding CTE tidak lagi membatasi trip_date ke Juni-Agustus 20
   assert.match(sql, /where\s+outstanding_amount\s*>\s*0/i);
 });
 
+test('outstanding CTE mengecualikan data historis sebelum Agustus tanpa nomor invoice', () => {
+  const sql = outstandingOrdersCte();
+
+  assert.match(sql, /so_date\s*>=\s*date\s*'2026-08-01'/i);
+  assert.match(sql, /nullif\(btrim\(invoice_number\),\s*''\)\s+is\s+not\s+null/i);
+});
+
 test('filter outstanding SO menerapkan rentang trip_date dari dateFrom/dateTo', () => {
   const noRange = buildOutstandingFilters({});
   const withRange = buildOutstandingFilters({ dateFrom: '2026-09-01', dateTo: '2026-09-30' });
