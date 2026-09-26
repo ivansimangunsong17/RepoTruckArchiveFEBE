@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import { fallbackCustomers } from '../../data/masterData';
 import AttachmentUploadField from '../common/AttachmentUploadField';
+import { useFeedback } from '../../hooks/useFeedback';
 import { fetchCustomerOutstandingSummary } from '../../services/archive/salesOrderService';
+import { fetchLocations } from '../../services/master-data/locationService';
+import { findDestinationMaster } from '../../utils/ujRecommendation';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 
@@ -269,15 +272,10 @@ function createInitialForm(order) {
     paymentTermDays: order?.paymentTermDays == null ? '30' : String(order.paymentTermDays || 30),
     origin: order?.origin || '',
     destination: order?.destination || '',
+    destinationId: order?.destinationId || '',
+    warehouseLocationId: order?.warehouseLocationId || '',
     terminal: order?.terminal || '',
     jobDescription: order?.jobDescription || order?.notes || '',
-    isVendorOrder: Boolean(order?.isVendorOrder),
-    vendorName: order?.vendorName || '',
-    vendorNote: order?.vendorNote || '',
-    // Status order vendor (Phase 4) -- dipertahankan dari order yang diedit supaya edit field lain
-    // tidak diam-diam membalikkan status "Selesai" ke "Dicatat". Untuk order internal, field ini
-    // tidak pernah dipakai langsung oleh Sales/Admin -- backend tetap menghitung ulang otomatis
-    // dari container job (lihat refreshOrderStatus di sales-orders.repository.js).
     status: order?.status || 'waiting_operational',
     price: order?.price ? String(order.price) : '',
     unit: order?.unit || 'Container',
@@ -308,6 +306,7 @@ function SearchableInput({
   name,
   value,
   onChange,
+  onCommit,
   options,
   placeholder,
   required = false,
@@ -321,6 +320,7 @@ function SearchableInput({
   function selectOption(option) {
     onChange({ target: { name, value: option } });
     setOpen(false);
+    onCommit?.(option);
   }
 
   return (
@@ -342,6 +342,90 @@ function SearchableInput({
           {matches.map((option) => (
             <button key={option} type="button" role="option" onMouseDown={() => selectOption(option)}>
               {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const LOCATION_SEARCH_DEBOUNCE_MS = 300;
+
+// Berbeda dari SearchableInput (murni teks bebas) -- lokasi gudang harus terkunci ke id (bukan cuma
+// nama) supaya bisa dipersist sebagai warehouseLocationId, dan daftar sarannya diambil live dari
+// GET /api/locations (Phase 3) yang sudah difilter server-side berdasarkan tujuan + status aktif +
+// role (Sales tidak menerima field alamat/Maps sama sekali dari endpoint ini).
+function LocationSearchableSelect({
+  value,
+  displayName,
+  destinationId,
+  onSelect,
+  disabled = false,
+}) {
+  const [query, setQuery] = useState(displayName || '');
+  const [open, setOpen] = useState(false);
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setQuery(displayName || '');
+  }, [displayName, value]);
+
+  useEffect(() => {
+    if (!open || !destinationId) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    const timer = window.setTimeout(() => {
+      fetchLocations({ destinationId, status: 'active', query: query.trim() })
+        .then((rows) => { if (!cancelled) setResults(Array.isArray(rows) ? rows : []); })
+        .catch(() => { if (!cancelled) setResults([]); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    }, LOCATION_SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, destinationId, query]);
+
+  function selectLocation(location) {
+    onSelect(location);
+    setQuery(location.name);
+    setOpen(false);
+  }
+
+  if (!destinationId) {
+    return (
+      <div className="searchable-input">
+        <input value="" disabled placeholder="Pilih Tujuan terlebih dahulu" aria-label="Lokasi Gudang" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="searchable-input">
+      <input
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+          if (value) onSelect(null);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false); }}
+        placeholder="Cari lokasi gudang (opsional)"
+        autoComplete="off"
+        disabled={disabled}
+        aria-label="Lokasi Gudang"
+      />
+      {open ? (
+        <div className="searchable-input-results" role="listbox">
+          {loading ? <span className="searchable-input-empty">Mencari lokasi...</span> : null}
+          {!loading && !results.length ? <span className="searchable-input-empty">Tidak ada lokasi aktif untuk tujuan ini.</span> : null}
+          {!loading && results.map((location) => (
+            <button key={location.id} type="button" role="option" onMouseDown={() => selectLocation(location)}>
+              {location.name}
             </button>
           ))}
         </div>
@@ -440,12 +524,45 @@ function SalesOrderForm({
   const requiresAdminCorrection = editing && !historicalMode && isOrderLockedForCorrection(order);
   const canAccessAdminCorrection = requiresAdminCorrection && String(currentUser?.role || '').toLowerCase() === 'admin';
   const salesRevisionBlocked = editing && !historicalMode && isSalesActor && !order?.canRevise;
+  const { notify } = useFeedback();
+
+  // Lokasi Gudang dikunci ke id Master Lokasi (bukan cuma nama), jadi cache-nya {id, name,
+  // destinationId} disimpan terpisah dari form.warehouseLocationId -- dipakai untuk (1) menampilkan
+  // nama lokasi yang sudah tersimpan dan (2) mendeteksi saat tujuan diganti ke tujuan lain yang
+  // tidak lagi terhubung dengan lokasi tersebut (lihat handleDestinationCommitted di bawah).
+  const [selectedWarehouseLocation, setSelectedWarehouseLocation] = useState(null);
 
   useEffect(() => {
     setForm(createFormDraft());
     setError('');
     setReviewPayload(null);
+    setSelectedWarehouseLocation(null);
   }, [createFormDraft]);
+
+  // Resolusi nama lokasi gudang yang tersimpan di SO lama (data mentah dari backend cuma punya
+  // warehouseLocationId, bukan namanya) -- dicoba sekali per order dibuka, pakai tujuan SO saat itu
+  // untuk resolve destinationId. Kalau gagal ditemukan (mis. lokasi sudah diarsipkan total), field
+  // tetap menampilkan kotak kosong tapi id lama TIDAK dihapus sampai Sales benar-benar mengubahnya --
+  // supaya SO lama tanpa lokasi (atau dengan lokasi yang belum bisa diresolusi) tetap bisa diedit.
+  useEffect(() => {
+    const locationId = order?.warehouseLocationId || '';
+    if (!locationId) return undefined;
+    const orderDestinationMatch = findDestinationMaster(providedDestinations, order?.destination || '');
+    if (!orderDestinationMatch?.id) return undefined;
+
+    let cancelled = false;
+    fetchLocations({ destinationId: orderDestinationMatch.id })
+      .then((rows) => {
+        if (cancelled) return;
+        const match = (Array.isArray(rows) ? rows : []).find((row) => row.id === locationId);
+        if (match) {
+          setSelectedWarehouseLocation({ id: match.id, name: match.name, destinationId: match.destinationId || orderDestinationMatch.id });
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id]);
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => String(customer.name || '').toLowerCase() === String(form.customer || '').toLowerCase()),
@@ -478,6 +595,15 @@ function SalesOrderForm({
       cancelled = true;
     };
   }, [selectedCustomer?.name]);
+
+  const exactDestinationMatch = useMemo(() => {
+    const normalizedName = String(form.destination || '').trim().toLowerCase();
+    if (!normalizedName) return null;
+    return providedDestinations.find((destination) => (
+      String(destination.name || '').trim().toLowerCase() === normalizedName
+    )) || null;
+  }, [form.destination, providedDestinations]);
+  const resolvedDestinationId = form.destinationId || exactDestinationMatch?.id || '';
 
   const lineItems = form.lineItems;
   const totalQuantity = lineItems.reduce((total, item) => total + Number(item.qty || 0), 0);
@@ -514,24 +640,57 @@ function SalesOrderForm({
     }));
   }
 
+  function updateDestinationField(event) {
+    const value = event.target.value;
+    if (selectedWarehouseLocation) {
+      notify({
+        type: 'info',
+        title: 'Lokasi gudang dikosongkan',
+        message: `Tujuan sedang diubah, lokasi gudang sebelumnya (${selectedWarehouseLocation.name}) dikosongkan.`,
+      });
+    }
+    setForm((current) => ({
+      ...current,
+      destination: value,
+      destinationId: '',
+      warehouseLocationId: '',
+    }));
+    setSelectedWarehouseLocation(null);
+  }
+
+  // Dipanggil saat Sales memilih Tujuan baru dari daftar saran (bukan setiap ketikan) -- kalau
+  // lokasi gudang yang sudah dipilih ternyata bukan milik tujuan baru ini, kosongkan lokasinya dan
+  // beri tahu Sales dengan jelas kenapa itu terjadi.
+  function handleDestinationCommitted(newDestinationValue) {
+    const normalizedValue = String(newDestinationValue || '').trim().toLowerCase();
+    const nextMatch = providedDestinations.find((destination) => (
+      String(destination.name || '').trim().toLowerCase() === normalizedValue
+    ));
+    const nextDestinationId = nextMatch?.id || '';
+    setForm((current) => ({ ...current, destinationId: nextDestinationId }));
+    setSelectedWarehouseLocation((current) => {
+      if (!current || current.destinationId === nextDestinationId) return current;
+      notify({
+        type: 'info',
+        title: 'Lokasi gudang dikosongkan',
+        message: `Tujuan diganti ke "${newDestinationValue}", lokasi gudang sebelumnya (${current.name}) tidak terhubung dengan tujuan ini.`,
+      });
+      setForm((formCurrent) => ({ ...formCurrent, warehouseLocationId: '' }));
+      return null;
+    });
+  }
+
+  function handleWarehouseLocationSelected(location) {
+    setSelectedWarehouseLocation(location ? { id: location.id, name: location.name, destinationId: location.destinationId || '' } : null);
+    setForm((current) => ({ ...current, warehouseLocationId: location?.id || '' }));
+  }
+
   function updateAdminCorrectionMode(event) {
     const checked = event.target.checked;
     setForm((current) => ({
       ...current,
       adminCorrectionMode: checked,
       adminCorrectionReason: checked ? current.adminCorrectionReason : '',
-    }));
-  }
-
-  function updateVendorOrderMode(event) {
-    const checked = event.target.checked;
-    setForm((current) => ({
-      ...current,
-      isVendorOrder: checked,
-      // Nama/catatan vendor hanya relevan selama checkbox dicentang -- dikosongkan lagi
-      // saat di-uncheck supaya tidak ada data vendor basi ikut tersimpan diam-diam.
-      vendorName: checked ? current.vendorName : '',
-      vendorNote: checked ? current.vendorNote : '',
     }));
   }
 
@@ -669,13 +828,35 @@ function SalesOrderForm({
     const price = normalizedLineItems.length === 1 ? Number(normalizedLineItems[0].price || 0) : 0;
     const serviceSummary = summarizeLineItems(normalizedLineItems);
     const containerSummary = normalizedLineItems.map(formatLineItemLabel).join(' + ');
-    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt, order?.containers || [], form.destination.trim());
+    const trimmedDestination = form.destination.trim();
+    const containers = buildContainersFromLineItems(normalizedLineItems, form.receivedAt, order?.containers || [], trimmedDestination);
+
+    // Jaring pengaman terakhir sebelum data disimpan -- terlepas dari bagaimana Sales berinteraksi
+    // dengan field-nya (klik saran, ketik bebas tanpa memilih, dst), lokasi gudang yang tidak lagi
+    // terhubung dengan tujuan saat ini TIDAK PERNAH ikut tersimpan.
+    const finalDestinationId = resolvedDestinationId;
+    const warehouseLocationStillValid = Boolean(
+      form.warehouseLocationId
+      && selectedWarehouseLocation
+      && selectedWarehouseLocation.id === form.warehouseLocationId
+      && selectedWarehouseLocation.destinationId === finalDestinationId,
+    );
+    if (form.warehouseLocationId && !warehouseLocationStillValid) {
+      notify({
+        type: 'info',
+        title: 'Lokasi gudang dikosongkan',
+        message: 'Lokasi gudang sebelumnya tidak terhubung dengan tujuan saat ini sehingga dikosongkan otomatis.',
+      });
+    }
+
     setReviewPayload({
       ...form,
       soNumber,
       financeVerificationStatus: historicalMode && soNumber ? 'verified' : form.financeVerificationStatus,
       origin: form.origin.trim(),
-      destination: form.destination.trim(),
+      destination: trimmedDestination,
+      destinationId: finalDestinationId,
+      warehouseLocationId: warehouseLocationStillValid ? form.warehouseLocationId : '',
       salesName: selectedCustomer?.salesName || form.salesName || '',
       invoiceNumber: form.invoiceNumber.trim(),
       paymentType: form.paymentType === 'tempo' ? 'tempo' : 'cash',
@@ -683,9 +864,9 @@ function SalesOrderForm({
       container: containerSummary,
       terminal: form.terminal.trim(),
       vesselName: form.vesselName.trim(),
-      isVendorOrder: Boolean(form.isVendorOrder),
-      vendorName: form.isVendorOrder ? form.vendorName.trim() : '',
-      vendorNote: form.isVendorOrder ? form.vendorNote.trim() : '',
+      isVendorOrder: false,
+      vendorName: '',
+      vendorNote: '',
       serviceName: serviceSummary,
       lineItems: normalizedLineItems,
       container20Qty,
@@ -823,50 +1004,6 @@ function SalesOrderForm({
                 : 'Nomor SO Finance akan diisi oleh Finance setelah order dicek.'}
             </p>
 
-            <label className="vendor-order-toggle">
-              <input
-                type="checkbox"
-                name="isVendorOrder"
-                checked={Boolean(form.isVendorOrder)}
-                onChange={updateVendorOrderMode}
-              />
-              <span>
-                <strong>Dikerjakan oleh Vendor</strong>
-                <small>Order hanya dicatat sebagai Sales Order bertanda Vendor -- tidak membuat ritasi/container job internal.</small>
-              </span>
-            </label>
-
-            {form.isVendorOrder ? (
-              <div className="order-form-grid vendor-order-fields">
-                <label>
-                  Status Vendor
-                  <select name="status" value={form.status} onChange={updateField}>
-                    <option value="waiting_operational">Dicatat</option>
-                    <option value="completed">Selesai</option>
-                  </select>
-                </label>
-                <label>
-                  Nama Vendor
-                  <input
-                    name="vendorName"
-                    value={form.vendorName}
-                    onChange={updateField}
-                    placeholder="Nama vendor/truck luar (opsional)"
-                  />
-                </label>
-                <label className="span-two">
-                  Catatan Vendor
-                  <textarea
-                    name="vendorNote"
-                    value={form.vendorNote}
-                    onChange={updateField}
-                    rows="2"
-                    placeholder="Catatan tambahan (opsional)"
-                  />
-                </label>
-              </div>
-            ) : null}
-
             <div className="order-form-grid">
               {editing || historicalMode ? (
                 <label>
@@ -975,10 +1112,21 @@ function SalesOrderForm({
                 <SearchableInput
                   name="destination"
                   value={form.destination}
-                  onChange={updateField}
+                  onChange={updateDestinationField}
+                  onCommit={handleDestinationCommitted}
                   options={destinationOptions}
                   placeholder="Pilih Lokasi Tujuan"
                   required
+                />
+              </label>
+
+              <label>
+                Lokasi Gudang (Opsional)
+                <LocationSearchableSelect
+                  value={form.warehouseLocationId}
+                  displayName={selectedWarehouseLocation?.name || ''}
+                  destinationId={resolvedDestinationId}
+                  onSelect={handleWarehouseLocationSelected}
                 />
               </label>
 
@@ -1241,6 +1389,7 @@ function SalesOrderForm({
                   <div><span>Tanggal Jalan</span><strong>{formatDate(reviewPayload.tripDate)}</strong></div>
                   <div><span>Depo</span><strong>{reviewPayload.origin || '-'}</strong></div>
                   <div><span>Tujuan</span><strong>{reviewPayload.destination || '-'}</strong></div>
+                  <div><span>Lokasi Gudang</span><strong>{reviewPayload.warehouseLocationId ? (selectedWarehouseLocation?.name || '-') : '-'}</strong></div>
                   <div><span>Shipment</span><strong>{reviewPayload.shipment || '-'}</strong></div>
                   <div><span>Pembayaran</span><strong>{reviewPayload.paymentType === 'tempo' ? `Tempo ${reviewPayload.paymentTermDays} hari` : 'Cash'}</strong></div>
                 </div>

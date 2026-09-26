@@ -48,7 +48,6 @@ const SALES_INVOICE_DELIVERY_STATUSES = [
 // dua nilai yang boleh diset manual lewat form biasa: "Dicatat" (waiting_operational) dan
 // "Selesai" (completed). "Batal" tetap eksklusif lewat endpoint cancel/cancel-request yang
 // sudah ada (cascade, activity log, approval), bukan lewat field status di form biasa.
-const VENDOR_ORDER_ALLOWED_STATUSES = ['waiting_operational', 'completed'];
 
 // Sama seperti BACKDATE_REASON_MIN_LENGTH di container-jobs.service.js -- diduplikasi (bukan
 // diimpor) karena kedua modul memvalidasi bentuk payload yang berbeda (SO+containers vs container
@@ -550,13 +549,6 @@ function validateSalesOrderPayload(payload, currentOrder = null) {
 
   if (billingStatusRequiresInvoice(payload.billingStatus) && !String(payload.invoiceNumber || '').trim()) {
     const error = new Error('Nomor invoice wajib diisi sebelum melanjutkan status billing ini.');
-    error.statusCode = 400;
-    error.code = 'VALIDATION_ERROR';
-    throw error;
-  }
-
-  if (payload.isVendorOrder && payload.status && !VENDOR_ORDER_ALLOWED_STATUSES.includes(payload.status)) {
-    const error = new Error('Status order vendor hanya boleh Dicatat atau Selesai. Gunakan menu batalkan untuk membatalkan order.');
     error.statusCode = 400;
     error.code = 'VALIDATION_ERROR';
     throw error;

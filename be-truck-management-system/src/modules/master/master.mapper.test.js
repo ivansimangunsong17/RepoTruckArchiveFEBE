@@ -131,6 +131,10 @@ test('end user mapper membaca dan menyimpan data kontak', () => {
     email: 'budi@example.com',
     status: 'Aktif',
     notes: 'Prioritas',
+    destinationId: null,
+    googleMapsUrl: '',
+    latitude: null,
+    longitude: null,
   });
 
   const databaseRow = resourceConfig['end-users'].toDb({
@@ -148,4 +152,50 @@ test('end user mapper membaca dan menyimpan data kontak', () => {
   assert.equal(databaseRow.code, 'EU-001');
   assert.equal(databaseRow.pic_name, 'Budi');
   assert.equal(databaseRow.operational_status, 'Tidak Aktif');
+  assert.equal(databaseRow.destination_id, null);
+  assert.equal(databaseRow.google_maps_url, null);
+  assert.equal(databaseRow.latitude, null);
+  assert.equal(databaseRow.longitude, null);
+});
+
+test('end user mapper membaca dan menyimpan tujuan serta lokasi maps (Phase 2)', () => {
+  const mapped = resourceConfig['end-users'].toApi({
+    id: 'end-user-2',
+    name: 'Gudang Cikarang',
+    destination_id: 'destination-1',
+    google_maps_url: 'https://maps.google.com/?q=-6.123,107.456',
+    latitude: '-6.123000',
+    longitude: '107.456000',
+  });
+
+  assert.equal(mapped.destinationId, 'destination-1');
+  assert.equal(mapped.googleMapsUrl, 'https://maps.google.com/?q=-6.123,107.456');
+  assert.equal(mapped.latitude, -6.123);
+  assert.equal(mapped.longitude, 107.456);
+
+  const databaseRow = resourceConfig['end-users'].toDb({
+    name: 'Gudang Cikarang',
+    destinationId: 'destination-1',
+    googleMapsUrl: 'https://maps.google.com/?q=-6.123,107.456',
+    latitude: '-6.123',
+    longitude: '107.456',
+  });
+
+  assert.equal(databaseRow.destination_id, 'destination-1');
+  assert.equal(databaseRow.google_maps_url, 'https://maps.google.com/?q=-6.123,107.456');
+  assert.equal(databaseRow.latitude, -6.123);
+  assert.equal(databaseRow.longitude, 107.456);
+
+  const clearedRow = resourceConfig['end-users'].toDb({
+    name: 'Gudang Cikarang',
+    destinationId: '',
+    googleMapsUrl: '',
+    latitude: '',
+    longitude: '',
+  });
+
+  assert.equal(clearedRow.destination_id, null);
+  assert.equal(clearedRow.google_maps_url, null);
+  assert.equal(clearedRow.latitude, null);
+  assert.equal(clearedRow.longitude, null);
 });

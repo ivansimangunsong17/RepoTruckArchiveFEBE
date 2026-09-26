@@ -71,6 +71,46 @@ export function adminCorrectionChanges(before = {}, after = {}) {
     }));
 }
 
+// Phase 8: audit khusus lokasi gudang & tujuan, terpisah dari log UPDATE_SALES_ORDER umum supaya
+// tiga kejadian ini ("lokasi dipilih" dari kosong, "lokasi diganti" antar lokasi, "lokasi
+// dikosongkan") dan pergantian tujuan mudah ditelusuri tanpa membaca ulang seluruh diff SO.
+function classifyLocationChange(beforeId, afterId) {
+  if (!beforeId && afterId) return 'selected';
+  if (beforeId && !afterId) return 'cleared';
+  if (beforeId && afterId && beforeId !== afterId) return 'changed';
+  return null;
+}
+
+export function locationAuditChanges(before = {}, after = {}) {
+  const changes = [];
+  const beforeLocationId = before.warehouseLocationId || null;
+  const afterLocationId = after.warehouseLocationId || null;
+  const locationChangeType = classifyLocationChange(beforeLocationId, afterLocationId);
+  if (locationChangeType) {
+    changes.push({
+      field: 'warehouseLocationId',
+      changeType: locationChangeType,
+      before: beforeLocationId,
+      beforeName: before.warehouseLocationNameSnapshot || '',
+      after: afterLocationId,
+      afterName: after.warehouseLocationNameSnapshot || '',
+    });
+  }
+
+  const beforeDestination = String(before.destination || '').trim();
+  const afterDestination = String(after.destination || '').trim();
+  if (normalizeAuditValue(beforeDestination) !== normalizeAuditValue(afterDestination)) {
+    changes.push({
+      field: 'destination',
+      changeType: 'destination_changed',
+      before: beforeDestination,
+      after: afterDestination,
+    });
+  }
+
+  return changes;
+}
+
 function historicalContainerMetadata(order = {}, container = {}) {
   return {
     salesOrderId: order.id,
@@ -200,6 +240,21 @@ export async function updateSalesOrderController(request, response) {
       metadata: {
         ...adminCorrectionMetadata(request.body, saved),
         changedFields: changes.map((item) => item.label),
+      },
+    });
+  }
+  const locationChanges = locationAuditChanges(before, saved);
+  if (locationChanges.length) {
+    await safeRecordActivityLog(request, {
+      action: 'UPDATE_SALES_ORDER_LOCATION',
+      module: 'sales_orders',
+      entityType: 'sales_order',
+      entityId: saved.id,
+      beforeData: Object.fromEntries(locationChanges.map((item) => [item.field, item.before])),
+      afterData: Object.fromEntries(locationChanges.map((item) => [item.field, item.after])),
+      metadata: {
+        soNumber: saved.soNumber,
+        changes: locationChanges,
       },
     });
   }

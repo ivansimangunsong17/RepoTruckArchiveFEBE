@@ -67,6 +67,10 @@ export const resourceConfig = {
       email: row.email || '',
       status: row.operational_status || 'Aktif',
       notes: row.notes || '',
+      destinationId: row.destination_id || null,
+      googleMapsUrl: row.google_maps_url || '',
+      latitude: row.latitude == null ? null : Number(row.latitude),
+      longitude: row.longitude == null ? null : Number(row.longitude),
     }),
     toDb: (row) => ({
       name: row.name,
@@ -77,6 +81,10 @@ export const resourceConfig = {
       email: row.email || null,
       operational_status: row.status || 'Aktif',
       notes: row.notes || null,
+      destination_id: row.destinationId || null,
+      google_maps_url: row.googleMapsUrl || null,
+      latitude: toNullableNumber(row.latitude),
+      longitude: toNullableNumber(row.longitude),
     }),
   },
   drivers: {

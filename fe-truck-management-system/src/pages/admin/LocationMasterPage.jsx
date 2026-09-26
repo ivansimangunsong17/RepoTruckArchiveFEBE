@@ -2,7 +2,7 @@ import MasterDataPage from '../../components/master/MasterDataPage';
 
 const emptyRows = [];
 
-function StatusCell({ value }) {
+export function StatusCell({ value }) {
   const statusClass = value === 'Aktif' ? 'available' : 'maintenance';
   return <span className={`master-status-dot ${statusClass}`}><i />{value || '-'}</span>;
 }

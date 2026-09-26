@@ -12,6 +12,7 @@ import { driverCommissionRoutes } from './modules/driver-commissions/driver-comm
 import { financeRoutes } from './modules/finance/finance.routes.js';
 import { fleetAssignmentRoutes } from './modules/operations/fleet-assignment/fleet-assignment.routes.js';
 import { historicalEntryRoutes } from './modules/historical-entry/historical-entry.routes.js';
+import { locationRoutes } from './modules/locations/locations.routes.js';
 import { masterRoutes } from './modules/master/master.routes.js';
 import { reportRoutes } from './modules/reports/reports.routes.js';
 import { salesOrderRoutes } from './modules/sales-orders/sales-orders.routes.js';
@@ -59,6 +60,7 @@ const routes = [
   ...driverCommissionRoutes,
   ...financeRoutes,
   ...historicalEntryRoutes,
+  ...locationRoutes,
   ...masterRoutes,
   ...vehicleDocumentRoutes,
   ...reportRoutes,

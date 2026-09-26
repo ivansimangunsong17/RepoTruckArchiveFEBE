@@ -10,6 +10,7 @@ const {
   createContainerJobExpense,
   correctContainerJobExpense,
   ensureInapPayload,
+  ensureCompletedCommissionDriverAction,
   ensureRepoStoragePayload,
   hasCompletedTimelineChange,
   hasDriverCommissionChange,
@@ -30,35 +31,49 @@ const {
 } = await import('./container-jobs.controller.js');
 const {
   buildAutoJourneyMoneyDescription,
-  assertVehicleCanPickupRepo,
   ensureDriverCommissionIsNotPosted,
+  findJourneyMoneyAmount,
   hasCompleteOperationalAssignment,
   hasRequiredRepoCompletionDocuments,
   normalizeCompletedAtForSave,
   resolveCompletedAtForSave,
   resolveDriverCommissionUpdate,
+  resolveCompletedCommissionDriverCorrection,
   resolveJourneyMoneyAmountForSize,
+  assertVehicleCanPickupRepo,
   shouldValidateVehicleContainerSize,
+  shouldRequireAssignmentAfterVendorRevert,
   syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
 
 test('pickup container titip memperbolehkan 20FT diambil truck 40FT', () => {
   assert.doesNotThrow(() => assertVehicleCanPickupRepo(
-    { container_size: '40FT', plate_number: 'B 9001 TEST' },
+    { chassis_size: '40FT', container_size: '40FT', plate_number: 'B 9001 TEST' },
     [{ container_size: '20FT' }],
     'single',
   ));
 });
 
+test('pickup container titip menolak container 40FT diambil truck 20FT', () => {
+  assert.throws(
+    () => assertVehicleCanPickupRepo(
+      { chassis_size: '20FT', container_size: '20FT', plate_number: 'B 9002 TEST' },
+      [{ container_size: '40FT' }],
+      'single',
+    ),
+    (error) => error.code === 'REPO_PICKUP_REQUIRES_40FT',
+  );
+});
+
 test('combo pickup titip hanya valid untuk dua container 20FT memakai truck 40FT', () => {
   assert.doesNotThrow(() => assertVehicleCanPickupRepo(
-    { container_size: '40FT', plate_number: 'B 9003 TEST' },
+    { chassis_size: '40FT', container_size: '40FT', plate_number: 'B 9003 TEST' },
     [{ container_size: '20FT' }, { container_size: '20FT' }],
     'combo_2x20',
   ));
   assert.throws(
     () => assertVehicleCanPickupRepo(
-      { container_size: '20FT', plate_number: 'B 9004 TEST' },
+      { chassis_size: '20FT', container_size: '20FT', plate_number: 'B 9004 TEST' },
       [{ container_size: '20FT' }, { container_size: '20FT' }],
       'combo_2x20',
     ),
@@ -66,12 +81,236 @@ test('combo pickup titip hanya valid untuk dua container 20FT memakai truck 40FT
   );
   assert.throws(
     () => assertVehicleCanPickupRepo(
-      { container_size: '40FT', plate_number: 'B 9005 TEST' },
+      { chassis_size: '40FT', container_size: '40FT', plate_number: 'B 9005 TEST' },
       [{ container_size: '20FT' }, { container_size: '40FT' }],
       'combo_2x20',
     ),
     (error) => error.code === 'REPO_PICKUP_COMBO_INVALID_JOBS',
   );
+});
+
+test('vendor yang dikembalikan menjadi internal wajib melewati validasi assignment', () => {
+  assert.equal(shouldRequireAssignmentAfterVendorRevert('vendor', 'internal'), true);
+  assert.equal(shouldRequireAssignmentAfterVendorRevert('vendor', 'vendor'), false);
+  assert.equal(shouldRequireAssignmentAfterVendorRevert('internal', 'internal'), false);
+  assert.equal(shouldRequireAssignmentAfterVendorRevert('vendor', 'internal', true), false);
+});
+
+test('koreksi sopir job selesai berkomisi wajib memilih tindakan komisi', () => {
+  const job = {
+    status: 'completed',
+    hasDriverCommission: true,
+    driverId: 'driver-old',
+    driver: 'Sopir Lama',
+  };
+
+  assert.throws(
+    () => ensureCompletedCommissionDriverAction(job, {
+      adminCorrectionMode: true,
+      driverId: 'driver-new',
+      driver: 'Sopir Baru',
+    }),
+    (error) => error.code === 'CONTAINER_JOB_COMMISSION_DRIVER_ACTION_REQUIRED' && error.statusCode === 400,
+  );
+  assert.doesNotThrow(() => ensureCompletedCommissionDriverAction(job, {
+    driverId: 'driver-new',
+    driver: 'Sopir Baru',
+    adminCorrectionMode: true,
+    commissionDriverAction: 'move',
+  }));
+  assert.doesNotThrow(() => ensureCompletedCommissionDriverAction(
+    { ...job, hasDriverCommission: false },
+    { adminCorrectionMode: true, driverId: 'driver-new', driver: 'Sopir Baru' },
+  ));
+  assert.doesNotThrow(() => ensureCompletedCommissionDriverAction(job, {
+    driverId: 'driver-new',
+    driver: 'Sopir Baru',
+  }));
+});
+
+test('keep mengunci penerima komisi lama pada data legacy tanpa commission_driver_id', async () => {
+  const result = await resolveCompletedCommissionDriverCorrection({ query: async () => assert.fail('tidak boleh query') }, {
+    job: {
+      id: 'job-legacy',
+      driver_id: 'driver-old',
+      assignment_snapshot: { driver: 'Sopir Lama', driverBankName: 'BCA', driverBankAccountNumber: '123' },
+      commission_driver_snapshot: {},
+    },
+    action: 'keep',
+    driverId: 'driver-new',
+    assignment: { driver: 'Sopir Baru' },
+  });
+
+  assert.equal(result.driverId, 'driver-old');
+  assert.equal(result.driverName, 'Sopir Lama');
+  assert.equal(result.snapshot.driverBankAccountNumber, '123');
+});
+
+test('move mengganti penerima komisi yang belum masuk batch', async () => {
+  const client = { query: async () => ({ rows: [] }) };
+  const result = await resolveCompletedCommissionDriverCorrection(client, {
+    job: { id: 'job-draft', driver_id: 'driver-old', assignment_snapshot: { driver: 'Sopir Lama' } },
+    action: 'move',
+    driverId: 'driver-new',
+    assignment: { driver: 'Sopir Baru', driverBankName: 'MANDIRI', driverBankAccountNumber: '456' },
+  });
+
+  assert.equal(result.batchStatus, 'unsubmitted');
+  assert.equal(result.driverId, 'driver-new');
+  assert.equal(result.driverName, 'Sopir Baru');
+  assert.equal(result.snapshot.driverBankAccountNumber, '456');
+});
+
+test('move menolak batch komisi approved atau paid', async () => {
+  for (const status of ['approved', 'paid']) {
+    const client = {
+      query: async () => ({
+        rows: [{
+          id: 'item-1',
+          batch_id: 'batch-1',
+          payment_id: 'payment-old',
+          batch_status: status,
+          payment_status: status === 'paid' ? 'paid' : 'pending',
+          payment_proof_attachment_id: null,
+        }],
+      }),
+    };
+
+    await assert.rejects(
+      resolveCompletedCommissionDriverCorrection(client, {
+        job: { id: 'job-locked', driver_id: 'driver-old', assignment_snapshot: { driver: 'Sopir Lama' } },
+        action: 'move',
+        driverId: 'driver-new',
+        assignment: { driver: 'Sopir Baru' },
+      }),
+      (error) => error.code === 'CONTAINER_JOB_COMMISSION_BATCH_LOCKED'
+        && error.details.batchStatus === status,
+    );
+  }
+});
+
+test('move memindahkan item pada batch submitted dan menghitung ulang payment', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql.includes('from driver_commission_items dci')) {
+        return { rows: [{
+          id: 'item-1',
+          batch_id: 'batch-1',
+          payment_id: 'payment-old',
+          batch_status: 'submitted',
+          payment_status: 'pending',
+          payment_proof_attachment_id: null,
+        }] };
+      }
+      if (sql.startsWith('select exists')) return { rows: [{ exists: false }] };
+      if (sql.includes('from driver_commission_payments') && sql.includes('driver_id = $2')) {
+        return { rows: [{ id: 'payment-new', status: 'pending', payment_proof_attachment_id: null }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const result = await resolveCompletedCommissionDriverCorrection(client, {
+    job: { id: 'job-submitted', driver_id: 'driver-old', assignment_snapshot: { driver: 'Sopir Lama' } },
+    action: 'move',
+    driverId: 'driver-new',
+    assignment: { driver: 'Sopir Baru', driverBankAccountNumber: '789' },
+  });
+
+  assert.equal(result.batchStatus, 'submitted');
+  assert.ok(calls.some(({ sql, params }) => (
+    sql.includes('update driver_commission_items')
+    && params[1] === 'payment-new'
+    && params[2] === 'driver-new'
+  )));
+  assert.ok(calls.some(({ sql }) => sql.includes('update driver_commission_payments payment')));
+  assert.ok(calls.some(({ sql }) => sql.includes('update driver_commission_batches batch')));
+});
+
+test('auto UJ memprioritaskan destination_id dan hanya fallback ke nama untuk data lama', async () => {
+  const destinationId = '11111111-1111-4111-8111-111111111111';
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [{ id: destinationId, uj_20ft: 250000, uj_40ft: 400000 }] };
+    },
+  };
+
+  const byId = await findJourneyMoneyAmount(client, {
+    destination_id: destinationId,
+    destination: 'Nama snapshot lama',
+    container_size: '20FT',
+  });
+  assert.equal(byId.amount, 250000);
+  assert.deepEqual(calls[0].params, [destinationId, 'Nama snapshot lama']);
+
+  await findJourneyMoneyAmount(client, { destination: 'Bekasi', container_size: '40FT' });
+  assert.deepEqual(calls[1].params, [null, 'Bekasi']);
+});
+
+test('auto UJ menambahkan Rp100.000 untuk container Reefer', async () => {
+  const client = {
+    query: async () => ({ rows: [{ id: 'destination-reefer', uj_20ft: 600000, uj_40ft: 750000 }] }),
+  };
+
+  const reefer = await findJourneyMoneyAmount(client, {
+    destination: 'Cikarang',
+    container_size: '40FT',
+    container_type: 'Reefer',
+  });
+  const dry = await findJourneyMoneyAmount(client, {
+    destination: 'Cikarang',
+    container_size: '40FT',
+    container_type: 'Dry',
+  });
+
+  assert.equal(reefer.amount, 850000);
+  assert.equal(dry.amount, 750000);
+});
+
+test('auto UJ Repo Reefer tidak menambahkan surcharge', async () => {
+  const client = {
+    query: async () => ({ rows: [{ id: 'destination-repo', uj_20ft: 600000, uj_40ft: 750000 }] }),
+  };
+
+  const repoReefer = await findJourneyMoneyAmount(client, {
+    destination: 'Cikarang',
+    container_size: '40FT',
+    container_type: 'Reefer',
+    shipment_type: 'repo_full',
+  });
+
+  assert.equal(repoReefer.amount, 750000);
+});
+
+test('ritasi vendor tidak membuat auto UJ atau transaksi rekening dropping', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+
+  const result = await syncAutoJourneyMoneyExpense(client, {
+    job: {
+      id: 'job-vendor',
+      execution_source: 'vendor',
+      rpuj_status: 'pending',
+    },
+    nextStatus: 'running',
+    nextEntrySource: 'realtime',
+    nextDriverId: null,
+    runningAt: '2026-09-25T08:00:00.000Z',
+    assignment: { driver: 'VENDOR', plateNumber: 'VENDOR' },
+    actorName: 'Operational Test',
+  });
+
+  assert.equal(result, undefined);
+  assert.equal(calls.length, 0);
 });
 
 test('posted driver commission can only be changed after void/correction', async () => {
@@ -108,6 +347,10 @@ test('update nonkomisi mempertahankan snapshot komisi lama', () => {
     { driverId: 'driver-2', vehicleId: 'vehicle-2' },
     { entrySource: 'historical', historicalPeriod: '2026-07' },
     { isBackdateEntry: true, backdateReason: 'Input susulan dari lapangan' },
+    // Phase 6: memilih/mengganti Lokasi Gudang (dan destination_id ikutannya) BUKAN input komisi --
+    // tidak boleh mereset atau menghitung ulang komisi yang sudah dibekukan.
+    { warehouseLocationId: 'location-2' },
+    { warehouseLocationId: 'location-2', destinationId: 'destination-2' },
   ]) {
     assert.deepEqual(resolveDriverCommissionUpdate(existingCommission, payload), {
       updateRequested: false,
@@ -368,6 +611,18 @@ test('assignment operational lengkap dari payload atau snapshot tersimpan', () =
   }), true);
 });
 
+test('Phase 8: assignment operational tetap lengkap tanpa lokasi gudang -- job bisa jalan/selesai walau lokasi kosong', () => {
+  assert.equal(hasCompleteOperationalAssignment({
+    plateNumber: 'B 1234 XYZ',
+    driver: 'Budi',
+    warehouseLocationId: '',
+  }), true);
+  assert.equal(hasCompleteOperationalAssignment({ plateNumber: 'B 1234 XYZ', driver: 'Budi' }, null, null, {
+    assignment_snapshot: { plateNumber: 'B 1234 XYZ', driver: 'Budi' },
+    warehouse_location_id: null,
+  }), true);
+});
+
 test('auto UJ memilih tarif sesuai ukuran container dan membuat keterangan ledger', () => {
   assert.equal(resolveJourneyMoneyAmountForSize({ uj_20ft: '600000', uj_40ft: '1200000' }, '20FT'), 600000);
   assert.equal(resolveJourneyMoneyAmountForSize({ uj_20ft: '600000', uj_40ft: '1200000' }, '40FT'), 1200000);
@@ -381,6 +636,50 @@ test('auto UJ memilih tarif sesuai ukuran container dan membuat keterangan ledge
     },
     { driver: 'Randi', plateNumber: 'B9180BEL' },
   ), 'UJ Revo Patimban 50X40 B9180BEL');
+});
+
+test('Phase 8: UJ yang sudah dibekukan tidak dihitung ulang ke Master Tujuan sama sekali (tidak reset oleh perubahan lokasi/tujuan)', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (sql.includes("coalesce(source, 'manual') <> 'auto_uj_order'")) return { rows: [] };
+      if (sql.includes('left join operational_fund_transactions oft')) return { rows: [] };
+      if (sql.includes('insert into container_job_expenses')) return { rows: [{ id: 'expense-frozen' }] };
+      if (sql.includes('insert into operational_fund_batches')) {
+        return { rows: [{ id: 'batch-frozen', batch_date: params[0], status: 'open' }] };
+      }
+      if (sql.includes('insert into operational_fund_transactions')) return { rows: [] };
+      // Kalau kode ini SAMPAI query destination_locations, berarti UJ yang sudah beku dihitung
+      // ulang -- persis pelanggaran yang harus dicegah (Phase 6/8). Gagalkan test dengan tegas.
+      throw new Error(`UJ seharusnya tidak query ulang ke Master Tujuan, tapi ada query: ${sql}`);
+    },
+  };
+
+  await syncAutoJourneyMoneyExpense(client, {
+    job: {
+      id: 'job-frozen',
+      sales_order_id: 'order-frozen',
+      customer_name: 'PT Beku',
+      destination: 'Cikarang',
+      container_size: '20FT',
+      // Nilai ini SENGAJA tidak konsisten dengan tarif 20FT Cikarang manapun -- kalau kode diam-diam
+      // menghitung ulang dari destination_locations, nilai yang tersimpan akan beda dari ini.
+      uj_amount_snapshot: 777777,
+      rpuj_status: 'draft',
+      assignment_snapshot: { plateNumber: 'B 7777 XYZ' },
+    },
+    nextStatus: 'running',
+    nextEntrySource: 'realtime',
+    nextDriverId: 'driver-frozen',
+    runningAt: '2026-09-10T08:00:00.000Z',
+    assignment: { driver: 'Sopir Beku', plateNumber: 'B 7777 XYZ' },
+    actorName: 'Operational Test',
+  });
+
+  const expenseInsert = calls.find((call) => call.sql.includes('insert into container_job_expenses'));
+  assert.equal(expenseInsert.params[3], 777777);
+  assert.equal(calls.some((call) => call.sql.includes('destination_locations')), false);
 });
 
 test('sales document-only dikenali untuk upload dokumen container job historical', () => {

@@ -178,6 +178,10 @@ export function mapContainerJob(row, attachments = []) {
     notes: row.container_notes,
     executionSource,
     destination: row.destination || '',
+    warehouseLocationId: row.warehouse_location_id || null,
+    warehouseLocationNameSnapshot: row.warehouse_location_name_snapshot || '',
+    warehouseLocationAddressSnapshot: row.warehouse_location_address_snapshot || '',
+    destinationId: row.destination_id || null,
     driverId: row.driver_id,
     vehicleId: row.vehicle_id,
     driver: isVendorExecution ? 'VENDOR' : assignment.driver || null,
@@ -311,6 +315,10 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
     cargoType: row.cargo_type,
     origin: row.origin,
     destination: row.destination,
+    warehouseLocationId: row.warehouse_location_id || null,
+    warehouseLocationNameSnapshot: row.warehouse_location_name_snapshot || '',
+    warehouseLocationAddressSnapshot: row.warehouse_location_address_snapshot || '',
+    destinationId: row.destination_id || null,
     price: row.price == null ? 0 : Number(row.price),
     quantity: row.quantity == null ? containers.length : Number(row.quantity),
     unit: row.unit,
@@ -366,7 +374,7 @@ function getDisplayOrderNumber(row = {}) {
   return id ? `ORD-${id.slice(0, 8)}` : '';
 }
 
-export function toSalesOrderDb(form, customer) {
+export function toSalesOrderDb(form, customer, location, destination) {
   const containers = Array.isArray(form.containers) ? form.containers : [];
   const quantity = Number(form.quantity || containers.length || 1);
   const price = Number(form.price || 0);
@@ -428,14 +436,23 @@ export function toSalesOrderDb(form, customer) {
     total_amount: totalAmount,
     origin: form.origin,
     destination: form.destination,
+    // Lokasi gudang di-snapshot dari row Master Lokasi (`location`) TERKINI, bukan langsung dari
+    // form.warehouseLocationId -- pemanggil (sales-orders.repository.js) bertanggung jawab hanya
+    // melakukan lookup (dan dengan begitu, hanya menimpa snapshot) saat warehouse_location_id
+    // benar-benar berubah pada request ini. Kalau lookup gagal (id tidak valid/sudah diarsipkan),
+    // location bernilai null dan lokasi dianggap tidak dipilih -- lebih aman daripada menyimpan id
+    // yang tidak bisa diverifikasi.
+    warehouse_location_id: location?.id || null,
+    warehouse_location_name_snapshot: location?.name || null,
+    warehouse_location_address_snapshot: location?.address || null,
+    destination_id: destination?.id || null,
     status: form.status || 'waiting_operational',
     sales_name: customer?.sales_name || form.salesName || null,
-    // Vendor order (Phase 1) hanya penanda pencatatan -- vendor_name/vendor_note sengaja
-    // dikosongkan lagi kalau checkbox-nya di-uncheck, supaya tidak ada data vendor basi
-    // yang nyangkut di order yang sudah dibalik jadi internal.
-    is_vendor_order: Boolean(form.isVendorOrder),
-    vendor_name: form.isVendorOrder ? (String(form.vendorName || '').trim() || null) : null,
-    vendor_note: form.isVendorOrder ? (String(form.vendorNote || '').trim() || null) : null,
+    // Penanda vendor di level SO sudah deprecated. Payload klien lama diabaikan;
+    // vendor sekarang ditentukan per container job melalui execution_source.
+    is_vendor_order: false,
+    vendor_name: null,
+    vendor_note: null,
     entry_source: entrySource,
     historical_period: historicalPeriod,
     historical_notes: entrySource === 'historical' ? normalizeHistoricalValue(form.historicalNotes) : null,
@@ -472,6 +489,18 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
     // kalau kosong pakai tujuan SO saat itu sebagai default) -- lihat sales-orders.repository.js
     // untuk kepastian kolom ini tidak pernah ditulis ulang lewat edit SO biasa setelah container ada.
     destination: String(container.destination || order.destination || '').trim(),
+    // Snapshot lokasi gudang (Phase 4-5) -- perlakuannya sama persis dengan destination di atas
+    // (sekali diisi saat container dibuat, tidak pernah ditulis ulang lewat edit SO biasa). Baris
+    // rincian container BOLEH override lokasinya sendiri (beda gudang dari SO), kalau kosong
+    // otomatis mewarisi lokasi + snapshot nama/alamat/destination_id dari SO saat itu -- order di
+    // sini bisa berupa payload mentah (snake_case, hasil toSalesOrderDb) atau hasil mapSalesOrder
+    // (camelCase), makanya kedua bentuk key dicek.
+    warehouse_location_id: container.warehouseLocationId || order.warehouse_location_id || order.warehouseLocationId || null,
+    warehouse_location_name_snapshot: container.warehouseLocationNameSnapshot
+      || order.warehouse_location_name_snapshot || order.warehouseLocationNameSnapshot || null,
+    warehouse_location_address_snapshot: container.warehouseLocationAddressSnapshot
+      || order.warehouse_location_address_snapshot || order.warehouseLocationAddressSnapshot || null,
+    destination_id: container.destinationId || order.destination_id || order.destinationId || null,
     container_type: container.type || 'Dry',
     container_notes: container.notes || null,
     rpuj_status: container.rpujStatus || 'pending',
