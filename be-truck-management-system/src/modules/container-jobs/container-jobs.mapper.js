@@ -71,6 +71,8 @@ function firstAttachment(...attachments) {
 
 export function mapContainerJob(row, attachments = [], expenses = []) {
   const assignment = row.assignment_snapshot || {};
+  const executionSource = row.execution_source === 'vendor' ? 'vendor' : 'internal';
+  const isVendorExecution = executionSource === 'vendor';
   const attachmentMap = attachments.reduce((map, attachment) => {
     map[attachment.category] = attachment;
     return map;
@@ -124,9 +126,10 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     size: row.container_size,
     type: row.container_type,
     notes: row.container_notes,
+    executionSource,
     driverId: row.driver_id,
     vehicleId: row.vehicle_id,
-    driver: assignment.driver || null,
+    driver: isVendorExecution ? 'VENDOR' : assignment.driver || null,
     driverPaymentMethod: assignment.driverPaymentMethod || 'bank',
     driverBankAccount: assignment.driverBankAccount || assignment.bankAccount || '',
     driverBankName: assignment.driverBankName || '',
@@ -134,8 +137,8 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     driverBankAccountHolder: assignment.driverBankAccountHolder || '',
     driverEmoneyProvider: assignment.driverEmoneyProvider || '',
     driverEmoneyNumber: assignment.driverEmoneyNumber || '',
-    unitCode: assignment.unitCode || row.vehicle_unit_code || '',
-    plateNumber: assignment.plateNumber || null,
+    unitCode: isVendorExecution ? 'VENDOR' : assignment.unitCode || row.vehicle_unit_code || '',
+    plateNumber: isVendorExecution ? 'VENDOR' : assignment.plateNumber || null,
     chassis: assignment.vehicleDetail || null,
     rpujStatus: row.rpuj_status,
     rpujNotes: row.rpuj_notes,

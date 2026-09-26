@@ -9,9 +9,18 @@ const {
   buildOutstandingFilters,
   buildCustomerOutstandingFilters,
   getCustomerOutstandingRollupExport,
+  financeRowsCte,
   invoiceOrdersCte,
   outstandingOrdersCte,
 } = await import('./finance.repository.js');
+
+test('billing readiness vendor tidak mensyaratkan dokumen atau UJ internal', () => {
+  const sql = financeRowsCte();
+
+  assert.match(sql, /when\s+coalesce\(cj\.execution_source,\s*'internal'\)\s*=\s*'vendor'[\s\S]*then\s+'SIAP_DITAGIHKAN'/i);
+  assert.match(sql, /coalesce\(cj\.execution_source,\s*'internal'\)\s*=\s*'vendor'[\s\S]*as\s+has_spk_document/i);
+  assert.doesNotMatch(sql, /where[\s\S]*coalesce\(cj\.execution_source,\s*'internal'\)\s*=\s*'internal'[\s\S]*cj\.status\s*=\s*'completed'/i);
+});
 
 test('invoice CTE hanya mengambil completed job yang punya completed_at valid', () => {
   const sql = invoiceOrdersCte();

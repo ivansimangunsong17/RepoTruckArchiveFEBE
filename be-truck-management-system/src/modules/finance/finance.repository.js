@@ -215,7 +215,7 @@ function normalizeInvoiceStatusExpression(column = 'billing_status') {
   `;
 }
 
-function financeRowsCte() {
+export function financeRowsCte() {
   const invoiceStatusSql = normalizeInvoiceStatusExpression('so.billing_status');
 
   return `
@@ -368,6 +368,7 @@ function financeRowsCte() {
         so.price,
         so.total_amount,
         cj.container_number,
+        coalesce(cj.execution_source, 'internal') as execution_source,
         cj.container_size,
         cj.container_type,
         cj.container_notes,
@@ -479,6 +480,24 @@ function financeRowsCte() {
           else null
         end as estimated_margin,
         case
+          when coalesce(cj.execution_source, 'internal') = 'vendor'
+          then case
+            when coalesce(
+              nullif(tup.unit_price, 0),
+              case
+                when upper(replace(cj.container_size, ' ', '')) = '40FT' then nullif(ofi.transport_40ft_unit, 0)
+                else nullif(ofi.transport_20ft_unit, 0)
+              end,
+              nullif(ofi.transport_legacy_unit, 0),
+              case
+                when coalesce(ofi.line_item_count, 0) = 0
+                then coalesce(nullif(so.price, 0), nullif(so.total_amount, 0) / greatest(coalesce(jc.total_jobs, 1), 1))
+                else null
+              end
+            ) is not null
+            then 'SIAP_DITAGIHKAN'
+            else 'LENGKAP'
+          end
           when (
             (nullif(btrim(cj.spk_number), '') is not null or coalesce(af.has_spk_file, false))
             and (nullif(btrim(cj.loading_voucher_number), '') is not null or coalesce(af.has_loading_file, false))
@@ -508,7 +527,11 @@ function financeRowsCte() {
           end
           else 'BELUM_LENGKAP'
         end as document_status,
-        (nullif(btrim(cj.spk_number), '') is not null or coalesce(af.has_spk_file, false)) as has_spk_document,
+        (
+          coalesce(cj.execution_source, 'internal') = 'vendor'
+          or nullif(btrim(cj.spk_number), '') is not null
+          or coalesce(af.has_spk_file, false)
+        ) as has_spk_document,
         (nullif(btrim(cj.loading_voucher_number), '') is not null or coalesce(af.has_loading_file, false)) as has_loading_document,
         (
           nullif(btrim(coalesce(cj.tila_gatepass_document_number, cj.unloading_voucher_number, cj.weighing_document_number, '')), '') is not null
@@ -635,6 +658,7 @@ function buildRpujFilters(options = {}) {
   const clauses = [
     "so.status <> 'cancelled'",
     "cj.rpuj_status <> 'pending'",
+    "coalesce(cj.execution_source, 'internal') = 'internal'",
   ];
   const params = [];
   const periodStatus = options.periodBasis || options.status;
@@ -886,6 +910,7 @@ function mapFinanceRow(row) {
     origin: row.origin,
     destination: row.destination,
     containerNumber: row.container_number,
+    executionSource: row.execution_source === 'vendor' ? 'vendor' : 'internal',
     containerSize: row.container_size,
     containerType: row.container_type,
     quantity: Number(row.trip_quantity || 1),
@@ -1674,6 +1699,7 @@ export async function getFinanceDashboard(options = {}) {
             join sales_orders so on so.id = cj.sales_order_id
             where so.status <> 'cancelled'
               and cj.rpuj_status = 'submitted'
+              and coalesce(cj.execution_source, 'internal') = 'internal'
           ) as rpuj_submitted,
           (
             select count(*)::int
@@ -1681,6 +1707,7 @@ export async function getFinanceDashboard(options = {}) {
             join sales_orders so on so.id = cj.sales_order_id
             where so.status <> 'cancelled'
               and cj.rpuj_status = 'approved'
+              and coalesce(cj.execution_source, 'internal') = 'internal'
           ) as rpuj_approved_waiting_transfer,
           (
             select count(*)::int
@@ -1688,6 +1715,7 @@ export async function getFinanceDashboard(options = {}) {
             join sales_orders so on so.id = cj.sales_order_id
             where so.status <> 'cancelled'
               and cj.rpuj_status = 'paid'
+              and coalesce(cj.execution_source, 'internal') = 'internal'
           ) as rpuj_paid,
           (
             select count(*)::int
@@ -4251,11 +4279,17 @@ export async function deleteContainerJobExpenseTransferProofRecord(id, proofId, 
 
 export async function approveRpujRequest(id, payload = {}) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, rpuj_status from container_jobs where id = $1', [id]);
+    const existing = await client.query('select id, rpuj_status, execution_source from container_jobs where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Pengajuan RPUJ tidak ditemukan.');
       error.statusCode = 404;
       error.code = 'RPUJ_REQUEST_NOT_FOUND';
+      throw error;
+    }
+    if ((existing.rows[0].execution_source || 'internal') === 'vendor') {
+      const error = new Error('Ritasi Vendor tidak memiliki pengajuan UJ.');
+      error.statusCode = 409;
+      error.code = 'RPUJ_VENDOR_FORBIDDEN';
       throw error;
     }
     if (!['submitted', 'rejected'].includes(existing.rows[0].rpuj_status)) {
@@ -4285,11 +4319,17 @@ export async function approveRpujRequest(id, payload = {}) {
 
 export async function rejectRpujRequest(id, payload = {}) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, rpuj_status from container_jobs where id = $1', [id]);
+    const existing = await client.query('select id, rpuj_status, execution_source from container_jobs where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Pengajuan RPUJ tidak ditemukan.');
       error.statusCode = 404;
       error.code = 'RPUJ_REQUEST_NOT_FOUND';
+      throw error;
+    }
+    if ((existing.rows[0].execution_source || 'internal') === 'vendor') {
+      const error = new Error('Ritasi Vendor tidak memiliki pengajuan UJ.');
+      error.statusCode = 409;
+      error.code = 'RPUJ_VENDOR_FORBIDDEN';
       throw error;
     }
     if (!['submitted', 'approved'].includes(existing.rows[0].rpuj_status)) {
@@ -4319,11 +4359,17 @@ export async function rejectRpujRequest(id, payload = {}) {
 
 export async function markRpujTransferUploaded(id, payload = {}) {
   return withTransaction(async (client) => {
-    const existing = await client.query('select id, rpuj_status from container_jobs where id = $1', [id]);
+    const existing = await client.query('select id, rpuj_status, execution_source from container_jobs where id = $1', [id]);
     if (!existing.rows[0]) {
       const error = new Error('Pengajuan RPUJ tidak ditemukan.');
       error.statusCode = 404;
       error.code = 'RPUJ_REQUEST_NOT_FOUND';
+      throw error;
+    }
+    if ((existing.rows[0].execution_source || 'internal') === 'vendor') {
+      const error = new Error('Ritasi Vendor tidak memiliki pengajuan UJ.');
+      error.statusCode = 409;
+      error.code = 'RPUJ_VENDOR_FORBIDDEN';
       throw error;
     }
     if (!['approved', 'paid'].includes(existing.rows[0].rpuj_status)) {

@@ -2,6 +2,38 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mapContainerJob, mapContainerJobExpense } from './container-jobs.mapper.js';
 
+test('container job lama tanpa execution source dianggap internal', () => {
+  const mapped = mapContainerJob({
+    id: 'job-legacy',
+    sales_order_id: 'order-legacy',
+    assignment_snapshot: { driver: 'Budi', plateNumber: 'B 1234 XYZ' },
+    status: 'received',
+  });
+
+  assert.equal(mapped.executionSource, 'internal');
+  assert.equal(mapped.driver, 'Budi');
+  assert.equal(mapped.plateNumber, 'B 1234 XYZ');
+});
+
+test('container job vendor menampilkan label vendor tanpa assignment internal', () => {
+  const mapped = mapContainerJob({
+    id: 'job-vendor',
+    sales_order_id: 'order-vendor',
+    execution_source: 'vendor',
+    driver_id: null,
+    vehicle_id: null,
+    assignment_snapshot: { driver: 'VENDOR', plateNumber: 'VENDOR' },
+    status: 'received',
+  });
+
+  assert.equal(mapped.executionSource, 'vendor');
+  assert.equal(mapped.driverId, null);
+  assert.equal(mapped.vehicleId, null);
+  assert.equal(mapped.driver, 'VENDOR');
+  assert.equal(mapped.plateNumber, 'VENDOR');
+  assert.equal(mapped.unitCode, 'VENDOR');
+});
+
 test('container job mapper membaca snapshot komisi sopir', () => {
   const mapped = mapContainerJob({
     id: 'job-1',

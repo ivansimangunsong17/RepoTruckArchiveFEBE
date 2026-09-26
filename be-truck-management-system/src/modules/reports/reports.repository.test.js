@@ -127,6 +127,32 @@ test('monthly comparison membandingkan revenue, sales/customer, utilisasi, dan c
   assert.equal(rows[1].repoStoredCount, 2);
 });
 
+test('monthly comparison memasukkan revenue vendor tetapi utilisasi hanya unit sendiri', () => {
+  const rows = buildMonthlyComparisonRows([
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `internal-${index}`,
+      completed_date: '2026-01-03',
+      customer_name: 'Customer Campuran',
+      price: 1000000,
+      execution_source: 'internal',
+      vehicle_id: `truck-${index}`,
+    })),
+    ...Array.from({ length: 2 }, (_, index) => ({
+      id: `vendor-${index}`,
+      completed_date: '2026-01-03',
+      customer_name: 'Customer Campuran',
+      price: 1000000,
+      execution_source: 'vendor',
+    })),
+  ], [], { year: 2026, activeTruckCount: 5 }, new Date('2026-02-01T00:00:00.000Z'));
+
+  assert.equal(rows[0].totalRevenue, 5000000);
+  assert.equal(rows[0].totalVolume, 5);
+  assert.equal(rows[0].totalTrips, 3);
+  assert.equal(rows[0].usedTruckDays, 3);
+  assert.equal(rows[0].utilizationPercent, (3 / (5 * 31)) * 100);
+});
+
 test('koreksi chassis utilisasi tidak mengubah baris jika tidak ada mapping', () => {
   const rows = [
     { id: 'job-1', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', completedDate: '2026-08-10' },

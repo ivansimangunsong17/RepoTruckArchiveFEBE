@@ -2,7 +2,7 @@ import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 
 const joinedJobColumns = `
-  cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.container_type,
+  cj.id, cj.sales_order_id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type,
   cj.container_notes, cj.rpuj_status, cj.rpuj_notes,
   cj.rpuj_requested_by_name, cj.rpuj_requested_at, cj.rpuj_reviewed_by_name,
   cj.rpuj_reviewed_at, cj.rpuj_rejection_note, cj.rpuj_transfer_uploaded_by_name,
@@ -866,6 +866,7 @@ export async function syncAutoJourneyMoneyExpense(client, {
   allowOperationalFundPending = false,
   allowAdminCorrection = false,
 }) {
+  if ((job.execution_source || 'internal') === 'vendor') return;
   if (!['running', 'completed'].includes(nextStatus)) return;
   // Ritasi susulan/backdate (Phase 3) TIDAK boleh memicu UJ otomatis / rekening dropping sama
   // sekali -- persis seperti entry historis. Kalau UJ tetap diperlukan untuk ritasi ini, harus
@@ -1151,6 +1152,7 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       where cj.id <> $1
+        and coalesce(cj.execution_source, 'internal') = 'internal'
         and cj.status not in ('completed', 'cancelled', 'repo_stored')
         and (
           ($2::uuid is not null and cj.driver_id = $2::uuid)
@@ -1186,6 +1188,7 @@ async function releaseDriverIfIdle(client, driverId) {
           select 1
           from container_jobs cj
           where cj.driver_id = $1
+            and coalesce(cj.execution_source, 'internal') = 'internal'
             and cj.status not in ('completed', 'cancelled', 'repo_stored')
         )
     `,
@@ -1206,6 +1209,7 @@ async function releaseVehicleIfIdle(client, vehicleId) {
           select 1
           from container_jobs cj
           where cj.vehicle_id = $1
+            and coalesce(cj.execution_source, 'internal') = 'internal'
             and cj.status not in ('completed', 'cancelled', 'repo_stored')
         )
     `,
@@ -1618,7 +1622,7 @@ export async function findAssignmentHistory(id) {
 export async function findContainerJobExpenseLedger(options = {}) {
   const { limit, offset, page, pageSize } = parsePage(options);
   const params = [];
-  const clauses = ['1 = 1'];
+  const clauses = ["coalesce(cj.execution_source, 'internal') = 'internal'"];
 
   if (options.financeCheckStatus) {
     params.push(options.financeCheckStatus);
@@ -1762,8 +1766,27 @@ export async function findContainerJobExpenseByIdRecord(id) {
   return result.rows[0] ? mapContainerJobExpense(result.rows[0]) : null;
 }
 
+export function shouldRequireAssignmentAfterVendorRevert(currentSource, nextSource, documentOnlyUpdate = false) {
+  return !documentOnlyUpdate
+    && (currentSource || 'internal') === 'vendor'
+    && (nextSource || 'internal') === 'internal';
+}
+
+async function ensureInternalExecution(client, id, processLabel = 'proses internal') {
+  const result = await client.query('select id, execution_source from container_jobs where id = $1', [id]);
+  if (!result.rows[0]) throw validationError('Container Job tidak ditemukan.', 'CONTAINER_JOB_NOT_FOUND', 404);
+  if ((result.rows[0].execution_source || 'internal') === 'vendor') {
+    throw validationError(
+      `Ritasi Vendor tidak dapat diproses pada ${processLabel}.`,
+      'CONTAINER_JOB_VENDOR_INTERNAL_PROCESS_FORBIDDEN',
+      409,
+    );
+  }
+}
+
 export async function createContainerJobExpenseRecord(id, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'Rekening Dropping');
     const jobResult = await client.query(
       `
         select cj.id, cj.sales_order_id, cj.driver_id, cj.status, cj.container_number,
@@ -2066,6 +2089,7 @@ async function applyDroppingExpenseFieldsUpdate(client, { id, expenseId, existin
 
 export async function correctContainerJobExpenseRecord(id, expenseId, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'Rekening Dropping');
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     if (existing.finance_check_status !== 'perlu_klarifikasi') {
       const error = new Error('Transaksi biaya hanya bisa dikoreksi setelah Finance meminta klarifikasi.');
@@ -2081,6 +2105,7 @@ export async function correctContainerJobExpenseRecord(id, expenseId, payload = 
 
 export async function updateDroppingExpenseBeforeFinanceCheckRecord(id, expenseId, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'Rekening Dropping');
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
     ensureManualOperationalExpense(existing);
@@ -2095,6 +2120,7 @@ export async function updateDroppingExpenseBeforeFinanceCheckRecord(id, expenseI
 
 export async function moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord(id, expenseId, targetJobId, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'Rekening Dropping');
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
     ensureManualOperationalExpense(existing);
@@ -2109,6 +2135,7 @@ export async function moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord(id
       error.code = 'CONTAINER_JOB_EXPENSE_MOVE_TARGET_INVALID';
       throw error;
     }
+    await ensureInternalExecution(client, normalizedTargetJobId, 'Rekening Dropping');
     const targetResult = await client.query(
       `
         select cj.id, cj.sales_order_id, cj.status, cj.container_number, cj.assignment_snapshot, cj.destination,
@@ -2209,6 +2236,7 @@ export async function voidDroppingExpenseBeforeFinanceCheckRecord(id, expenseId,
 
 export async function uploadAutoJourneyMoneyProofRecord(id, expenseId, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'Uang Jalan');
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     if (existing.source !== 'auto_uj_order') {
       const error = new Error('Bukti transfer ini hanya berlaku untuk transaksi UJ Perjalanan otomatis.');
@@ -2249,6 +2277,7 @@ export async function uploadAutoJourneyMoneyProofRecord(id, expenseId, payload =
 
 export async function updateContainerJobExpenseProofRecord(id, expenseId, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'Rekening Dropping');
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
     ensureTransactionNotFinanceChecked(existing);
@@ -2361,6 +2390,7 @@ export async function updateContainerJob(id, form) {
 
 export async function resetContainerJobAssignment(id, payload = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'reset assignment internal');
     const existing = await client.query(
       `
         select cj.id, cj.sales_order_id, cj.container_number, cj.status, cj.driver_id, cj.vehicle_id,
@@ -2554,7 +2584,7 @@ async function updateContainerJobTransaction(id, form) {
     const existing = await client.query(
       `
         select cj.id, cj.sales_order_id, cj.container_number, cj.container_size, cj.running_at, cj.completed_at, cj.cancelled_at,
-               cj.driver_id, cj.vehicle_id, cj.rpuj_status, cj.rpuj_notes, cj.status, cj.eir_number,
+               cj.driver_id, cj.vehicle_id, cj.execution_source, cj.rpuj_status, cj.rpuj_notes, cj.status, cj.eir_number,
                cj.assignment_snapshot,
                cj.loading_voucher_number, cj.travel_document_number, cj.tila_gatepass_document_number,
                cj.unloading_voucher_number, cj.weighing_document_number,
@@ -2588,18 +2618,69 @@ async function updateContainerJobTransaction(id, form) {
 
     const currentJob = existing.rows[0];
     const documentOnlyUpdate = normalizeBooleanFlag(form.documentOnlyUpdate);
+    const nextExecutionSource = documentOnlyUpdate
+      ? currentJob.execution_source || 'internal'
+      : form.executionSource || currentJob.execution_source || 'internal';
+    const isVendorExecution = nextExecutionSource === 'vendor';
+    if (isVendorExecution && currentJob.execution_source !== 'vendor') {
+      const linkedInternalProcess = await client.query(
+        `
+          select
+            exists(
+              select 1 from container_job_expenses expense
+              where expense.container_job_id = $1 and expense.payment_status <> 'batal'
+            ) as has_active_expense,
+            exists(
+              select 1 from driver_commission_items item
+              where item.container_job_id = $1 and item.voided_at is null
+            ) as has_commission_item
+        `,
+        [id],
+      );
+      if (
+        currentJob.rpuj_status !== 'pending'
+        || linkedInternalProcess.rows[0]?.has_active_expense
+        || linkedInternalProcess.rows[0]?.has_commission_item
+      ) {
+        throw validationError(
+          'Ritasi tidak dapat diubah menjadi Vendor karena sudah memiliki proses UJ, Rekening Dropping, atau komisi.',
+          'CONTAINER_JOB_VENDOR_INTERNAL_PROCESS_EXISTS',
+          409,
+        );
+      }
+    }
     const allowRetroactiveEntry = isBackfillLike(form, currentJob);
     const allowAdminCorrection = normalizeBooleanFlag(form.adminCorrectionMode);
     const driver = await findDriver(client, form);
     const vehicle = await findVehicle(client, form);
-    if (!documentOnlyUpdate) {
+    if (shouldRequireAssignmentAfterVendorRevert(
+      currentJob.execution_source,
+      nextExecutionSource,
+      documentOnlyUpdate,
+    )) {
+      requireCompleteOperationalAssignment(
+        form,
+        driver,
+        vehicle,
+        currentJob,
+        'Ritasi Vendor yang dikembalikan menjadi Unit Sendiri wajib memilih truck dan driver.',
+      );
+    }
+    if (!documentOnlyUpdate && !isVendorExecution) {
       assertDriverAssignable(driver, currentJob.driver_id);
       assertVehicleAssignable(vehicle, currentJob.vehicle_id);
     }
-    if (!documentOnlyUpdate && shouldValidateVehicleContainerSize(form, currentJob)) {
+    if (!documentOnlyUpdate && !isVendorExecution && shouldValidateVehicleContainerSize(form, currentJob)) {
       assertVehicleMatchesContainer(vehicle, currentJob.container_size);
     }
     const nextStatus = documentOnlyUpdate ? currentJob.status || 'received' : form.status || currentJob.status || 'received';
+    if (isVendorExecution && ['repo_stored', 'inap'].includes(nextStatus)) {
+      throw validationError(
+        'Ritasi Vendor tidak dapat menggunakan status Container Titip atau Inap armada internal.',
+        'CONTAINER_JOB_VENDOR_INTERNAL_STATUS_FORBIDDEN',
+        409,
+      );
+    }
     if (nextStatus === 'cancelled' && currentJob.status === 'completed' && !allowAdminCorrection) {
       throw validationError(
         'Container Job yang sudah selesai tidak dapat dibatalkan.',
@@ -2625,8 +2706,10 @@ async function updateContainerJobTransaction(id, form) {
         );
       }
     }
-    const nextRpujStatus = normalizeRpujStatusForOperational(currentJob, form.rpujStatus);
-    if (!documentOnlyUpdate && nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(currentJob.rpuj_status)) {
+    const nextRpujStatus = isVendorExecution
+      ? 'pending'
+      : normalizeRpujStatusForOperational(currentJob, form.rpujStatus);
+    if (!documentOnlyUpdate && !isVendorExecution && nextRpujStatus === 'submitted' && !['submitted', 'approved', 'paid'].includes(currentJob.rpuj_status)) {
       requireCompleteOperationalAssignment(
         form,
         driver,
@@ -2635,7 +2718,7 @@ async function updateContainerJobTransaction(id, form) {
         'RPUJ belum bisa diajukan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    if (!documentOnlyUpdate && ['running', 'completed'].includes(nextStatus)) {
+    if (!documentOnlyUpdate && !isVendorExecution && ['running', 'completed'].includes(nextStatus)) {
       requireCompleteOperationalAssignment(
         form,
         driver,
@@ -2644,7 +2727,7 @@ async function updateContainerJobTransaction(id, form) {
         'Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.',
       );
     }
-    if (!documentOnlyUpdate) {
+    if (!documentOnlyUpdate && !isVendorExecution) {
       await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
     }
     const validatedCompletedAt = !documentOnlyUpdate && nextStatus === 'completed'
@@ -2656,6 +2739,13 @@ async function updateContainerJobTransaction(id, form) {
     const nextContainerNumber = hasOwnInput(form, 'containerNumber')
       ? String(form.containerNumber || existing.rows[0].container_number || '').trim().toUpperCase() || null
       : existing.rows[0].container_number || null;
+    if (isVendorExecution && !nextContainerNumber) {
+      throw validationError(
+        'Nomor container wajib diisi untuk ritasi vendor.',
+        'CONTAINER_JOB_VENDOR_CONTAINER_NUMBER_REQUIRED',
+        400,
+      );
+    }
     // Tujuan (destination) sengaja dibekukan begitu container dibuat -- hanya boleh dikoreksi lewat
     // mode koreksi admin (sudah divalidasi di service layer via ensureAdminCorrectionContract), bukan
     // lewat update biasa (mis. edit SO), supaya tidak diam-diam berubah tiap kali job diperbarui.
@@ -2700,8 +2790,12 @@ async function updateContainerJobTransaction(id, form) {
       : existing.rows[0].cancelled_by_name || null;
     const hasDriverAssignmentInput = hasOwnInput(form, 'driverId') || hasOwnInput(form, 'driver');
     const hasVehicleAssignmentInput = hasOwnInput(form, 'vehicleId') || hasOwnInput(form, 'plateNumber');
-    const nextDriverId = driver?.id || form.driverId || (hasDriverAssignmentInput ? null : existing.rows[0].driver_id);
-    const nextVehicleId = vehicle?.id || form.vehicleId || (hasVehicleAssignmentInput ? null : existing.rows[0].vehicle_id);
+    const nextDriverId = isVendorExecution
+      ? null
+      : driver?.id || form.driverId || (hasDriverAssignmentInput ? null : existing.rows[0].driver_id);
+    const nextVehicleId = isVendorExecution
+      ? null
+      : vehicle?.id || form.vehicleId || (hasVehicleAssignmentInput ? null : existing.rows[0].vehicle_id);
     const existingAssignment = existing.rows[0].assignment_snapshot || {};
     // Snapshot (nama sopir/truck, rekening bank, e-money) dibekukan begitu assignment dibuat.
     // findDriver()/findVehicle() di atas selalu mengambil data TERKINI dari tabel master, jadi
@@ -2803,10 +2897,10 @@ async function updateContainerJobTransaction(id, form) {
       : existing.rows[0].tila_gatepass_document_number || existing.rows[0].unloading_voucher_number || existing.rows[0].weighing_document_number || null;
     const commissionUpdate = resolveDriverCommissionUpdate(existing.rows[0], form, { documentOnlyUpdate });
     const commissionUpdateRequested = commissionUpdate.updateRequested;
-    const nextHasDriverCommission = commissionUpdate.hasCommission;
-    const nextDriverCommissionAmount = commissionUpdate.amount;
-    const nextDriverCommissionSourceDestinationId = commissionUpdate.sourceDestinationId;
-    const nextDriverCommissionNote = commissionUpdate.note;
+    const nextHasDriverCommission = isVendorExecution ? false : commissionUpdate.hasCommission;
+    const nextDriverCommissionAmount = isVendorExecution ? 0 : commissionUpdate.amount;
+    const nextDriverCommissionSourceDestinationId = isVendorExecution ? null : commissionUpdate.sourceDestinationId;
+    const nextDriverCommissionNote = isVendorExecution ? null : commissionUpdate.note;
     const commissionValuesChanged = commissionUpdateRequested && Boolean(
       nextHasDriverCommission !== Boolean(existing.rows[0].has_driver_commission)
       || Number(nextDriverCommissionAmount || 0) !== Number(existing.rows[0].driver_commission_amount || 0)
@@ -2814,21 +2908,23 @@ async function updateContainerJobTransaction(id, form) {
       || String(nextDriverCommissionNote || '') !== String(existing.rows[0].driver_commission_note || '')
     );
     const actorName = form.updatedBy || 'Operational';
-    const nextAssignmentSnapshot = toAssignmentSnapshot(
-      nextAssignmentForm,
-      driverIdentityChanging ? driver : null,
-      vehicleIdentityChanging ? vehicle : null,
-    );
+    const nextAssignmentSnapshot = isVendorExecution
+      ? { driver: 'VENDOR', unitCode: 'VENDOR', plateNumber: 'VENDOR', vehicleDetail: null }
+      : toAssignmentSnapshot(
+        nextAssignmentForm,
+        driverIdentityChanging ? driver : null,
+        vehicleIdentityChanging ? vehicle : null,
+      );
     const shouldCaptureCommissionDriver = ['running', 'completed'].includes(nextStatus)
       && (commissionValuesChanged || nextStatus !== currentJob.status)
       && !existing.rows[0].commission_driver_id
       && !normalizeOptionalText(existing.rows[0].commission_driver_name)
       && (nextDriverId || nextAssignmentSnapshot.driver);
-    const nextCommissionDriverId = existing.rows[0].commission_driver_id || (shouldCaptureCommissionDriver ? nextDriverId : null);
-    const nextCommissionDriverName = normalizeOptionalText(
+    let nextCommissionDriverId = isVendorExecution ? null : existing.rows[0].commission_driver_id || (shouldCaptureCommissionDriver ? nextDriverId : null);
+    let nextCommissionDriverName = isVendorExecution ? null : normalizeOptionalText(
       existing.rows[0].commission_driver_name || (shouldCaptureCommissionDriver ? nextAssignmentSnapshot.driver : null),
     );
-    const nextCommissionDriverSnapshot = existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
+    let nextCommissionDriverSnapshot = isVendorExecution ? {} : existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
       ? existing.rows[0].commission_driver_snapshot
       : (shouldCaptureCommissionDriver ? buildCommissionDriverSnapshot(nextAssignmentSnapshot) : {});
     const completedAtForUpdate = nextStatus === 'completed'
@@ -2870,6 +2966,7 @@ async function updateContainerJobTransaction(id, form) {
       `
         update container_jobs
         set container_number = $1,
+            execution_source = $60,
             driver_id = $2,
             vehicle_id = $3,
             assignment_snapshot = $4::jsonb,
@@ -2994,6 +3091,7 @@ async function updateContainerJobTransaction(id, form) {
         nextCreatedAsCorrection,
         actorName,
         id,
+        nextExecutionSource,
       ],
     );
 
@@ -3001,7 +3099,7 @@ async function updateContainerJobTransaction(id, form) {
     // sopir/truck (driverIdentityChanging/vehicleIdentityChanging di atas), mencakup jalur normal
     // maupun mode koreksi admin, supaya "sopir A -> sopir B, kapan, oleh siapa, kenapa" selalu
     // terlacak terpisah dari dump before/after generik di activity_logs.
-    if (driverIdentityChanging || vehicleIdentityChanging) {
+    if (!isVendorExecution && (driverIdentityChanging || vehicleIdentityChanging)) {
       const assignmentChangeSource = allowAdminCorrection ? 'admin_correction' : 'operational';
       const assignmentReason = allowAdminCorrection
         ? normalizeOptionalText(form.adminCorrectionReason)
@@ -3041,7 +3139,7 @@ async function updateContainerJobTransaction(id, form) {
       // operational status, assignment, timeline, auto UJ, or resource availability.
     } else if (nextStatus === 'cancelled') {
       await voidAutoJourneyMoneyExpense(client, id, actorName, { allowAdminCorrection });
-    } else {
+    } else if (!isVendorExecution) {
       const autoUjWarning = await syncAutoJourneyMoneyExpense(client, {
         job: existing.rows[0],
         nextStatus,
@@ -3327,6 +3425,7 @@ function buildGeneratedSpkNumber(job) {
 
 export async function generateContainerJobSpk(id, form = {}) {
   return withTransaction(async (client) => {
+    await ensureInternalExecution(client, id, 'SPK internal');
     const existing = await client.query(
       `
         select ${joinedJobColumns}

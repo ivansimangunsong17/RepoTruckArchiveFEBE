@@ -54,6 +54,13 @@ function mapBatchRow(row = {}) {
     rejectionNote: row.rejection_note || '',
     totalItems: toNumber(row.total_items),
     totalAmount: toNumber(row.total_amount),
+    revisionCount: toNumber(row.revision_count),
+    lastRevisedAt: row.last_revised_at,
+    lastRevisedByName: row.last_revised_by_name || '',
+    lastRevisionReason: row.last_revision_reason || '',
+    lastRevisionJobId: row.last_revision_job_id || null,
+    lastRevisionPreviousDriverName: row.last_revision_previous_driver_name || '',
+    lastRevisionNextDriverName: row.last_revision_next_driver_name || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -471,6 +478,7 @@ async function findEligibleRows(period, db = { query }) {
       join sales_orders so on so.id = cj.sales_order_id
       left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
       where cj.status = 'completed'
+        and coalesce(cj.execution_source, 'internal') = 'internal'
         and cj.completed_at is not null
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
@@ -549,6 +557,7 @@ async function findCommissionReviewRows(period, db = { query }) {
         join sales_orders so on so.id = cj.sales_order_id
         left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
         where cj.status = 'completed'
+          and coalesce(cj.execution_source, 'internal') = 'internal'
           and cj.completed_at is not null
           and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           and coalesce(cj.has_driver_commission, false)
@@ -579,6 +588,7 @@ async function countNoCommissionRows(period, db = { query }) {
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       where cj.status = 'completed'
+        and coalesce(cj.execution_source, 'internal') = 'internal'
         and cj.completed_at is not null
         and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
         and not coalesce(cj.has_driver_commission, false)

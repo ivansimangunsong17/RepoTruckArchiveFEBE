@@ -83,7 +83,7 @@ export async function listFleetAssignments(options = {}) {
       `,
       params,
     ),
-    query("select distinct driver_id from container_jobs where status = 'running' and driver_id is not null"),
+    query("select distinct driver_id from container_jobs where status = 'running' and driver_id is not null and coalesce(execution_source, 'internal') = 'internal'"),
   ]);
 
   return {

@@ -253,11 +253,12 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
     const revenue = calculateCompletedJobRevenue(row);
     const customerKey = normalizeCustomerName(row).toLowerCase();
     const salesKey = normalizeSalesName(row).toLowerCase();
-    const truckKey = getComparisonTruckKey(row);
-    const dateKey = getComparisonDateKey(row);
+    const isInternal = (row.execution_source || row.executionSource || 'internal') !== 'vendor';
+    const truckKey = isInternal ? getComparisonTruckKey(row) : '';
+    const dateKey = isInternal ? getComparisonDateKey(row) : '';
 
     month.totalRevenue += revenue;
-    month.totalTrips += 1;
+    if (isInternal) month.totalTrips += 1;
     month.totalVolume += 1;
     if (customerKey) month.customerKeys.add(customerKey);
     if (salesKey) month.salesKeys.add(salesKey);
@@ -637,6 +638,7 @@ export async function getDashboardReport() {
         count(*) filter (where status = 'completed')::int as completed_jobs,
         count(*) filter (where status = 'cancelled')::int as cancelled_jobs
       from container_jobs
+      where coalesce(execution_source, 'internal') = 'internal'
     `),
     query('select count(*)::int as total_documents from attachments'),
     query(`
@@ -658,7 +660,7 @@ export async function getDashboardReport() {
       order by v.unit_code asc, v.plate_number asc
     `),
     query(`
-      select cj.id, cj.container_number, cj.container_size, cj.container_type, cj.status,
+      select cj.id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type, cj.status,
              cj.rpuj_status, cj.spk_number, cj.loading_voucher_number,
              cj.unloading_voucher_number, cj.travel_document_number,
              cj.weighing_document_number, cj.tila_gatepass_document_number,
@@ -675,6 +677,7 @@ export async function getDashboardReport() {
       join sales_orders so on so.id = cj.sales_order_id
       left join drivers assigned_driver on assigned_driver.id = cj.driver_id
       where so.status <> 'cancelled'
+        and coalesce(cj.execution_source, 'internal') = 'internal'
         and cj.status in ('received', 'running', 'repo_stored')
       order by so.trip_date asc, cj.created_at asc
       limit 200
@@ -695,13 +698,14 @@ export async function getDashboardReport() {
       join sales_orders so on so.id = cj.sales_order_id
       left join drivers assigned_driver on assigned_driver.id = cj.driver_id
       where so.status <> 'cancelled'
+        and coalesce(cj.execution_source, 'internal') = 'internal'
         and cj.status in ('received', 'running')
         and so.trip_date >= current_date
       order by so.trip_date asc, cj.created_at asc
       limit 500
     `),
     query(`
-      select cj.id, cj.container_number, cj.container_size, cj.container_type, cj.status,
+      select cj.id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type, cj.status,
              cj.received_at, cj.running_at, cj.completed_at, cj.updated_at, cj.assignment_snapshot,
              assigned_driver.name as driver_full_name,
              assigned_driver.nickname as driver_nickname,
@@ -796,6 +800,7 @@ export async function getDashboardReport() {
     })),
     progressJobs: progressJobs.rows.map((row) => ({
       id: row.id,
+      executionSource: row.execution_source === 'vendor' ? 'vendor' : 'internal',
       orderId: row.sales_order_id,
       soNumber: row.so_number,
       customer: row.customer_name,
@@ -1274,6 +1279,7 @@ export async function getMonthlyComparisonReport(options = {}) {
             so.total_amount,
             to_jsonb(so)->'line_items' as line_items,
             cj.container_size,
+            cj.execution_source,
             ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
             cj.completed_at,
             cj.vehicle_id,
@@ -1314,6 +1320,7 @@ export async function getMonthlyComparisonReport(options = {}) {
           join container_jobs cj on cj.sales_order_id = so.id
           where so.status <> 'cancelled'
             and cj.repo_stored_at is not null
+            and coalesce(cj.execution_source, 'internal') = 'internal'
             ${repoSourceWhereSql}
         )
         select *
@@ -1398,7 +1405,7 @@ export async function getOperationReport(options = {}) {
       ? `coalesce(${timestampToJakartaDateSql('cj.repo_stored_at')}, so.trip_date)`
       : 'so.trip_date';
   const dateFilter = buildDateWhere(dateColumn, options);
-  const clauses = [...dateFilter.clauses];
+  const clauses = [...dateFilter.clauses, "coalesce(cj.execution_source, 'internal') = 'internal'"];
   const params = [...dateFilter.params];
 
   if (isFinishedHistory) {
@@ -1620,6 +1627,7 @@ export async function getDriverPerformanceReport(options = {}) {
           left join driver_commission_batches dcb on dcb.id = dci.batch_id
           left join driver_commission_payments dcp on dcp.id = dci.payment_id
           where cj.status = 'completed'
+            and coalesce(cj.execution_source, 'internal') = 'internal'
             and so.status <> 'cancelled'
             and nullif(cj.assignment_snapshot->>'driver', '') is not null
             ${sourceCondition}
@@ -1637,6 +1645,7 @@ export async function getDriverPerformanceReport(options = {}) {
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       where cj.status = 'completed'
+        and coalesce(cj.execution_source, 'internal') = 'internal'
         and nullif(cj.assignment_snapshot->>'driver', '') is not null
       order by value desc
     `),
@@ -1795,6 +1804,7 @@ export async function getInputMonitoringReport(options = {}) {
         join sales_orders so on so.id = cj.sales_order_id
         where ${activeOrderSql}
           and ${activeJobSql}
+          and coalesce(cj.execution_source, 'internal') = 'internal'
           and (
             (cj.driver_id is null and nullif(cj.assignment_snapshot->>'driver', '') is null)
             or (cj.vehicle_id is null and nullif(cj.assignment_snapshot->>'plateNumber', '') is null)
@@ -1825,6 +1835,7 @@ export async function getInputMonitoringReport(options = {}) {
         join sales_orders so on so.id = cj.sales_order_id
         where ${activeOrderSql}
           and ${activeJobSql}
+          and coalesce(cj.execution_source, 'internal') = 'internal'
           and coalesce(cj.rpuj_status, 'pending') in ('pending', 'submitted', 'rejected')
         order by coalesce(cj.running_at::date, so.trip_date, cj.created_at::date) asc, cj.created_at asc
         limit $1

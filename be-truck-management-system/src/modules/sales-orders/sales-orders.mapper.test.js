@@ -1,6 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapContainerJob, mapSalesOrder, toSalesOrderDb } from './sales-orders.mapper.js';
+import {
+  mapContainerJob, mapSalesOrder, toContainerJobDb, toSalesOrderDb,
+} from './sales-orders.mapper.js';
+
+test('container job baru default internal dan dapat ditandai vendor', () => {
+  const order = { id: 'order-source', destination: 'Cikarang' };
+  const internalJob = toContainerJobDb({ size: '20FT' }, order);
+  const vendorJob = toContainerJobDb({ size: '20FT', executionSource: 'vendor' }, order);
+
+  assert.equal(internalJob.execution_source, 'internal');
+  assert.equal(vendorJob.execution_source, 'vendor');
+});
+
+test('container job vendor di detail sales order memakai label vendor', () => {
+  const mapped = mapContainerJob({
+    id: 'job-vendor-detail',
+    sales_order_id: 'order-vendor-detail',
+    execution_source: 'vendor',
+    assignment_snapshot: {},
+    status: 'received',
+  });
+
+  assert.equal(mapped.executionSource, 'vendor');
+  assert.equal(mapped.driver, 'VENDOR');
+  assert.equal(mapped.plateNumber, 'VENDOR');
+});
 
 test('sales order mapper membaca metadata workflow dokumen invoice', () => {
   const mapped = mapSalesOrder({
