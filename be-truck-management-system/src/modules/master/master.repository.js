@@ -239,42 +239,6 @@ export async function updateVehicleDefaultDriver(vehicleId, driverId) {
 // lama) dan Assignment Armada (chassisIdentifier berupa uuid kir_chassis.id) -- satu fungsi supaya
 // validasi eligibility, exclusivity (lepas dari truck lain), dan sinkronisasi kir_chassis_number
 // lama cuma ada di SATU tempat, tidak dobel logic di dua modul.
-async function recordChassisHistory(client, {
-  vehicleId,
-  source,
-  previousChassisId = null,
-  previousChassisCode = null,
-  nextChassisId = null,
-  nextChassisCode = null,
-  reason = null,
-  note = null,
-  actorName = null,
-  actorRole = null,
-}) {
-  if ((previousChassisId || null) === (nextChassisId || null)) return;
-  await client.query(
-    `
-      insert into vehicle_assignment_history (
-        vehicle_id, change_type, source,
-        previous_chassis_id, previous_chassis_code, next_chassis_id, next_chassis_code,
-        reason, note, changed_by_name, changed_by_role
-      ) values ($1, 'chassis', $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    `,
-    [
-      vehicleId,
-      source || 'master_truck',
-      previousChassisId || null,
-      previousChassisCode || null,
-      nextChassisId || null,
-      nextChassisCode || null,
-      reason || null,
-      note || null,
-      actorName || null,
-      actorRole || null,
-    ],
-  );
-}
-
 export async function updateVehicleChassis(vehicleId, chassisIdentifier, context = {}, transactionClient = null) {
   const { source = 'fleet_assignment', reason = null, note = null, actorName = null, actorRole = null } = context;
   const update = async (client) => {

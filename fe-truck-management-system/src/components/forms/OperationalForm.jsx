@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Building2, Plus, ShieldCheck, Trash2, Truck, X } from 'lucide-react';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { hasPermission } from '../../constants/roles';
 import AssignmentHistorySection from './AssignmentHistorySection';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import DateTimeWibInput from '../common/DateTimeWibInput';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
+import WarehouseLocationCard from '../operations/WarehouseLocationCard';
 import { calculateUjRecommendation } from '../../utils/ujRecommendation';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
@@ -474,7 +475,15 @@ function createSpkPdfBlob(documentData, logoImage = null) {
   return buildPdfFile(commands.join('\n'), logoImage);
 }
 
-function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTruckDefaultDriver, masterTrucks, masterDrivers, masterDestinations, activeJobs = [], currentUser, initialPhase = 'preparation' }) {
+export function shouldPersistRecommendedDriverCommission({
+  useRecommendation,
+  hasDriverCommission,
+  status,
+}) {
+  return Boolean(useRecommendation && hasDriverCommission && ['running', 'completed'].includes(status));
+}
+
+function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTruckDefaultDriver, masterTrucks, masterDrivers, masterDestinations, masterLocations = [], activeJobs = [], currentUser, initialPhase = 'preparation' }) {
   const apiDataMode = isApiDataSource();
   const [fallbackTruckRows] = useState(() => getMasterData('tms-master-trucks-v2', fallbackTruckUnits));
   const [fallbackDriverRows] = useState(() => getMasterData('tms-master-drivers-v2', fallbackDrivers));
@@ -505,14 +514,22 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const commissionDataLoaded = Object.prototype.hasOwnProperty.call(container, 'hasDriverCommission')
     && Object.prototype.hasOwnProperty.call(container, 'driverCommissionAmount');
   const existingHasDriverCommission = container.hasDriverCommission === true;
+  const shouldUseRecommendedCommission = container.status === 'received'
+    && !existingHasDriverCommission
+    && Number(container.driverCommissionAmount || 0) <= 0
+    && defaultDriverCommissionAmount > 0;
   const existingDriverCommissionAmount = Number(container.driverCommissionAmount || 0);
   const [form, setForm] = useState({
     executionSource: container.executionSource === 'vendor' ? 'vendor' : 'internal',
     containerNumber: container.containerNumber || '',
     rpujStatus: container.rpujStatus || 'pending',
     rpujNotes: container.rpujNotes || '',
-    hasDriverCommission: existingHasDriverCommission,
-    driverCommissionAmount: String(existingHasDriverCommission ? existingDriverCommissionAmount || defaultDriverCommissionAmount : 0),
+    hasDriverCommission: existingHasDriverCommission || shouldUseRecommendedCommission,
+    driverCommissionAmount: String(
+      existingHasDriverCommission
+        ? existingDriverCommissionAmount || defaultDriverCommissionAmount
+        : shouldUseRecommendedCommission ? defaultDriverCommissionAmount : 0,
+    ),
     driverCommissionSourceDestinationId: container.driverCommissionSourceDestinationId || ujRecommendation.destinationId || '',
     driverCommissionNote: container.driverCommissionNote || '',
     spkNumber: container.spkNumber || '',
@@ -536,14 +553,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     travelDocument: container.travelDocument || '',
     travelDocumentFile: container.travelDocumentFile || null,
     otherDocuments: container.otherDocuments || [],
-    status: container.status || 'received',
+    status: container.status === 'inap' ? 'running' : container.status || 'received',
     runningAt: toDateTimeInputValue(container.runningAt),
     completedAt: toDateTimeInputValue(container.completedAt),
     adminCorrectionMode: false,
     adminCorrectionReason: '',
+    commissionDriverAction: '',
   });
-  const isSalesRole = String(currentUser?.role || '').trim().toLowerCase() === 'sales';
-  const canUpdateOperational = !isSalesRole && (!currentUser || hasPermission(currentUser, 'operations.update'));
+  const canUpdateOperational = !currentUser || hasPermission(currentUser, 'operations.update');
   const canUpdateDocuments = hasPermission(currentUser, 'documents.operational.update') || canUpdateOperational;
   const isDocumentOnlyMode = canUpdateDocuments && !canUpdateOperational;
   const [activePhase, setActivePhase] = useState(() => (isDocumentOnlyMode ? 'closing' : initialPhase));
@@ -583,6 +600,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const hadCompleteAssignmentBefore = Boolean(originalAssignedDriver && originalAssignedPlate);
   const assignmentIdentityChanged = String(form.driver || '').trim() !== originalAssignedDriver
     || String(form.plateNumber || '').trim() !== originalAssignedPlate;
+  const driverIdentityChanged = normalizeName(form.driver) !== normalizeName(originalAssignedDriver);
+  const completedCommissionDriverCorrection = canReviseLockedFields
+    && container.status === 'completed'
+    && existingHasDriverCommission
+    && driverIdentityChanged;
+  const commissionBatchStatus = container.commissionBatchStatus || 'unsubmitted';
+  const commissionMoveLocked = ['approved', 'paid'].includes(commissionBatchStatus);
+  const previousCommissionDriverName = container.commissionDriverName || originalAssignedDriver || '-';
   const assignmentChangeReasonRequired = !canReviseLockedFields
     && hadCompleteAssignmentBefore
     && assignmentIdentityChanged
@@ -613,7 +638,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     if (isDocumentOnlyMode) return option.value === form.status;
     if (canReviseLockedFields) return true;
     if (container.status === 'completed') return option.value === 'completed';
-    if (container.status === 'running') return option.value !== 'received';
+    if (['running', 'inap'].includes(container.status)) return option.value !== 'received';
     return true;
   });
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah truck dan driver lengkap.';
@@ -735,6 +760,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       ...current,
       adminCorrectionMode: checked,
       adminCorrectionReason: checked ? current.adminCorrectionReason : '',
+      commissionDriverAction: checked ? current.commissionDriverAction : '',
     }));
   }
 
@@ -842,6 +868,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       ...current,
       driver: driverName,
       driverId: selectedDriver?.id || '',
+      commissionDriverAction: '',
       ...driverPayment,
     }));
   }
@@ -1202,13 +1229,32 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       runningAt: dateTimeInputToIso(form.runningAt),
       completedAt: dateTimeInputToIso(form.completedAt),
     };
-    if (driverCommissionEditedRef.current) {
+    if (isVendorExecution) {
+      submitForm.driver = '';
+      submitForm.driverId = null;
+      submitForm.plateNumber = '';
+      submitForm.vehicleId = null;
+      submitForm.chassis = '';
+      submitForm.rpujStatus = 'pending';
+      delete submitForm.hasDriverCommission;
+      delete submitForm.driverCommissionAmount;
+      delete submitForm.driverCommissionSourceDestinationId;
+      delete submitForm.driverCommissionNote;
+      delete submitForm.driverCommissionEdited;
+    }
+    const shouldPersistRecommendedCommission = shouldPersistRecommendedDriverCommission({
+      useRecommendation: shouldUseRecommendedCommission,
+      hasDriverCommission,
+      status: form.status,
+    });
+    if (!isVendorExecution && (driverCommissionEditedRef.current || shouldPersistRecommendedCommission)) {
       submitForm.driverCommissionEdited = true;
     } else {
       delete submitForm.hasDriverCommission;
       delete submitForm.driverCommissionAmount;
       delete submitForm.driverCommissionSourceDestinationId;
       delete submitForm.driverCommissionNote;
+      delete submitForm.driverCommissionEdited;
     }
     delete submitForm.rpujNotes;
     if (canReviseLockedFields) {
@@ -1218,9 +1264,21 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       }
       submitForm.adminCorrectionMode = true;
       submitForm.adminCorrectionReason = correctionReason;
+      if (completedCommissionDriverCorrection) {
+        if (!['move', 'keep'].includes(form.commissionDriverAction)) {
+          return { error: 'Pilih apakah komisi dipindahkan ke sopir baru atau tetap pada sopir sebelumnya.' };
+        }
+        if (form.commissionDriverAction === 'move' && commissionMoveLocked) {
+          return { error: `Komisi tidak dapat dipindahkan karena batch sudah ${commissionBatchStatus}.` };
+        }
+        submitForm.commissionDriverAction = form.commissionDriverAction;
+      } else {
+        delete submitForm.commissionDriverAction;
+      }
     } else {
       delete submitForm.adminCorrectionMode;
       delete submitForm.adminCorrectionReason;
+      delete submitForm.commissionDriverAction;
     }
     return { submitForm, hasRpujRequest, driverCommissionAmount };
   }
@@ -1374,7 +1432,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           {error ? <div className="alert error operational-form-error">{error}</div> : null}
           {isRepoPickupMode ? (
             <div className="alert operational-form-repo-pickup">
-              Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.
+              {isRepoComboPickupMode
+                ? `Combo pickup ${container.repoComboContainers?.join(' + ') || '2 container 20FT'} dari depo penitipan. Gunakan truck/chassis 40FT; UJ dicatat satu kali untuk perjalanan combo.`
+                : 'Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.'}
             </div>
           ) : null}
           {canAccessAdminCorrection ? (
@@ -1407,30 +1467,35 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           ) : null}
 
           {!isDocumentOnlyMode ? (
-            <section className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3" aria-labelledby="execution-source-label">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 id="execution-source-label" className="text-sm font-bold text-slate-900">Pelaksanaan ritasi</h3>
-                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Pilih sumber unit untuk container ini.</p>
+            <section className={`execution-source-selector ${isVendorExecution ? 'is-vendor' : 'is-internal'}`} aria-labelledby="execution-source-label">
+              <div className="execution-source-heading">
+                <div className="execution-source-icon" aria-hidden="true">
+                  {isVendorExecution ? <Building2 size={18} /> : <Truck size={18} />}
                 </div>
-                <div className="inline-grid grid-cols-2 rounded-md border border-slate-300 bg-white p-1" role="group" aria-label="Pelaksanaan ritasi">
+                <div>
+                  <h3 id="execution-source-label">Pelaksanaan Ritasi</h3>
+                  <p>{isVendorExecution ? 'Vendor dipilih untuk ritasi ini. Proses internal tidak dibuat.' : 'Gunakan unit dan sopir internal untuk ritasi ini.'}</p>
+                </div>
+              </div>
+              <div className="execution-source-segmented" role="group" aria-label="Pelaksanaan ritasi">
                   <button
-                    className={`min-w-28 rounded px-3 py-2 text-xs font-bold ${!isVendorExecution ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`execution-source-option ${!isVendorExecution ? 'is-active' : ''}`}
                     type="button"
                     aria-pressed={!isVendorExecution}
                     onClick={() => updateExecutionSource('internal')}
                   >
+                    <Truck size={15} />
                     Unit Sendiri
                   </button>
                   <button
-                    className={`min-w-28 rounded px-3 py-2 text-xs font-bold ${isVendorExecution ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                    className={`execution-source-option ${isVendorExecution ? 'is-active' : ''}`}
                     type="button"
                     aria-pressed={isVendorExecution}
                     onClick={() => updateExecutionSource('vendor')}
                   >
+                    <Building2 size={15} />
                     Vendor
                   </button>
-                </div>
               </div>
             </section>
           ) : null}
@@ -1452,6 +1517,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <span>Sopir</span>
               <strong>{isVendorExecution ? 'VENDOR' : form.driver || '-'}</strong>
             </div>
+          </div>
+
+          <div className="mb-4">
+            <WarehouseLocationCard container={container} masterLocations={masterLocations} masterDestinations={masterDestinations} />
           </div>
 
           {!isDocumentOnlyMode ? (
@@ -1476,17 +1545,29 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           <div className="operational-form-content">
           {activePhase === 'preparation' ? (
           <>
-          <div className="form-section">
+          <div className={`form-section ${isVendorExecution ? 'vendor-preparation-section' : ''}`}>
             <h3>{isVendorExecution ? 'Ritasi Vendor' : 'Assignment Aktual'}</h3>
             <p className="mb-2 text-[11px] font-medium text-slate-500">
               {isVendorExecution ? 'Cukup isi nomor container. Truck dan sopir dicatat sebagai VENDOR.' : 'Perubahan ini hanya berlaku untuk ritasi ini dan tidak mengubah master.'}
             </p>
             {isVendorExecution ? (
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,.7fr)]">
-                <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
-                <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3" aria-label="Assignment vendor">
-                  <div><span className="block text-[10px] font-bold uppercase text-slate-500">Truck</span><strong className="mt-1 block text-sm text-slate-900">VENDOR</strong></div>
-                  <div><span className="block text-[10px] font-bold uppercase text-slate-500">Sopir</span><strong className="mt-1 block text-sm text-slate-900">VENDOR</strong></div>
+              <div className="vendor-assignment-panel">
+                <label className="vendor-container-field">
+                  <span>No. Container</span>
+                  <input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="Contoh: TCLU1234567" />
+                  <small>Wajib diisi sebelum ritasi vendor disimpan.</small>
+                </label>
+                <div className="vendor-assignment-summary" aria-label="Assignment vendor">
+                  <div>
+                    <span>Truck</span>
+                    <strong>VENDOR</strong>
+                    <small>Tidak memakai unit internal</small>
+                  </div>
+                  <div>
+                    <span>Sopir</span>
+                    <strong>VENDOR</strong>
+                    <small>Tidak memakai sopir internal</small>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1509,6 +1590,50 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <label>Catatan<textarea name="assignmentChangeNote" value={form.assignmentChangeNote} onChange={updateField} disabled={!canEditAssignment} placeholder="Catatan tambahan (opsional)" rows={2} /></label>
             </div>
             )}
+            {!isVendorExecution && completedCommissionDriverCorrection ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <strong className="block text-sm text-amber-950">Dampak Komisi Sopir</strong>
+                    <p className="mt-0.5 text-xs text-amber-800">
+                      {previousCommissionDriverName} ke {form.driver || '-'} | {formatCurrency(existingDriverCommissionAmount)}
+                    </p>
+                  </div>
+                  <span className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[11px] font-bold uppercase text-amber-800">
+                    {commissionBatchStatus === 'submitted' ? 'Menunggu Finance' : commissionBatchStatus === 'unsubmitted' ? 'Belum Diajukan' : commissionBatchStatus}
+                  </span>
+                </div>
+                {commissionBatchStatus === 'submitted' ? (
+                  <p className="mt-2 text-xs font-semibold text-amber-800">Jika komisi dipindahkan, batch akan ditandai berubah dan wajib diperiksa ulang oleh Finance.</p>
+                ) : null}
+                {commissionMoveLocked ? (
+                  <p className="mt-2 text-xs font-semibold text-rose-700">Batch sudah dikunci. Assignment dapat dikoreksi, tetapi komisi harus tetap pada sopir sebelumnya.</p>
+                ) : null}
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-200 bg-white p-3 text-xs">
+                    <input
+                      type="radio"
+                      name="commissionDriverAction"
+                      value="move"
+                      checked={form.commissionDriverAction === 'move'}
+                      disabled={commissionMoveLocked}
+                      onChange={updateField}
+                    />
+                    <span><strong className="block text-slate-900">Pindahkan assignment dan komisi</strong><span className="text-slate-600">Komisi menjadi milik {form.driver || 'sopir baru'}.</span></span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-200 bg-white p-3 text-xs">
+                    <input
+                      type="radio"
+                      name="commissionDriverAction"
+                      value="keep"
+                      checked={form.commissionDriverAction === 'keep'}
+                      onChange={updateField}
+                    />
+                    <span><strong className="block text-slate-900">Ubah assignment saja</strong><span className="text-slate-600">Komisi tetap untuk {previousCommissionDriverName}.</span></span>
+                  </label>
+                </div>
+              </div>
+            ) : null}
             {!isVendorExecution && selectedTruckForDefault ? (
               <p className="mt-2 text-[11px] font-medium text-slate-500">Default sopir truck saat ini: {getDriverDisplayName(selectedTruckForDefault.defaultDriver) || 'belum diset'}</p>
             ) : null}

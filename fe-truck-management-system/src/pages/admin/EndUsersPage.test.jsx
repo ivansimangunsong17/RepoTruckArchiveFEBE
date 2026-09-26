@@ -83,4 +83,94 @@ describe('EndUsersPage', () => {
       null,
     ));
   });
+
+  it('menampilkan kolom Tujuan dan ikon Maps aktif saat lokasi sudah terhubung (Phase 2)', async () => {
+    fetchMasterPage.mockResolvedValue({
+      rows: [{
+        id: 'end-user-1',
+        name: 'Gudang Bekasi Plant',
+        address: 'Jl. Industri No. 1, Bekasi',
+        status: 'Aktif',
+        destinationId: 'destination-1',
+        googleMapsUrl: 'https://maps.google.com/?q=-6.2,106.8',
+        latitude: null,
+        longitude: null,
+      }],
+      total: 1,
+    });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: {
+        'end-users': [],
+        destinations: [{ id: 'destination-1', name: 'Cikarang', status: 'Aktif' }],
+      },
+      upsertMaster,
+      removeMaster,
+    });
+
+    render(<EndUsersPage />);
+
+    const destinationCells = await screen.findAllByText('Cikarang');
+    expect(destinationCells.length).toBeGreaterThan(0);
+    const mapsButtons = screen.getAllByRole('button', { name: 'Buka lokasi di Google Maps' });
+    expect(mapsButtons[0]).toBeEnabled();
+  });
+
+  it('ikon Maps fallback ke pencarian alamat saat link dan koordinat kosong', async () => {
+    fetchMasterPage.mockResolvedValue({
+      rows: [{
+        id: 'end-user-1',
+        name: 'Gudang Bekasi Plant',
+        address: 'Jl. Industri No. 1, Bekasi',
+        status: 'Aktif',
+        destinationId: null,
+        googleMapsUrl: '',
+        latitude: null,
+        longitude: null,
+      }],
+      total: 1,
+    });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { 'end-users': [], destinations: [] },
+      upsertMaster,
+      removeMaster,
+    });
+
+    render(<EndUsersPage />);
+
+    const nameCells = await screen.findAllByText('Gudang Bekasi Plant');
+    expect(nameCells.length).toBeGreaterThan(0);
+    const mapsButtons = screen.getAllByRole('button', { name: 'Buka lokasi di Google Maps' });
+    expect(mapsButtons[0]).toBeEnabled();
+  });
+
+  it('menonaktifkan ikon Maps saat link, koordinat, dan alamat semuanya kosong', async () => {
+    fetchMasterPage.mockResolvedValue({
+      rows: [{
+        id: 'end-user-1',
+        name: 'Gudang Tanpa Alamat',
+        address: '',
+        status: 'Aktif',
+        destinationId: null,
+        googleMapsUrl: '',
+        latitude: null,
+        longitude: null,
+      }],
+      total: 1,
+    });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      masters: { 'end-users': [], destinations: [] },
+      upsertMaster,
+      removeMaster,
+    });
+
+    render(<EndUsersPage />);
+
+    const nameCells = await screen.findAllByText('Gudang Tanpa Alamat');
+    expect(nameCells.length).toBeGreaterThan(0);
+    const disabledMapsButtons = screen.getAllByTitle('Belum ada link Maps atau koordinat');
+    expect(disabledMapsButtons[0]).toBeDisabled();
+  });
 });

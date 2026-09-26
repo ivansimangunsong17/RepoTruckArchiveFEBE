@@ -1,3 +1,4 @@
+import { withTransaction } from '../../db/client.js';
 import {
   archiveMasterRow,
   clearVehicleDefaultDriverByNames,
@@ -11,7 +12,6 @@ import {
   upsertMasterRow,
   upsertMasterViewerNote,
 } from './master.repository.js';
-import { withTransaction } from '../../db/client.js';
 
 const TRUCK_DEFAULT_DRIVER_REASON_MIN_LENGTH = 8;
 
@@ -34,6 +34,21 @@ export function listMasterRowsPage(resource, query) {
     query: query.query || '',
     filters: parseFilters(query),
   });
+}
+
+export function sanitizeMasterResultForActor(resource, result, actor = {}) {
+  if (resource !== 'end-users' || String(actor.role || '').toLowerCase() !== 'sales') return result;
+  const sanitizeRow = (row = {}) => {
+    const sanitized = { ...row };
+    delete sanitized.address;
+    delete sanitized.googleMapsUrl;
+    delete sanitized.latitude;
+    delete sanitized.longitude;
+    return sanitized;
+  };
+  if (Array.isArray(result)) return result.map(sanitizeRow);
+  if (Array.isArray(result?.data)) return { ...result, data: result.data.map(sanitizeRow) };
+  return sanitizeRow(result);
 }
 
 export async function getMasterRow(resource, id) {
@@ -135,7 +150,7 @@ async function saveTruckRow(payload, id, actor = {}) {
   });
 }
 
-export async function saveMasterRow(resource, payload, id, context = {}) {
+export async function saveMasterRow(resource, payload, id, actor = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload master data harus berupa object.');
     error.statusCode = 400;
@@ -145,7 +160,7 @@ export async function saveMasterRow(resource, payload, id, context = {}) {
   const currentDriver = resource === 'drivers' && id ? await findMasterRowById(resource, id) : null;
   const normalizedPayload = await normalizePayloadForResource(resource, payload);
   const saved = resource === 'trucks'
-    ? await saveTruckRow(normalizedPayload, id, context)
+    ? await saveTruckRow(normalizedPayload, id, actor)
     : await upsertMasterRow(resource, normalizedPayload, id);
 
   if (resource === 'drivers' && shouldDetachDriverFromUnit(saved.status)) {

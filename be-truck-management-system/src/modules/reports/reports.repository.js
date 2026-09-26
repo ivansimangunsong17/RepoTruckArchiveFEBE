@@ -1,14 +1,10 @@
 import { query } from '../../db/client.js';
 import { getCustomerOutstandingRollupPage } from '../finance/finance.repository.js';
+import { utilizationChassisJoinsSql, utilizationChassisSizeSql, utilizationChassisSourceSql } from './utilization-chassis.sql.js';
 import {
   getTransportLineItemForSize,
   splitFinancialLineItems,
 } from './revenue-line-items.js';
-import {
-  utilizationChassisJoinsSql,
-  utilizationChassisSizeSql,
-  utilizationChassisSourceSql,
-} from './utilization-chassis.sql.js';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 

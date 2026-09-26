@@ -213,6 +213,150 @@
 .operational-mobile-job-summary {
   display: none;
 }
+.execution-source-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbe3ee;
+  border-left: 4px solid #334155;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.execution-source-selector.is-vendor {
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+  background: #fffafa;
+}
+.execution-source-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.execution-source-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 7px;
+  color: #334155;
+  background: #e2e8f0;
+}
+.is-vendor .execution-source-icon {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+.execution-source-heading h3 {
+  margin: 0;
+  color: #172033;
+  font-size: .78rem;
+  font-weight: 800;
+}
+.execution-source-heading p {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: .68rem;
+  font-weight: 600;
+}
+.execution-source-segmented {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(2, minmax(112px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #ffffff;
+}
+.execution-source-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  color: #475569;
+  background: transparent;
+  font-size: .69rem;
+  font-weight: 800;
+}
+.execution-source-option:hover { background: #f1f5f9; }
+.execution-source-option.is-active { color: #ffffff; background: #172033; box-shadow: 0 1px 2px #0f172a33; }
+.execution-source-selector.is-vendor .execution-source-option:last-child.is-active { background: #c81e1e; }
+.vendor-preparation-section {
+  border-color: #fecaca;
+  background: #fffdfd;
+}
+.vendor-assignment-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(360px, 1.1fr);
+  gap: 16px;
+  align-items: stretch;
+  padding: 14px;
+  border: 1px solid #fee2e2;
+  border-radius: 7px;
+  background: #fffafa;
+}
+.vendor-container-field { display: block; margin: 0; }
+.vendor-container-field > span,
+.vendor-assignment-summary span {
+  display: block;
+  color: #64748b;
+  font-size: .61rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.vendor-container-field input {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 6px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  color: #172033;
+  background: #ffffff;
+  font-size: .86rem;
+  font-weight: 750;
+}
+.vendor-container-field input:focus { border-color: #dc2626; outline: 2px solid #fee2e2; outline-offset: 1px; }
+.vendor-container-field small {
+  display: block;
+  margin-top: 6px;
+  color: #9f1239;
+  font-size: .62rem;
+  font-weight: 650;
+}
+.vendor-assignment-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+}
+.vendor-assignment-summary > div { padding: 11px 13px; }
+.vendor-assignment-summary > div + div { border-left: 1px solid #e2e8f0; }
+.vendor-assignment-summary strong {
+  display: block;
+  margin-top: 5px;
+  color: #b91c1c;
+  font-size: .82rem;
+  font-weight: 850;
+}
+.vendor-assignment-summary small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: .6rem;
+  font-weight: 600;
+}
 .operational-closing-phase {
   display: contents;
 }
@@ -4163,6 +4307,15 @@
   color: #1d4ed8;
 }
 
+.operational-container-row.is-vendor-execution {
+  border-left: 3px solid #0f766e;
+  background: #f0fdfa;
+}
+
+.operational-container-row.is-vendor-execution .container-row-main strong {
+  color: #115e59;
+}
+
 .container-row-main,
 .container-rpuj-status,
 .container-row-assignment,
@@ -4230,6 +4383,22 @@
 .repo-combo-toolbar span {
   color: #64748b;
   font-size: .75rem;
+}
+
+.container-vendor-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 19px;
+  padding: 0 7px;
+  border: 1px solid #99f6e4;
+  border-radius: 999px;
+  color: #0f766e;
+  background: #ccfbf1;
+  font-size: .52rem;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .container-sequence {

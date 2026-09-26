@@ -15,6 +15,19 @@ test('container job lama tanpa execution source dianggap internal', () => {
   assert.equal(mapped.plateNumber, 'B 1234 XYZ');
 });
 
+test('container job memakai nomor SO Finance saat nomor SO internal kosong', () => {
+  const mapped = mapContainerJob({
+    id: 'job-finance-so',
+    sales_order_id: 'order-finance-so',
+    so_number: null,
+    accurate_so_number: '2609/26-00001',
+    status: 'received',
+  });
+
+  assert.equal(mapped.soNumber, '2609/26-00001');
+  assert.equal(mapped.accurateSoNumber, '2609/26-00001');
+});
+
 test('container job vendor menampilkan label vendor tanpa assignment internal', () => {
   const mapped = mapContainerJob({
     id: 'job-vendor',
@@ -32,6 +45,60 @@ test('container job vendor menampilkan label vendor tanpa assignment internal', 
   assert.equal(mapped.driver, 'VENDOR');
   assert.equal(mapped.plateNumber, 'VENDOR');
   assert.equal(mapped.unitCode, 'VENDOR');
+});
+
+test('container job mapper membawa ringkasan pickup movement tanpa menggabungkan dokumen', () => {
+  const mapped = mapContainerJob({
+    id: 'job-combo-1',
+    sales_order_id: 'order-combo',
+    status: 'running',
+    pickup_movement_id: 'movement-1',
+    pickup_type: 'combo_2x20',
+    pickup_sequence_no: 2,
+    pickup_item_count: 2,
+    pickup_container_numbers: ['MSDU1111111', 'MSDU2222222'],
+  }, [
+    {
+      entity_id: 'job-combo-1',
+      category: 'travelDocument',
+      file_name: 'surat-jalan-job-1.pdf',
+      storage_path: '/docs/surat-jalan-job-1.pdf',
+    },
+  ]);
+
+  assert.deepEqual(mapped.pickupMovement, {
+    id: 'movement-1',
+    type: 'combo_2x20',
+    sequenceNo: 2,
+    itemCount: 2,
+    containerNumbers: ['MSDU1111111', 'MSDU2222222'],
+  });
+  assert.equal(mapped.travelDocumentFile.name, 'surat-jalan-job-1.pdf');
+  assert.equal(mapped.loadingVoucherDocument, null);
+});
+
+test('assignment snapshot menyimpan chassis saat unit internal dipilih', async () => {
+  const { toAssignmentSnapshot } = await import('./container-jobs.mapper.js');
+  const snapshot = toAssignmentSnapshot(
+    {},
+    { name: 'Budi' },
+    {
+      unit_code: 'TRK-001',
+      plate_number: 'B 9103 BEL',
+      chassis_id: 'chassis-20',
+      chassis_code: 'CH-20-001',
+      chassis_size: '20FT',
+    },
+  );
+
+  assert.deepEqual(
+    {
+      chassisId: snapshot.chassisId,
+      chassisCode: snapshot.chassisCode,
+      chassisSize: snapshot.chassisSize,
+    },
+    { chassisId: 'chassis-20', chassisCode: 'CH-20-001', chassisSize: '20FT' },
+  );
 });
 
 test('container job mapper membaca snapshot komisi sopir', () => {
@@ -61,6 +128,50 @@ test('container job mapper membaca snapshot komisi sopir', () => {
   assert.equal(mapped.driverCommissionAmount, 50000);
   assert.equal(mapped.driverCommissionSourceDestinationId, 'destination-1');
   assert.equal(mapped.driverCommissionNote, 'Komisi sesuai master tujuan');
+});
+
+test('container job mapper membaca snapshot lokasi gudang untuk tampilan OPS (Phase 7)', () => {
+  const mappedWithLocation = mapContainerJob({
+    id: 'job-1',
+    sales_order_id: 'order-1',
+    so_number: 'SO-ARM-202608-0001',
+    customer_name: 'PT Contoh',
+    shipment_type: 'import',
+    job_type: 'dry',
+    origin: 'Tanjung Priok',
+    destination: 'Cikarang',
+    trip_date: '2026-08-14',
+    status: 'received',
+    warehouse_location_id: 'location-1',
+    warehouse_location_name_snapshot: 'Gudang Cikarang',
+    warehouse_location_address_snapshot: 'Jl. Industri No. 1, Cikarang',
+    destination_id: 'destination-1',
+  });
+
+  assert.equal(mappedWithLocation.warehouseLocationId, 'location-1');
+  assert.equal(mappedWithLocation.warehouseLocationNameSnapshot, 'Gudang Cikarang');
+  assert.equal(mappedWithLocation.warehouseLocationAddressSnapshot, 'Jl. Industri No. 1, Cikarang');
+  assert.equal(mappedWithLocation.destinationId, 'destination-1');
+
+  // Job lama/tanpa lokasi -- OPS tetap harus bisa memprosesnya, mapper tidak boleh melempar error
+  // dan cukup mengembalikan nilai kosong yang bisa dideteksi FE sebagai "Lokasi belum dipilih".
+  const mappedWithoutLocation = mapContainerJob({
+    id: 'job-2',
+    sales_order_id: 'order-2',
+    so_number: 'SO-ARM-202608-0002',
+    customer_name: 'PT Contoh',
+    shipment_type: 'import',
+    job_type: 'dry',
+    origin: 'Tanjung Priok',
+    destination: 'Cikarang',
+    trip_date: '2026-08-14',
+    status: 'received',
+  });
+
+  assert.equal(mappedWithoutLocation.warehouseLocationId, null);
+  assert.equal(mappedWithoutLocation.warehouseLocationNameSnapshot, '');
+  assert.equal(mappedWithoutLocation.warehouseLocationAddressSnapshot, '');
+  assert.equal(mappedWithoutLocation.destinationId, null);
 });
 
 test('container job mapper membaca lampiran biaya lainnya terpisah dari SPK', () => {

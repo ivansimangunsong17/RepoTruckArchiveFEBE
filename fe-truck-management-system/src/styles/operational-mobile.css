@@ -487,6 +487,12 @@
     background: #f8fbff;
   }
 
+  .operations-page .operational-container-row.is-vendor-execution {
+    border-color: #99f6e4 !important;
+    border-left-color: #0f766e !important;
+    background: #f0fdfa !important;
+  }
+
   .operations-page .container-row-main {
     gap: 2px;
     padding-bottom: 0;
@@ -777,6 +783,30 @@
     margin: 8px 10px 0 !important;
     padding: 8px !important;
     border-radius: 9px !important;
+  }
+
+  .operational-update-form .execution-source-selector {
+    display: grid;
+    gap: 10px;
+    margin: 8px 10px 10px;
+    padding: 11px;
+  }
+
+  .operational-update-form .execution-source-segmented {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operational-update-form .execution-source-option {
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: .63rem;
+  }
+
+  .operational-update-form .vendor-assignment-panel {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 10px;
   }
 
   .operational-update-form .operational-mobile-job-summary div {

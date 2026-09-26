@@ -27,10 +27,67 @@ const joinedJobColumns = `
   cj.driver_commission_source_destination_id, cj.driver_commission_note,
   cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
   cj.commission_locked_amount, cj.commission_locked_at, cj.commission_status,
+  (select dci.batch_id from driver_commission_items dci where dci.container_job_id = cj.id and dci.voided_at is null limit 1) as commission_batch_id,
+  (select dcb.status from driver_commission_items dci join driver_commission_batches dcb on dcb.id = dci.batch_id where dci.container_job_id = cj.id and dci.voided_at is null limit 1) as commission_batch_status,
+  (
+    select cpm.id
+    from container_pickup_items cpi
+    join container_pickup_movements cpm on cpm.id = cpi.movement_id
+    where cpi.container_job_id = cj.id
+      and cpm.status <> 'cancelled'
+    order by cpm.created_at desc
+    limit 1
+  ) as pickup_movement_id,
+  (
+    select cpm.pickup_type
+    from container_pickup_items cpi
+    join container_pickup_movements cpm on cpm.id = cpi.movement_id
+    where cpi.container_job_id = cj.id
+      and cpm.status <> 'cancelled'
+    order by cpm.created_at desc
+    limit 1
+  ) as pickup_type,
+  (
+    select cpi.sequence_no
+    from container_pickup_items cpi
+    join container_pickup_movements cpm on cpm.id = cpi.movement_id
+    where cpi.container_job_id = cj.id
+      and cpm.status <> 'cancelled'
+    order by cpm.created_at desc
+    limit 1
+  ) as pickup_sequence_no,
+  (
+    select count(*)::int
+    from container_pickup_items cpi
+    join container_pickup_movements cpm on cpm.id = cpi.movement_id
+    where cpm.id = (
+      select inner_cpm.id
+      from container_pickup_items inner_cpi
+      join container_pickup_movements inner_cpm on inner_cpm.id = inner_cpi.movement_id
+      where inner_cpi.container_job_id = cj.id
+        and inner_cpm.status <> 'cancelled'
+      order by inner_cpm.created_at desc
+      limit 1
+    )
+  ) as pickup_item_count,
+  (
+    select array_remove(array_agg(nullif(coalesce(sibling.container_number, ''), '') order by sibling_item.sequence_no), null)
+    from container_pickup_items current_item
+    join container_pickup_movements cpm on cpm.id = current_item.movement_id
+    join container_pickup_items sibling_item on sibling_item.movement_id = cpm.id
+    join container_jobs sibling on sibling.id = sibling_item.container_job_id
+    where current_item.container_job_id = cj.id
+      and cpm.status <> 'cancelled'
+    group by cpm.id, cpm.created_at
+    order by cpm.created_at desc
+    limit 1
+  ) as pickup_container_numbers,
   so.so_number, so.accurate_so_number, so.do_number, so.customer_name, so.shipment_type, so.job_type,
   so.finance_verification_status,
   to_jsonb(so)->>'vessel_name' as vessel_name,
   so.terminal, so.service_name, so.origin, cj.destination, so.trip_date,
+  cj.warehouse_location_id, cj.warehouse_location_name_snapshot, cj.warehouse_location_address_snapshot,
+  cj.destination_id,
   so.created_by_name as order_created_by_name,
   (
     select count(*)::int
@@ -374,7 +431,9 @@ function buildJobWhere({
     )`);
   }
 
-  if (status) {
+  if (status === 'active_journey') {
+    clauses.push("cj.status in ('running', 'inap')");
+  } else if (status) {
     params.push(status);
     clauses.push(`cj.status = $${params.length}`);
   }
@@ -702,6 +761,233 @@ function buildCommissionDriverSnapshot(assignment = {}) {
   };
 }
 
+function commissionCorrectionError(message, code, details = undefined) {
+  const error = validationError(message, code, 409);
+  if (details) error.details = details;
+  return error;
+}
+
+export async function resolveCompletedCommissionDriverCorrection(client, {
+  job,
+  action,
+  driverId,
+  assignment,
+  actorName,
+  reason,
+} = {}) {
+  const previousAssignment = job.assignment_snapshot || {};
+  const previousDriverId = job.commission_driver_id || job.driver_id || null;
+  const previousDriverName = normalizeOptionalText(
+    job.commission_driver_name || job.commission_driver_snapshot?.driver || previousAssignment.driver,
+  );
+  const previousSnapshot = job.commission_driver_snapshot && Object.keys(job.commission_driver_snapshot).length
+    ? job.commission_driver_snapshot
+    : buildCommissionDriverSnapshot(previousAssignment);
+  const normalizedAction = String(action || '').trim().toLowerCase();
+
+  if (normalizedAction === 'keep') {
+    return {
+      driverId: previousDriverId,
+      driverName: previousDriverName,
+      snapshot: previousSnapshot,
+      batchId: null,
+      batchStatus: 'unsubmitted',
+    };
+  }
+  if (normalizedAction !== 'move') {
+    throw commissionCorrectionError(
+      'Tindakan koreksi penerima komisi tidak valid.',
+      'CONTAINER_JOB_COMMISSION_DRIVER_ACTION_INVALID',
+      { allowedActions: ['move', 'keep'] },
+    );
+  }
+  if (!driverId || !assignment?.driver) {
+    throw commissionCorrectionError(
+      'Sopir baru wajib lengkap untuk memindahkan komisi.',
+      'CONTAINER_JOB_COMMISSION_DRIVER_REQUIRED',
+    );
+  }
+
+  const itemResult = await client.query(
+    `
+      select dci.id, dci.batch_id, dci.payment_id,
+             dcb.status as batch_status,
+             dcp.status as payment_status,
+             dcp.payment_proof_attachment_id
+      from driver_commission_items dci
+      join driver_commission_batches dcb on dcb.id = dci.batch_id
+      join driver_commission_payments dcp on dcp.id = dci.payment_id
+      where dci.container_job_id = $1
+        and dci.voided_at is null
+      for update of dci, dcb, dcp
+    `,
+    [job.id],
+  );
+  const item = itemResult.rows[0];
+  if (!item) {
+    return {
+      driverId,
+      driverName: normalizeOptionalText(assignment.driver),
+      snapshot: buildCommissionDriverSnapshot(assignment),
+      batchId: null,
+      batchStatus: 'unsubmitted',
+    };
+  }
+  if (!['draft', 'submitted'].includes(item.batch_status)) {
+    throw commissionCorrectionError(
+      `Komisi tidak dapat dipindahkan karena batch sudah berstatus ${item.batch_status}.`,
+      'CONTAINER_JOB_COMMISSION_BATCH_LOCKED',
+      { batchId: item.batch_id, batchStatus: item.batch_status },
+    );
+  }
+  if (item.payment_status !== 'pending' || item.payment_proof_attachment_id) {
+    throw commissionCorrectionError(
+      'Komisi tidak dapat dipindahkan karena pembayaran sopir sudah diproses Finance.',
+      'CONTAINER_JOB_COMMISSION_PAYMENT_LOCKED',
+      { batchId: item.batch_id, batchStatus: item.batch_status },
+    );
+  }
+
+  const deductionResult = await client.query(
+    'select exists(select 1 from driver_commission_payment_deductions where payment_id = $1 and voided_at is null) as exists',
+    [item.payment_id],
+  );
+  if (deductionResult.rows[0]?.exists) {
+    throw commissionCorrectionError(
+      'Komisi tidak dapat dipindahkan karena potongan Finance sudah dicatat untuk sopir sebelumnya.',
+      'CONTAINER_JOB_COMMISSION_DEDUCTION_LOCKED',
+      { batchId: item.batch_id, batchStatus: item.batch_status },
+    );
+  }
+
+  let targetPaymentResult = await client.query(
+    `
+      select id, status, payment_proof_attachment_id
+      from driver_commission_payments
+      where batch_id = $1 and driver_id = $2
+      for update
+    `,
+    [item.batch_id, driverId],
+  );
+  if (!targetPaymentResult.rows[0]) {
+    targetPaymentResult = await client.query(
+      `
+        insert into driver_commission_payments (
+          batch_id, driver_id, driver_name,
+          payment_method, bank_name, bank_account_number, bank_account_holder,
+          emoney_provider, emoney_number, emoney_account_holder,
+          total_items, total_amount
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, null, 0, 0)
+        returning id, status, payment_proof_attachment_id
+      `,
+      [
+        item.batch_id,
+        driverId,
+        assignment.driver,
+        assignment.driverPaymentMethod === 'emoney' ? 'emoney' : 'bank',
+        assignment.driverBankName || null,
+        assignment.driverBankAccountNumber || null,
+        assignment.driverBankAccountHolder || null,
+        assignment.driverEmoneyProvider || null,
+        assignment.driverEmoneyNumber || null,
+      ],
+    );
+  }
+  const targetPayment = targetPaymentResult.rows[0];
+  if (targetPayment.status !== 'pending' || targetPayment.payment_proof_attachment_id) {
+    throw commissionCorrectionError(
+      'Komisi tidak dapat dipindahkan karena pembayaran sopir baru sudah diproses Finance.',
+      'CONTAINER_JOB_COMMISSION_TARGET_PAYMENT_LOCKED',
+      { batchId: item.batch_id, batchStatus: item.batch_status },
+    );
+  }
+  const targetDeductionResult = await client.query(
+    'select exists(select 1 from driver_commission_payment_deductions where payment_id = $1 and voided_at is null) as exists',
+    [targetPayment.id],
+  );
+  if (targetDeductionResult.rows[0]?.exists) {
+    throw commissionCorrectionError(
+      'Komisi tidak dapat dipindahkan karena potongan Finance sudah dicatat untuk sopir baru.',
+      'CONTAINER_JOB_COMMISSION_TARGET_DEDUCTION_LOCKED',
+      { batchId: item.batch_id, batchStatus: item.batch_status },
+    );
+  }
+
+  await client.query(
+    `
+      update driver_commission_items
+      set payment_id = $2,
+          driver_id = $3,
+          driver_name = $4,
+          updated_at = now()
+      where id = $1
+    `,
+    [item.id, targetPayment.id, driverId, assignment.driver],
+  );
+  await client.query(
+    `
+      update driver_commission_payments payment
+      set total_items = (
+            select count(*)::int
+            from driver_commission_items item
+            where item.payment_id = payment.id and item.voided_at is null
+          ),
+          total_amount = (
+            select coalesce(sum(item.amount), 0)
+            from driver_commission_items item
+            where item.payment_id = payment.id and item.voided_at is null
+          ),
+          updated_at = now()
+      where payment.id = any($1::uuid[])
+    `,
+    [[item.payment_id, targetPayment.id]],
+  );
+  await client.query(
+    `
+      delete from driver_commission_payments payment
+      where payment.id = $1
+        and payment.status = 'pending'
+        and payment.payment_proof_attachment_id is null
+        and not exists (select 1 from driver_commission_items item where item.payment_id = payment.id)
+        and not exists (select 1 from driver_commission_payment_deductions deduction where deduction.payment_id = payment.id and deduction.voided_at is null)
+    `,
+    [item.payment_id],
+  );
+  await client.query(
+    `
+      update driver_commission_batches batch
+      set total_items = (
+            select count(*)::int
+            from driver_commission_items item
+            where item.batch_id = batch.id and item.voided_at is null
+          ),
+          total_amount = (
+            select coalesce(sum(item.amount), 0)
+            from driver_commission_items item
+            where item.batch_id = batch.id and item.voided_at is null
+          ),
+          revision_count = case when batch.status = 'submitted' then batch.revision_count + 1 else batch.revision_count end,
+          last_revised_at = case when batch.status = 'submitted' then now() else batch.last_revised_at end,
+          last_revised_by_name = case when batch.status = 'submitted' then $2 else batch.last_revised_by_name end,
+          last_revision_reason = case when batch.status = 'submitted' then $3 else batch.last_revision_reason end,
+          last_revision_job_id = case when batch.status = 'submitted' then $4::uuid else batch.last_revision_job_id end,
+          last_revision_previous_driver_name = case when batch.status = 'submitted' then $5 else batch.last_revision_previous_driver_name end,
+          last_revision_next_driver_name = case when batch.status = 'submitted' then $6 else batch.last_revision_next_driver_name end,
+          updated_at = now()
+      where batch.id = $1
+    `,
+    [item.batch_id, actorName || 'Admin', reason || null, job.id, previousDriverName, assignment.driver],
+  );
+
+  return {
+    driverId,
+    driverName: normalizeOptionalText(assignment.driver),
+    snapshot: buildCommissionDriverSnapshot(assignment),
+    batchId: item.batch_id,
+    batchStatus: item.batch_status,
+  };
+}
+
 function resolveCommissionStatus({
   currentStatus = 'pending',
   jobStatus = 'received',
@@ -868,24 +1154,29 @@ function requireCompleteOperationalAssignment(form, driver, vehicle, existing, m
 }
 
 export async function findJourneyMoneyAmount(client, job = {}) {
+  const destinationId = normalizeOptionalUuid(job.destination_id, 'Master Tujuan');
   const destination = normalizeOptionalText(job.destination);
-  if (!destination) return { amount: 0, destinationId: null };
+  if (!destinationId && !destination) return { amount: 0, destinationId: null };
   const result = await client.query(
     `
       select id, uj_20ft, uj_40ft
       from destination_locations
-      where lower(trim(name)) = lower(trim($1))
+      where (
+          ($1::uuid is not null and id = $1::uuid)
+          or ($1::uuid is null and lower(trim(name)) = lower(trim($2)))
+        )
         and archived_at is null
       order by updated_at desc nulls last, created_at desc nulls last
       limit 1
     `,
-    [destination],
+    [destinationId, destination],
   );
   const row = result.rows[0] || {};
   const baseAmount = resolveJourneyMoneyAmountForSize(row, job.container_size);
   const isReefer = String(job.container_type || '').trim().toLowerCase().includes('reefer');
+  const reeferSurcharge = isReefer && !isRepoShipment(job) ? 100000 : 0;
   return {
-    amount: baseAmount > 0 && isReefer ? baseAmount + 100000 : baseAmount,
+    amount: baseAmount > 0 ? baseAmount + reeferSurcharge : baseAmount,
     destinationId: row.id || null,
   };
 }
@@ -1394,6 +1685,7 @@ export async function findContainerJobsPage(options = {}) {
             case cj.status
               when 'received' then 1
               when 'running' then 2
+              when 'inap' then 2
               when 'repo_stored' then 3
               when 'completed' then 4
               when 'cancelled' then 5
@@ -1444,6 +1736,7 @@ export async function findContainerJobsPage(options = {}) {
           case cj.status
             when 'received' then 1
             when 'running' then 2
+            when 'inap' then 2
             when 'repo_stored' then 3
             when 'completed' then 4
             when 'cancelled' then 5
@@ -1812,6 +2105,11 @@ export async function findContainerJobExpenseByIdRecord(id) {
     [id],
   );
   return result.rows[0] ? mapContainerJobExpense(result.rows[0]) : null;
+}
+
+function isRepoShipment(job = {}) {
+  const shipment = String(job.shipment_type || job.shipmentType || job.shipment || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  return shipment === 'repo_empty' || shipment === 'repo_full';
 }
 
 export function shouldRequireAssignmentAfterVendorRevert(currentSource, nextSource, documentOnlyUpdate = false) {
@@ -2648,7 +2946,7 @@ async function updateContainerJobTransaction(id, form) {
                cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
                cj.commission_locked_amount, cj.commission_locked_at, cj.commission_status,
                cj.uj_amount_snapshot, cj.uj_source_destination_id, cj.uj_snapshot_at, cj.uj_snapshot_source,
-               so.so_number, so.do_number, so.customer_name, cj.destination,
+               so.so_number, so.do_number, so.customer_name, cj.destination, cj.destination_id,
                so.trip_date, so.finance_verification_status
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
@@ -2945,10 +3243,11 @@ async function updateContainerJobTransaction(id, form) {
       : existing.rows[0].tila_gatepass_document_number || existing.rows[0].unloading_voucher_number || existing.rows[0].weighing_document_number || null;
     const commissionUpdate = resolveDriverCommissionUpdate(existing.rows[0], form, { documentOnlyUpdate });
     const commissionUpdateRequested = commissionUpdate.updateRequested;
-    const nextHasDriverCommission = isVendorExecution ? false : commissionUpdate.hasCommission;
-    const nextDriverCommissionAmount = isVendorExecution ? 0 : commissionUpdate.amount;
-    const nextDriverCommissionSourceDestinationId = isVendorExecution ? null : commissionUpdate.sourceDestinationId;
-    const nextDriverCommissionNote = isVendorExecution ? null : commissionUpdate.note;
+    const isRepoJob = isRepoShipment(existing.rows[0]);
+    const nextHasDriverCommission = isVendorExecution || isRepoJob ? false : commissionUpdate.hasCommission;
+    const nextDriverCommissionAmount = isVendorExecution || isRepoJob ? 0 : commissionUpdate.amount;
+    const nextDriverCommissionSourceDestinationId = isVendorExecution || isRepoJob ? null : commissionUpdate.sourceDestinationId;
+    const nextDriverCommissionNote = isVendorExecution || isRepoJob ? null : commissionUpdate.note;
     const commissionValuesChanged = commissionUpdateRequested && Boolean(
       nextHasDriverCommission !== Boolean(existing.rows[0].has_driver_commission)
       || Number(nextDriverCommissionAmount || 0) !== Number(existing.rows[0].driver_commission_amount || 0)
@@ -2976,6 +3275,24 @@ async function updateContainerJobTransaction(id, form) {
     let nextCommissionDriverSnapshot = isVendorExecution ? {} : existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
       ? existing.rows[0].commission_driver_snapshot
       : (shouldCaptureCommissionDriver ? buildCommissionDriverSnapshot(nextAssignmentSnapshot) : {});
+    const completedCommissionDriverCorrection = currentJob.status === 'completed'
+      && nextStatus === 'completed'
+      && driverIdentityChanging
+      && nextHasDriverCommission
+      ? await resolveCompletedCommissionDriverCorrection(client, {
+        job: existing.rows[0],
+        action: form.commissionDriverAction,
+        driverId: nextDriverId,
+        assignment: nextAssignmentSnapshot,
+        actorName,
+        reason: form.adminCorrectionReason,
+      })
+      : null;
+    if (completedCommissionDriverCorrection) {
+      nextCommissionDriverId = completedCommissionDriverCorrection.driverId;
+      nextCommissionDriverName = completedCommissionDriverCorrection.driverName;
+      nextCommissionDriverSnapshot = completedCommissionDriverCorrection.snapshot;
+    }
     const completedAtForUpdate = nextStatus === 'completed'
       ? (documentOnlyUpdate
         ? resolveCompletedAtForSave({}, existing.rows[0], nextStatus)
@@ -3250,15 +3567,25 @@ async function findLockedRepoPickupJobs(client, ids = []) {
 }
 
 function assertRepoPickupJobs(rows = [], ids = [], pickupType = 'single') {
-  if (rows.length !== ids.length) throw validationError('Container titip tidak ditemukan.', 'REPO_PICKUP_JOB_NOT_FOUND', 404);
+  if (rows.length !== ids.length) {
+    throw validationError('Container titip tidak ditemukan.', 'REPO_PICKUP_JOB_NOT_FOUND', 404);
+  }
   rows.forEach((job) => {
-    if (job.status !== 'repo_stored') throw validationError('Hanya container dengan status titip yang bisa diambil.', 'REPO_PICKUP_STATUS_INVALID', 409);
-    if ((job.execution_source || 'internal') === 'vendor') throw validationError('Ritasi vendor tidak dapat diproses sebagai pickup internal.', 'REPO_PICKUP_VENDOR_INVALID', 409);
-    if (!normalizeOptionalText(job.container_number)) throw validationError('Nomor container wajib ada sebelum container titip diambil.', 'REPO_PICKUP_CONTAINER_REQUIRED', 400);
+    if (job.status !== 'repo_stored') {
+      throw validationError('Hanya container dengan status titip yang bisa diambil.', 'REPO_PICKUP_STATUS_INVALID', 409);
+    }
+    if ((job.execution_source || 'internal') === 'vendor') {
+      throw validationError('Ritasi vendor tidak dapat diproses sebagai pickup internal.', 'REPO_PICKUP_VENDOR_INVALID', 409);
+    }
+    if (!normalizeOptionalText(job.container_number)) {
+      throw validationError('Nomor container wajib ada sebelum container titip diambil.', 'REPO_PICKUP_CONTAINER_REQUIRED', 400);
+    }
   });
   if (pickupType === 'combo_2x20') {
     const locations = new Set(rows.map((job) => String(job.repo_location || '').trim().toLowerCase()).filter(Boolean));
-    if (locations.size > 1) throw validationError('Pickup combo hanya dapat dilakukan dari depo titip yang sama.', 'REPO_PICKUP_LOCATION_MISMATCH', 400);
+    if (locations.size > 1) {
+      throw validationError('Pickup combo hanya dapat dilakukan dari depo titip yang sama.', 'REPO_PICKUP_LOCATION_MISMATCH', 400);
+    }
   }
 }
 
@@ -3274,10 +3601,20 @@ async function ensureNoActiveRepoPickupMovement(client, ids = []) {
     `,
     [ids],
   );
-  if (result.rows[0]) throw validationError('Container ini sudah tercatat dalam pickup aktif.', 'REPO_PICKUP_ALREADY_EXISTS', 409);
+  if (result.rows[0]) {
+    throw validationError('Container ini sudah tercatat dalam pickup aktif.', 'REPO_PICKUP_ALREADY_EXISTS', 409);
+  }
 }
 
-async function insertRepoPickupMovement(client, { pickupType, jobs, driver, vehicle, assignment, actorName, runningAt }) {
+async function insertRepoPickupMovement(client, {
+  pickupType,
+  jobs,
+  driver,
+  vehicle,
+  assignment,
+  actorName,
+  runningAt,
+}) {
   const movementResult = await client.query(
     `
       insert into container_pickup_movements (
@@ -3287,17 +3624,37 @@ async function insertRepoPickupMovement(client, { pickupType, jobs, driver, vehi
       values ($1, $2, $3, $4::jsonb, $5, 'running', $6::timestamptz, $7, $7)
       returning *
     `,
-    [pickupType, vehicle?.id || null, driver?.id || null, JSON.stringify(assignment || {}), jobs[0]?.repo_location || null, runningAt, actorName],
+    [
+      pickupType,
+      vehicle?.id || null,
+      driver?.id || null,
+      JSON.stringify(assignment || {}),
+      jobs[0]?.repo_location || null,
+      runningAt,
+      actorName,
+    ],
   );
   const movement = movementResult.rows[0];
   await Promise.all(jobs.map((job, index) => client.query(
-    'insert into container_pickup_items (movement_id, container_job_id, sequence_no) values ($1, $2, $3)',
+    `
+      insert into container_pickup_items (movement_id, container_job_id, sequence_no)
+      values ($1, $2, $3)
+    `,
     [movement.id, job.id, index + 1],
   )));
   return movement;
 }
 
-async function updateRepoPickupJob(client, { job, driver, vehicle, assignment, actorName, runningAt, movement, pickupType }) {
+async function updateRepoPickupJob(client, {
+  job,
+  driver,
+  vehicle,
+  assignment,
+  actorName,
+  runningAt,
+  movement,
+  pickupType,
+}) {
   await client.query(
     `
       update container_jobs
@@ -3357,8 +3714,12 @@ async function mapUpdatedRepoPickupJobs(client, ids = []) {
 
 async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'single') {
   const uniqueIds = [...new Set(ids.map((id) => normalizeOptionalUuid(id, 'Container Job')).filter(Boolean))];
-  if (pickupType === 'single' && uniqueIds.length !== 1) throw validationError('Pickup single membutuhkan tepat 1 container job.', 'REPO_PICKUP_SINGLE_INVALID', 400);
-  if (pickupType === 'combo_2x20' && uniqueIds.length !== 2) throw validationError('Pickup combo membutuhkan tepat 2 container job.', 'REPO_PICKUP_COMBO_INVALID', 400);
+  if (pickupType === 'single' && uniqueIds.length !== 1) {
+    throw validationError('Pickup single membutuhkan tepat 1 container job.', 'REPO_PICKUP_SINGLE_INVALID', 400);
+  }
+  if (pickupType === 'combo_2x20' && uniqueIds.length !== 2) {
+    throw validationError('Pickup combo membutuhkan tepat 2 container job.', 'REPO_PICKUP_COMBO_INVALID', 400);
+  }
   const actorName = normalizeOptionalText(payload.updatedBy || payload.actorName) || 'Operational';
   const runningAt = payload.runningAt || payload.repoPickedUpAt || new Date().toISOString();
 
@@ -3378,15 +3739,37 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     assertVehicleCanPickupRepo(vehicle, orderedJobs, pickupType);
 
     const assignment = toAssignmentSnapshot(payload, driver, vehicle, {});
-    const movement = await insertRepoPickupMovement(client, { pickupType, jobs: orderedJobs, driver, vehicle, assignment, actorName, runningAt });
+    const movement = await insertRepoPickupMovement(client, {
+      pickupType,
+      jobs: orderedJobs,
+      driver,
+      vehicle,
+      assignment,
+      actorName,
+      runningAt,
+    });
 
     for (const job of orderedJobs) {
-      await updateRepoPickupJob(client, { job, driver, vehicle, assignment, actorName, runningAt, movement, pickupType });
-      await syncResourceAssignmentStatus(client, job, { driverId: driver.id, vehicleId: vehicle.id }, 'running', 'realtime', false);
+      await updateRepoPickupJob(client, {
+        job,
+        driver,
+        vehicle,
+        assignment,
+        actorName,
+        runningAt,
+        movement,
+        pickupType,
+      });
+      await syncResourceAssignmentStatus(client, job, {
+        driverId: driver.id,
+        vehicleId: vehicle.id,
+      }, 'running', 'realtime', false);
       await refreshOrderStatus(client, job.sales_order_id);
     }
 
-    const ujAnchorJob = pickupType === 'combo_2x20' ? { ...orderedJobs[0], container_size: '40FT' } : orderedJobs[0];
+    const ujAnchorJob = pickupType === 'combo_2x20'
+      ? { ...orderedJobs[0], container_size: '40FT' }
+      : orderedJobs[0];
     await syncAutoJourneyMoneyExpense(client, {
       job: ujAnchorJob,
       nextStatus: 'running',

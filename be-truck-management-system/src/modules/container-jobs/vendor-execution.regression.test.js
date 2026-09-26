@@ -33,7 +33,7 @@ test('backend menjadi pengaman vendor dari UJ, dropping, SPK, dan histori assign
   assert.match(source, /ensureInternalExecution\(client, id, 'Uang Jalan'\)/i);
   assert.match(source, /ensureInternalExecution\(client, id, 'SPK internal'\)/i);
   assert.match(source, /if \(!isVendorExecution && \(driverIdentityChanging \|\| vehicleIdentityChanging\)\)/i);
-  assert.match(source, /const nextHasDriverCommission = isVendorExecution \? false/i);
+  assert.match(source, /const nextHasDriverCommission = isVendorExecution \|\| isRepoJob \? false/i);
 });
 
 test('status pemenuhan SO tetap menghitung job internal dan vendor bersama-sama', () => {
@@ -45,6 +45,26 @@ test('status pemenuhan SO tetap menghitung job internal dan vendor bersama-sama'
 
   assert.match(refreshStatus, /from container_jobs\s+where sales_order_id = \$1\s+group by status/i);
   assert.doesNotMatch(refreshStatus, /execution_source/i);
+});
+
+test('Sales Order selalu memakai lifecycle container job normal', () => {
+  const mapper = read('../sales-orders/sales-orders.mapper.js');
+  const repository = read('../sales-orders/sales-orders.repository.js');
+
+  assert.match(mapper, /is_vendor_order:\s*false/i);
+  assert.doesNotMatch(repository, /if \(!payload\.is_vendor_order\)/i);
+  assert.doesNotMatch(repository, /if \(payload\.is_vendor_order\)/i);
+  assert.match(repository, /for \(const container of form\.containers \|\| \[\]\)/i);
+  assert.match(repository, /reconcileSalesOrderContainers\(form\.containers \|\| \[\], currentJobs\.rows\)/i);
+});
+
+test('konversi SO vendor lama bersifat dry-run kecuali diminta eksplisit', () => {
+  const script = read('../../../scripts/convert-legacy-vendor-orders.js');
+
+  assert.match(script, /const applyChanges = process\.argv\.includes\('--apply'\)/i);
+  assert.match(script, /if \(!applyChanges \|\| orders\.length === 0\) return/i);
+  assert.match(script, /execution_source, container_number, container_size/i);
+  assert.match(script, /update sales_orders set is_vendor_order = false/i);
 });
 
 test('query komisi, utilisasi, dan ketersediaan armada mengecualikan vendor', () => {

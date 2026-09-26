@@ -261,7 +261,7 @@ test('sales order historis memakai periode dari tanggal jalan', () => {
   assert.equal(row.historical_period, '2026-05');
 });
 
-test('sales order mapper membaca dan menyimpan penanda order vendor', () => {
+test('sales order mapper membaca penanda vendor lama tetapi mengabaikan payload vendor baru', () => {
   const mapped = mapSalesOrder({
     id: 'order-vendor-1',
     so_number: 'SO-VENDOR-001',
@@ -288,12 +288,10 @@ test('sales order mapper membaca dan menyimpan penanda order vendor', () => {
     vendorNote: '  Catatan vendor  ',
   });
 
-  assert.equal(vendorRow.is_vendor_order, true);
-  assert.equal(vendorRow.vendor_name, 'CV Truck Luar');
-  assert.equal(vendorRow.vendor_note, 'Catatan vendor');
+  assert.equal(vendorRow.is_vendor_order, false);
+  assert.equal(vendorRow.vendor_name, null);
+  assert.equal(vendorRow.vendor_note, null);
 
-  // Order internal biasa (checkbox tidak dicentang) tidak boleh punya default baru
-  // yang tiba-tiba true, dan vendor_name/vendor_note harus tetap kosong.
   const internalRow = toSalesOrderDb({
     customer: 'PT Internal',
     origin: 'Jakarta',
@@ -304,8 +302,6 @@ test('sales order mapper membaca dan menyimpan penanda order vendor', () => {
   assert.equal(internalRow.vendor_name, null);
   assert.equal(internalRow.vendor_note, null);
 
-  // Uncheck vendor lagi (vendorName/vendorNote lama masih terisi di form) tidak boleh
-  // menyisakan data vendor basi di DB.
   const revertedRow = toSalesOrderDb({
     customer: 'PT Internal',
     origin: 'Jakarta',
@@ -318,4 +314,140 @@ test('sales order mapper membaca dan menyimpan penanda order vendor', () => {
   assert.equal(revertedRow.is_vendor_order, false);
   assert.equal(revertedRow.vendor_name, null);
   assert.equal(revertedRow.vendor_note, null);
+});
+
+test('sales order mapper membaca lokasi gudang beserta snapshot dan destination_id (Phase 4-5)', () => {
+  const mapped = mapSalesOrder({
+    id: 'order-loc-1',
+    so_number: 'SO-LOC-001',
+    customer_name: 'PT Lokasi',
+    destination: 'Cikarang',
+    warehouse_location_id: 'location-1',
+    warehouse_location_name_snapshot: 'Gudang Cikarang',
+    warehouse_location_address_snapshot: 'Jl. Industri No. 1',
+    destination_id: 'destination-1',
+    payment_type: 'cash',
+    quantity: 1,
+    price: 0,
+    total_amount: 0,
+  });
+
+  assert.equal(mapped.warehouseLocationId, 'location-1');
+  assert.equal(mapped.warehouseLocationNameSnapshot, 'Gudang Cikarang');
+  assert.equal(mapped.warehouseLocationAddressSnapshot, 'Jl. Industri No. 1');
+  assert.equal(mapped.destinationId, 'destination-1');
+});
+
+test('sales order db mapper menyimpan snapshot lokasi dan destination_id terverifikasi secara terpisah', () => {
+  // toSalesOrderDb(form, customer, location) -- location adalah row end_users TERKINI hasil
+  // lookup repository, bukan langsung dari form.warehouseLocationId. Ini yang membuat snapshot
+  // bisa "dibekukan sekali" -- pemanggil (repository) yang memutuskan kapan lookup itu terjadi.
+  const location = {
+    id: 'location-1',
+    name: 'Gudang Cikarang',
+    address: 'Jl. Industri No. 1',
+    destination_id: 'destination-1',
+  };
+
+  const rowWithLocation = toSalesOrderDb({
+    customer: 'PT Lokasi',
+    origin: 'Jakarta',
+    destination: 'Cikarang',
+    warehouseLocationId: 'location-1',
+  }, null, location, { id: 'destination-1' });
+
+  assert.equal(rowWithLocation.warehouse_location_id, 'location-1');
+  assert.equal(rowWithLocation.warehouse_location_name_snapshot, 'Gudang Cikarang');
+  assert.equal(rowWithLocation.warehouse_location_address_snapshot, 'Jl. Industri No. 1');
+  assert.equal(rowWithLocation.destination_id, 'destination-1');
+
+  // form.warehouseLocationId terisi tapi location TIDAK diberikan (mis. repository sengaja tidak
+  // melakukan lookup karena id-nya tidak berubah pada request ini, atau lookup gagal menemukan
+  // row-nya) -- seluruh bundel lokasi harus null, tidak ada id "setengah tervalidasi" yang tersimpan.
+  const rowWithoutLocationLookup = toSalesOrderDb({
+    customer: 'PT Lokasi',
+    origin: 'Jakarta',
+    destination: 'Cikarang',
+    warehouseLocationId: 'location-1',
+  });
+
+  assert.equal(rowWithoutLocationLookup.warehouse_location_id, null);
+  assert.equal(rowWithoutLocationLookup.warehouse_location_name_snapshot, null);
+  assert.equal(rowWithoutLocationLookup.warehouse_location_address_snapshot, null);
+  assert.equal(rowWithoutLocationLookup.destination_id, null);
+
+  const rowWithoutWarehouse = toSalesOrderDb({
+    customer: 'PT Lokasi',
+    origin: 'Jakarta',
+    destination: 'Cikarang',
+    destinationId: 'destination-1',
+  }, null, null, { id: 'destination-1' });
+  assert.equal(rowWithoutWarehouse.warehouse_location_id, null);
+  assert.equal(rowWithoutWarehouse.destination_id, 'destination-1');
+});
+
+test('container job snapshot lokasi gudang: pakai lokasi baris rincian, fallback ke lokasi SO, lalu null (Phase 4)', () => {
+  const order = { id: 'order-loc-1', destination: 'Cikarang', warehouse_location_id: 'so-location-1' };
+
+  const withOwnLocation = toContainerJobDb(
+    { size: '20FT', warehouseLocationId: 'container-location-1' },
+    order,
+  );
+  assert.equal(withOwnLocation.warehouse_location_id, 'container-location-1');
+
+  const fallbackToOrder = toContainerJobDb({ size: '20FT' }, order);
+  assert.equal(fallbackToOrder.warehouse_location_id, 'so-location-1');
+
+  const noLocationAnywhere = toContainerJobDb({ size: '20FT' }, { id: 'order-loc-2', destination: 'Bekasi' });
+  assert.equal(noLocationAnywhere.warehouse_location_id, null);
+
+  assert.equal(mapContainerJob({ id: 'job-1', warehouse_location_id: 'container-location-1' }).warehouseLocationId, 'container-location-1');
+  assert.equal(mapContainerJob({ id: 'job-2' }).warehouseLocationId, null);
+});
+
+test('container job mewarisi snapshot nama/alamat/destination_id lokasi dari SO, container bisa override sendiri (Phase 5)', () => {
+  // order di sini merepresentasikan payload hasil toSalesOrderDb (snake_case) -- bentuk yang
+  // sebenarnya dipakai repository.js saat sinkronisasi container job.
+  const orderPayload = {
+    id: 'order-loc-1',
+    destination: 'Cikarang',
+    warehouse_location_id: 'so-location-1',
+    warehouse_location_name_snapshot: 'Gudang SO',
+    warehouse_location_address_snapshot: 'Alamat Gudang SO',
+    destination_id: 'destination-so-1',
+  };
+
+  const inherited = toContainerJobDb({ size: '20FT' }, orderPayload);
+  assert.equal(inherited.warehouse_location_id, 'so-location-1');
+  assert.equal(inherited.warehouse_location_name_snapshot, 'Gudang SO');
+  assert.equal(inherited.warehouse_location_address_snapshot, 'Alamat Gudang SO');
+  assert.equal(inherited.destination_id, 'destination-so-1');
+
+  const overridden = toContainerJobDb({
+    size: '20FT',
+    warehouseLocationId: 'container-location-1',
+    warehouseLocationNameSnapshot: 'Gudang Khusus Container',
+    warehouseLocationAddressSnapshot: 'Alamat Gudang Khusus',
+    destinationId: 'destination-container-1',
+  }, orderPayload);
+  assert.equal(overridden.warehouse_location_id, 'container-location-1');
+  assert.equal(overridden.warehouse_location_name_snapshot, 'Gudang Khusus Container');
+  assert.equal(overridden.warehouse_location_address_snapshot, 'Alamat Gudang Khusus');
+  assert.equal(overridden.destination_id, 'destination-container-1');
+
+  const noLocationAtAll = toContainerJobDb({ size: '20FT' }, { id: 'order-loc-2', destination: 'Bekasi' });
+  assert.equal(noLocationAtAll.warehouse_location_name_snapshot, null);
+  assert.equal(noLocationAtAll.warehouse_location_address_snapshot, null);
+  assert.equal(noLocationAtAll.destination_id, null);
+
+  const mapped = mapContainerJob({
+    id: 'job-1',
+    warehouse_location_id: 'location-1',
+    warehouse_location_name_snapshot: 'Gudang Cikarang',
+    warehouse_location_address_snapshot: 'Jl. Industri No. 1',
+    destination_id: 'destination-1',
+  });
+  assert.equal(mapped.warehouseLocationNameSnapshot, 'Gudang Cikarang');
+  assert.equal(mapped.warehouseLocationAddressSnapshot, 'Jl. Industri No. 1');
+  assert.equal(mapped.destinationId, 'destination-1');
 });
