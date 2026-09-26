@@ -507,6 +507,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const existingHasDriverCommission = container.hasDriverCommission === true;
   const existingDriverCommissionAmount = Number(container.driverCommissionAmount || 0);
   const [form, setForm] = useState({
+    executionSource: container.executionSource === 'vendor' ? 'vendor' : 'internal',
     containerNumber: container.containerNumber || '',
     rpujStatus: container.rpujStatus || 'pending',
     rpujNotes: container.rpujNotes || '',
@@ -548,6 +549,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [activePhase, setActivePhase] = useState(() => (isDocumentOnlyMode ? 'closing' : initialPhase));
   const [error, setError] = useState('');
   const [notification, setNotification] = useState(null);
+  const [executionSourceConfirmation, setExecutionSourceConfirmation] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [defaultDriverFormOpen, setDefaultDriverFormOpen] = useState(false);
   const [defaultDriverReason, setDefaultDriverReason] = useState('');
@@ -558,12 +560,13 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const driverCommissionAmountValue = form.hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
   const rpujStatus = form.rpujStatus || 'pending';
+  const isVendorExecution = form.executionSource === 'vendor';
   const isRepoPickupMode = Boolean(container.repoPickupMode);
   const isRepoComboPickupMode = Boolean(container.repoComboPickupMode);
   const requiresFinanceApprovalForSpk = false;
-  const hasCompleteAssignment = Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
+  const hasCompleteAssignment = isVendorExecution || Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
   const financeApprovedForSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
-  const canGenerateSpk = canUpdateOperational && !isRepoPickupMode && financeApprovedForSpk && hasCompleteAssignment;
+  const canGenerateSpk = !isVendorExecution && canUpdateOperational && !isRepoPickupMode && financeApprovedForSpk && hasCompleteAssignment;
   const assignmentRequirementMessage = 'Lengkapi truck dan driver terlebih dahulu.';
   const spkRequirementMessage = !form.spkNumber && !hasCompleteAssignment
     ? 'SPK bisa dibuat setelah truck dan driver lengkap.'
@@ -572,7 +575,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       : '';
   const canAccessAdminCorrection = String(currentUser?.role || '').toLowerCase() === 'admin';
   const canReviseLockedFields = canAccessAdminCorrection && Boolean(form.adminCorrectionMode);
-  const canEditDriverCommission = commissionDataLoaded && canUpdateOperational && !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
+  const canEditDriverCommission = !isVendorExecution && commissionDataLoaded && canUpdateOperational && !isRepoPickupMode && (canReviseLockedFields || form.status !== 'completed');
   const canFillMissingAssignment = canUpdateOperational && !hasCompleteAssignment && form.status !== 'completed';
   const canEditAssignment = canUpdateOperational && (canReviseLockedFields || canFillMissingAssignment || (rpujStatus !== 'paid' && form.status !== 'completed'));
   const originalAssignedDriver = String(container.driver || '').trim();
@@ -605,7 +608,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const canEditDocumentFile = (field) => canUpdateDocuments && (isDocumentOnlyMode || !isCompletedDocumentFollowUp || !container[field]);
   const canEditOtherDocuments = canUpdateDocuments && (isDocumentOnlyMode || !isCompletedDocumentFollowUp);
   const canEditTimeline = canUpdateOperational && (canReviseLockedFields || container.status !== 'completed');
-  const canStartTrip = canUpdateOperational && (hasCompleteAssignment || canReviseLockedFields);
+  const canStartTrip = canUpdateOperational && (isVendorExecution || hasCompleteAssignment || canReviseLockedFields);
   const availableStatusOptions = statusOptions.filter((option) => {
     if (isDocumentOnlyMode) return option.value === form.status;
     if (canReviseLockedFields) return true;
@@ -623,11 +626,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const isReadyToStart = form.status === 'received'
     && hasCompleteAssignment
     && canStartTrip
-    && hasSpkDocument;
+    && (isVendorExecution || hasSpkDocument);
   const primaryActionLabel = isDocumentOnlyMode
     ? 'Simpan Dokumen'
     : activePhase === 'preparation'
-    ? 'Simpan Assignment'
+    ? isVendorExecution ? 'Simpan Ritasi Vendor' : 'Simpan Assignment'
     : activePhase === 'rpuj'
       ? 'Simpan Biaya & SPK'
       : isReadyToStart
@@ -639,10 +642,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             : 'Simpan Dokumen & Status';
   const closingChecklist = [
     { label: 'Nomor container ada', ready: Boolean(String(form.containerNumber || '').trim()) },
-    { label: 'Truck dan driver ada', ready: hasCompleteAssignment },
+    ...(isVendorExecution ? [] : [{ label: 'Truck dan driver ada', ready: hasCompleteAssignment }]),
     { label: 'Waktu mulai dan selesai ada', ready: Boolean(form.runningAt && form.completedAt) },
-    { label: 'Biaya perjalanan tercatat', ready: canStartTrip },
-    { label: 'SPK ada', ready: hasSpkDocument },
+    ...(isVendorExecution ? [] : [
+      { label: 'Biaya perjalanan tercatat', ready: canStartTrip },
+      { label: 'SPK ada', ready: hasSpkDocument },
+    ]),
     ...(hasRepoHistory ? [{ label: 'EIR Titip tersedia', ready: hasRepoEirReceipt }] : []),
     { label: 'Lampiran EIR sudah diupload', ready: hasEirDocument },
   ];
@@ -650,6 +655,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   useEffect(() => {
     function closeOnEscape(event) {
       if (event.key !== 'Escape') return;
+      if (executionSourceConfirmation) {
+        setExecutionSourceConfirmation(null);
+        return;
+      }
       if (notification) {
         setNotification(null);
         return;
@@ -663,7 +672,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       document.body.style.overflow = '';
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [notification, onClose]);
+  }, [executionSourceConfirmation, notification, onClose]);
+
+  useEffect(() => {
+    if (isVendorExecution && activePhase === 'rpuj') setActivePhase('preparation');
+  }, [activePhase, isVendorExecution]);
 
   function showSubmitNotification(message, title = 'Data belum lengkap') {
     setError('');
@@ -673,6 +686,47 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   function updateField(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function applyExecutionSource(executionSource) {
+    setError('');
+    setForm((current) => ({
+      ...current,
+      executionSource,
+      ...(executionSource === 'vendor' ? {
+        driver: '',
+        driverId: '',
+        plateNumber: '',
+        vehicleId: '',
+        chassis: '',
+        assignmentChangeReason: '',
+        assignmentChangeNote: '',
+        hasDriverCommission: false,
+        driverCommissionAmount: '0',
+        driverCommissionSourceDestinationId: '',
+        driverCommissionNote: '',
+        rpujStatus: 'pending',
+      } : {}),
+    }));
+    setExecutionSourceConfirmation(null);
+  }
+
+  function updateExecutionSource(executionSource) {
+    if (executionSource === form.executionSource) return;
+    const hasInternalAssignment = Boolean(
+      container.driverId
+      || container.vehicleId
+      || (container.driver && container.driver !== 'VENDOR')
+      || (container.plateNumber && container.plateNumber !== 'VENDOR'),
+    );
+    const hasUjTransaction = ['submitted', 'approved', 'paid'].includes(container.rpujStatus)
+      || Number(container.ujAmountSnapshot || 0) > 0
+      || (Array.isArray(container.expenses) && container.expenses.length > 0);
+    if (executionSource === 'vendor' && (hasInternalAssignment || hasUjTransaction)) {
+      setExecutionSourceConfirmation({ hasInternalAssignment, hasUjTransaction });
+      return;
+    }
+    applyExecutionSource(executionSource);
   }
 
   function updateAdminCorrectionMode(event) {
@@ -704,7 +758,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
 
   function updateStatusValue(status) {
     const now = nowForDateTimeInput();
-    if (['running', 'completed'].includes(status) && !hasCompleteAssignment) {
+    if (!isVendorExecution && ['running', 'completed'].includes(status) && !hasCompleteAssignment) {
       setError(assignmentRequirementMessage);
       return;
     }
@@ -1119,10 +1173,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   }
 
   function buildSubmitForm({ forceRpujStatus } = {}) {
-    if (assignmentChangeReasonRequired && !String(form.assignmentChangeReason || '').trim()) {
+    if (!isVendorExecution && assignmentChangeReasonRequired && !String(form.assignmentChangeReason || '').trim()) {
       return { error: 'Ritasi sudah berjalan -- alasan perubahan sopir/truck wajib diisi.' };
     }
-    const hasDriverCommission = Boolean(form.hasDriverCommission);
+    const hasDriverCommission = !isVendorExecution && Boolean(form.hasDriverCommission);
     const driverCommissionAmount = hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
     if (driverCommissionAmount < 0) {
       return { error: 'Nominal komisi sopir tidak boleh negatif.' };
@@ -1131,7 +1185,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       return { error: 'Nominal komisi sopir belum tersedia. Lengkapi Master Lokasi Tujuan atau matikan checkbox komisi.' };
     }
     const currentRpujStatus = form.rpujStatus || 'pending';
-    const hasRpujRequest = ujAmount > 0;
+    const hasRpujRequest = !isVendorExecution && ujAmount > 0;
     const nextRpujStatus = ['approved', 'paid'].includes(currentRpujStatus)
       ? currentRpujStatus
       : hasRpujRequest
@@ -1139,6 +1193,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         : 'pending';
     const submitForm = {
       ...form,
+      executionSource: isVendorExecution ? 'vendor' : 'internal',
       rpujStatus: nextRpujStatus,
       hasDriverCommission,
       driverCommissionAmount,
@@ -1253,22 +1308,22 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       showSubmitNotification(`Truck ${selectedTruck.plateNumber} sedang ${selectedTruck.status || 'tidak siap'} dan tidak bisa di-assign.`);
       return;
     }
-    if (['running', 'completed'].includes(submitForm.status) && !canStartTrip) {
+    if (!isVendorExecution && ['running', 'completed'].includes(submitForm.status) && !canStartTrip) {
       showSubmitNotification(tripStartRequirementMessage);
       return;
     }
-    if (['running', 'completed'].includes(submitForm.status) && !hasCompleteAssignment) {
+    if (!isVendorExecution && ['running', 'completed'].includes(submitForm.status) && !hasCompleteAssignment) {
       showSubmitNotification('Status perjalanan belum bisa Sedang Jalan. Lengkapi truck dan driver terlebih dahulu.');
       return;
     }
-    if (submitForm.status === 'running' && (!submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt)) {
+    if (!isVendorExecution && submitForm.status === 'running' && (!submitForm.driver || !submitForm.plateNumber || !submitForm.runningAt)) {
       showSubmitNotification('Truck, driver otomatis, dan waktu mulai wajib diisi untuk status Sedang Jalan.');
       return;
     }
     if (submitForm.status === 'completed') {
       const missingContainerNumber = !String(submitForm.containerNumber || '').trim();
-      const missingAssignment = !hasCompleteAssignment || !submitForm.runningAt || !submitForm.completedAt;
-      const missingSpk = !canReviseLockedFields && !submitForm.spkNumber && !submitForm.spkDocument;
+      const missingAssignment = (!isVendorExecution && !hasCompleteAssignment) || !submitForm.runningAt || !submitForm.completedAt;
+      const missingSpk = !isVendorExecution && !canReviseLockedFields && !submitForm.spkNumber && !submitForm.spkDocument;
       const missingRepoEirReceipt = !canReviseLockedFields && hasRepoHistory && !hasRepoEirReceipt;
       const missingEirDocument = !canReviseLockedFields && !submitForm.eirDocument;
       if (missingRepoEirReceipt) {
@@ -1276,7 +1331,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         return;
       }
       if (missingContainerNumber || missingAssignment || missingSpk || missingEirDocument) {
-        showSubmitNotification('Pekerjaan belum dapat diselesaikan. Lengkapi nomor container, truck/driver, waktu jalan, waktu selesai, SPK, dan upload lampiran EIR.');
+        showSubmitNotification(isVendorExecution
+          ? 'Pekerjaan vendor belum dapat diselesaikan. Lengkapi nomor container, waktu jalan, waktu selesai, dan upload lampiran EIR.'
+          : 'Pekerjaan belum dapat diselesaikan. Lengkapi nomor container, truck/driver, waktu jalan, waktu selesai, SPK, dan upload lampiran EIR.');
         return;
       }
       if (submitForm.completedAt && submitForm.runningAt && new Date(submitForm.completedAt) < new Date(submitForm.runningAt)) {
@@ -1349,6 +1406,35 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             </div>
           ) : null}
 
+          {!isDocumentOnlyMode ? (
+            <section className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3" aria-labelledby="execution-source-label">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 id="execution-source-label" className="text-sm font-bold text-slate-900">Pelaksanaan ritasi</h3>
+                  <p className="mt-0.5 text-[11px] font-medium text-slate-500">Pilih sumber unit untuk container ini.</p>
+                </div>
+                <div className="inline-grid grid-cols-2 rounded-md border border-slate-300 bg-white p-1" role="group" aria-label="Pelaksanaan ritasi">
+                  <button
+                    className={`min-w-28 rounded px-3 py-2 text-xs font-bold ${!isVendorExecution ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                    type="button"
+                    aria-pressed={!isVendorExecution}
+                    onClick={() => updateExecutionSource('internal')}
+                  >
+                    Unit Sendiri
+                  </button>
+                  <button
+                    className={`min-w-28 rounded px-3 py-2 text-xs font-bold ${isVendorExecution ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                    type="button"
+                    aria-pressed={isVendorExecution}
+                    onClick={() => updateExecutionSource('vendor')}
+                  >
+                    Vendor
+                  </button>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           <div className="operational-mobile-job-summary" aria-label="Ringkasan container job">
             <div>
               <span>Customer</span>
@@ -1360,17 +1446,17 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             </div>
             <div>
               <span>Truck</span>
-              <strong>{form.plateNumber || '-'}</strong>
+              <strong>{isVendorExecution ? 'VENDOR' : form.plateNumber || '-'}</strong>
             </div>
             <div>
               <span>Sopir</span>
-              <strong>{form.driver || '-'}</strong>
+              <strong>{isVendorExecution ? 'VENDOR' : form.driver || '-'}</strong>
             </div>
           </div>
 
           {!isDocumentOnlyMode ? (
           <div className="operational-phase-tabs" role="tablist" aria-label="Phase Operational">
-            {operationalPhaseOptions.map((phase, index) => (
+            {operationalPhaseOptions.filter((phase) => !isVendorExecution || phase.id !== 'rpuj').map((phase, index) => (
               <button
                 aria-selected={activePhase === phase.id}
                 className={activePhase === phase.id ? 'active' : ''}
@@ -1391,8 +1477,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           {activePhase === 'preparation' ? (
           <>
           <div className="form-section">
-            <h3>Assignment Aktual</h3>
-            <p className="mb-2 text-[11px] font-medium text-slate-500">Perubahan ini hanya berlaku untuk ritasi ini dan tidak mengubah master.</p>
+            <h3>{isVendorExecution ? 'Ritasi Vendor' : 'Assignment Aktual'}</h3>
+            <p className="mb-2 text-[11px] font-medium text-slate-500">
+              {isVendorExecution ? 'Cukup isi nomor container. Truck dan sopir dicatat sebagai VENDOR.' : 'Perubahan ini hanya berlaku untuk ritasi ini dan tidak mengubah master.'}
+            </p>
+            {isVendorExecution ? (
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,.7fr)]">
+                <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
+                <div className="grid grid-cols-2 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3" aria-label="Assignment vendor">
+                  <div><span className="block text-[10px] font-bold uppercase text-slate-500">Truck</span><strong className="mt-1 block text-sm text-slate-900">VENDOR</strong></div>
+                  <div><span className="block text-[10px] font-bold uppercase text-slate-500">Sopir</span><strong className="mt-1 block text-sm text-slate-900">VENDOR</strong></div>
+                </div>
+              </div>
+            ) : (
             <div className="order-form-grid">
               <label>Truck<select name="plateNumber" value={selectedTruckCanBeShown ? form.plateNumber : ''} onChange={updateTruck} disabled={!canEditAssignment}><option value="">{isRepoComboPickupMode ? 'Pilih truck 40FT untuk combo' : `Pilih truck ${containerSize ? `${containerSize}` : ''}`}</option>{form.plateNumber && !currentTruckExists && selectedTruckCanBeShown ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'}</option>)}</select></label>
               <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
@@ -1411,10 +1508,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <label>Alasan Perubahan{assignmentChangeReasonRequired ? ' *' : ''}<input name="assignmentChangeReason" value={form.assignmentChangeReason} onChange={updateField} disabled={!canEditAssignment} placeholder="Contoh: sopir sakit, truck rusak di jalan" /></label>
               <label>Catatan<textarea name="assignmentChangeNote" value={form.assignmentChangeNote} onChange={updateField} disabled={!canEditAssignment} placeholder="Catatan tambahan (opsional)" rows={2} /></label>
             </div>
-            {selectedTruckForDefault ? (
+            )}
+            {!isVendorExecution && selectedTruckForDefault ? (
               <p className="mt-2 text-[11px] font-medium text-slate-500">Default sopir truck saat ini: {getDriverDisplayName(selectedTruckForDefault.defaultDriver) || 'belum diset'}</p>
             ) : null}
-            {canSetTruckDefaultDriver ? (
+            {!isVendorExecution && canSetTruckDefaultDriver ? (
               <div className="mt-2">
                 {defaultDriverFormOpen ? (
                   <form className="grid gap-2 rounded-md border border-sky-200 bg-sky-50 p-3" onSubmit={submitSetTruckDefaultDriver}>
@@ -1467,11 +1565,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <p className="mt-2 text-[11px] font-medium text-emerald-700">No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</p>
             ) : null}
           </div>
-          <AssignmentHistorySection containerJobId={container.id} />
+          {!isVendorExecution ? <AssignmentHistorySection containerJobId={container.id} /> : null}
           </>
           ) : null}
 
-          {activePhase === 'rpuj' ? (
+          {activePhase === 'rpuj' && !isVendorExecution ? (
           <div className="form-section">
             <h3>Komisi Sopir & SPK</h3>
             <div className="mb-4">
@@ -1775,7 +1873,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                     {activeStatusOption.label}
                   </span>
                   <small className="text-[11px] font-semibold leading-snug text-slate-500">{activeStatusOption.description}</small>
-                  {!hasCompleteAssignment ? (
+                  {!isVendorExecution && !hasCompleteAssignment ? (
                     <small className="text-[11px] font-semibold leading-snug text-amber-700">
                       Truck dan driver wajib lengkap sebelum perjalanan berjalan.
                     </small>
@@ -1824,6 +1922,35 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <button className="primary-button" type="button" autoFocus onClick={() => setNotification(null)}>
                 Mengerti
               </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+
+      {executionSourceConfirmation ? (
+        <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setExecutionSourceConfirmation(null)}>
+          <section
+            className="feedback-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="execution-source-confirmation-title"
+            aria-describedby="execution-source-confirmation-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span><AlertTriangle size={21} /></span>
+              <div>
+                <h2 id="execution-source-confirmation-title">Ubah menjadi ritasi Vendor?</h2>
+                <p id="execution-source-confirmation-description">
+                  {executionSourceConfirmation.hasUjTransaction
+                    ? 'Ritasi ini sudah memiliki data UJ atau transaksi biaya. Assignment truck dan sopir akan dikosongkan, tetapi perubahan masih dapat ditolak backend jika transaksi sudah terkunci.'
+                    : 'Assignment truck dan sopir yang sudah dipilih akan dikosongkan dari ritasi ini.'}
+                </p>
+              </div>
+            </header>
+            <footer>
+              <button className="secondary-button" type="button" autoFocus onClick={() => setExecutionSourceConfirmation(null)}>Batal</button>
+              <button className="primary-button" type="button" onClick={() => applyExecutionSource('vendor')}>Ya, gunakan Vendor</button>
             </footer>
           </section>
         </div>

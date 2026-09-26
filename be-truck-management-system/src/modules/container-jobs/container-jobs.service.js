@@ -825,6 +825,15 @@ export async function saveContainerJob(id, payload, actor) {
   }
   const normalizedPayload = { ...payload };
   if (
+    Object.prototype.hasOwnProperty.call(normalizedPayload, 'executionSource')
+    && !['internal', 'vendor'].includes(normalizedPayload.executionSource)
+  ) {
+    const error = new Error('Sumber pelaksanaan Container Job tidak valid.');
+    error.statusCode = 400;
+    error.code = 'CONTAINER_JOB_EXECUTION_SOURCE_INVALID';
+    throw error;
+  }
+  if (
     Object.prototype.hasOwnProperty.call(payload, 'tilaGatepassDocument')
     || Object.prototype.hasOwnProperty.call(payload, 'unloadingVoucher')
     || Object.prototype.hasOwnProperty.call(payload, 'weighingDocument')
@@ -841,6 +850,15 @@ export async function saveContainerJob(id, payload, actor) {
   }
 
   const currentJob = await getContainerJob(id);
+  const nextExecutionSource = normalizedPayload.executionSource || currentJob.executionSource || 'internal';
+  const isVendorExecution = nextExecutionSource === 'vendor';
+  if (isVendorExecution) {
+    normalizedPayload.executionSource = 'vendor';
+    normalizedPayload.driverId = null;
+    normalizedPayload.driver = '';
+    normalizedPayload.vehicleId = null;
+    normalizedPayload.plateNumber = '';
+  }
   ensureAdminCorrectionContract(actor, normalizedPayload);
   ensureBackdateReasonRequired(normalizedPayload, currentJob);
   const documentOnlyUpdate = isDocumentOnlyActor(actor);
@@ -868,8 +886,10 @@ export async function saveContainerJob(id, payload, actor) {
     ensureOperationalCanEditContainerNumber(actor, currentJob, payloadForUpdate);
     ensureOperationalCanInputOtherCost(actor, currentJob, payloadForUpdate);
     ensureOperationalCanInputDriverCommission(actor, currentJob, payloadForUpdate);
-    ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
-    ensureAssignmentChangeReasonRequired(actor, currentJob, payloadForUpdate);
+    if (!isVendorExecution) {
+      ensureOperationalCanEditAssignment(actor, currentJob, payloadForUpdate);
+      ensureAssignmentChangeReasonRequired(actor, currentJob, payloadForUpdate);
+    }
     ensureOperationalCanEditCompletedTimeline(actor, currentJob, payloadForUpdate);
   }
   ensureOperationalCanEditDocuments(actor, currentJob, payloadForUpdate);

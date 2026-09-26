@@ -137,6 +137,8 @@ function fallbackLineItems(row) {
 
 export function mapContainerJob(row, attachments = []) {
   const assignment = row.assignment_snapshot || {};
+  const executionSource = row.execution_source === 'vendor' ? 'vendor' : 'internal';
+  const isVendorExecution = executionSource === 'vendor';
   const attachmentMap = attachments.reduce((map, attachment) => {
     map[attachment.category] = attachment;
     return map;
@@ -174,11 +176,12 @@ export function mapContainerJob(row, attachments = []) {
     size: row.container_size,
     type: row.container_type,
     notes: row.container_notes,
+    executionSource,
     destination: row.destination || '',
     driverId: row.driver_id,
     vehicleId: row.vehicle_id,
-    driver: assignment.driver || null,
-    plateNumber: assignment.plateNumber || null,
+    driver: isVendorExecution ? 'VENDOR' : assignment.driver || null,
+    plateNumber: isVendorExecution ? 'VENDOR' : assignment.plateNumber || null,
     chassis: assignment.vehicleDetail || null,
     rpujStatus: row.rpuj_status,
     rpujNotes: row.rpuj_notes,
@@ -462,6 +465,7 @@ export function toContainerJobDb(container, order, actorName = 'Operational') {
     : false;
   return {
     sales_order_id: order.id,
+    execution_source: container.executionSource === 'vendor' ? 'vendor' : 'internal',
     container_number: String(container.containerNumber || '').trim().toUpperCase() || null,
     container_size: normalizeContainerSize(container.size || container.containerSize),
     // Snapshot yang HANYA diisi sekali saat container ini dibuat (baris rincian bisa override,

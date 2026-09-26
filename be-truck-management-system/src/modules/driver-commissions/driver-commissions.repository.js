@@ -54,6 +54,13 @@ function mapBatchRow(row = {}) {
     rejectionNote: row.rejection_note || '',
     totalItems: toNumber(row.total_items),
     totalAmount: toNumber(row.total_amount),
+    revisionCount: toNumber(row.revision_count),
+    lastRevisedAt: row.last_revised_at,
+    lastRevisedByName: row.last_revised_by_name || '',
+    lastRevisionReason: row.last_revision_reason || '',
+    lastRevisionJobId: row.last_revision_job_id || null,
+    lastRevisionPreviousDriverName: row.last_revision_previous_driver_name || '',
+    lastRevisionNextDriverName: row.last_revision_next_driver_name || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

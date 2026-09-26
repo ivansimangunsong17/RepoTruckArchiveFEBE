@@ -224,6 +224,51 @@ describe('TodayTruckDashboard', () => {
     expect(reportText).not.toContain('32 TOTAL RITASI');
   });
 
+  it('menampilkan total SO campuran dan membedakan unit sendiri dengan vendor', async () => {
+    const user = userEvent.setup();
+    fetchDashboardReport.mockResolvedValue({
+      trucks: [],
+      activeJobs: [],
+      progressJobs: [
+        ...Array.from({ length: 3 }, (_, index) => ({
+          id: `internal-${index}`,
+          orderId: 'order-campuran',
+          soNumber: 'SO-CAMPURAN',
+          executionSource: 'internal',
+          status: index === 0 ? 'completed' : 'running',
+          shipment: 'export',
+          customer: 'PT Contoh',
+          destination: 'Cikarang',
+          driver: `Driver ${index + 1}`,
+          plateNumber: `B 100${index} TEST`,
+          size: '20FT',
+        })),
+        ...Array.from({ length: 2 }, (_, index) => ({
+          id: `vendor-${index}`,
+          orderId: 'order-campuran',
+          soNumber: 'SO-CAMPURAN',
+          executionSource: 'vendor',
+          status: index === 0 ? 'running' : 'received',
+          shipment: 'export',
+          customer: 'PT Contoh',
+          destination: 'Cikarang',
+          driver: 'VENDOR',
+          plateNumber: 'VENDOR',
+          size: '20FT',
+        })),
+      ],
+    });
+
+    render(<TodayTruckDashboard />);
+    await screen.findByText(/Last Update/i);
+    await user.click(screen.getByRole('button', { name: /download report/i }));
+
+    const reportText = canvasFillTextCalls.join('\n');
+    expect(reportText).toContain('5 TOTAL RITASI');
+    expect(reportText).toContain('PELAKSANAAN: 3 UNIT SENDIRI | 2 VENDOR');
+    expect(reportText).toContain('VENDOR - SEDANG JALAN');
+  });
+
   it('menampilkan hanya size chassis di dashboard', async () => {
     const user = userEvent.setup();
     render(<TodayTruckDashboard />);

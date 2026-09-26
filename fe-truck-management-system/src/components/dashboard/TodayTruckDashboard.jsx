@@ -258,6 +258,8 @@ function buildProgressReportSections(rows = [], reportDate) {
     const completedItems = items.filter((item) => item.job?.status === 'completed');
     const runningItems = items.filter((item) => ['running', 'repo_stored', 'inap'].includes(item.job?.status));
     const waitingItems = items.filter((item) => !['completed', 'running', 'repo_stored', 'inap'].includes(item.job?.status));
+    const vendorItems = items.filter((item) => item.job?.executionSource === 'vendor');
+    const internalItems = items.filter((item) => item.job?.executionSource !== 'vendor');
     const actionableItems = items.filter((item) => item.job?.status !== 'completed');
     const assignedItems = actionableItems.filter((item) => reportDriverPlateLabel(item) !== '-');
     const unassignedItems = actionableItems.filter((item) => reportDriverPlateLabel(item) === '-');
@@ -283,6 +285,7 @@ function buildProgressReportSections(rows = [], reportDate) {
         { label: 'BELUM JALAN', value: waitingItems.length, color: '#334155' },
         { label: 'TOTAL RITASI', value: items.length, color: '#0f172a' },
       ],
+      summary: `PELAKSANAAN: ${internalItems.length} UNIT SENDIRI | ${vendorItems.length} VENDOR`,
       numbered: true,
       lines: assignedItems.map((item) => `${reportDriverPlateLabel(item)} - ${normalizeReportStatus(item.job?.status)}`),
       footer: unassignedItems.length ? `BELUM JALAN: ${unassignedItems.length} RITASI` : '',
