@@ -32,7 +32,13 @@ export async function setFleetVehicleChassis(vehicleId, payload = {}) {
   }
   const reason = String(payload.reason || '').trim();
   const note = String(payload.note || '').trim();
-  const { before, after } = await updateVehicleChassis(vehicleId, chassisId);
+  const { before, after } = await updateVehicleChassis(vehicleId, chassisId, {
+    source: 'fleet_assignment',
+    reason,
+    note,
+    actorName: payload.actorName || '',
+    actorRole: payload.actorRole || '',
+  });
   return { before, after, reason, note };
 }
 

@@ -132,8 +132,9 @@ export async function recordVehicleAssignmentHistory({
   note = null,
   actorName = null,
   actorRole = null,
-}) {
-  await query(
+}, client = null) {
+  const execute = client ? client.query.bind(client) : query;
+  await execute(
     `
       insert into vehicle_assignment_history (
         vehicle_id, change_type, source,

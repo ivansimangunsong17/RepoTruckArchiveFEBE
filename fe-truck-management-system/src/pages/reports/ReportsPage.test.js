@@ -569,6 +569,72 @@ describe('buildTruckDayUtilizationSummary', () => {
   });
 });
 
+describe('buildMonthlyUtilizationPivot historical chassis', () => {
+  const trips = [
+    { id: 'j21', vehicleId: 't1', plateNumber: 'B 9103 BEL', chassisSize: '20FT', completedAt: '2026-09-21T16:59:59Z', status: 'completed', customer: 'PT A' },
+    { id: 'j22', vehicleId: 't1', plateNumber: 'B 9103 BEL', chassisSize: '40FT', completedAt: '2026-09-21T17:00:00Z', status: 'completed', customer: 'PT A' },
+  ];
+  const truck = { id: 't1', plateNumber: 'B 9103 BEL', capacity: '40FT', status: 'Aktif' };
+  it.each([{ masters: [] }, { masters: [truck] }, { masters: [{ ...truck, capacity: '' }] }])('groups from historical size with masters $masters', ({ masters }) => {
+    const pivot = buildMonthlyUtilizationPivot(masters, trips, 9, 2026);
+    expect(pivot.rows.map(row => [row.size, row.totalTrips])).toEqual([['20FT', 1], ['40FT', 1]]);
+    expect(pivot.totalsByDay['2026-09-21']).toBe(1);
+    expect(pivot.totalsByDay['2026-09-22']).toBe(1);
+    expect(pivot.grandTotal).toBe(2);
+  });
+
+  it('keeps one unit and unchanged target/percentage across split configurations and duplicate jobs', () => {
+    const summary = buildTruckDayUtilizationSummary([truck, truck], [...trips, trips[0]], 9, 2026, new Date('2026-10-01T08:00:00Z'));
+    expect(summary).toMatchObject({ totalTrips: 2, activeTruckCount: 1, potentialTruckDays: 30, realizedTruckDays: 2 });
+    const unsplit = buildTruckDayUtilizationSummary([truck], trips.map(row => ({ ...row, chassisSize: '40FT' })), 9, 2026, new Date('2026-10-01T08:00:00Z'));
+    expect(summary.utilizationPercent).toBe(unsplit.utilizationPercent);
+    expect(buildMonthlyUtilizationPivot([truck], [...trips, trips[0]], 9, 2026).grandTotal).toBe(2);
+  });
+
+  it('customer pivot shows two configurations but one unit', () => {
+    const pivot = buildMonthlyCustomerTruckPivot([...trips, trips[0]], 9, 2026, {}, [truck]);
+    expect(pivot.customers[0].unitCount).toBe(1);
+    expect(pivot.customers[0].rows.map(row => [row.size, row.totalTrips])).toEqual([['20FT', 1], ['40FT', 1]]);
+    expect(pivot.grandTotal).toBe(2);
+  });
+
+  it('does not infer chassis from container or current master after a detach', () => {
+    const rows = [{ ...trips[0], chassisSize: '', chassisSource: 'history_before', size: '20FT' }];
+    const pivot = buildMonthlyUtilizationPivot([truck], rows, 9, 2026);
+    expect(pivot.rows).toHaveLength(1);
+    expect(pivot.rows[0].size).toBe('');
+    expect(buildMonthlyCustomerTruckPivot(rows, 9, 2026).customers[0].rows[0].size).toBe('');
+  });
+
+  it('manual correction does not reclassify trips outside its effective period', () => {
+    const correction = { sourceChassisSize: '20FT', targetChassisSize: '40FT', effectiveFrom: '2026-09-22', effectiveTo: '2026-09-23' };
+    const rows = [trips[0], { ...trips[1], utilizationChassisCorrection: correction },
+      { ...trips[0], id: 'j24', completedAt: '2026-09-24T08:00:00+07:00' }];
+    const pivot = buildMonthlyUtilizationPivot([truck], rows, 9, 2026);
+    expect(pivot.rows.map(row => [row.size, row.totalTrips])).toEqual([['20FT', 2], ['40FT', 1]]);
+    expect(pivot.rows[0].cells['2026-09-24'].count).toBe(1);
+    expect(pivot.rows[0].cells['2026-09-25'].inactive).toBe(false);
+    expect(pivot.rows[1].cells['2026-09-24'].count).toBe(0);
+  });
+
+  it('memisahkan ukuran chassis historis tanpa menggandakan unit', () => {
+    const pivot = buildMonthlyUtilizationPivot(
+      [{ id: 'truck-1', plateNumber: 'B 9103 BEL', unitCode: 'TRK-001', capacity: '40FT' }],
+      [
+        { id: 'job-before', vehicleId: 'truck-1', plateNumber: 'B 9103 BEL', chassisSize: '20FT', completedAt: '2026-09-21T04:00:00.000Z', status: 'completed' },
+        { id: 'job-after', vehicleId: 'truck-1', plateNumber: 'B 9103 BEL', chassisSize: '40FT', completedAt: '2026-09-22T04:00:00.000Z', status: 'completed' },
+      ],
+      9,
+      2026,
+      {},
+    );
+
+    expect(pivot.grandTotal).toBe(2);
+    expect(pivot.rows.map((row) => row.size)).toEqual(expect.arrayContaining(['20FT', '40FT']));
+    expect(pivot.rows.filter((row) => row.plateNumber === 'B 9103 BEL')).toHaveLength(2);
+  });
+});
+
 describe('buildRepoMonitoringRows', () => {
   it('hanya menampilkan repo_stored dan mengurutkan titipan paling lama', () => {
     const rows = buildRepoMonitoringRows([

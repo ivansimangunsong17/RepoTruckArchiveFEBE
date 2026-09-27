@@ -1,5 +1,6 @@
 import { query, withTransaction } from '../../db/client.js';
 import { getResourceConfig } from './master.mapper.js';
+import { recordVehicleAssignmentHistory } from '../operations/fleet-assignment/fleet-assignment.repository.js';
 
 function buildWhere(config, { keyword = '', filters = {} } = {}) {
   const clauses = [];
@@ -86,7 +87,8 @@ export async function findMasterRowById(resource, id) {
   return result.rows[0] ? config.toApi(result.rows[0]) : null;
 }
 
-export async function upsertMasterRow(resource, payload, id) {
+export async function upsertMasterRow(resource, payload, id, client = null) {
+  const execute = client ? client.query.bind(client) : query;
   const config = getResourceConfig(resource);
   const data = config.toDb(payload);
   const entries = Object.entries(data).filter(([, value]) => value !== undefined);
@@ -100,7 +102,7 @@ export async function upsertMasterRow(resource, payload, id) {
 
   if (id) {
     const setSql = entries.map(([key], index) => `${key} = $${index + 1}`).join(', ');
-    const result = await query(
+    const result = await execute(
       `
         update ${config.table}
         set ${setSql}, updated_at = now()
@@ -120,7 +122,7 @@ export async function upsertMasterRow(resource, payload, id) {
 
   const columns = entries.map(([key]) => key);
   const placeholders = entries.map((_, index) => `$${index + 1}`);
-  const result = await query(
+  const result = await execute(
     `
       insert into ${config.table} (${columns.join(', ')})
       values (${placeholders.join(', ')})
@@ -237,8 +239,61 @@ export async function updateVehicleDefaultDriver(vehicleId, driverId) {
 // lama) dan Assignment Armada (chassisIdentifier berupa uuid kir_chassis.id) -- satu fungsi supaya
 // validasi eligibility, exclusivity (lepas dari truck lain), dan sinkronisasi kir_chassis_number
 // lama cuma ada di SATU tempat, tidak dobel logic di dua modul.
-export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
-  return withTransaction(async (client) => {
+async function recordChassisHistory(client, {
+  vehicleId,
+  source,
+  previousChassisId = null,
+  previousChassisCode = null,
+  nextChassisId = null,
+  nextChassisCode = null,
+  reason = null,
+  note = null,
+  actorName = null,
+  actorRole = null,
+}) {
+  if ((previousChassisId || null) === (nextChassisId || null)) return;
+  await client.query(
+    `
+      insert into vehicle_assignment_history (
+        vehicle_id, change_type, source,
+        previous_chassis_id, previous_chassis_code, next_chassis_id, next_chassis_code,
+        reason, note, changed_by_name, changed_by_role
+      ) values ($1, 'chassis', $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `,
+    [
+      vehicleId,
+      source || 'master_truck',
+      previousChassisId || null,
+      previousChassisCode || null,
+      nextChassisId || null,
+      nextChassisCode || null,
+      reason || null,
+      note || null,
+      actorName || null,
+      actorRole || null,
+    ],
+  );
+}
+
+export async function updateVehicleChassis(vehicleId, chassisIdentifier, context = {}, transactionClient = null) {
+  const { source = 'fleet_assignment', reason = null, note = null, actorName = null, actorRole = null } = context;
+  const update = async (client) => {
+    const recordChange = async (before, after, changeReason = reason) => {
+      if ((before.current_chassis_id || null) === (after.current_chassis_id || null)) return;
+      await recordVehicleAssignmentHistory({
+        vehicleId: before.id,
+        changeType: 'chassis',
+        source,
+        previousChassisId: before.current_chassis_id || null,
+        previousChassisCode: before.current_chassis_code || before.kir_chassis_number || null,
+        nextChassisId: after.current_chassis_id || null,
+        nextChassisCode: after.current_chassis_code || null,
+        reason: changeReason,
+        note,
+        actorName,
+        actorRole,
+      }, client);
+    };
     const vehicleResult = await client.query(
       'select * from vehicles where id = $1 and archived_at is null for update',
       [vehicleId],
@@ -271,6 +326,7 @@ export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
         `,
         [vehicleId],
       );
+      await recordChange(vehicle, cleared.rows[0]);
       return {
         before: getResourceConfig('trucks').toApi(vehicle),
         after: getResourceConfig('trucks').toApi(cleared.rows[0]),
@@ -288,6 +344,7 @@ export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
             or lower(coalesce(plate_number, '')) = lower($1)
           )
         limit 1
+        for update
       `,
       [identifier],
     );
@@ -311,6 +368,15 @@ export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
     // Satu chassis cuma boleh terpasang di satu unit -- lepas dari unit lain yang masih
     // memegangnya (termasuk kir_chassis_number lama-nya) supaya tidak ada dua unit yang sama-sama
     // menganggap chassis ini terpasang.
+    const detachedVehicles = await client.query(
+      `
+        select id, current_chassis_id, current_chassis_code, kir_chassis_number
+        from vehicles
+        where current_chassis_id = $1 and id <> $2
+        for update
+      `,
+      [chassis.id, vehicleId],
+    );
     await client.query(
       `
         update vehicles
@@ -336,11 +402,17 @@ export async function updateVehicleChassis(vehicleId, chassisIdentifier) {
       [vehicleId, chassis.id, chassis.chassis_code],
     );
 
+    for (const detached of detachedVehicles.rows) {
+      await recordChange(detached, {}, reason || 'Chassis dipindahkan ke unit lain');
+    }
+    await recordChange(vehicle, updated.rows[0]);
+
     return {
       before: getResourceConfig('trucks').toApi(vehicle),
       after: getResourceConfig('trucks').toApi(updated.rows[0]),
     };
-  });
+  };
+  return transactionClient ? update(transactionClient) : withTransaction(update);
 }
 
 // Diagnostik saja -- vehicles.container_size adalah field legacy yang tidak lagi jadi sumber utama

@@ -484,11 +484,27 @@ async function findDriver(client, form) {
 
 async function findVehicle(client, form) {
   if (form.vehicleId) {
-    const result = await client.query('select * from vehicles where id = $1 and archived_at is null', [form.vehicleId]);
+    const result = await client.query(
+      `
+        select v.*, kc.id as chassis_id, kc.chassis_code, kc.container_size as chassis_size
+        from vehicles v
+        left join kir_chassis kc on kc.id = v.current_chassis_id
+        where v.id = $1 and v.archived_at is null
+      `,
+      [form.vehicleId],
+    );
     return result.rows[0] || null;
   }
   if (!form.plateNumber) return null;
-  const result = await client.query('select * from vehicles where plate_number = $1 and archived_at is null', [form.plateNumber]);
+  const result = await client.query(
+    `
+      select v.*, kc.id as chassis_id, kc.chassis_code, kc.container_size as chassis_size
+      from vehicles v
+      left join kir_chassis kc on kc.id = v.current_chassis_id
+      where v.plate_number = $1 and v.archived_at is null
+    `,
+    [form.plateNumber],
+  );
   return result.rows[0] || null;
 }
 
@@ -2831,6 +2847,7 @@ async function updateContainerJobTransaction(id, form) {
       nextAssignmentForm,
       driverIdentityChanging ? driver : null,
       vehicleIdentityChanging ? vehicle : null,
+      vehicleIdentityChanging ? {} : existingAssignment,
     );
     const shouldCaptureCommissionDriver = ['running', 'completed'].includes(nextStatus)
       && (commissionValuesChanged || nextStatus !== currentJob.status)

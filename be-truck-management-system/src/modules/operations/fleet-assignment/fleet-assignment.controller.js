@@ -65,20 +65,10 @@ export async function updateFleetDefaultDriverController(request, response) {
 }
 
 export async function updateFleetChassisController(request, response) {
-  const { before, after, reason, note } = await setFleetVehicleChassis(request.params.vehicleId, request.body);
   const actorName = request.user?.name || '';
   const actorRole = request.user?.role || '';
-
-  await safeRecordVehicleAssignmentHistory({
-    vehicleId: after.id,
-    changeType: 'chassis',
-    source: 'fleet_assignment',
-    previousChassisId: before.currentChassisId,
-    previousChassisCode: before.currentChassisCode,
-    nextChassisId: after.currentChassisId,
-    nextChassisCode: after.currentChassisCode,
-    reason,
-    note,
+  const { before, after, reason, note } = await setFleetVehicleChassis(request.params.vehicleId, {
+    ...request.body,
     actorName,
     actorRole,
   });
