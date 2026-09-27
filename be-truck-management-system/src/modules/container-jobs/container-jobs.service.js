@@ -9,6 +9,8 @@ import {
   findContainerJobExpensesByJobId,
   findContainerJobsPage,
   moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord,
+  pickupComboRepoContainerJobs,
+  pickupSingleRepoContainerJob,
   requestContainerJobCancellation as requestContainerJobCancellationRepository,
   resetContainerJobAssignment,
   reviewContainerJobCancellation as reviewContainerJobCancellationRepository,
@@ -894,6 +896,28 @@ export async function saveContainerJob(id, payload, actor) {
     actorRole: actor?.role || '',
     documentOnlyUpdate,
   });
+}
+
+function normalizeRepoPickupPayload(payload = {}, actor) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    const error = new Error('Payload pickup container titip harus berupa object.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  return {
+    ...payload,
+    updatedBy: payload.updatedBy || getActorName(actor),
+  };
+}
+
+export function pickupRepoContainerJob(id, payload = {}, actor) {
+  return pickupSingleRepoContainerJob(id, normalizeRepoPickupPayload(payload, actor));
+}
+
+export function pickupComboRepoContainerJob(payload = {}, actor) {
+  const normalizedPayload = normalizeRepoPickupPayload(payload, actor);
+  return pickupComboRepoContainerJobs(normalizedPayload);
 }
 
 export function createContainerJobSpk(id, payload = {}) {

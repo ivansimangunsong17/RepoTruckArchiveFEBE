@@ -254,15 +254,18 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
     const customerKey = normalizeCustomerName(row).toLowerCase();
     const salesKey = normalizeSalesName(row).toLowerCase();
     const isInternal = (row.execution_source || row.executionSource || 'internal') !== 'vendor';
+    const pickupType = row.pickup_type || row.pickupType || '';
+    const pickupSequence = Number(row.pickup_sequence_no ?? row.pickupSequenceNo ?? 1);
+    const countsAsInternalTrip = isInternal && !(pickupType === 'combo_2x20' && pickupSequence > 1);
     const truckKey = isInternal ? getComparisonTruckKey(row) : '';
     const dateKey = isInternal ? getComparisonDateKey(row) : '';
 
     month.totalRevenue += revenue;
-    if (isInternal) month.totalTrips += 1;
+    if (countsAsInternalTrip) month.totalTrips += 1;
     month.totalVolume += 1;
     if (customerKey) month.customerKeys.add(customerKey);
     if (salesKey) month.salesKeys.add(salesKey);
-    if (truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
+    if (countsAsInternalTrip && truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
   });
 
   repoRows.forEach((row) => {
@@ -1283,6 +1286,8 @@ export async function getMonthlyComparisonReport(options = {}) {
             ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
             cj.completed_at,
             cj.vehicle_id,
+            cpm.pickup_type,
+            cpi.sequence_no as pickup_sequence_no,
             coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number) as plate_number,
             coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code) as unit_code,
             greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
@@ -1298,6 +1303,8 @@ export async function getMonthlyComparisonReport(options = {}) {
             )
           left join vehicles v on v.id = cj.vehicle_id
           left join order_job_totals ojt on ojt.sales_order_id = so.id
+          left join container_pickup_items cpi on cpi.container_job_id = cj.id
+          left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
           where so.status <> 'cancelled'
             and cj.status = 'completed'
             ${completedSourceWhereSql}

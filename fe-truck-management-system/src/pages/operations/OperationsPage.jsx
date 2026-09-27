@@ -37,6 +37,8 @@ import {
   fetchContainerJob,
   fetchContainerJobsPage,
   generateContainerJobSpk,
+  pickupComboRepoContainerJobs,
+  pickupRepoContainerJob,
   resetContainerJobAssignment,
 } from '../../services/archive/containerJobService';
 
@@ -454,6 +456,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     repoEirDocument: null,
   });
   const [repoSaving, setRepoSaving] = useState(false);
+  const [repoComboSelection, setRepoComboSelection] = useState([]);
   const [inapTarget, setInapTarget] = useState(null);
   const [inapForm, setInapForm] = useState({ inapReason: '', inapNotes: '' });
   const [inapSaving, setInapSaving] = useState(false);
@@ -607,6 +610,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     (archive.isDatabaseMode ? pendingDatabaseJobs : flattenPendingCancelJobs(archive.orders || []))
       .filter((job) => job && job.cancelRequestStatus === 'submitted')
   ), [archive.isDatabaseMode, archive.orders, pendingDatabaseJobs]);
+  const selectedRepoComboJobs = useMemo(() => {
+    const selected = new Set(repoComboSelection);
+    return visibleJobs.filter((job) => selected.has(job.id));
+  }, [repoComboSelection, visibleJobs]);
 
   useEffect(() => {
     setPage(1);
@@ -718,7 +725,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
 
     const containerNumber = form.containerNumber || containerLabel(editing);
     const actorName = user?.fullName || user?.name || 'Operational';
-    const payload = editing.repoPickupMode
+    const payload = editing.repoPickupMode || editing.repoComboPickupMode
       ? {
           ...form,
           status: 'running',
@@ -729,21 +736,34 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
         }
       : form;
     try {
-      const saved = await archive.updateJob(editing.id, payload);
+      const saved = editing.repoComboPickupMode
+        ? await pickupComboRepoContainerJobs({
+            ...payload,
+            containerJobIds: editing.repoComboPickupIds,
+          })
+        : editing.repoPickupMode
+          ? await pickupRepoContainerJob(editing.id, payload)
+          : await archive.updateJob(editing.id, payload);
       if (archive.isDatabaseMode) {
-        if (saved) {
+        const updatedRows = Array.isArray(saved?.jobs) ? saved.jobs : null;
+        if (updatedRows?.length) {
+          setDatabaseJobs((current) => current.map((job) => updatedRows.find((item) => item.id === job.id) || job));
+        } else if (saved) {
           setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
         }
         setListVersion((value) => value + 1);
         archive.refresh?.();
       }
       setEditing(null);
+      setRepoComboSelection([]);
       const updateWarning = Array.isArray(saved?.updateWarnings) ? saved.updateWarnings[0] : null;
       notify({
         title: updateWarning
           ? 'Proses Operational diperbarui dengan catatan'
-          : editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
-        message: editing.repoPickupMode
+          : editing.repoComboPickupMode ? 'Combo container diambil dari Repo' : editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
+        message: editing.repoComboPickupMode
+          ? `${editing.repoComboPickupIds?.length || 2} container berhasil diambil dari Repo dengan 1 truck 40FT.`
+          : editing.repoPickupMode
           ? `${containerNumber} berhasil diambil dari Repo dan lanjut Sedang Jalan dengan assignment perjalanan.`
           : updateWarning?.message || `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
@@ -911,6 +931,44 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       runningAt: '',
       completedAt: '',
       repoPickupMode: true,
+    });
+    setDetail(null);
+  }
+
+  function toggleRepoComboSelection(job) {
+    if (!isRepoStoredJob(job) || String(job.size || '').toUpperCase().replace(/\s/g, '') !== '20FT') return;
+    setRepoComboSelection((current) => {
+      if (current.includes(job.id)) return current.filter((id) => id !== job.id);
+      return [...current, job.id].slice(-2);
+    });
+  }
+
+  function openRepoComboPickup() {
+    if (selectedRepoComboJobs.length !== 2) {
+      notify({ type: 'error', title: 'Pilih 2 container', message: 'Combo pickup membutuhkan tepat 2 container titip 20FT.' });
+      return;
+    }
+    const [first, second] = selectedRepoComboJobs;
+    const firstLocation = String(first.repoLocation || '').trim().toLowerCase();
+    const secondLocation = String(second.repoLocation || '').trim().toLowerCase();
+    if (firstLocation && secondLocation && firstLocation !== secondLocation) {
+      notify({ type: 'error', title: 'Depo berbeda', message: 'Combo pickup hanya bisa dari lokasi titip yang sama.' });
+      return;
+    }
+    setEditing({
+      ...first,
+      status: 'received',
+      plateNumber: '',
+      driver: '',
+      driverId: null,
+      vehicleId: null,
+      chassis: '',
+      runningAt: '',
+      completedAt: '',
+      repoPickupMode: true,
+      repoComboPickupMode: true,
+      repoComboPickupIds: selectedRepoComboJobs.map((job) => job.id),
+      repoComboContainers: selectedRepoComboJobs.map((job) => job.containerNumber || containerLabel(job)),
     });
     setDetail(null);
   }
@@ -1200,6 +1258,19 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           ) : null}
         </div> : null}
 
+        {canEdit && repoComboSelection.length ? (
+          <div className="repo-combo-toolbar">
+            <div>
+              <strong>{repoComboSelection.length}/2 container 20FT dipilih</strong>
+              <span>{selectedRepoComboJobs.map((job) => job.containerNumber || containerLabel(job)).join(' + ')}</span>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => setRepoComboSelection([])}>Batal</button>
+            <button className="operational-primary-action repo" type="button" disabled={repoComboSelection.length !== 2} onClick={openRepoComboPickup}>
+              <Truck size={15} /> Combo 2x20
+            </button>
+          </div>
+        ) : null}
+
         <div className="operational-so-list">
           {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat Container Job...</p></div> : null}
           {!loading && error ? (
@@ -1254,10 +1325,22 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   const repoSummary = isRepoStoredJob(job) ? repoStorageSummary(job) : null;
                   const actionHint = nextActionHint(job, documents, rpuj, { documentFollowUp, repoSummary });
                   const historicalLocked = isHistoricalJob(job) && !canManageHistoricalEntry;
+                  const canSelectRepoCombo = canEdit && !historicalLocked && isRepoStoredJob(job) && String(job.size || '').toUpperCase().replace(/\s/g, '') === '20FT';
+                  const repoComboChecked = repoComboSelection.includes(job.id);
                   return (
                     <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''}`} key={job.id}>
                       <div className="container-row-main">
                         <div className="container-row-title">
+                          {canSelectRepoCombo ? (
+                            <label className="repo-combo-check" title="Pilih untuk combo pickup 2x20">
+                              <input
+                                type="checkbox"
+                                checked={repoComboChecked}
+                                onChange={() => toggleRepoComboSelection(job)}
+                              />
+                              <span>Combo</span>
+                            </label>
+                          ) : null}
                           <span className="container-sequence" title={`Container ${jobIndex + 1} dari ${group.jobs.length}`}>#{jobIndex + 1}</span>
                           <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
                         </div>

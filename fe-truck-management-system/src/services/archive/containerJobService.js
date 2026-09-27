@@ -294,6 +294,14 @@ export function resetContainerJobAssignment(id, payload = {}) {
   return httpClient.patch(`/container-jobs/${id}/reset-assignment`, payload);
 }
 
+export function pickupRepoContainerJob(id, payload = {}) {
+  return httpClient.post(`/container-jobs/repo-pickups/single/${id}`, payload);
+}
+
+export function pickupComboRepoContainerJobs(payload = {}) {
+  return httpClient.post('/container-jobs/repo-pickups/combo-2x20', payload);
+}
+
 export function requestContainerJobCancellation(id, payload = {}) {
   return httpClient.patch(`/container-jobs/${id}/cancel-request`, payload);
 }

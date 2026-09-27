@@ -12,6 +12,8 @@ import {
   listContainerJobExpenses,
   listContainerJobs,
   moveDroppingExpenseToAnotherJobBeforeFinanceCheck,
+  pickupComboRepoContainerJob,
+  pickupRepoContainerJob,
   requestContainerJobCancellation,
   resetMisassignedContainerJob,
   reviewContainerJobCancellation,
@@ -568,6 +570,51 @@ export async function updateContainerJobController(request, response) {
     });
   }
   sendSuccess(response, saved, 'Container Job berhasil diperbarui.');
+}
+
+export async function pickupRepoContainerJobController(request, response) {
+  const result = await pickupRepoContainerJob(request.params.id, request.body || {}, request.user);
+  const job = result.jobs?.[0] || null;
+  if (job) {
+    await safeRecordActivityLog(request, {
+      action: 'PICKUP_CONTAINER_JOB_REPO',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: job.id,
+      afterData: job,
+      metadata: {
+        movementId: result.movement?.id,
+        pickupType: result.movement?.pickup_type || 'single',
+        salesOrderId: job.orderId,
+        soNumber: job.soNumber,
+        containerNumber: job.containerNumber,
+      },
+    });
+  }
+  return sendSuccess(response, result);
+}
+
+export async function pickupComboRepoContainerJobController(request, response) {
+  const result = await pickupComboRepoContainerJob(request.body || {}, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'PICKUP_CONTAINER_JOB_REPO_COMBO',
+    module: 'container_jobs',
+    entityType: 'container_pickup_movement',
+    entityId: result.movement?.id,
+    afterData: {
+      movement: result.movement,
+      jobs: result.jobs,
+    },
+    metadata: {
+      movementId: result.movement?.id,
+      pickupType: result.movement?.pickup_type || 'combo_2x20',
+      containerJobIds: (result.jobs || []).map((item) => item.id),
+      containerNumbers: (result.jobs || []).map((item) => item.containerNumber),
+      vehicleId: result.movement?.vehicle_id,
+      driverId: result.movement?.driver_id,
+    },
+  });
+  return sendSuccess(response, result);
 }
 
 export async function resetMisassignedContainerJobController(request, response) {
