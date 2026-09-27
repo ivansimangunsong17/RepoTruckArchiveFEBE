@@ -228,7 +228,7 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
   };
 }
 
-export function toAssignmentSnapshot(form, driver, vehicle) {
+export function toAssignmentSnapshot(form, driver, vehicle, previousAssignment = {}) {
   const vehicleDetail = form.chassis || (vehicle
     ? `${vehicle.unit_code || ''}${vehicle.brand ? ` - ${vehicle.brand}` : ''}${vehicle.vehicle_type ? ` ${vehicle.vehicle_type}` : ''}`.trim()
     : null);
@@ -242,11 +242,23 @@ export function toAssignmentSnapshot(form, driver, vehicle) {
     form.driverEmoneyNumber || driver?.emoney_number,
   ].filter(Boolean).join(' ');
 
+  // Only a new vehicle assignment captures current chassis. Legacy snapshots stay absent.
+  const chassisSnapshot = vehicle ? {
+    chassisId: vehicle.chassis_id || vehicle.current_chassis_id || null,
+    chassisCode: vehicle.chassis_code || vehicle.current_chassis_code || null,
+    chassisSize: vehicle.chassis_size || null,
+  } : Object.fromEntries(
+    ['chassisId', 'chassisCode', 'chassisSize']
+      .filter((key) => Object.prototype.hasOwnProperty.call(previousAssignment, key))
+      .map((key) => [key, previousAssignment[key]]),
+  );
+
   return {
     driver: form.driver || driver?.name || null,
     unitCode: form.unitCode || vehicle?.unit_code || null,
     plateNumber: form.plateNumber || vehicle?.plate_number || null,
     vehicleDetail,
+    ...chassisSnapshot,
     driverPaymentMethod: paymentMethod === 'emoney' ? 'emoney' : 'bank',
     driverBankAccount: paymentMethod === 'emoney' ? emoneyAccount || null : bankAccount || null,
     driverBankName: form.driverBankName || driver?.bank_name || null,

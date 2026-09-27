@@ -135,6 +135,7 @@ function normalizeTruckSize(value) {
 }
 
 function getTruckSize(row = {}) {
+  if (Object.prototype.hasOwnProperty.call(row, 'chassisSize')) return normalizeTruckSize(row.chassisSize);
   return normalizeTruckSize(
     row.capacity
     || row.chassisSize
@@ -437,14 +438,6 @@ function buildRevenueTruckRows(masterTrucks = [], revenueRows = []) {
 function toDateKey(value) {
   if (!value) return '';
 
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return [
-      value.getFullYear(),
-      String(value.getMonth() + 1).padStart(2, '0'),
-      String(value.getDate()).padStart(2, '0'),
-    ].join('-');
-  }
-
   const raw = String(value).trim();
   const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (dateOnly) return `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}`;
@@ -466,6 +459,18 @@ function toDateKey(value) {
 
 function getUtilizationDateKey(row = {}) {
   return toDateKey(row.completedDate || row.completedAt || row.tripDate || row.updatedAt);
+}
+
+function uniqueUtilizationTrips(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    if (row.status === 'cancelled' || row.executionSource === 'vendor') return false;
+    const id = row.jobId || row.id;
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 function getTripStartDateTime(row = {}) {
@@ -554,7 +559,8 @@ function createPivotCells(days, period = {}) {
   return days.reduce((cells, day) => {
     const inactive = Boolean(
       (period.activeFrom && day.key < period.activeFrom)
-      || (period.activeTo && day.key > period.activeTo),
+      || (period.activeTo && day.key > period.activeTo)
+      || (period.inactiveFrom && day.key >= period.inactiveFrom && day.key <= period.inactiveTo),
     );
     return {
       ...cells,
@@ -596,7 +602,7 @@ export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], mo
 
   const truckDayKeys = new Set();
 
-  rows.forEach((row) => {
+  uniqueUtilizationTrips(rows).forEach((row) => {
     if (String(row.status || '').trim().toLowerCase() === 'cancelled') return;
 
     const dateKey = getUtilizationDateKey(row);
@@ -634,7 +640,7 @@ export function buildTruckDayUtilizationSummary(masterTrucks = [], rows = [], mo
       return left.plateNumber.localeCompare(right.plateNumber);
     });
 
-  const activeTruckCount = activeTrucks.length;
+  const activeTruckCount = rowsByTruck.size;
   const potentialTruckDays = activeTruckCount * period.days;
   const realizedTruckDays = truckDayKeys.size;
   const totalTrips = utilizationRows.reduce((total, truck) => total + truck.totalTrips, 0);
@@ -655,10 +661,14 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
   const days = buildMonthDays(month, year, holidaysByDate);
   const dayKeys = new Set(days.map((day) => day.key));
   const trucks = new Map();
-  const normalTruckKeyByPlate = new Map();
+  const masterByPlate = new Map(masterTrucks.map((truck) => [normalizeIdentity(getTruckPlate(truck)), truck]));
+  const unitKey = (row) => normalizeIdentity(row.vehicleId || row.vehicle_id || row.truckId
+    || masterByPlate.get(normalizeIdentity(getTruckPlate(row)))?.id || getTruckPlate(row));
+  const periodRows = uniqueUtilizationTrips(rows).filter((row) => dayKeys.has(getUtilizationDateKey(row)));
+  const unitsWithTrips = new Set(periodRows.map(unitKey));
   const transitionsByPlate = new Map();
 
-  rows.forEach((row) => {
+  periodRows.forEach((row) => {
     const correction = row.utilizationChassisCorrection;
     if (!correction) return;
 
@@ -671,6 +681,7 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     transitionsByPlate.set(plateNumber, {
       id: correction.id || `${plateNumber}-${effectiveFrom}-${sourceSize}-${targetSize}`,
       plateNumber,
+      vehicleId: row.vehicleId || row.vehicle_id,
       unitCode: getTruckUnitCode(row),
       sourceSize,
       targetSize,
@@ -690,24 +701,24 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     if (!transition) return null;
     return {
       transition,
-      key: `${plateNumber}|${phase === 'after' ? transition.targetSize : transition.sourceSize}|${phase}|${transition.id}`,
+      key: `${unitKey({ plateNumber, vehicleId: transition.vehicleId })}|${phase === 'after' ? transition.targetSize : transition.sourceSize}`,
     };
   };
 
   const addTruckRow = (source, options = {}) => {
     const plateNumber = getTruckPlate(source);
     const phase = options.phase || 'normal';
-    const size = options.size || getTruckSize(source);
-    const rowKey = options.key || `${plateNumber}|${size || 'unknown'}|${phase}`;
+    const size = options.size ?? getTruckSize(source);
+    const rowKey = options.key || `${unitKey(source)}|${size || 'unknown'}`;
 
     if (trucks.has(rowKey)) return trucks.get(rowKey);
 
     const transition = options.transition || null;
     const row = {
-      id: getTruckId(source) || plateNumber,
+      id: source.vehicleId || source.vehicle_id || masterByPlate.get(normalizeIdentity(plateNumber))?.id || plateNumber,
       rowKey,
       plateNumber,
-      unitCode: getTruckUnitCode(source),
+      unitCode: getTruckUnitCode(source) || getTruckUnitCode(masterByPlate.get(normalizeIdentity(plateNumber)) || {}),
       size,
       driver: getDriverName(source),
       segmentPhase: phase,
@@ -718,24 +729,27 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
       transition,
       cells: createPivotCells(days, {
         activeFrom: options.activeFrom || '',
-        activeTo: options.activeTo || '',
+        activeTo: phase === 'before' ? '' : options.activeTo || '',
+        inactiveFrom: phase === 'before' ? transition?.newActiveFrom : '',
+        inactiveTo: phase === 'before' ? transition?.newActiveTo : '',
         transitionDate: transition?.effectiveFrom || '',
         transition,
       }),
       totalTrips: 0,
     };
     trucks.set(rowKey, row);
-    if (phase === 'normal' && !normalTruckKeyByPlate.has(plateNumber)) {
-      normalTruckKeyByPlate.set(plateNumber, rowKey);
-    }
     return row;
   };
 
   const getTruckRowForDate = (row, targetDateKey) => {
     const plateNumber = getTruckPlate(row);
     const transition = transitionsByPlate.get(plateNumber);
+    const hasHistoricalSize = Object.prototype.hasOwnProperty.call(row, 'chassisSize');
+    const size = hasHistoricalSize ? getTruckSize(row)
+      : getTruckSize(row) || getTruckSize(masterByPlate.get(normalizeIdentity(plateNumber)) || {});
 
-    if (transition) {
+    if (transition && ((targetDateKey < transition.newActiveFrom && size === transition.sourceSize)
+      || (targetDateKey >= transition.newActiveFrom && targetDateKey <= transition.newActiveTo && size === transition.targetSize))) {
       const phase = targetDateKey >= transition.newActiveFrom ? 'after' : 'before';
       const transitionRow = transitionByRowKey(plateNumber, phase);
       return trucks.get(transitionRow.key) || addTruckRow(row, {
@@ -752,8 +766,9 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
       });
     }
 
-    const existingKey = normalTruckKeyByPlate.get(plateNumber);
-    return existingKey ? trucks.get(existingKey) : addTruckRow(row);
+    const truck = addTruckRow(row, { size });
+    if (truck.transition && targetDateKey > truck.transition.newActiveTo) truck.segmentBadge = `Chassis ${size || '-'}`;
+    return truck;
   };
 
   masterTrucks.forEach((truck) => {
@@ -782,10 +797,10 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
       return;
     }
 
-    addTruckRow(truck);
+    if (!unitsWithTrips.has(unitKey(truck))) addTruckRow(truck);
   });
 
-  rows.forEach((row) => {
+  periodRows.forEach((row) => {
     const dateKey = getUtilizationDateKey(row);
     if (!dayKeys.has(dateKey)) return;
 
@@ -794,7 +809,6 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     const truck = getTruckRowForDate(row, dateKey);
 
     if (!truck.unitCode) truck.unitCode = getTruckUnitCode(row);
-    if (!truck.size) truck.size = getTruckSize(row);
     const cell = truck.cells[dateKey];
     if (cell?.inactive) cell.inactive = false;
     cell.count += 1;
@@ -822,7 +836,6 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     getConfirmedInapDateKeys(row, dayKeys).forEach((autoDateKey) => {
       const autoTruck = getTruckRowForDate(row, autoDateKey);
       if (!autoTruck.unitCode) autoTruck.unitCode = getTruckUnitCode(row);
-      if (!autoTruck.size) autoTruck.size = getTruckSize(row);
       if (row.driver) autoTruck.driver = getDriverName(row);
 
       const autoCell = autoTruck.cells[autoDateKey];
@@ -837,6 +850,13 @@ export function buildMonthlyUtilizationPivot(masterTrucks = [], rows = [], month
     if (sizeDiff !== 0) return sizeDiff;
     if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
     return left.plateNumber.localeCompare(right.plateNumber);
+  });
+
+  const configurations = new Map();
+  rowsByTruck.forEach((row) => configurations.set(row.id, (configurations.get(row.id) || 0) + 1));
+  rowsByTruck.forEach((row) => {
+    row.isDuplicateUnit = configurations.get(row.id) > 1;
+    if (row.isDuplicateUnit && !row.segmentBadge) row.segmentBadge = `Chassis ${row.size || '-'}`;
   });
 
   return {
@@ -857,7 +877,7 @@ export function buildMonthlyCustomerTruckPivot(rows = [], month, year, holidaysB
   const dayKeys = new Set(days.map((day) => day.key));
   const customers = new Map();
 
-  rows.forEach((row) => {
+  uniqueUtilizationTrips(rows).forEach((row) => {
     if (String(row.status || '').trim().toLowerCase() === 'cancelled') return;
 
     const dateKey = getUtilizationDateKey(row);
@@ -866,7 +886,8 @@ export function buildMonthlyCustomerTruckPivot(rows = [], month, year, holidaysB
     const customerName = getCustomerName(row);
     const customerKey = normalizeIdentity(row.customerId || row.customer_id || customerName) || customerName;
     const plateNumber = getTruckPlate(row);
-    const truckKey = normalizeIdentity(getTruckId(row) || plateNumber) || plateNumber;
+    const identity = normalizeIdentity(row.vehicleId || row.vehicle_id || row.truckId || plateNumber);
+    const truckKey = `${identity}|${getTruckSize(row) || 'unknown'}`;
 
     if (!customers.has(customerKey)) {
       customers.set(customerKey, {
@@ -881,7 +902,7 @@ export function buildMonthlyCustomerTruckPivot(rows = [], month, year, holidaysB
     const customer = customers.get(customerKey);
     if (!customer.rowsByTruck.has(truckKey)) {
       customer.rowsByTruck.set(truckKey, {
-        id: getTruckId(row) || plateNumber,
+        id: row.vehicleId || row.vehicle_id || row.truckId || plateNumber,
         rowKey: `${customerKey}|${truckKey}`,
         plateNumber,
         unitCode: getTruckUnitCode(row),
@@ -943,6 +964,7 @@ export function buildMonthlyCustomerTruckPivot(rows = [], month, year, holidaysB
     }),
     totalsByDay: customer.totalsByDay,
     grandTotal: customer.grandTotal,
+    unitCount: new Set(Array.from(customer.rowsByTruck.values()).map((truck) => truck.id)).size,
   })).sort((left, right) => {
     if (right.grandTotal !== left.grandTotal) return right.grandTotal - left.grandTotal;
     return left.customerName.localeCompare(right.customerName);
@@ -2453,7 +2475,7 @@ export function CustomerMonthlyUtilizationModal({
               {customers.length} Customer
             </span>
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
-              {selectedCustomer?.rows.length || 0} Unit
+              {selectedCustomer?.unitCount || 0} Unit
             </span>
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
               {selectedCustomer?.grandTotal || 0} Trip
