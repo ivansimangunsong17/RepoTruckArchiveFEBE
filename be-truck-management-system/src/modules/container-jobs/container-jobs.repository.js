@@ -554,6 +554,25 @@ function assertVehicleMatchesContainer(vehicle, containerSize) {
   }
 }
 
+export function assertVehicleCanPickupRepo(vehicle, jobs = [], pickupType = 'single') {
+  if (!vehicle) return;
+  const vehicleSize = normalizeContainerSize(vehicle.chassis_size || vehicle.container_size);
+  const jobSizes = jobs.map((job) => normalizeContainerSize(job.container_size));
+  if (pickupType === 'combo_2x20') {
+    if (vehicleSize !== '40FT' && vehicleSize !== 'COMBO') {
+      throw validationError('Pickup combo 2x20 wajib memakai truck/chassis 40FT.', 'REPO_PICKUP_COMBO_REQUIRES_40FT', 400);
+    }
+    if (jobSizes.length !== 2 || jobSizes.some((size) => size !== '20FT')) {
+      throw validationError('Pickup combo hanya berlaku untuk tepat 2 container 20FT.', 'REPO_PICKUP_COMBO_INVALID_JOBS', 400);
+    }
+    return;
+  }
+  const has40ftJob = jobSizes.includes('40FT');
+  if (has40ftJob && vehicleSize !== '40FT' && vehicleSize !== 'COMBO') {
+    throw validationError('Container 40FT wajib memakai truck/chassis 40FT.', 'REPO_PICKUP_REQUIRES_40FT', 400);
+  }
+}
+
 function assertVehicleAssignable(vehicle, existingVehicleId) {
   if (!vehicle) return;
   if (existingVehicleId && String(vehicle.id) === String(existingVehicleId)) return;
@@ -3116,6 +3135,181 @@ async function updateContainerJobTransaction(id, form) {
     if (updateWarnings.length) mapped.updateWarnings = updateWarnings;
     return mapped;
   });
+}
+
+async function findLockedRepoPickupJobs(client, ids = []) {
+  const result = await client.query(
+    `
+      select ${joinedJobColumns}
+      from container_jobs cj
+      join sales_orders so on so.id = cj.sales_order_id
+      where cj.id = any($1::uuid[])
+      for update of cj
+    `,
+    [ids],
+  );
+  return result.rows;
+}
+
+function assertRepoPickupJobs(rows = [], ids = [], pickupType = 'single') {
+  if (rows.length !== ids.length) throw validationError('Container titip tidak ditemukan.', 'REPO_PICKUP_JOB_NOT_FOUND', 404);
+  rows.forEach((job) => {
+    if (job.status !== 'repo_stored') throw validationError('Hanya container dengan status titip yang bisa diambil.', 'REPO_PICKUP_STATUS_INVALID', 409);
+    if ((job.execution_source || 'internal') === 'vendor') throw validationError('Ritasi vendor tidak dapat diproses sebagai pickup internal.', 'REPO_PICKUP_VENDOR_INVALID', 409);
+    if (!normalizeOptionalText(job.container_number)) throw validationError('Nomor container wajib ada sebelum container titip diambil.', 'REPO_PICKUP_CONTAINER_REQUIRED', 400);
+  });
+  if (pickupType === 'combo_2x20') {
+    const locations = new Set(rows.map((job) => String(job.repo_location || '').trim().toLowerCase()).filter(Boolean));
+    if (locations.size > 1) throw validationError('Pickup combo hanya dapat dilakukan dari depo titip yang sama.', 'REPO_PICKUP_LOCATION_MISMATCH', 400);
+  }
+}
+
+async function ensureNoActiveRepoPickupMovement(client, ids = []) {
+  const result = await client.query(
+    `
+      select cpi.container_job_id
+      from container_pickup_items cpi
+      join container_pickup_movements cpm on cpm.id = cpi.movement_id
+      where cpi.container_job_id = any($1::uuid[])
+        and cpm.status in ('running', 'completed')
+      limit 1
+    `,
+    [ids],
+  );
+  if (result.rows[0]) throw validationError('Container ini sudah tercatat dalam pickup aktif.', 'REPO_PICKUP_ALREADY_EXISTS', 409);
+}
+
+async function insertRepoPickupMovement(client, { pickupType, jobs, driver, vehicle, assignment, actorName, runningAt }) {
+  const movementResult = await client.query(
+    `
+      insert into container_pickup_movements (
+        pickup_type, vehicle_id, driver_id, assignment_snapshot, pickup_location,
+        status, started_at, created_by_name, updated_by_name
+      )
+      values ($1, $2, $3, $4::jsonb, $5, 'running', $6::timestamptz, $7, $7)
+      returning *
+    `,
+    [pickupType, vehicle?.id || null, driver?.id || null, JSON.stringify(assignment || {}), jobs[0]?.repo_location || null, runningAt, actorName],
+  );
+  const movement = movementResult.rows[0];
+  await Promise.all(jobs.map((job, index) => client.query(
+    'insert into container_pickup_items (movement_id, container_job_id, sequence_no) values ($1, $2, $3)',
+    [movement.id, job.id, index + 1],
+  )));
+  return movement;
+}
+
+async function updateRepoPickupJob(client, { job, driver, vehicle, assignment, actorName, runningAt, movement, pickupType }) {
+  await client.query(
+    `
+      update container_jobs
+      set status = 'running',
+          driver_id = $2,
+          vehicle_id = $3,
+          assignment_snapshot = $4::jsonb,
+          running_at = coalesce(running_at, $5::timestamptz),
+          repo_picked_up_at = $5::timestamptz,
+          repo_picked_up_by_name = $6,
+          updated_by_name = $6,
+          updated_at = now()
+      where id = $1
+    `,
+    [job.id, driver?.id || null, vehicle?.id || null, JSON.stringify(assignment || {}), runningAt, actorName],
+  );
+  await client.query(
+    `
+      insert into container_job_assignment_history (
+        container_job_id, change_source,
+        previous_driver_id, previous_driver_name, next_driver_id, next_driver_name,
+        previous_vehicle_id, previous_plate_number, next_vehicle_id, next_plate_number,
+        reason, note, changed_by_name, changed_by_role
+      ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, null)
+    `,
+    [
+      job.id,
+      pickupType === 'combo_2x20' ? 'repo_combo_pickup' : 'repo_pickup',
+      job.repo_released_driver_id || null,
+      job.assignment_snapshot?.driver || null,
+      driver?.id || null,
+      assignment.driver || null,
+      job.repo_released_vehicle_id || null,
+      job.assignment_snapshot?.plateNumber || null,
+      vehicle?.id || null,
+      assignment.plateNumber || null,
+      'Pickup container titip',
+      movement?.id ? `movement:${movement.id}` : null,
+      actorName,
+    ],
+  );
+}
+
+async function mapUpdatedRepoPickupJobs(client, ids = []) {
+  const result = await client.query(
+    `
+      select ${joinedJobColumns}
+      from container_jobs cj
+      join sales_orders so on so.id = cj.sales_order_id
+      where cj.id = any($1::uuid[])
+      order by array_position($1::uuid[], cj.id)
+    `,
+    [ids],
+  );
+  return result.rows.map((row) => mapContainerJob(row, []));
+}
+
+async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'single') {
+  const uniqueIds = [...new Set(ids.map((id) => normalizeOptionalUuid(id, 'Container Job')).filter(Boolean))];
+  if (pickupType === 'single' && uniqueIds.length !== 1) throw validationError('Pickup single membutuhkan tepat 1 container job.', 'REPO_PICKUP_SINGLE_INVALID', 400);
+  if (pickupType === 'combo_2x20' && uniqueIds.length !== 2) throw validationError('Pickup combo membutuhkan tepat 2 container job.', 'REPO_PICKUP_COMBO_INVALID', 400);
+  const actorName = normalizeOptionalText(payload.updatedBy || payload.actorName) || 'Operational';
+  const runningAt = payload.runningAt || payload.repoPickedUpAt || new Date().toISOString();
+
+  return withTransaction(async (client) => {
+    const jobs = await findLockedRepoPickupJobs(client, uniqueIds);
+    const jobsById = new Map(jobs.map((job) => [String(job.id), job]));
+    const orderedJobs = uniqueIds.map((id) => jobsById.get(String(id))).filter(Boolean);
+    assertRepoPickupJobs(orderedJobs, uniqueIds, pickupType);
+    await ensureNoActiveRepoPickupMovement(client, uniqueIds);
+
+    const driver = await findDriver(client, payload);
+    const vehicle = await findVehicle(client, payload);
+    if (!driver) throw validationError('Sopir wajib dipilih untuk pickup container titip.', 'REPO_PICKUP_DRIVER_REQUIRED', 400);
+    if (!vehicle) throw validationError('Truck wajib dipilih untuk pickup container titip.', 'REPO_PICKUP_VEHICLE_REQUIRED', 400);
+    assertDriverAssignable(driver, null);
+    assertVehicleAssignable(vehicle, null);
+    assertVehicleCanPickupRepo(vehicle, orderedJobs, pickupType);
+
+    const assignment = toAssignmentSnapshot(payload, driver, vehicle, {});
+    const movement = await insertRepoPickupMovement(client, { pickupType, jobs: orderedJobs, driver, vehicle, assignment, actorName, runningAt });
+
+    for (const job of orderedJobs) {
+      await updateRepoPickupJob(client, { job, driver, vehicle, assignment, actorName, runningAt, movement, pickupType });
+      await syncResourceAssignmentStatus(client, job, { driverId: driver.id, vehicleId: vehicle.id }, 'running', 'realtime', false);
+      await refreshOrderStatus(client, job.sales_order_id);
+    }
+
+    const ujAnchorJob = pickupType === 'combo_2x20' ? { ...orderedJobs[0], container_size: '40FT' } : orderedJobs[0];
+    await syncAutoJourneyMoneyExpense(client, {
+      job: ujAnchorJob,
+      nextStatus: 'running',
+      nextEntrySource: 'realtime',
+      nextDriverId: driver.id,
+      runningAt,
+      assignment,
+      actorName,
+    });
+
+    const updatedJobs = await mapUpdatedRepoPickupJobs(client, uniqueIds);
+    return { movement, jobs: updatedJobs };
+  });
+}
+
+export function pickupSingleRepoContainerJob(id, payload = {}) {
+  return pickupRepoContainerJobs([id], payload, 'single');
+}
+
+export function pickupComboRepoContainerJobs(payload = {}) {
+  return pickupRepoContainerJobs(payload.containerJobIds || payload.jobIds || [], payload, 'combo_2x20');
 }
 
 async function ensureCanRequestCancellation(client, id) {

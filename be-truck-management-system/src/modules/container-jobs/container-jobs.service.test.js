@@ -30,6 +30,7 @@ const {
 } = await import('./container-jobs.controller.js');
 const {
   buildAutoJourneyMoneyDescription,
+  assertVehicleCanPickupRepo,
   ensureDriverCommissionIsNotPosted,
   findJourneyMoneyAmount,
   hasCompleteOperationalAssignment,
@@ -60,6 +61,38 @@ test('auto UJ menambahkan Rp100.000 untuk container Reefer', async () => {
 
   assert.equal(reefer.amount, 850000);
   assert.equal(dry.amount, 750000);
+});
+
+test('pickup container titip memperbolehkan 20FT diambil truck 40FT', () => {
+  assert.doesNotThrow(() => assertVehicleCanPickupRepo(
+    { container_size: '40FT', plate_number: 'B 9001 TEST' },
+    [{ container_size: '20FT' }],
+    'single',
+  ));
+});
+
+test('combo pickup titip hanya valid untuk dua container 20FT memakai truck 40FT', () => {
+  assert.doesNotThrow(() => assertVehicleCanPickupRepo(
+    { container_size: '40FT', plate_number: 'B 9003 TEST' },
+    [{ container_size: '20FT' }, { container_size: '20FT' }],
+    'combo_2x20',
+  ));
+  assert.throws(
+    () => assertVehicleCanPickupRepo(
+      { container_size: '20FT', plate_number: 'B 9004 TEST' },
+      [{ container_size: '20FT' }, { container_size: '20FT' }],
+      'combo_2x20',
+    ),
+    (error) => error.code === 'REPO_PICKUP_COMBO_REQUIRES_40FT',
+  );
+  assert.throws(
+    () => assertVehicleCanPickupRepo(
+      { container_size: '40FT', plate_number: 'B 9005 TEST' },
+      [{ container_size: '20FT' }, { container_size: '40FT' }],
+      'combo_2x20',
+    ),
+    (error) => error.code === 'REPO_PICKUP_COMBO_INVALID_JOBS',
+  );
 });
 
 test('posted driver commission can only be changed after void/correction', async () => {
