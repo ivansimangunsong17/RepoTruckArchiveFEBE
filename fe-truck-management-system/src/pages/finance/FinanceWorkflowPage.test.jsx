@@ -1152,6 +1152,37 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
+  it('tidak memfilter ulang hasil pagination invoice dari backend di frontend', async () => {
+    const user = userEvent.setup();
+    const invoiceRows = Array.from({ length: 20 }, (_, index) => ({
+      ...invoiceRow,
+      id: `invoice-page-${index + 1}`,
+      soNumber: `SO-PAGE-${String(index + 1).padStart(3, '0')}`,
+      invoiceStatus: index < 5 ? 'Butuh Nomor Invoice' : 'Menunggu Update Status',
+      invoiceNumber: index < 5 ? '' : `INV-PAGE-${String(index + 1).padStart(3, '0')}`,
+    }));
+    fetchFinanceInvoices.mockResolvedValue({
+      rows: invoiceRows,
+      total: 983,
+      totalPages: 50,
+      summary: { ...invoiceSummary, needNumber: 983, inProgress: 0, paid: 0 },
+    });
+
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    expect(await screen.findByText('Menampilkan 1-20 dari 983 data filter ini')).toBeInTheDocument();
+    expect(screen.getByText('SO-PAGE-001')).toBeInTheDocument();
+    expect(screen.getByText('SO-PAGE-020')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Halaman berikutnya' }));
+    await waitFor(() => {
+      expect(fetchFinanceInvoices).toHaveBeenLastCalledWith(expect.objectContaining({
+        page: 2,
+        pageSize: 20,
+      }));
+    });
+  });
+
   it('mengirim filter dokumen invoice ke backend finance', async () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);
