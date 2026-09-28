@@ -68,6 +68,7 @@ function normalizeFinanceInvoiceRow(row = {}) {
     billedJobsCount: Number(row.billedJobsCount || 0),
     sjUploadedCount: Number(row.sjUploadedCount || 0),
     sjTotalCount: Number(row.sjTotalCount || row.billedJobsCount || row.containerCount || 0),
+    inapJobsCount: Number(row.inapJobsCount || 0),
     cancelledJobsCount: Number(row.cancelledJobsCount || 0),
     repoStoredJobsCount: Number(row.repoStoredJobsCount || 0),
     cancellationNote: row.cancellationNote || '',

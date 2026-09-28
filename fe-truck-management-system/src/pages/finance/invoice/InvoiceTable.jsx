@@ -418,9 +418,10 @@ function InvoiceTable({
               const needsInvoiceDocuments = Boolean(row.invoiceNumber && !row.invoiceDocumentUploadedAt);
               const documentActionLabel = needsInvoiceDocuments && canUploadInvoiceDocument ? 'Upload Dokumen' : 'Detail Dokumen';
               const isLunas = row.billingStatus === 'lunas';
+              const inapJobsCount = Math.max(Number(row.inapJobsCount || 0), 0);
 
               return (
-                <tr className="border-t border-slate-100 align-middle hover:bg-slate-50" key={row.id}>
+                <tr className={`border-t align-middle hover:bg-slate-50 ${inapJobsCount ? 'border-amber-100 bg-amber-50/35' : 'border-slate-100'}`} key={row.id}>
                   <td className="font-black text-slate-800" data-label="No">{showingFrom + index}</td>
                   <td className="finance-invoice-so font-semibold text-slate-700" data-label="Nomor SO">{row.soNumber}</td>
                   <td className="finance-invoice-number-cell" data-label="Nomor Invoice">
@@ -467,6 +468,14 @@ function InvoiceTable({
                           title={row.destinations.join(', ')}
                         >
                           Multi-tujuan
+                        </span>
+                      ) : null}
+                      {inapJobsCount ? (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-orange-700"
+                          title={`${inapJobsCount} ritasi pada SO ini tercatat Inap`}
+                        >
+                          {inapJobsCount} Inap
                         </span>
                       ) : null}
                     </span>
