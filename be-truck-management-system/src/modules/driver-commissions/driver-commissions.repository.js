@@ -481,10 +481,10 @@ async function findEligibleRows(period, db = { query }) {
       left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
       left join container_pickup_items cpi on cpi.container_job_id = cj.id
       left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
-      where cj.status = 'completed'
+      where cj.status in ('completed', 'repo_stored')
         and coalesce(cj.execution_source, 'internal') = 'internal'
         and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
-        and cj.completed_at is not null
+        and coalesce(cj.repo_stored_at, cj.completed_at) is not null
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
         and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
@@ -563,10 +563,10 @@ async function findCommissionReviewRows(period, db = { query }) {
         left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
         left join container_pickup_items cpi on cpi.container_job_id = cj.id
         left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
-        where cj.status = 'completed'
+        where cj.status in ('completed', 'repo_stored')
           and coalesce(cj.execution_source, 'internal') = 'internal'
           and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
-          and cj.completed_at is not null
+          and coalesce(cj.repo_stored_at, cj.completed_at) is not null
           and (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           and coalesce(cj.has_driver_commission, false)
           and so.status <> 'cancelled'
@@ -597,10 +597,10 @@ async function countNoCommissionRows(period, db = { query }) {
       join sales_orders so on so.id = cj.sales_order_id
       left join container_pickup_items cpi on cpi.container_job_id = cj.id
       left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
-      where cj.status = 'completed'
+      where cj.status in ('completed', 'repo_stored')
         and coalesce(cj.execution_source, 'internal') = 'internal'
         and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
-        and cj.completed_at is not null
+        and coalesce(cj.repo_stored_at, cj.completed_at) is not null
         and (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
         and not coalesce(cj.has_driver_commission, false)
         and so.status <> 'cancelled'
