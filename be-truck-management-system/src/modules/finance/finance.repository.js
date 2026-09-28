@@ -1239,6 +1239,7 @@ function mapInvoiceOrderRow(row) {
     billedJobsCount: Number(row.billed_jobs_count || row.total_jobs_count || 0),
     sjUploadedCount: Number(row.travel_document_uploaded_count || 0),
     sjTotalCount: Number(row.billed_jobs_count || row.total_jobs_count || 0),
+    inapJobsCount: Number(row.inap_jobs_count || 0),
     cancelledJobsCount,
     repoStoredJobsCount,
     cancellationNote,
@@ -1545,6 +1546,10 @@ export function invoiceOrdersCte() {
         coalesce(max(ojs.planned_jobs_count), count(fr.id))::int as planned_jobs_count,
         coalesce(max(ojs.cancelled_jobs_count), 0)::int as cancelled_jobs_count,
         coalesce(max(ojs.repo_stored_jobs_count), 0)::int as repo_stored_jobs_count,
+        count(fr.id) filter (
+          where fr.inap_started_at is not null
+             or nullif(btrim(coalesce(fr.inap_reason, '')), '') is not null
+        )::int as inap_jobs_count,
         count(fr.id) filter (where fr.document_status = 'BELUM_LENGKAP')::int as incomplete_documents_count,
         count(fr.id) filter (where fr.document_status = 'SIAP_DITAGIHKAN')::int as ready_documents_count,
         count(fr.id) filter (where fr.has_travel_document)::int as travel_document_uploaded_count,

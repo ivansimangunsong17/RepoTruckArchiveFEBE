@@ -10,8 +10,8 @@ describe('normalizeFinanceInvoiceRow', () => {
       inapReason: 'DEPO TUTUP',
     }];
 
-    expect(normalizeFinanceInvoiceRow({ id: 'so-1', containerBreakdown })).toEqual(
-      expect.objectContaining({ containerBreakdown }),
+    expect(normalizeFinanceInvoiceRow({ id: 'so-1', containerBreakdown, inapJobsCount: 1 })).toEqual(
+      expect.objectContaining({ containerBreakdown, inapJobsCount: 1 }),
     );
   });
 });
