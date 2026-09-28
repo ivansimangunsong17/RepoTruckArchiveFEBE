@@ -999,7 +999,7 @@ function resolveCommissionStatus({
   if (!hasCommission) return 'without_commission';
   if (Number(amount || 0) <= 0) return 'needs_review';
   if (!driverId && !String(driverName || '').trim()) return 'needs_review';
-  if (jobStatus === 'completed') return 'with_commission';
+  if (['completed', 'repo_stored'].includes(jobStatus)) return 'with_commission';
   return currentStatus === 'needs_review' ? 'pending' : currentStatus || 'pending';
 }
 

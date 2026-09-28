@@ -77,3 +77,9 @@ test('query komisi, utilisasi, dan ketersediaan armada mengecualikan vendor', ()
   assert.match(reports, /const isInternal = \(row\.execution_source \|\| row\.executionSource \|\| 'internal'\) !== 'vendor'/i);
   assert.match(fleet, /coalesce\(execution_source, 'internal'\) = 'internal'/i);
 });
+
+test('container titip dengan komisi valid langsung eligible masuk batch komisi', () => {
+  const source = read('./container-jobs.repository.js');
+
+  assert.match(source, /if \(\['completed', 'repo_stored'\]\.includes\(jobStatus\)\) return 'with_commission'/i);
+});
