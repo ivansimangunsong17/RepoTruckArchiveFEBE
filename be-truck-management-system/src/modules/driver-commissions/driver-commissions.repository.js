@@ -428,7 +428,9 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
   return { summary, drivers };
 }
 
-// Diambil hanya ritasi berkomisi yang selesai di periode Minggu-Sabtu yang sedang ditutup.
+// Diambil hanya ritasi berkomisi yang masuk periode Minggu-Sabtu yang sedang ditutup.
+// Untuk container titip, periode komisi memakai tanggal masuk penitipan (repo_stored_at),
+// bukan tanggal closing akhir setelah container diambil lagi.
 // Ritasi dari periode lain harus dicek lewat periodenya masing-masing agar batch mingguan rapi.
 // Tidak ada syarat jumlah ritasi minimum: berapa pun jumlahnya (termasuk 1) langsung eligible
 // untuk diajukan ke Finance.
@@ -444,8 +446,8 @@ async function findEligibleRows(period, db = { query }) {
         cj.container_size,
         so.customer_name,
         cj.destination,
-        (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
-        cj.completed_at,
+        (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date as completed_date,
+        coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
         coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
         coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
         case
@@ -471,7 +473,7 @@ async function findEligibleRows(period, db = { query }) {
         -- bawah). Ritasi susulan yang periode aslinya MASIH open tetap masuk lewat kondisi normal
         -- (between $1 and $2), jadi tidak butuh flag ini.
         case
-          when (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date then false
+          when (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date then false
           else true
         end as is_backdate_commission
       from container_jobs cj
@@ -495,7 +497,7 @@ async function findEligibleRows(period, db = { query }) {
             and dci.voided_at is null
         )
         and (
-          (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+          (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           or (
             -- Ritasi susulan/backdate (Phase 4): periode mingguan ASLI ritasi ini sudah
             -- approved/paid, jadi tidak akan pernah bisa membuka batch baru untuk periode
@@ -506,8 +508,8 @@ async function findEligibleRows(period, db = { query }) {
             and exists (
               select 1
               from driver_commission_batches b2
-              where b2.period_start <= (cj.completed_at at time zone 'Asia/Jakarta')::date
-                and b2.period_end >= (cj.completed_at at time zone 'Asia/Jakarta')::date
+              where b2.period_start <= (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date
+                and b2.period_end >= (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date
                 and b2.status in ('approved', 'paid')
             )
           )
@@ -533,8 +535,8 @@ async function findCommissionReviewRows(period, db = { query }) {
           cj.container_size,
           so.customer_name,
           cj.destination,
-          (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
-          cj.completed_at,
+          (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date as completed_date,
+          coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
           coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
           coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
           'bank' as payment_method,
@@ -565,7 +567,7 @@ async function findCommissionReviewRows(period, db = { query }) {
           and coalesce(cj.execution_source, 'internal') = 'internal'
           and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
           and cj.completed_at is not null
-          and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+          and (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           and coalesce(cj.has_driver_commission, false)
           and so.status <> 'cancelled'
           and not exists (
@@ -599,7 +601,7 @@ async function countNoCommissionRows(period, db = { query }) {
         and coalesce(cj.execution_source, 'internal') = 'internal'
         and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
         and cj.completed_at is not null
-        and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+        and (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
         and not coalesce(cj.has_driver_commission, false)
         and so.status <> 'cancelled'
     `,

@@ -110,6 +110,12 @@ function isTruckCompatibleWithContainer(truck, containerSize) {
   return !containerSize || !truckCapacity || truckCapacity === 'COMBO' || truckCapacity === containerSize;
 }
 
+function isTruckCompatibleForRepoPickup(truck, containerSize, isComboPickup = false) {
+  const truckCapacity = getTruckCapacity(truck);
+  if (isComboPickup) return truckCapacity === '40FT' || truckCapacity === 'COMBO';
+  return isTruckCompatibleWithContainer(truck, containerSize);
+}
+
 function isTruckAssignable(truck) {
   return ['Aktif', 'Siap'].includes(truck?.status);
 }
@@ -555,6 +561,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const rpujStatus = form.rpujStatus || 'pending';
   const isVendorExecution = form.executionSource === 'vendor';
   const isRepoPickupMode = Boolean(container.repoPickupMode);
+  const isRepoComboPickupMode = Boolean(container.repoComboPickupMode);
   const requiresFinanceApprovalForSpk = false;
   const hasCompleteAssignment = isVendorExecution || Boolean(String(form.plateNumber || '').trim() && String(form.driver || '').trim());
   const financeApprovedForSpk = !requiresFinanceApprovalForSpk || ['approved', 'paid'].includes(form.rpujStatus);
@@ -780,8 +787,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     }
     const plateNumber = event.target.value;
     const truck = trucks.find((item) => item.plateNumber === plateNumber);
-    if (truck && !isTruckCompatibleWithContainer(truck, containerSize)) {
-      setError(`Truck ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
+    if (truck && !isTruckCompatibleForRepoPickup(truck, containerSize, isRepoComboPickupMode)) {
+      setError(isRepoComboPickupMode
+        ? `Combo 2x20 wajib memakai truck/chassis 40FT. ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak bisa dipilih.`
+        : `Truck ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }
     // Sopir cuma di-auto-fill dari default truck kalau belum ada sopir terpilih sama sekali --
@@ -1288,8 +1297,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       return;
     }
     const selectedTruck = isVendorExecution ? null : trucks.find((truck) => truck.plateNumber === submitForm.plateNumber);
-    if (selectedTruck && !isTruckCompatibleWithContainer(selectedTruck, containerSize)) {
-      showSubmitNotification(`Truck ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
+    if (selectedTruck && !isTruckCompatibleForRepoPickup(selectedTruck, containerSize, isRepoComboPickupMode)) {
+      showSubmitNotification(isRepoComboPickupMode
+        ? `Combo 2x20 wajib memakai truck/chassis 40FT. ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak bisa dipilih.`
+        : `Truck ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }
     if (selectedTruck && selectedTruck.plateNumber !== container.plateNumber && !isTruckAssignable(selectedTruck)) {
@@ -1335,11 +1346,16 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
 
   const availableTrucks = trucks.filter((truck) => (
     (isTruckAssignable(truck) || truck.plateNumber === form.plateNumber)
-    && isTruckCompatibleWithContainer(truck, containerSize)
+    && isTruckCompatibleForRepoPickup(truck, containerSize, isRepoComboPickupMode)
     && !isTruckBusyForAnotherJob(truck, activeJobs, container.id)
     && (!isTruckDefaultDriverBlacklisted(truck) || truck.plateNumber === form.plateNumber)
   ));
   const currentTruckExists = availableTrucks.some((truck) => truck.plateNumber === form.plateNumber);
+  const selectedTruckCanBeShown = !form.plateNumber || !isRepoComboPickupMode || isTruckCompatibleForRepoPickup(
+    trucks.find((truck) => truck.plateNumber === form.plateNumber),
+    containerSize,
+    isRepoComboPickupMode,
+  );
   const availableDrivers = drivers.filter((driver) => (
     (!isDriverBlacklisted(driver) || normalizeName(driver.name) === normalizeName(form.driver))
     && !isDriverBusyForAnotherJob(driver, activeJobs, container.id)
@@ -1474,7 +1490,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               </div>
             ) : (
             <div className="order-form-grid">
-              <label>Truck<select name="plateNumber" value={form.plateNumber} onChange={updateTruck} disabled={!canEditAssignment}><option value="">Pilih truck {containerSize ? `${containerSize}` : ''}</option>{form.plateNumber && !currentTruckExists ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'}</option>)}</select></label>
+              <label>Truck<select name="plateNumber" value={selectedTruckCanBeShown ? form.plateNumber : ''} onChange={updateTruck} disabled={!canEditAssignment}><option value="">{isRepoComboPickupMode ? 'Pilih truck 40FT untuk combo' : `Pilih truck ${containerSize ? `${containerSize}` : ''}`}</option>{form.plateNumber && !currentTruckExists && selectedTruckCanBeShown ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'}</option>)}</select></label>
               <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
               <label>
                 Sopir Aktual Ritasi
