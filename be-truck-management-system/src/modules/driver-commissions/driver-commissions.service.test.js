@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
@@ -7,6 +10,22 @@ const {
   assertDriverCommissionProofPayload,
   submitDriverCommissionBatch,
 } = await import('./driver-commissions.service.js');
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+test('query komisi mengecualikan item kedua combo pickup 2x20', () => {
+  const source = readFileSync(join(__dirname, 'driver-commissions.repository.js'), 'utf8');
+  assert.match(source, /container_pickup_items cpi/i);
+  assert.match(source, /container_pickup_movements cpm/i);
+  assert.match(source, /not \(cpm\.pickup_type = 'combo_2x20' and coalesce\(cpi\.sequence_no, 1\) > 1\)/i);
+});
+
+test('query komisi container titip memakai tanggal masuk penitipan sebagai tanggal komisi', () => {
+  const source = readFileSync(join(__dirname, 'driver-commissions.repository.js'), 'utf8');
+  assert.match(source, /coalesce\(cj\.repo_stored_at, cj\.completed_at\) at time zone 'Asia\/Jakarta'\)::date as completed_date/i);
+  assert.match(source, /coalesce\(cj\.repo_stored_at, cj\.completed_at\) as completed_at/i);
+  assert.doesNotMatch(source, /and \(cj\.completed_at at time zone 'Asia\/Jakarta'\)::date between \$1::date and \$2::date/i);
+});
 
 test('validasi bukti transfer komisi menolak payload kosong', () => {
   assert.throws(
