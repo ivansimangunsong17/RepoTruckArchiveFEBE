@@ -167,49 +167,20 @@ function InvoiceTable({
     { id: 'due-soon', label: 'Jatuh tempo dekat', countKey: 'dueSoon' },
     { id: 'overdue', label: 'Lewat jatuh tempo', countKey: 'overdue' },
   ];
-  const currentTab = invoiceTabs.find((tab) => tab.id === activeInvoiceTab) || invoiceTabs[0];
   const canFilterDocuments = activeInvoiceTab === 'in-progress';
   const canFilterAllTabDocuments = activeInvoiceTab === 'all';
   const visibleInvoiceDocumentFilters = invoiceDocumentFilters.filter(() => canFilterDocuments);
-  const searchedRows = rows.filter((row) => `${row.soNumber} ${row.customer} ${row.destination} ${(row.destinations || []).join(' ')} ${row.invoiceNumber} ${row.invoiceStatus} ${row.debitNoteNumber || ''} ${(row.containerNumbers || []).join(' ')}`.toLowerCase().includes(query.toLowerCase()));
-  const filteredRows = searchedRows.filter((row) => {
-    if (!currentTab.match(row)) return false;
-    if (canFilterDocuments) {
-      if (activeInvoiceDocumentFilter === 'complete') {
-        return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
-      }
-      if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
-      return true;
-    }
-    if (canFilterAllTabDocuments) {
-      if (activeInvoiceDocumentFilter === 'missing-invoice') {
-        return Boolean(row.invoiceNumber) && !row.invoiceDocumentUploadedAt;
-      }
-      if (activeInvoiceDocumentFilter === 'sj-incomplete') return row.sjTotalCount > 0 && row.sjUploadedCount < row.sjTotalCount;
-      if (activeInvoiceDocumentFilter === 'sj-complete') return row.sjTotalCount > 0 && row.sjUploadedCount >= row.sjTotalCount;
-      if (activeInvoiceDocumentFilter === 'complete') {
-        return row.invoiceNumber && row.invoiceDocumentUploadedAt && row.invoiceDocumentStatus !== 'terkirim';
-      }
-      if (activeInvoiceDocumentFilter === 'sent') return row.invoiceDocumentStatus === 'terkirim';
-      // 'due-soon'/'overdue' sengaja tidak dihitung ulang di sini: perbandingannya perlu timezone
-      // Asia/Jakarta yang presisi (lihat buildInvoiceFilters di finance.repository.js), sementara
-      // baris di sini cuma punya dueDate yang sudah diformat jadi teks tampilan, bukan tanggal mentah.
-      // rows yang datang ke komponen ini sudah difilter backend sesuai activeInvoiceDocumentFilter,
-      // jadi di sini cukup percaya hasil itu.
-      return true;
-    }
-    return true;
-  });
+  const serverRows = Array.isArray(rows) ? rows : [];
   const safeTotal = Number.isFinite(Number(total)) ? Number(total) : 0;
   const safeTotalPages = Math.max(1, Number(totalPages || Math.ceil(safeTotal / INVOICE_TABLE_PAGE_SIZE) || 1));
   const safeCurrentPage = Math.min(Math.max(1, Number(currentPage || 1)), safeTotalPages);
-  const paginatedRows = filteredRows;
+  const paginatedRows = serverRows;
   const showingFrom = safeTotal ? (safeCurrentPage - 1) * INVOICE_TABLE_PAGE_SIZE + 1 : 0;
   const showingTo = safeTotal ? Math.min(showingFrom + paginatedRows.length - 1, safeTotal) : 0;
   const tabCounts = {
-    'need-number': Number(summary?.needNumber ?? searchedRows.filter((row) => invoiceTabs[1].match(row)).length),
-    'in-progress': Number(summary?.inProgress ?? searchedRows.filter((row) => invoiceTabs[2].match(row)).length),
-    paid: Number(summary?.paid ?? searchedRows.filter((row) => invoiceTabs[3].match(row)).length),
+    'need-number': Number(summary?.needNumber ?? serverRows.filter((row) => invoiceTabs[1].match(row)).length),
+    'in-progress': Number(summary?.inProgress ?? serverRows.filter((row) => invoiceTabs[2].match(row)).length),
+    paid: Number(summary?.paid ?? serverRows.filter((row) => invoiceTabs[3].match(row)).length),
   };
   const allInvoiceTotal = tabCounts['need-number'] + tabCounts['in-progress'] + tabCounts.paid;
   tabCounts.all = Number(summary?.allInvoices ?? allInvoiceTotal);
@@ -547,7 +518,7 @@ function InvoiceTable({
                 </tr>
               );
             })}
-            {!filteredRows.length ? (
+            {!paginatedRows.length ? (
               <tr>
                 <td className="px-3 py-3 text-center text-xs font-semibold text-slate-400" colSpan={11}>Tidak ada data pada klasifikasi ini.</td>
               </tr>
