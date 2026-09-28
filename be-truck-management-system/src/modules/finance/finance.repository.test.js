@@ -92,7 +92,9 @@ test('export customer outstanding memakai satu query terfilter tanpa pagination 
   }, db);
 
   assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /group by customer_name/i);
+  assert.match(calls[0].sql, /customer_rollup_name as customer_name/i);
+  assert.match(calls[0].sql, /customer_rollup_name ilike/i);
+  assert.match(calls[0].sql, /group by customer_rollup_name/i);
   assert.match(calls[0].sql, /order by customer_name asc/i);
   assert.doesNotMatch(calls[0].sql, /\blimit\b/i);
   assert.doesNotMatch(calls[0].sql, /\boffset\b/i);
