@@ -1559,6 +1559,7 @@ export function invoiceOrdersCte() {
           array_agg(distinct fr.destination) filter (where fr.destination is not null and fr.destination <> ''),
           array[]::text[]
         ) as destinations,
+        so.customer_id,
         so.customer_name,
         so.destination,
         so.so_date,
@@ -4533,6 +4534,7 @@ export function outstandingOrdersCte() {
     outstanding_orders_all as (
       select
         io.*,
+        coalesce(customer_master.name, io.customer_name) as customer_rollup_name,
         so.ots_data_review_status,
         coalesce(pt.total_paid, 0)::numeric as total_paid,
         greatest(io.billing_amount - coalesce(pt.total_paid, 0), 0)::numeric as outstanding_amount,
@@ -4550,6 +4552,7 @@ export function outstandingOrdersCte() {
         end as days_overdue
       from invoice_orders io
       join sales_orders so on so.id = io.id
+      left join customers customer_master on customer_master.id = so.customer_id and customer_master.archived_at is null
       left join payment_totals pt on pt.sales_order_id = io.id
     ),
     -- Data historis sebelum Agustus 2026 hanya menjadi piutang jika memiliki nomor invoice.
@@ -4593,6 +4596,7 @@ export function buildOutstandingFilters(options = {}) {
       or ${orderNumberSearchFromColumnSql('id')} ilike $${params.length}
       or invoice_number ilike $${params.length}
       or customer_name ilike $${params.length}
+      or customer_rollup_name ilike $${params.length}
       or destination ilike $${params.length}
     )`);
   }
@@ -4723,7 +4727,7 @@ export function buildCustomerOutstandingFilters(options = {}) {
   }
   if (options.query) {
     params.push(`%${String(options.query).trim()}%`);
-    clauses.push(`customer_name ilike $${params.length}`);
+    clauses.push(`(customer_rollup_name ilike $${params.length} or customer_name ilike $${params.length})`);
   }
 
   return {
@@ -4774,7 +4778,7 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
       `
         ${outstandingOrdersCte()}
         select
-          customer_name,
+          customer_rollup_name as customer_name,
           count(*)::int as invoice_count,
           coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
           coalesce(sum(outstanding_amount) filter (where aging_bucket = 'current'), 0)::numeric as current_amount,
@@ -4788,7 +4792,7 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
           bool_or(ots_data_review_status = 'perlu_dicek') as needs_review
         from outstanding_orders
         ${whereSql}
-        group by customer_name
+        group by customer_rollup_name
         order by ${orderBySql}
         limit $${limitIndex} offset $${offsetIndex}
       `,
@@ -4799,10 +4803,10 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
         ${outstandingOrdersCte()}
         select count(*)::int as total
         from (
-          select customer_name
+          select customer_rollup_name
           from outstanding_orders
           ${whereSql}
-          group by customer_name
+          group by customer_rollup_name
         ) grouped
       `,
       params,
@@ -4817,7 +4821,7 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
         select
           coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
           count(*)::int as total_orders,
-          count(distinct customer_name)::int as total_customers,
+          count(distinct customer_rollup_name)::int as total_customers,
           count(*) filter (where aging_bucket = 'current')::int as current_count,
           count(*) filter (where aging_bucket = 'overdue_1_15')::int as overdue_1_15_count,
           count(*) filter (where aging_bucket = 'overdue_16_30')::int as overdue_16_30_count,
@@ -4881,7 +4885,7 @@ export async function getCustomerOutstandingSummary(customerName) {
         count(*) filter (where aging_bucket not in ('current', 'unknown'))::int as overdue_count,
         count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
       from outstanding_orders
-      where lower(btrim(customer_name)) = lower(btrim($1))
+      where lower(btrim(customer_rollup_name)) = lower(btrim($1))
     `,
     [normalized],
   );
@@ -4934,7 +4938,7 @@ export async function getCustomerOutstandingRollupExport(options = {}, db = { qu
     `
       ${outstandingOrdersCte()}
       select
-        customer_name,
+        customer_rollup_name as customer_name,
         count(*)::int as invoice_count,
         coalesce(sum(outstanding_amount), 0)::numeric as total_outstanding_amount,
         coalesce(sum(outstanding_amount) filter (where aging_bucket = 'current'), 0)::numeric as current_amount,
@@ -4948,7 +4952,7 @@ export async function getCustomerOutstandingRollupExport(options = {}, db = { qu
         bool_or(ots_data_review_status = 'perlu_dicek') as needs_review
       from outstanding_orders
       ${whereSql}
-      group by customer_name
+      group by customer_rollup_name
       order by ${orderBySql}
     `,
     params,
