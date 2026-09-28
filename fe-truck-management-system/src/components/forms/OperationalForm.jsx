@@ -652,10 +652,22 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     && hasCompleteAssignment
     && canStartTrip
     && (isVendorExecution || hasSpkDocument);
+  const comboContainerNumbers = Array.from(new Set(
+    (isRepoComboPickupMode ? [
+      ...(Array.isArray(container.repoComboContainers) ? container.repoComboContainers : []),
+      form.containerNumber,
+      container.containerNumber,
+    ] : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  ));
+  const comboContainerLabel = comboContainerNumbers.length
+    ? comboContainerNumbers.join(' + ')
+    : '2 container 20FT';
   const primaryActionLabel = isDocumentOnlyMode
     ? 'Simpan Dokumen'
     : activePhase === 'preparation'
-    ? isVendorExecution ? 'Simpan Ritasi Vendor' : 'Simpan Assignment'
+    ? isVendorExecution ? 'Simpan Ritasi Vendor' : isRepoComboPickupMode ? 'Simpan Combo 2 Container' : 'Simpan Assignment'
     : activePhase === 'rpuj'
       ? 'Simpan Biaya & SPK'
       : isReadyToStart
@@ -1425,7 +1437,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     <div className="modal-backdrop" role="presentation" onMouseDown={isSaving ? undefined : onClose}>
       <section className="order-modal operational-modal" role="dialog" aria-modal="true" aria-busy={isSaving} onMouseDown={(event) => event.stopPropagation()}>
         <header>
-          <div><p className="eyebrow">Container Job</p><h2>{form.containerNumber || container.containerNumber}</h2><span>{container.soNumber} - {container.customer} - {container.origin} - {container.destination}</span></div>
+          <div>
+            <p className="eyebrow">Container Job</p>
+            <h2 className="operational-modal-title">
+              {form.containerNumber || container.containerNumber}
+              {isRepoComboPickupMode ? <span className="combo-title-badge">Combo 2x20FT</span> : null}
+            </h2>
+            <span>{container.soNumber} - {container.customer} - {container.origin} - {container.destination}</span>
+          </div>
           <button type="button" onClick={onClose} aria-label="Tutup form" disabled={isSaving}><X size={20} /></button>
         </header>
         <form className="operational-update-form" onSubmit={handleSubmit}>
@@ -1433,9 +1452,25 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           {isRepoPickupMode ? (
             <div className="alert operational-form-repo-pickup">
               {isRepoComboPickupMode
-                ? `Combo pickup ${container.repoComboContainers?.join(' + ') || '2 container 20FT'} dari depo penitipan. Gunakan truck/chassis 40FT; UJ dicatat satu kali untuk perjalanan combo.`
+                ? `Combo pickup ${comboContainerLabel} dari depo penitipan. Gunakan truck/chassis 40FT; UJ dicatat satu kali untuk perjalanan combo.`
                 : 'Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.'}
             </div>
+          ) : null}
+          {isRepoComboPickupMode ? (
+            <section className="combo-container-summary" aria-label="Container combo yang dijalankan">
+              <div>
+                <span className="combo-summary-kicker">Container yang dijalankan</span>
+                <strong>{comboContainerLabel}</strong>
+              </div>
+              <ol>
+                {(comboContainerNumbers.length ? comboContainerNumbers : ['Container 1', 'Container 2']).map((number, index) => (
+                  <li key={`${number}-${index}`}>
+                    <span>{index + 1}</span>
+                    <strong>{number}</strong>
+                  </li>
+                ))}
+              </ol>
+            </section>
           ) : null}
           {canAccessAdminCorrection ? (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
@@ -1573,7 +1608,18 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
             ) : (
             <div className="order-form-grid">
               <label>Truck<select name="plateNumber" value={selectedTruckCanBeShown ? form.plateNumber : ''} onChange={updateTruck} disabled={!canEditAssignment}><option value="">{isRepoComboPickupMode ? 'Pilih truck 40FT untuk combo' : `Pilih truck ${containerSize ? `${containerSize}` : ''}`}</option>{form.plateNumber && !currentTruckExists && selectedTruckCanBeShown ? <option value={form.plateNumber}>{form.plateNumber}</option> : null}{availableTrucks.map((truck) => <option key={truck.id} value={truck.plateNumber}>{truck.plateNumber} - {truck.unitCode} - {truck.capacity || '-'}</option>)}</select></label>
-              <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
+              {isRepoComboPickupMode ? (
+                <label className="combo-container-field">
+                  No. Container
+                  <div className="combo-container-readonly" aria-label="Nomor container combo">
+                    {(comboContainerNumbers.length ? comboContainerNumbers : [form.containerNumber || container.containerNumber || '-']).map((number, index) => (
+                      <span key={`${number}-${index}`}>{number}</span>
+                    ))}
+                  </div>
+                </label>
+              ) : (
+                <label>No. Container<input name="containerNumber" value={form.containerNumber} onChange={updateField} disabled={!canEditContainerNumber} placeholder="TCLU1234567" /></label>
+              )}
               <label>
                 Sopir Aktual Ritasi
                 <SearchableDriverInput
