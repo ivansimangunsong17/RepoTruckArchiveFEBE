@@ -35,6 +35,12 @@ test('invoice CTE menghitung dokumen Surat Jalan yang sudah diupload per SO', ()
   assert.match(sql, /count\(fr\.id\)\s+filter\s+\(where\s+fr\.has_travel_document\)::int\s+as\s+travel_document_uploaded_count/i);
 });
 
+test('invoice CTE menghitung ritasi inap per SO untuk penanda list Finance', () => {
+  const sql = invoiceOrdersCte();
+
+  assert.match(sql, /count\(fr\.id\)\s+filter\s+\(\s*where\s+fr\.inap_started_at\s+is\s+not\s+null[\s\S]*as\s+inap_jobs_count/i);
+});
+
 test('customer outstanding CTE tidak lagi membatasi trip_date ke Juni-Agustus 2026', () => {
   const sql = outstandingOrdersCte();
 

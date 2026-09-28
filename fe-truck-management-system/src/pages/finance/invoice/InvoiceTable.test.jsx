@@ -68,6 +68,19 @@ describe('InvoiceTable Surat Jalan', () => {
   });
 });
 
+describe('InvoiceTable ritasi inap', () => {
+  it('menampilkan badge jumlah ritasi inap pada list invoice', () => {
+    renderTable([baseRow({ inapJobsCount: 2 })]);
+    expect(screen.getByText('2 Inap')).toBeInTheDocument();
+    expect(screen.getByText('2 Inap')).toHaveAttribute('title', '2 ritasi pada SO ini tercatat Inap');
+  });
+
+  it('tidak menampilkan badge inap jika tidak ada ritasi inap', () => {
+    renderTable([baseRow({ inapJobsCount: 0 })]);
+    expect(screen.queryByText(/Inap/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('InvoiceTable input nomor invoice', () => {
   it('menampilkan input nomor invoice langsung di tabel untuk invoice yang belum punya nomor', async () => {
     const user = userEvent.setup();
