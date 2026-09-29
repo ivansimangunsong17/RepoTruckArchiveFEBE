@@ -756,6 +756,14 @@ function hasOwnInput(form, key) {
   return Object.prototype.hasOwnProperty.call(form, key);
 }
 
+export function isRepoShipment(job = {}) {
+  const shipment = String(job.shipment_type || job.shipmentType || job.shipment || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, '_');
+  return shipment === 'repo_empty' || shipment === 'repo_full';
+}
+
 function hasExplicitDriverCommissionInput(form = {}) {
   const unambiguousEnable = form.hasDriverCommission === true
     && Number(form.driverCommissionAmount || 0) > 0;
@@ -2816,10 +2824,11 @@ async function updateContainerJobTransaction(id, form) {
       : existing.rows[0].tila_gatepass_document_number || existing.rows[0].unloading_voucher_number || existing.rows[0].weighing_document_number || null;
     const commissionUpdate = resolveDriverCommissionUpdate(existing.rows[0], form, { documentOnlyUpdate });
     const commissionUpdateRequested = commissionUpdate.updateRequested;
-    const nextHasDriverCommission = commissionUpdate.hasCommission;
-    const nextDriverCommissionAmount = commissionUpdate.amount;
-    const nextDriverCommissionSourceDestinationId = commissionUpdate.sourceDestinationId;
-    const nextDriverCommissionNote = commissionUpdate.note;
+    const isRepoJob = isRepoShipment(existing.rows[0]);
+    const nextHasDriverCommission = isRepoJob ? false : commissionUpdate.hasCommission;
+    const nextDriverCommissionAmount = isRepoJob ? 0 : commissionUpdate.amount;
+    const nextDriverCommissionSourceDestinationId = isRepoJob ? null : commissionUpdate.sourceDestinationId;
+    const nextDriverCommissionNote = isRepoJob ? null : commissionUpdate.note;
     const commissionValuesChanged = commissionUpdateRequested && Boolean(
       nextHasDriverCommission !== Boolean(existing.rows[0].has_driver_commission)
       || Number(nextDriverCommissionAmount || 0) !== Number(existing.rows[0].driver_commission_amount || 0)

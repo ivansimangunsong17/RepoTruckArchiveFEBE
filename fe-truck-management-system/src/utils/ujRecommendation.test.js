@@ -82,4 +82,15 @@ describe('ujRecommendation', () => {
     expect(recommendation.reeferSurcharge).toBe(0);
     expect(recommendation.hasConfiguredTariff).toBe(false);
   });
+
+  it('Repo Reefer tetap memakai UJ dasar dan tidak mendapat komisi', () => {
+    const recommendation = calculateUjRecommendation(
+      { destination: 'Cikarang', size: '40FT', type: 'Reefer', shipment: 'Repo Full' },
+      [{ name: 'Cikarang', uj40ft: 750000, driverCommission40ftAmount: 80000 }],
+    );
+
+    expect(recommendation.currentContainerUj).toBe(750000);
+    expect(recommendation.reeferSurcharge).toBe(0);
+    expect(recommendation.driverCommissionAmount).toBe(0);
+  });
 });
