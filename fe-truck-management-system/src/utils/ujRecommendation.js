@@ -32,6 +32,11 @@ export function isReeferContainer(job = {}) {
   return containerType.includes('reefer');
 }
 
+export function isRepoShipment(job = {}) {
+  const shipment = normalizeText(job.shipment || job.shipmentType || job.shipment_type).replace(/[-\s]+/g, '_');
+  return shipment === 'repo_empty' || shipment === 'repo_full';
+}
+
 function destinationSearchTerms(destination = {}) {
   return [
     destination.name,
@@ -135,8 +140,10 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
   const baseContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
-  const reeferSurcharge = isReeferContainer(job) && baseContainerUj > 0 ? REEFER_UJ_SURCHARGE : 0;
+  const repoShipment = isRepoShipment(job);
+  const reeferSurcharge = isReeferContainer(job) && !repoShipment && baseContainerUj > 0 ? REEFER_UJ_SURCHARGE : 0;
   const currentContainerUj = baseContainerUj + reeferSurcharge;
+  const effectiveDriverCommissionAmount = repoShipment ? 0 : driverCommissionAmount;
   const hasCurrentContainerTariff = currentSize === '40FT'
     ? uj40ft > 0
     : currentSize === '20FT'
@@ -152,7 +159,7 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
     baseContainerUj,
     reeferSurcharge,
     isReefer: reeferSurcharge > 0,
-    driverCommissionAmount,
+    driverCommissionAmount: effectiveDriverCommissionAmount,
     driverCommission20ftAmount,
     driverCommission40ftAmount,
     uj20ft,

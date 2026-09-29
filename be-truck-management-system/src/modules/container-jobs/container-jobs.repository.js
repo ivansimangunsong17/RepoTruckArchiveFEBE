@@ -1077,6 +1077,14 @@ function hasOwnInput(form, key) {
   return Object.prototype.hasOwnProperty.call(form, key);
 }
 
+export function isRepoShipment(job = {}) {
+  const shipment = String(job.shipment_type || job.shipmentType || job.shipment || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, '_');
+  return shipment === 'repo_empty' || shipment === 'repo_full';
+}
+
 function hasExplicitDriverCommissionInput(form = {}) {
   const unambiguousEnable = form.hasDriverCommission === true
     && Number(form.driverCommissionAmount || 0) > 0;
@@ -2105,11 +2113,6 @@ export async function findContainerJobExpenseByIdRecord(id) {
     [id],
   );
   return result.rows[0] ? mapContainerJobExpense(result.rows[0]) : null;
-}
-
-function isRepoShipment(job = {}) {
-  const shipment = String(job.shipment_type || job.shipmentType || job.shipment || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
-  return shipment === 'repo_empty' || shipment === 'repo_full';
 }
 
 export function shouldRequireAssignmentAfterVendorRevert(currentSource, nextSource, documentOnlyUpdate = false) {

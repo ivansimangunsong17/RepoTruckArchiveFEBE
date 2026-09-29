@@ -35,6 +35,7 @@ const {
   findJourneyMoneyAmount,
   hasCompleteOperationalAssignment,
   hasRequiredRepoCompletionDocuments,
+  isRepoShipment,
   normalizeCompletedAtForSave,
   resolveCompletedAtForSave,
   resolveDriverCommissionUpdate,
@@ -377,6 +378,13 @@ test('document-only mengabaikan default false dan nol', () => {
     sourceDestinationId: null,
     note: 'Komisi tujuan',
   });
+});
+
+test('jenis shipment repo dikenali untuk menonaktifkan komisi sopir', () => {
+  assert.equal(isRepoShipment({ shipment_type: 'repo_empty' }), true);
+  assert.equal(isRepoShipment({ shipmentType: 'Repo Full' }), true);
+  assert.equal(isRepoShipment({ shipment: 'repo-full' }), true);
+  assert.equal(isRepoShipment({ shipment_type: 'import' }), false);
 });
 
 test('koreksi eksplisit dapat menonaktifkan komisi', () => {
