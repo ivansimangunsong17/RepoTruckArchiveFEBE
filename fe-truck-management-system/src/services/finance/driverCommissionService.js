@@ -40,6 +40,11 @@ export function rejectDriverCommissionBatch(id, rejectionNote = '') {
   return httpClient.patch(`/driver-commissions/batches/${encodeURIComponent(id)}/reject`, { rejectionNote });
 }
 
+export function markDriverCommissionPaymentPaid(id, payload = {}) {
+  if (!id) throw new Error('Payment komisi sopir belum tersedia untuk ditandai lunas.');
+  return httpClient.patch(`/driver-commissions/payments/${encodeURIComponent(id)}/pay`, payload);
+}
+
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;

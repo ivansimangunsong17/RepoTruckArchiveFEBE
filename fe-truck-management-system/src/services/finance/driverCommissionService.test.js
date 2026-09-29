@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { httpClient } from '../api/httpClient';
 import {
   fetchDriverCommissionPeriodReport,
+  markDriverCommissionPaymentPaid,
   recordDriverCommissionDeduction,
   submitDriverCommissionBatch,
   updateDriverCommissionDeduction,
@@ -43,6 +44,18 @@ describe('driverCommissionService', () => {
     await submitDriverCommissionBatch(payload);
 
     expect(httpClient.post).toHaveBeenCalledWith('/driver-commissions/batches', payload);
+  });
+
+  it('menandai payment komisi paid tanpa upload file', async () => {
+    const payload = { paymentNote: 'Lunas via potongan Finance penuh.' };
+    await markDriverCommissionPaymentPaid('payment-1', payload);
+
+    expect(httpClient.patch).toHaveBeenCalledWith('/driver-commissions/payments/payment-1/pay', payload);
+  });
+
+  it('menolak mark paid tanpa paymentId', async () => {
+    expect(() => markDriverCommissionPaymentPaid('', {})).toThrow();
+    expect(httpClient.patch).not.toHaveBeenCalled();
   });
 
   it('mengirim potongan komisi baru ke payment', async () => {

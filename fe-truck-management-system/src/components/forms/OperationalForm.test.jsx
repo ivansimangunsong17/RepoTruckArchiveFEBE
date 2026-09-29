@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import OperationalForm from './OperationalForm';
+import OperationalForm, { shouldPersistRecommendedDriverCommission } from './OperationalForm';
 import { fetchContainerJobAssignmentHistory } from '../../services/archive/containerJobService';
 
 vi.mock('../../services/archive/containerJobService', () => ({
@@ -37,6 +37,93 @@ function expectedDateTimeLocalValue(value) {
 }
 
 describe('OperationalForm', () => {
+  it('menyederhanakan form ritasi vendor dan mengirim sumber pelaksanaan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, executionSource: 'vendor' }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Vendor' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByLabelText('Truck')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /biaya perjalanan & spk/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText('VENDOR').length).toBeGreaterThanOrEqual(2);
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      executionSource: 'vendor',
+      containerNumber: 'MSCU-123456-7',
+      driverId: null,
+      vehicleId: null,
+    })));
+  });
+
+  it('ritasi vendor tetap mewajibkan nomor container', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...container, containerNumber: '', executionSource: 'vendor' }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(await screen.findByText(/nomor container wajib diisi untuk ritasi vendor/i)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('meminta konfirmasi sebelum assignment internal diubah menjadi vendor', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          driver: 'Driver Lama',
+          driverId: 'driver-1',
+          plateNumber: 'B 1000 AA',
+          vehicleId: 'truck-1',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Vendor' }));
+    expect(screen.getByRole('alertdialog', { name: /ubah menjadi ritasi vendor/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('Truck')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /ya, gunakan vendor/i }));
+    expect(screen.queryByLabelText('Truck')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Vendor' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('menyimpan rekomendasi komisi otomatis hanya ketika ritasi mulai atau selesai', () => {
+    expect(shouldPersistRecommendedDriverCommission({
+      useRecommendation: true,
+      hasDriverCommission: true,
+      status: 'received',
+    })).toBe(false);
+    expect(shouldPersistRecommendedDriverCommission({
+      useRecommendation: true,
+      hasDriverCommission: true,
+      status: 'running',
+    })).toBe(true);
+    expect(shouldPersistRecommendedDriverCommission({
+      useRecommendation: true,
+      hasDriverCommission: false,
+      status: 'running',
+    })).toBe(false);
+  });
+
   it('tidak mengirim field komisi ketika bagian komisi tidak diedit', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
@@ -893,6 +980,8 @@ describe('OperationalForm', () => {
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     await openOperationalPhase(user, /biaya perjalanan & spk/i);
+    expect(screen.getByLabelText(/ada komisi sopir/i)).toBeChecked();
+    await user.click(screen.getByLabelText(/ada komisi sopir/i));
     await user.click(screen.getByLabelText(/ada komisi sopir/i));
     await user.click(screen.getByRole('button', { name: /simpan biaya & spk/i }));
 
@@ -1129,6 +1218,77 @@ describe('OperationalForm', () => {
       adminCorrectionMode: true,
       adminCorrectionReason: 'Koreksi tanggal selesai',
     }));
+  });
+
+  it('menampilkan pilihan dampak komisi saat Admin mengganti sopir job selesai', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'completed',
+          driverId: 'driver-old',
+          driver: 'Sopir Lama',
+          plateNumber: 'B 6102 WXA',
+          hasDriverCommission: true,
+          driverCommissionAmount: 100000,
+          commissionDriverName: 'Sopir Lama',
+          commissionBatchStatus: 'submitted',
+          runningAt: '2026-07-19T08:00:00.000Z',
+          completedAt: '2026-07-19T12:00:00.000Z',
+        }}
+        currentUser={{ role: 'admin' }}
+        masterDrivers={[
+          { id: 'driver-old', name: 'Sopir Lama', status: 'Aktif' },
+          { id: 'driver-new', name: 'Sopir Baru', status: 'Aktif' },
+        ]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('checkbox', { name: /mode koreksi admin/i }));
+    await chooseDriver(user, 'Sopir Baru');
+
+    expect(screen.getByText('Dampak Komisi Sopir')).toBeInTheDocument();
+    expect(screen.getByText(/batch akan ditandai berubah/i)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /pindahkan assignment dan komisi/i })).toBeEnabled();
+    expect(screen.getByRole('radio', { name: /ubah assignment saja/i })).toBeEnabled();
+  });
+
+  it('mengunci pilihan pindah komisi jika batch sudah approved', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'completed',
+          driverId: 'driver-old',
+          driver: 'Sopir Lama',
+          plateNumber: 'B 6102 WXA',
+          hasDriverCommission: true,
+          driverCommissionAmount: 100000,
+          commissionDriverName: 'Sopir Lama',
+          commissionBatchStatus: 'approved',
+        }}
+        currentUser={{ role: 'admin' }}
+        masterDrivers={[
+          { id: 'driver-old', name: 'Sopir Lama', status: 'Aktif' },
+          { id: 'driver-new', name: 'Sopir Baru', status: 'Aktif' },
+        ]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('checkbox', { name: /mode koreksi admin/i }));
+    await chooseDriver(user, 'Sopir Baru');
+
+    expect(screen.getByRole('radio', { name: /pindahkan assignment dan komisi/i })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /ubah assignment saja/i })).toBeEnabled();
+    expect(screen.getByText(/batch sudah dikunci/i)).toBeInTheDocument();
   });
 
   it('mengunci komisi sopir setelah pekerjaan selesai', async () => {
@@ -1452,7 +1612,8 @@ describe('OperationalForm', () => {
 
     expect(screen.getByLabelText('Sopir Aktual Ritasi')).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
-    expect(screen.getByText(/Default sopir truck saat ini: Driver Aktif/)).toBeInTheDocument();
+    expect(screen.getByText('Default sopir truck saat ini')).toBeInTheDocument();
+    expect(screen.getAllByText('Driver Aktif').length).toBeGreaterThan(0);
   });
 
   it('mengganti sopir ritasi biasa tanpa klik aksi default tidak memanggil onSetTruckDefaultDriver', async () => {

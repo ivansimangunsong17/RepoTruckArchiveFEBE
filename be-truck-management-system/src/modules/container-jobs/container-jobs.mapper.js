@@ -107,7 +107,9 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
   return {
     id: row.id,
     orderId: row.sales_order_id,
-    soNumber: row.so_number,
+    // Nomor SO Finance adalah nomor operasional yang ditampilkan di halaman OPS.
+    // Data lama dapat hanya memiliki accurate_so_number ketika so_number masih kosong.
+    soNumber: row.accurate_so_number || row.so_number || '',
     internalSoNumber: row.so_number,
     accurateSoNumber: row.accurate_so_number || '',
     doNumber: row.do_number,
@@ -119,6 +121,10 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     serviceName: row.service_name,
     origin: row.origin,
     destination: row.destination,
+    warehouseLocationId: row.warehouse_location_id || null,
+    warehouseLocationNameSnapshot: row.warehouse_location_name_snapshot || '',
+    warehouseLocationAddressSnapshot: row.warehouse_location_address_snapshot || '',
+    destinationId: row.destination_id || null,
     tripDate: row.trip_date,
     qty20ft: Number(row.order_qty_20ft || 0),
     qty40ft: Number(row.order_qty_40ft || 0),
@@ -152,6 +158,8 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     commissionLockedAmount: row.commission_locked_amount == null ? null : Number(row.commission_locked_amount),
     commissionLockedAt: row.commission_locked_at || null,
     commissionStatus: row.commission_status || (row.has_driver_commission ? 'pending' : 'without_commission'),
+    commissionBatchId: row.commission_batch_id || null,
+    commissionBatchStatus: row.commission_batch_status || 'unsubmitted',
     rpujRequestedBy: row.rpuj_requested_by_name || '',
     rpujRequestedAt: row.rpuj_requested_at,
     rpujReviewedBy: row.rpuj_reviewed_by_name || '',
@@ -191,6 +199,13 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
     repoCreatedByName: row.repo_created_by_name || '',
     repoPickedUpAt: row.repo_picked_up_at,
     repoPickedUpByName: row.repo_picked_up_by_name || '',
+    pickupMovement: row.pickup_movement_id ? {
+      id: row.pickup_movement_id,
+      type: row.pickup_type || 'single',
+      sequenceNo: Number(row.pickup_sequence_no || 1),
+      itemCount: Number(row.pickup_item_count || 1),
+      containerNumbers: Array.isArray(row.pickup_container_numbers) ? row.pickup_container_numbers : [],
+    } : null,
     inapStartedAt: row.inap_started_at,
     inapEndedAt: row.inap_ended_at,
     inapReason: row.inap_reason || '',
@@ -228,7 +243,7 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
   };
 }
 
-export function toAssignmentSnapshot(form, driver, vehicle) {
+export function toAssignmentSnapshot(form, driver, vehicle, previousAssignment = {}) {
   const vehicleDetail = form.chassis || (vehicle
     ? `${vehicle.unit_code || ''}${vehicle.brand ? ` - ${vehicle.brand}` : ''}${vehicle.vehicle_type ? ` ${vehicle.vehicle_type}` : ''}`.trim()
     : null);
@@ -242,11 +257,23 @@ export function toAssignmentSnapshot(form, driver, vehicle) {
     form.driverEmoneyNumber || driver?.emoney_number,
   ].filter(Boolean).join(' ');
 
+  // Only a new vehicle assignment captures current chassis. Legacy snapshots stay absent.
+  const chassisSnapshot = vehicle ? {
+    chassisId: vehicle.chassis_id || vehicle.current_chassis_id || null,
+    chassisCode: vehicle.chassis_code || vehicle.current_chassis_code || null,
+    chassisSize: vehicle.chassis_size || null,
+  } : Object.fromEntries(
+    ['chassisId', 'chassisCode', 'chassisSize']
+      .filter((key) => Object.prototype.hasOwnProperty.call(previousAssignment, key))
+      .map((key) => [key, previousAssignment[key]]),
+  );
+
   return {
     driver: form.driver || driver?.name || null,
     unitCode: form.unitCode || vehicle?.unit_code || null,
     plateNumber: form.plateNumber || vehicle?.plate_number || null,
     vehicleDetail,
+    ...chassisSnapshot,
     driverPaymentMethod: paymentMethod === 'emoney' ? 'emoney' : 'bank',
     driverBankAccount: paymentMethod === 'emoney' ? emoneyAccount || null : bankAccount || null,
     driverBankName: form.driverBankName || driver?.bank_name || null,

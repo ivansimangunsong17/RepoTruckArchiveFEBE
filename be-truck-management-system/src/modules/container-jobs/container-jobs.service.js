@@ -9,6 +9,8 @@ import {
   findContainerJobExpensesByJobId,
   findContainerJobsPage,
   moveDroppingExpenseToAnotherJobBeforeFinanceCheckRecord,
+  pickupComboRepoContainerJobs,
+  pickupSingleRepoContainerJob,
   requestContainerJobCancellation as requestContainerJobCancellationRepository,
   resetContainerJobAssignment,
   reviewContainerJobCancellation as reviewContainerJobCancellationRepository,
@@ -778,6 +780,31 @@ export function voidDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {
   });
 }
 
+function hasDriverAssignmentChange(currentJob, payload = {}) {
+  const nextDriverId = payload.driverId || null;
+  const nextDriverName = normalizeText(payload.driver);
+  const currentDriverName = normalizeText(currentJob?.driver || currentJob?.assignment_snapshot?.driver);
+  return Boolean(
+    (nextDriverId && String(nextDriverId) !== String(currentJob?.driverId || ''))
+    || (nextDriverName && nextDriverName !== currentDriverName)
+  );
+}
+
+export function ensureCompletedCommissionDriverAction(currentJob = {}, payload = {}) {
+  if (!isAdminCorrectionMode(payload)) return;
+  if (currentJob.status !== 'completed' || !currentJob.hasDriverCommission) return;
+  if (!hasDriverAssignmentChange(currentJob, payload)) return;
+
+  const action = normalizeText(payload.commissionDriverAction).toLowerCase();
+  if (['move', 'keep'].includes(action)) return;
+
+  const error = new Error('Pilih perlakuan komisi: pindahkan ke sopir baru atau tetap pada sopir sebelumnya.');
+  error.statusCode = 400;
+  error.code = 'CONTAINER_JOB_COMMISSION_DRIVER_ACTION_REQUIRED';
+  error.details = { allowedActions: ['move', 'keep'] };
+  throw error;
+}
+
 export function resetMisassignedContainerJob(id, payload = {}, actor) {
   if (!actor || !['operational', 'admin'].includes(actor.role)) {
     const error = new Error('Reset ritasi hanya dapat dilakukan oleh Operational atau Admin.');
@@ -855,6 +882,7 @@ export async function saveContainerJob(id, payload, actor) {
     normalizedPayload.plateNumber = '';
   }
   ensureAdminCorrectionContract(actor, normalizedPayload);
+  ensureCompletedCommissionDriverAction(currentJob, normalizedPayload);
   ensureBackdateReasonRequired(normalizedPayload, currentJob);
   const documentOnlyUpdate = isDocumentOnlyActor(actor);
   if (!documentOnlyUpdate) {
@@ -894,6 +922,28 @@ export async function saveContainerJob(id, payload, actor) {
     actorRole: actor?.role || '',
     documentOnlyUpdate,
   });
+}
+
+function normalizeRepoPickupPayload(payload = {}, actor) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    const error = new Error('Payload pickup container titip harus berupa object.');
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+  return {
+    ...payload,
+    updatedBy: payload.updatedBy || getActorName(actor),
+  };
+}
+
+export function pickupRepoContainerJob(id, payload = {}, actor) {
+  return pickupSingleRepoContainerJob(id, normalizeRepoPickupPayload(payload, actor));
+}
+
+export function pickupComboRepoContainerJob(payload = {}, actor) {
+  const normalizedPayload = normalizeRepoPickupPayload(payload, actor);
+  return pickupComboRepoContainerJobs(normalizedPayload);
 }
 
 export function createContainerJobSpk(id, payload = {}) {

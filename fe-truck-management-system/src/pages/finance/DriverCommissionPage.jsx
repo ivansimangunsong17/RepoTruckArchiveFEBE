@@ -10,6 +10,7 @@ import {
   fetchDriverCommissionBatchDetail,
   fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
+  markDriverCommissionPaymentPaid,
   recordDriverCommissionDeduction,
   rejectDriverCommissionBatch,
   uploadDriverCommissionTransferProof,
@@ -20,7 +21,14 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { downloadPdfReport } from '../../utils/simplePdfReport';
 import { downloadCsv } from '../../utils/csvExport';
-import { buildDriverCommissionCsvRows, DRIVER_COMMISSION_CSV_HEADERS, summarizeDriverCommissions } from '../../utils/driverCommissionCsv';
+import {
+  buildDriverCommissionCsvRows,
+  driverCommissionFinanceStatus,
+  driverCommissionProofStatus,
+  driverCommissionStatusLabel,
+  DRIVER_COMMISSION_CSV_HEADERS,
+  summarizeDriverCommissions,
+} from '../../utils/driverCommissionCsv';
 
 const emptyReport = {
   periodStart: '',
@@ -46,6 +54,7 @@ const statusLabels = {
   rejected: 'Ditolak',
   paid: 'Sudah Dibayar',
   pending: 'Belum Dibayar',
+  deducted_paid: 'Lunas via Potongan',
 };
 
 const deductionTypeLabels = {
@@ -151,8 +160,8 @@ function buildCommissionPdfRows(drivers = [], statusResolver = driverFinanceStat
       grossAmount,
       deductionAmount,
       netAmount,
-      statusLabel: statusLabels[status] || status || '-',
-      proofStatus: driver.paymentProofAttachment ? 'Ada' : 'Belum',
+      statusLabel: driverCommissionStatusLabel(status),
+      proofStatus: driverCommissionProofStatus(driver),
     };
   });
 }
@@ -165,6 +174,7 @@ function StatusPill({ status }) {
     submitted: 'border-sky-200 bg-sky-50 text-sky-700',
     approved: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     paid: 'border-slate-300 bg-slate-100 text-slate-700',
+    deducted_paid: 'border-emerald-200 bg-emerald-50 text-emerald-700',
     pending: 'border-amber-200 bg-amber-50 text-amber-700',
     rejected: 'border-rose-200 bg-rose-50 text-rose-700',
   }[status] || 'border-slate-200 bg-slate-50 text-slate-600';
@@ -285,10 +295,7 @@ function MetricCard({ icon: Icon, label, value, helper, tone = 'slate', pill = f
 }
 
 function driverFinanceStatus(driver) {
-  if (driver.paymentStatus === 'paid' || driver.batchStatus === 'paid') return 'paid';
-  if (driver.batchStatus === 'approved') return 'approved';
-  if (driver.batchStatus === 'submitted') return 'submitted';
-  return driver.paymentStatus || driver.batchStatus || 'unsubmitted';
+  return driverCommissionFinanceStatus(driver);
 }
 
 function paymentAccountLabel(driver = {}) {
@@ -599,7 +606,7 @@ function DeductionSection({ paymentId, deductions, grossAmount, deductionAmount,
   );
 }
 
-function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, canManageDeduction, saving, onUploadProof, canVoidPayment, voidBusyId, voidError, onVoidPayment, onAddDeduction, onVoidDeduction, open, onClose }) {
+function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, canManageDeduction, saving, onUploadProof, onSettleDeductionOnly, canVoidPayment, voidBusyId, voidError, onVoidPayment, onAddDeduction, onVoidDeduction, open, onClose }) {
   const [noteDraft, setNoteDraft] = useState('');
   const [pendingFile, setPendingFile] = useState(null);
   const [voidingOpen, setVoidingOpen] = useState(false);
@@ -642,6 +649,10 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
   // driver_commission_payments) -- jatuhkan balik ke driver.paymentId dari period-report, dan kalau
   // dua-duanya kosong berarti memang belum ada payment sama sekali untuk dilekati potongan.
   const paymentId = payment?.id || driver.paymentId || '';
+  const hasTransferProof = Boolean(payment?.paymentProofAttachmentId || driver.paymentProofAttachmentId);
+  const isFullyDeducted = grossAmount > 0 && deductionAmount >= grossAmount && netAmount === 0;
+  const canSettleByDeduction = canFinance && ['approved', 'paid'].includes(selectedBatch?.status || '') && paymentId && isFullyDeducted && !alreadyPaid;
+  const canUploadTransferProof = canUploadProof && (netAmount > 0 || hasTransferProof);
 
   function submitProof(event) {
     event.preventDefault();
@@ -727,6 +738,9 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
             {payment?.paymentProofAttachmentId || driver.paymentProofAttachmentId ? (
               <p className="mt-1 text-xs font-semibold text-sky-700">Bukti transfer tersimpan.</p>
             ) : null}
+            {alreadyPaid && isFullyDeducted && !hasTransferProof ? (
+              <p className="mt-1 text-xs font-semibold text-emerald-700">Lunas via potongan Finance penuh. Tidak ada transfer ke sopir.</p>
+            ) : null}
             {payment?.paymentNote || driver.paymentNote ? (
               <p className="mt-1 text-xs text-slate-500">{payment?.paymentNote || driver.paymentNote}</p>
             ) : null}
@@ -772,7 +786,22 @@ function DriverFinanceDetailModal({ driver, payment, selectedBatch, canFinance, 
                 )}
               </div>
             ) : null}
-            {canUploadProof ? (
+            {canSettleByDeduction ? (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-xs font-semibold text-emerald-800">
+                  Komisi sudah habis dipotong Finance, jadi tidak ada nominal transfer.
+                </p>
+                <button
+                  className="primary-button mt-3 inline-flex items-center gap-2"
+                  disabled={saving}
+                  onClick={() => onSettleDeductionOnly(payment || { id: paymentId, driverName: driver.driverName })}
+                  type="button"
+                >
+                  <CheckCircle2 size={16} /> {saving ? 'Memproses...' : 'Tandai Lunas via Potongan'}
+                </button>
+              </div>
+            ) : null}
+            {canUploadTransferProof ? (
               <div className="mt-4">
                 {!alreadyPaid ? (
                   <p className="mb-2 text-xs font-bold text-emerald-700">
@@ -1108,6 +1137,7 @@ function DriverCommissionPage() {
   const [voidBusyId, setVoidBusyId] = useState('');
   const [voidError, setVoidError] = useState('');
   const [rejectBatch, setRejectBatch] = useState(null);
+  const [acknowledgedRevisionBatchId, setAcknowledgedRevisionBatchId] = useState('');
 
   const canFinance = [USER_ROLES.ADMIN, USER_ROLES.FINANCE].includes(user?.role);
   const canVoidPayment = user?.role === USER_ROLES.ADMIN;
@@ -1118,6 +1148,12 @@ function DriverCommissionPage() {
   const dropdownBatches = useMemo(() => buildCommissionPeriodOptions(batches), [batches]);
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const selectedPayment = resolveSelectedPayment(selectedBatch, selectedDriver);
+  const requiresRevisionAcknowledgement = selectedBatch?.status === 'submitted' && selectedBatch.revisionCount > 0;
+  const revisionAcknowledged = !requiresRevisionAcknowledgement || acknowledgedRevisionBatchId === selectedBatch?.id;
+
+  useEffect(() => {
+    setAcknowledgedRevisionBatchId('');
+  }, [selectedBatch?.id, selectedBatch?.revisionCount]);
 
   const applySelectedReport = useCallback((nextReport) => {
     setReport(nextReport || emptyReport);
@@ -1254,6 +1290,24 @@ function DriverCommissionPage() {
       await loadData(updated.id);
     } catch (error) {
       notify({ type: 'error', title: 'Upload bukti gagal', message: error.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSettleDeductionOnly(payment) {
+    if (!payment?.id) return;
+
+    setSaving(true);
+    try {
+      const updated = await markDriverCommissionPaymentPaid(payment.id, {
+        paymentNote: 'Lunas via potongan Finance penuh.',
+      });
+      notify({ title: 'Komisi dilunasi via potongan', message: `${payment.driverName || 'Sopir'} ditandai paid tanpa bukti transfer.` });
+      setSelectedBatch(updated);
+      await loadData(updated.id);
+    } catch (error) {
+      notify({ type: 'error', title: 'Settlement potongan gagal', message: error.message });
     } finally {
       setSaving(false);
     }
@@ -1405,7 +1459,7 @@ function DriverCommissionPage() {
               </button>
               {canFinance && selectedBatch?.status === 'submitted' ? (
                 <>
-                <button className="primary-button inline-flex items-center gap-2" type="button" disabled={saving} onClick={() => handleApprove(selectedBatch)}>
+                <button className="primary-button inline-flex items-center gap-2" type="button" disabled={saving || !revisionAcknowledged} onClick={() => handleApprove(selectedBatch)}>
                   <CheckCircle2 size={16} /> Approve
                 </button>
                 <button className="secondary-button inline-flex items-center gap-2" type="button" disabled={saving} onClick={() => handleReject(selectedBatch)}>
@@ -1418,6 +1472,31 @@ function DriverCommissionPage() {
           {!selectedBatch ? (
             <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
               Belum ada batch aktif dari Operational untuk periode ini.
+            </div>
+          ) : null}
+          {selectedBatch?.status === 'submitted' && selectedBatch.revisionCount > 0 ? (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 shrink-0" size={16} />
+                <div>
+                  <strong className="block">Batch berubah setelah diajukan</strong>
+                  <p className="mt-0.5 text-xs font-semibold">
+                    Penerima komisi {selectedBatch.lastRevisionPreviousDriverName || '-'} dipindahkan ke {selectedBatch.lastRevisionNextDriverName || '-'}
+                    {' '}oleh {selectedBatch.lastRevisedByName || 'Admin'} pada {formatDateTime(selectedBatch.lastRevisedAt)}.
+                  </p>
+                  {selectedBatch.lastRevisionReason ? <p className="mt-1 text-xs">Alasan: {selectedBatch.lastRevisionReason}</p> : null}
+                  <p className="mt-1 text-xs font-bold">Periksa kembali rincian sopir dan nominal sebelum menyetujui batch.</p>
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 text-xs font-bold">
+                    <input
+                      checked={acknowledgedRevisionBatchId === selectedBatch.id}
+                      className="mt-0.5 h-4 w-4 accent-amber-700"
+                      onChange={(event) => setAcknowledgedRevisionBatchId(event.target.checked ? selectedBatch.id : '')}
+                      type="checkbox"
+                    />
+                    Saya sudah memeriksa ulang penerima dan nominal komisi dalam batch ini.
+                  </label>
+                </div>
+              </div>
             </div>
           ) : null}
           {selectedBatch?.status === 'rejected' && selectedBatch.rejectionNote ? (
@@ -1533,6 +1612,7 @@ function DriverCommissionPage() {
         canManageDeduction={canManageDeduction}
         saving={saving}
         onUploadProof={handleUploadProof}
+        onSettleDeductionOnly={handleSettleDeductionOnly}
         canVoidPayment={canVoidPayment}
         voidBusyId={voidBusyId}
         voidError={voidError}

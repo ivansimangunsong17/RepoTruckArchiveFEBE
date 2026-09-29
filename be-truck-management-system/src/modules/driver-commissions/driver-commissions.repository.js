@@ -155,6 +155,28 @@ function attachGrossDeductionNet(target, deductions = []) {
   };
 }
 
+export function resolveDriverCommissionPaymentSettlement({
+  grossAmount,
+  totalAmount,
+  deductionAmount,
+  currentProofAttachmentId,
+  nextProofAttachmentId,
+} = {}) {
+  const resolvedGrossAmount = toNumber(grossAmount ?? totalAmount);
+  const resolvedDeductionAmount = toNumber(deductionAmount);
+  const netAmount = Math.max(0, resolvedGrossAmount - resolvedDeductionAmount);
+  const hasTransferProof = Boolean(currentProofAttachmentId || nextProofAttachmentId);
+
+  return {
+    grossAmount: resolvedGrossAmount,
+    deductionAmount: resolvedDeductionAmount,
+    netAmount,
+    hasTransferProof,
+    isFullyDeducted: resolvedGrossAmount > 0 && resolvedDeductionAmount >= resolvedGrossAmount && netAmount === 0,
+    requiresTransferProof: netAmount > 0 && !hasTransferProof,
+  };
+}
+
 async function attachDeductionsToPayments(db, payments = []) {
   const deductionsByPayment = await findDeductionsByPaymentIds(db, payments.map((payment) => payment.id));
   return payments.map((payment) => attachGrossDeductionNet(payment, deductionsByPayment.get(payment.id) || []));
@@ -428,7 +450,9 @@ export function summarizeDriverCommissionPeriodRows(rows = []) {
   return { summary, drivers };
 }
 
-// Diambil hanya ritasi berkomisi yang selesai di periode Minggu-Sabtu yang sedang ditutup.
+// Diambil hanya ritasi berkomisi yang masuk periode Minggu-Sabtu yang sedang ditutup.
+// Untuk container titip, periode komisi memakai tanggal masuk penitipan (repo_stored_at),
+// bukan tanggal closing akhir setelah container diambil lagi.
 // Ritasi dari periode lain harus dicek lewat periodenya masing-masing agar batch mingguan rapi.
 // Tidak ada syarat jumlah ritasi minimum: berapa pun jumlahnya (termasuk 1) langsung eligible
 // untuk diajukan ke Finance.
@@ -444,8 +468,8 @@ async function findEligibleRows(period, db = { query }) {
         cj.container_size,
         so.customer_name,
         cj.destination,
-        (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
-        cj.completed_at,
+        (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date as completed_date,
+        coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
         coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
         coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
         case
@@ -471,14 +495,17 @@ async function findEligibleRows(period, db = { query }) {
         -- bawah). Ritasi susulan yang periode aslinya MASIH open tetap masuk lewat kondisi normal
         -- (between $1 and $2), jadi tidak butuh flag ini.
         case
-          when (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date then false
+          when (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date then false
           else true
         end as is_backdate_commission
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
+      left join container_pickup_items cpi on cpi.container_job_id = cj.id
+      left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
       where cj.status = 'completed'
         and coalesce(cj.execution_source, 'internal') = 'internal'
+        and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
         and cj.completed_at is not null
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
@@ -492,7 +519,7 @@ async function findEligibleRows(period, db = { query }) {
             and dci.voided_at is null
         )
         and (
-          (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+          (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           or (
             -- Ritasi susulan/backdate (Phase 4): periode mingguan ASLI ritasi ini sudah
             -- approved/paid, jadi tidak akan pernah bisa membuka batch baru untuk periode
@@ -503,8 +530,8 @@ async function findEligibleRows(period, db = { query }) {
             and exists (
               select 1
               from driver_commission_batches b2
-              where b2.period_start <= (cj.completed_at at time zone 'Asia/Jakarta')::date
-                and b2.period_end >= (cj.completed_at at time zone 'Asia/Jakarta')::date
+              where b2.period_start <= (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date
+                and b2.period_end >= (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date
                 and b2.status in ('approved', 'paid')
             )
           )
@@ -530,8 +557,8 @@ async function findCommissionReviewRows(period, db = { query }) {
           cj.container_size,
           so.customer_name,
           cj.destination,
-          (cj.completed_at at time zone 'Asia/Jakarta')::date as completed_date,
-          cj.completed_at,
+          (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date as completed_date,
+          coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
           coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
           coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
           'bank' as payment_method,
@@ -556,10 +583,13 @@ async function findCommissionReviewRows(period, db = { query }) {
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
+        left join container_pickup_items cpi on cpi.container_job_id = cj.id
+        left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
         where cj.status = 'completed'
           and coalesce(cj.execution_source, 'internal') = 'internal'
+          and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
           and cj.completed_at is not null
-          and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+          and (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
           and coalesce(cj.has_driver_commission, false)
           and so.status <> 'cancelled'
           and not exists (
@@ -587,10 +617,13 @@ async function countNoCommissionRows(period, db = { query }) {
       select count(*)::int as total
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
+      left join container_pickup_items cpi on cpi.container_job_id = cj.id
+      left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
       where cj.status = 'completed'
         and coalesce(cj.execution_source, 'internal') = 'internal'
+        and not (cpm.pickup_type = 'combo_2x20' and coalesce(cpi.sequence_no, 1) > 1)
         and cj.completed_at is not null
-        and (cj.completed_at at time zone 'Asia/Jakarta')::date between $1::date and $2::date
+        and (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date between $1::date and $2::date
         and not coalesce(cj.has_driver_commission, false)
         and so.status <> 'cancelled'
     `,
@@ -1016,7 +1049,8 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
   return withTransaction(async (client) => {
     const existing = await client.query(
       `
-        select dcp.id, dcp.batch_id, dcp.status as payment_status, dcp.payment_proof_attachment_id, dcb.status as batch_status
+        select dcp.id, dcp.batch_id, dcp.status as payment_status, dcp.total_amount,
+               dcp.payment_proof_attachment_id, dcb.status as batch_status
         from driver_commission_payments dcp
         join driver_commission_batches dcb on dcb.id = dcp.batch_id
         where dcp.id = $1
@@ -1056,12 +1090,23 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
       return findDriverCommissionBatchById(current.batch_id, client);
     }
 
-    if (!nextProofAttachmentId && !current.payment_proof_attachment_id) {
+    const deductionAmount = await sumActiveDeductions(client, id);
+    const settlement = resolveDriverCommissionPaymentSettlement({
+      totalAmount: current.total_amount,
+      deductionAmount,
+      currentProofAttachmentId: current.payment_proof_attachment_id,
+      nextProofAttachmentId,
+    });
+
+    if (settlement.requiresTransferProof) {
       const error = new Error('Bukti transfer wajib diupload sebelum pembayaran komisi ditandai paid.');
       error.statusCode = 400;
       error.code = 'DRIVER_COMMISSION_PAYMENT_PROOF_REQUIRED';
       throw error;
     }
+
+    const paymentNote = payload.paymentNote || payload.payment_note
+      || (settlement.isFullyDeducted ? 'Lunas via potongan Finance penuh.' : null);
 
     await client.query(
       `
@@ -1080,7 +1125,7 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
         actor.sub || actor.id || null,
         actor.name || 'System',
         payload.paidAt || payload.paid_at || null,
-        payload.paymentNote || payload.payment_note || null,
+        paymentNote,
         nextProofAttachmentId,
       ],
     );

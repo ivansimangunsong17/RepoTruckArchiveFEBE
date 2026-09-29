@@ -12,6 +12,8 @@ import {
   listContainerJobExpenses,
   listContainerJobs,
   moveDroppingExpenseToAnotherJobBeforeFinanceCheck,
+  pickupComboRepoContainerJob,
+  pickupRepoContainerJob,
   requestContainerJobCancellation,
   resetMisassignedContainerJob,
   reviewContainerJobCancellation,
@@ -68,6 +70,7 @@ const adminCorrectionAuditFields = {
   rpujNotes: 'Biaya Lainnya',
   hasDriverCommission: 'Komisi Sopir',
   driverCommissionAmount: 'Nominal Komisi',
+  commissionDriverName: 'Penerima Komisi',
   eirNumber: 'No. EIR',
   loadingVoucher: 'Bon Muat/Bongkar',
   tilaGatepassDocument: 'TILA/Gatepass',
@@ -140,6 +143,9 @@ export function adminCorrectionMetadata(payload = {}, job = {}) {
     salesOrderId: job.orderId,
     soNumber: job.soNumber,
     containerNumber: job.containerNumber,
+    ...(payload.commissionDriverAction ? {
+      commissionDriverAction: String(payload.commissionDriverAction).trim().toLowerCase(),
+    } : {}),
   };
 }
 
@@ -168,6 +174,27 @@ function normalizeAuditValue(value) {
 
 export function adminCorrectionChanges(before = {}, after = {}) {
   return Object.entries(adminCorrectionAuditFields)
+    .filter(([field]) => normalizeAuditValue(before[field]) !== normalizeAuditValue(after[field]))
+    .map(([field, label]) => ({
+      field,
+      label,
+      before: before[field] ?? null,
+      after: after[field] ?? null,
+    }));
+}
+
+// Phase 8: audit terpisah khusus "sumber rekomendasi tarif" (uj_source_destination_id /
+// driver_commission_source_destination_id) -- paling sering berubah dari null ke terisi saat UJ
+// dibekukan otomatis ketika job pertama kali jalan (syncAutoJourneyMoneyExpense), tapi juga
+// tercatat kalau berubah lewat koreksi admin. Terpisah dari adminCorrectionChanges supaya
+// perubahan sumber tarif tetap tercatat walau bukan lewat mode koreksi admin.
+const tariffSourceAuditFields = {
+  ujSourceDestinationId: 'Sumber Tarif UJ',
+  driverCommissionSourceDestinationId: 'Sumber Tarif Komisi Sopir',
+};
+
+export function tariffSourceChanges(before = {}, after = {}) {
+  return Object.entries(tariffSourceAuditFields)
     .filter(([field]) => normalizeAuditValue(before[field]) !== normalizeAuditValue(after[field]))
     .map(([field, label]) => ({
       field,
@@ -364,6 +391,69 @@ export async function updateContainerJobController(request, response) {
       metadata: {
         ...adminCorrectionMetadata(request.body, saved),
         changedFields: changes.map((item) => item.label),
+      },
+    });
+    const commissionDriverAction = String(request.body.commissionDriverAction || '').trim().toLowerCase();
+    if (['move', 'keep'].includes(commissionDriverAction)) {
+      await safeRecordActivityLog(request, {
+        action: commissionDriverAction === 'move'
+          ? 'MOVE_DRIVER_COMMISSION_RECIPIENT'
+          : 'KEEP_DRIVER_COMMISSION_RECIPIENT',
+        module: 'driver_commissions',
+        entityType: 'container_job',
+        entityId: saved.id,
+        beforeData: {
+          driverId: before.commissionDriverId || before.driverId || null,
+          driverName: before.commissionDriverName || before.driver || '',
+        },
+        afterData: {
+          driverId: saved.commissionDriverId || null,
+          driverName: saved.commissionDriverName || '',
+        },
+        metadata: {
+          ...adminCorrectionMetadata(request.body, saved),
+          batchId: saved.commissionBatchId || null,
+          batchStatus: saved.commissionBatchStatus || 'unsubmitted',
+          amount: saved.commissionLockedAmount || saved.driverCommissionAmount || 0,
+        },
+      });
+      if (commissionDriverAction === 'move' && saved.commissionBatchStatus === 'submitted' && saved.commissionBatchId) {
+        await safeRecordActivityLog(request, {
+          action: 'MARK_COMMISSION_BATCH_CHANGED',
+          module: 'driver_commissions',
+          entityType: 'driver_commission_batch',
+          entityId: saved.commissionBatchId,
+          beforeData: {
+            driverId: before.commissionDriverId || before.driverId || null,
+            driverName: before.commissionDriverName || before.driver || '',
+          },
+          afterData: {
+            driverId: saved.commissionDriverId || null,
+            driverName: saved.commissionDriverName || '',
+          },
+          metadata: {
+            ...adminCorrectionMetadata(request.body, saved),
+            containerJobId: saved.id,
+            batchStatus: saved.commissionBatchStatus,
+          },
+        });
+      }
+    }
+  }
+  const tariffChanges = tariffSourceChanges(before, saved);
+  if (tariffChanges.length) {
+    await safeRecordActivityLog(request, {
+      action: 'UPDATE_CONTAINER_JOB_TARIFF_SOURCE',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: saved.id,
+      beforeData: Object.fromEntries(tariffChanges.map((item) => [item.field, item.before])),
+      afterData: Object.fromEntries(tariffChanges.map((item) => [item.field, item.after])),
+      metadata: {
+        salesOrderId: saved.orderId,
+        soNumber: saved.soNumber,
+        containerNumber: saved.containerNumber,
+        changedFields: tariffChanges.map((item) => item.label),
       },
     });
   }
@@ -568,6 +658,51 @@ export async function updateContainerJobController(request, response) {
     });
   }
   sendSuccess(response, saved, 'Container Job berhasil diperbarui.');
+}
+
+export async function pickupRepoContainerJobController(request, response) {
+  const result = await pickupRepoContainerJob(request.params.id, request.body || {}, request.user);
+  const job = result.jobs?.[0] || null;
+  if (job) {
+    await safeRecordActivityLog(request, {
+      action: 'PICKUP_CONTAINER_JOB_REPO',
+      module: 'container_jobs',
+      entityType: 'container_job',
+      entityId: job.id,
+      afterData: job,
+      metadata: {
+        movementId: result.movement?.id,
+        pickupType: result.movement?.pickup_type || 'single',
+        salesOrderId: job.orderId,
+        soNumber: job.soNumber,
+        containerNumber: job.containerNumber,
+      },
+    });
+  }
+  return sendSuccess(response, result);
+}
+
+export async function pickupComboRepoContainerJobController(request, response) {
+  const result = await pickupComboRepoContainerJob(request.body || {}, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'PICKUP_CONTAINER_JOB_REPO_COMBO',
+    module: 'container_jobs',
+    entityType: 'container_pickup_movement',
+    entityId: result.movement?.id,
+    afterData: {
+      movement: result.movement,
+      jobs: result.jobs,
+    },
+    metadata: {
+      movementId: result.movement?.id,
+      pickupType: result.movement?.pickup_type || 'combo_2x20',
+      containerJobIds: (result.jobs || []).map((job) => job.id),
+      containerNumbers: (result.jobs || []).map((job) => job.containerNumber),
+      vehicleId: result.movement?.vehicle_id,
+      driverId: result.movement?.driver_id,
+    },
+  });
+  return sendSuccess(response, result);
 }
 
 export async function resetMisassignedContainerJobController(request, response) {

@@ -1,7 +1,45 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { summarizeDriverCommissionPeriodRows } = await import('./driver-commissions.repository.js');
+const {
+  resolveDriverCommissionPaymentSettlement,
+  summarizeDriverCommissionPeriodRows,
+} = await import('./driver-commissions.repository.js');
+
+test('settlement komisi mewajibkan bukti transfer kalau masih ada net yang harus dibayar', () => {
+  const settlement = resolveDriverCommissionPaymentSettlement({
+    totalAmount: 500000,
+    deductionAmount: 300000,
+  });
+
+  assert.equal(settlement.grossAmount, 500000);
+  assert.equal(settlement.deductionAmount, 300000);
+  assert.equal(settlement.netAmount, 200000);
+  assert.equal(settlement.isFullyDeducted, false);
+  assert.equal(settlement.requiresTransferProof, true);
+});
+
+test('settlement komisi potongan penuh tidak mewajibkan bukti transfer', () => {
+  const settlement = resolveDriverCommissionPaymentSettlement({
+    totalAmount: 500000,
+    deductionAmount: 500000,
+  });
+
+  assert.equal(settlement.netAmount, 0);
+  assert.equal(settlement.isFullyDeducted, true);
+  assert.equal(settlement.requiresTransferProof, false);
+});
+
+test('settlement komisi menjaga net tidak negatif saat potongan sama dengan atau melebihi gross', () => {
+  const settlement = resolveDriverCommissionPaymentSettlement({
+    totalAmount: 500000,
+    deductionAmount: 600000,
+  });
+
+  assert.equal(settlement.netAmount, 0);
+  assert.equal(settlement.isFullyDeducted, true);
+  assert.equal(settlement.requiresTransferProof, false);
+});
 
 test('report komisi periode digrup per sopir dengan detail container', () => {
   const result = summarizeDriverCommissionPeriodRows([
