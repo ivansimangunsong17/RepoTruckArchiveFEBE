@@ -155,6 +155,28 @@ function attachGrossDeductionNet(target, deductions = []) {
   };
 }
 
+export function resolveDriverCommissionPaymentSettlement({
+  grossAmount,
+  totalAmount,
+  deductionAmount,
+  currentProofAttachmentId,
+  nextProofAttachmentId,
+} = {}) {
+  const resolvedGrossAmount = toNumber(grossAmount ?? totalAmount);
+  const resolvedDeductionAmount = toNumber(deductionAmount);
+  const netAmount = Math.max(0, resolvedGrossAmount - resolvedDeductionAmount);
+  const hasTransferProof = Boolean(currentProofAttachmentId || nextProofAttachmentId);
+
+  return {
+    grossAmount: resolvedGrossAmount,
+    deductionAmount: resolvedDeductionAmount,
+    netAmount,
+    hasTransferProof,
+    isFullyDeducted: resolvedGrossAmount > 0 && resolvedDeductionAmount >= resolvedGrossAmount && netAmount === 0,
+    requiresTransferProof: netAmount > 0 && !hasTransferProof,
+  };
+}
+
 async function attachDeductionsToPayments(db, payments = []) {
   const deductionsByPayment = await findDeductionsByPaymentIds(db, payments.map((payment) => payment.id));
   return payments.map((payment) => attachGrossDeductionNet(payment, deductionsByPayment.get(payment.id) || []));
@@ -1027,7 +1049,8 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
   return withTransaction(async (client) => {
     const existing = await client.query(
       `
-        select dcp.id, dcp.batch_id, dcp.status as payment_status, dcp.payment_proof_attachment_id, dcb.status as batch_status
+        select dcp.id, dcp.batch_id, dcp.status as payment_status, dcp.total_amount,
+               dcp.payment_proof_attachment_id, dcb.status as batch_status
         from driver_commission_payments dcp
         join driver_commission_batches dcb on dcb.id = dcp.batch_id
         where dcp.id = $1
@@ -1067,12 +1090,23 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
       return findDriverCommissionBatchById(current.batch_id, client);
     }
 
-    if (!nextProofAttachmentId && !current.payment_proof_attachment_id) {
+    const deductionAmount = await sumActiveDeductions(client, id);
+    const settlement = resolveDriverCommissionPaymentSettlement({
+      totalAmount: current.total_amount,
+      deductionAmount,
+      currentProofAttachmentId: current.payment_proof_attachment_id,
+      nextProofAttachmentId,
+    });
+
+    if (settlement.requiresTransferProof) {
       const error = new Error('Bukti transfer wajib diupload sebelum pembayaran komisi ditandai paid.');
       error.statusCode = 400;
       error.code = 'DRIVER_COMMISSION_PAYMENT_PROOF_REQUIRED';
       throw error;
     }
+
+    const paymentNote = payload.paymentNote || payload.payment_note
+      || (settlement.isFullyDeducted ? 'Lunas via potongan Finance penuh.' : null);
 
     await client.query(
       `
@@ -1091,7 +1125,7 @@ export async function markDriverCommissionPaymentPaid(id, payload = {}, actor = 
         actor.sub || actor.id || null,
         actor.name || 'System',
         payload.paidAt || payload.paid_at || null,
-        payload.paymentNote || payload.payment_note || null,
+        paymentNote,
         nextProofAttachmentId,
       ],
     );

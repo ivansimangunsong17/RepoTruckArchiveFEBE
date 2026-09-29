@@ -31,6 +31,13 @@ export function driverCommissionBatchAuditSnapshot(batch = {}) {
     rejectionNote: batch.rejectionNote || '',
     totalItems: batch.totalItems || 0,
     totalAmount: batch.totalAmount || 0,
+    revisionCount: batch.revisionCount || 0,
+    lastRevisedAt: batch.lastRevisedAt,
+    lastRevisedByName: batch.lastRevisedByName || '',
+    lastRevisionReason: batch.lastRevisionReason || '',
+    lastRevisionJobId: batch.lastRevisionJobId || null,
+    lastRevisionPreviousDriverName: batch.lastRevisionPreviousDriverName || '',
+    lastRevisionNextDriverName: batch.lastRevisionNextDriverName || '',
     payments: (batch.payments || []).map((payment) => ({
       id: payment.id,
       driverId: payment.driverId || null,

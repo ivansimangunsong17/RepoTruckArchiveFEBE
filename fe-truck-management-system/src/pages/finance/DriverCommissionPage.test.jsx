@@ -7,6 +7,7 @@ import {
   fetchDriverCommissionBatchDetail,
   fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
+  markDriverCommissionPaymentPaid,
   recordDriverCommissionDeduction,
   voidDriverCommissionDeduction,
 } from '../../services/finance/driverCommissionService';
@@ -39,6 +40,7 @@ vi.mock('../../services/finance/driverCommissionService', () => ({
   fetchDriverCommissionBatchDetail: vi.fn(),
   fetchDriverCommissionBatches: vi.fn(),
   fetchDriverCommissionPeriodReport: vi.fn(),
+  markDriverCommissionPaymentPaid: vi.fn(),
   recordDriverCommissionDeduction: vi.fn(),
   rejectDriverCommissionBatch: vi.fn(),
   uploadDriverCommissionTransferProof: vi.fn(),
@@ -278,6 +280,33 @@ describe('DriverCommissionPage finance', () => {
     expect(screen.getByText('CONT-001')).toBeInTheDocument();
   });
 
+  it('menampilkan notice ketika batch berubah setelah diajukan', async () => {
+    const user = userEvent.setup();
+    const revisedBatch = {
+      ...batchDetail,
+      revisionCount: 1,
+      lastRevisedAt: '2026-08-16T03:00:00.000Z',
+      lastRevisedByName: 'Admin Test',
+      lastRevisionReason: 'Sopir sebelumnya salah dipilih',
+      lastRevisionPreviousDriverName: 'Sopir Lama',
+      lastRevisionNextDriverName: 'Sopir Baru',
+    };
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [revisedBatch] });
+    fetchDriverCommissionBatchDetail.mockResolvedValue(revisedBatch);
+
+    render(<DriverCommissionPage />);
+
+    expect(await screen.findByText('Batch berubah setelah diajukan')).toBeInTheDocument();
+    expect(screen.getByText(/Sopir Lama dipindahkan ke Sopir Baru/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sopir sebelumnya salah dipilih/i)).toBeInTheDocument();
+    const approveButton = screen.getByRole('button', { name: /approve/i });
+    expect(approveButton).toBeDisabled();
+
+    await user.click(screen.getByRole('checkbox', { name: /sudah memeriksa ulang/i }));
+
+    expect(approveButton).toBeEnabled();
+  });
+
   it('mengunduh PDF pembayaran komisi yang sedang tampil', async () => {
     const user = userEvent.setup();
     render(<DriverCommissionPage />);
@@ -484,6 +513,134 @@ describe('DriverCommissionPage finance', () => {
     await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
 
     expect(await screen.findByText(/Nominal yang harus dibayarkan: Rp\s*100\.000/i)).toBeInTheDocument();
+  });
+
+  it('finance bisa menandai komisi lunas via potongan penuh tanpa upload bukti transfer', async () => {
+    const fullyDeductedBatch = {
+      ...batchDetail,
+      status: 'approved',
+      payments: [
+        {
+          ...batchDetail.payments[0],
+          status: 'pending',
+          deductionAmount: 125000,
+          netAmount: 0,
+          deductions: [
+            {
+              id: 'deduction-full',
+              paymentId: 'payment-1',
+              deductionType: 'hutang_sopir',
+              amount: 125000,
+              reason: 'Potongan hutang sopir sampai lunas',
+              status: 'active',
+              createdByName: 'Sprint2C Finance',
+              createdAt: '2026-09-20T04:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    };
+    const paidFullyDeductedBatch = {
+      ...fullyDeductedBatch,
+      status: 'paid',
+      payments: [
+        {
+          ...fullyDeductedBatch.payments[0],
+          status: 'paid',
+          paidAt: '2026-09-21T02:00:00.000Z',
+          paidByName: 'Sprint2C Finance',
+          paymentNote: 'Lunas via potongan Finance penuh.',
+        },
+      ],
+    };
+    fetchDriverCommissionBatchDetail
+      .mockResolvedValueOnce(fullyDeductedBatch)
+      .mockResolvedValue(paidFullyDeductedBatch);
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [fullyDeductedBatch] });
+    markDriverCommissionPaymentPaid.mockResolvedValue(paidFullyDeductedBatch);
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    await screen.findAllByText('Rahmat');
+    await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
+
+    expect(await screen.findByText(/Komisi sudah habis dipotong Finance/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Nominal yang harus dibayarkan/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /tandai lunas via potongan/i }));
+
+    await waitFor(() => {
+      expect(markDriverCommissionPaymentPaid).toHaveBeenCalledWith('payment-1', {
+        paymentNote: 'Lunas via potongan Finance penuh.',
+      });
+    });
+  });
+
+  it('report menampilkan status dan bukti khusus untuk komisi lunas via potongan penuh', async () => {
+    const fullyDeductedReport = {
+      ...periodReport,
+      status: 'paid',
+      activeBatch: {
+        ...periodReport.activeBatch,
+        status: 'paid',
+      },
+      summary: {
+        totalDrivers: 1,
+        totalItems: 1,
+        totalAmount: 125000,
+        paidAmount: 125000,
+        unpaidAmount: 0,
+      },
+      drivers: [
+        {
+          ...periodReport.drivers[0],
+          batchStatus: 'paid',
+          paymentStatus: 'paid',
+          grossAmount: 125000,
+          deductionAmount: 125000,
+          netAmount: 0,
+          paidAt: '2026-09-21T02:00:00.000Z',
+          paidByName: 'Sprint2C Finance',
+          paymentProofAttachment: null,
+          paymentProofAttachmentId: null,
+          paymentNote: 'Lunas via potongan Finance penuh.',
+        },
+      ],
+    };
+    const fullyDeductedBatch = {
+      ...batchDetail,
+      status: 'paid',
+      payments: [
+        {
+          ...batchDetail.payments[0],
+          status: 'paid',
+          deductionAmount: 125000,
+          netAmount: 0,
+          paidAt: '2026-09-21T02:00:00.000Z',
+          paidByName: 'Sprint2C Finance',
+          paymentProofAttachmentId: null,
+          paymentNote: 'Lunas via potongan Finance penuh.',
+        },
+      ],
+    };
+    fetchDriverCommissionPeriodReport.mockResolvedValue(fullyDeductedReport);
+    fetchDriverCommissionBatchDetail.mockResolvedValue(fullyDeductedBatch);
+    fetchDriverCommissionBatches.mockResolvedValue({ rows: [fullyDeductedBatch] });
+    const user = userEvent.setup();
+    render(<DriverCommissionPage />);
+
+    expect(await screen.findByText('Lunas via Potongan')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /download pdf/i }));
+
+    expect(downloadPdfReport).toHaveBeenCalledWith(expect.objectContaining({
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          driverName: 'Rahmat',
+          netAmount: 0,
+          statusLabel: 'Lunas via Potongan',
+          proofStatus: 'Tidak Ada Transfer',
+        }),
+      ]),
+    }));
   });
 
   it('finance bisa membatalkan potongan yang belum paid', async () => {

@@ -1671,7 +1671,8 @@ describe('OperationalForm', () => {
 
     expect(screen.getByLabelText('Sopir Aktual Ritasi')).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
-    expect(screen.getByText(/Default sopir truck saat ini: Driver Aktif/)).toBeInTheDocument();
+    expect(screen.getByText('Default sopir truck saat ini')).toBeInTheDocument();
+    expect(screen.getAllByText('Driver Aktif').length).toBeGreaterThan(0);
   });
 
   it('mengganti sopir ritasi biasa tanpa klik aksi default tidak memanggil onSetTruckDefaultDriver', async () => {

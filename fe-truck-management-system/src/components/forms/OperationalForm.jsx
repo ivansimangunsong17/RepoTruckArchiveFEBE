@@ -1449,6 +1449,18 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         </header>
         <form className="operational-update-form" onSubmit={handleSubmit}>
           {error ? <div className="alert error operational-form-error">{error}</div> : null}
+          {notification ? (
+            <div className="operational-validation-alert" role="alert" aria-live="assertive">
+              <span className="operational-validation-alert-icon" aria-hidden="true"><AlertTriangle size={18} /></span>
+              <div>
+                <strong>{notification.title}</strong>
+                <p>{notification.message}</p>
+              </div>
+              <button type="button" aria-label="Tutup notifikasi validasi" onClick={() => setNotification(null)}>
+                <X size={16} />
+              </button>
+            </div>
+          ) : null}
           {isRepoPickupMode ? (
             <div className="alert operational-form-repo-pickup">
               {isRepoComboPickupMode
@@ -1680,11 +1692,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                 </div>
               </div>
             ) : null}
-            {!isVendorExecution && selectedTruckForDefault ? (
-              <p className="mt-2 text-[11px] font-medium text-slate-500">Default sopir truck saat ini: {getDriverDisplayName(selectedTruckForDefault.defaultDriver) || 'belum diset'}</p>
-            ) : null}
-            {!isVendorExecution && canSetTruckDefaultDriver ? (
-              <div className="mt-2">
+            {!isVendorExecution && (selectedTruckForDefault || canSetTruckDefaultDriver) ? (
+              <div className="operational-default-driver-panel">
+                <div className="operational-default-driver-copy">
+                  <span>Default sopir truck saat ini</span>
+                  <strong>{selectedTruckForDefault ? getDriverDisplayName(selectedTruckForDefault.defaultDriver) || 'Belum diset' : 'Pilih truck terlebih dahulu'}</strong>
+                </div>
+                {canSetTruckDefaultDriver ? (
+                  <div className="operational-default-driver-action">
                 {defaultDriverFormOpen ? (
                   <form className="grid gap-2 rounded-md border border-sky-200 bg-sky-50 p-3" onSubmit={submitSetTruckDefaultDriver}>
                     <p className="text-xs font-semibold text-sky-900">
@@ -1715,7 +1730,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                   </form>
                 ) : (
                   <button
-                    className="text-xs font-bold text-sky-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
+                    className="secondary-button"
                     disabled={!canTriggerSetDefaultDriver}
                     onClick={() => { setDefaultDriverFormOpen(true); setDefaultDriverError(''); }}
                     type="button"
@@ -1723,17 +1738,23 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                     Jadikan sopir ini default truck
                   </button>
                 )}
+                  </div>
+                ) : null}
               </div>
             ) : null}
-            {!canEditAssignment ? (
-              <p className="mt-2 text-[11px] font-medium text-amber-700">Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</p>
-            ) : assignmentChangeReasonRequired ? (
-              <p className="mt-2 text-[11px] font-medium text-amber-700">Ritasi sudah berjalan -- alasan perubahan sopir/truck wajib diisi sebelum disimpan.</p>
-            ) : null}
-            {!canEditContainerNumber ? (
-              <p className="mt-2 text-[11px] font-medium text-amber-700">{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</p>
-            ) : !hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid') ? (
-              <p className="mt-2 text-[11px] font-medium text-emerald-700">No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</p>
+            {!canEditAssignment || assignmentChangeReasonRequired || !canEditContainerNumber || (!hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid')) ? (
+              <div className="operational-lock-notices">
+                {!canEditAssignment ? (
+                  <p><AlertTriangle size={14} /> <span>Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</span></p>
+                ) : assignmentChangeReasonRequired ? (
+                  <p><AlertTriangle size={14} /> <span>Ritasi sudah berjalan -- alasan perubahan sopir/truck wajib diisi sebelum disimpan.</span></p>
+                ) : null}
+                {!canEditContainerNumber ? (
+                  <p><AlertTriangle size={14} /> <span>{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</span></p>
+                ) : !hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid') ? (
+                  <p className="is-success"><ShieldCheck size={14} /> <span>No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</span></p>
+                ) : null}
+              </div>
             ) : null}
           </div>
           {!isVendorExecution ? <AssignmentHistorySection containerJobId={container.id} /> : null}
@@ -2071,32 +2092,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           <footer className="operational-form-footer"><button className="secondary-button" type="button" onClick={onClose} disabled={isSaving}>Batal</button><button className="primary-button" type="submit" aria-label={`Simpan Container Job - ${primaryActionLabel}`} disabled={isSaving}>{isSaving ? 'Menyimpan...' : primaryActionLabel}</button></footer>
         </form>
       </section>
-
-      {notification ? (
-        <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setNotification(null)}>
-          <section
-            className="feedback-dialog"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="operational-notification-title"
-            aria-describedby="operational-notification-description"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <header>
-              <span><AlertTriangle size={21} /></span>
-              <div>
-                <h2 id="operational-notification-title">{notification.title}</h2>
-                <p id="operational-notification-description">{notification.message}</p>
-              </div>
-            </header>
-            <footer>
-              <button className="primary-button" type="button" autoFocus onClick={() => setNotification(null)}>
-                Mengerti
-              </button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
 
       {executionSourceConfirmation ? (
         <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setExecutionSourceConfirmation(null)}>

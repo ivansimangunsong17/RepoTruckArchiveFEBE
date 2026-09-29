@@ -26,13 +26,57 @@ export function summarizeDriverCommissions(drivers = []) {
   return drivers.reduce((totals, driver) => {
     const grossAmount = Number(driver.grossAmount ?? driver.totalAmount ?? 0);
     const deductionAmount = Number(driver.deductionAmount || 0);
-    const netAmount = Number(driver.netAmount ?? (grossAmount - deductionAmount));
+    const netAmount = Math.max(0, Number(driver.netAmount ?? (grossAmount - deductionAmount)));
     return {
       grossAmount: totals.grossAmount + grossAmount,
       deductionAmount: totals.deductionAmount + deductionAmount,
       netAmount: totals.netAmount + netAmount,
     };
   }, { grossAmount: 0, deductionAmount: 0, netAmount: 0 });
+}
+
+export function isFullyDeductedCommission(driver = {}) {
+  const grossAmount = Number(driver.grossAmount ?? driver.totalAmount ?? 0);
+  const deductionAmount = Number(driver.deductionAmount || 0);
+  const netAmount = Math.max(0, Number(driver.netAmount ?? (grossAmount - deductionAmount)));
+  return grossAmount > 0 && deductionAmount >= grossAmount && netAmount === 0;
+}
+
+export function hasDriverCommissionTransferProof(driver = {}) {
+  return Boolean(driver.paymentProofAttachment || driver.paymentProofAttachmentId);
+}
+
+export function driverCommissionFinanceStatus(driver = {}) {
+  const paid = driver.paymentStatus === 'paid' || driver.batchStatus === 'paid' || driver.status === 'paid';
+  if (paid && isFullyDeductedCommission(driver) && !hasDriverCommissionTransferProof(driver)) return 'deducted_paid';
+  if (paid) return 'paid';
+  if (driver.batchStatus === 'approved') return 'approved';
+  if (driver.batchStatus === 'submitted') return 'submitted';
+  return driver.paymentStatus || driver.batchStatus || driver.status || 'unsubmitted';
+}
+
+export function driverCommissionStatusLabel(driver = {}) {
+  const status = typeof driver === 'string' ? driver : driverCommissionFinanceStatus(driver);
+  const labels = {
+    empty: 'Kosong',
+    draft: 'Draft',
+    unsubmitted: 'Belum Diajukan',
+    submitted: 'Menunggu Finance',
+    approved: 'Siap Dibayar',
+    rejected: 'Ditolak',
+    paid: 'Sudah Dibayar',
+    pending: 'Belum Dibayar',
+    deducted_paid: 'Lunas via Potongan',
+  };
+  return labels[status] || status || '-';
+}
+
+export function driverCommissionProofStatus(driver = {}) {
+  if (hasDriverCommissionTransferProof(driver)) return 'Ada';
+  if (isFullyDeductedCommission(driver) && driverCommissionFinanceStatus(driver) === 'deducted_paid') {
+    return 'Tidak Ada Transfer';
+  }
+  return 'Belum';
 }
 
 function paymentMethodLabel(driver = {}) {
@@ -48,7 +92,8 @@ export function buildDriverCommissionCsvRows(drivers = [], options = {}) {
   return drivers.flatMap((driver) => {
     const grossAmount = Number(driver.grossAmount ?? driver.totalAmount ?? 0);
     const deductionAmount = Number(driver.deductionAmount || 0);
-    const netAmount = Number(driver.netAmount ?? (grossAmount - deductionAmount));
+    const netAmount = Math.max(0, Number(driver.netAmount ?? (grossAmount - deductionAmount)));
+    const statusLabel = driverCommissionStatusLabel(driver);
     const accountNumber = driver.paymentMethod === 'emoney'
       ? driver.emoneyNumber || ''
       : driver.bankAccountNumber || '';
@@ -78,7 +123,7 @@ export function buildDriverCommissionCsvRows(drivers = [], options = {}) {
         grossAmount,
         deductionAmount,
         netAmount,
-        item.paymentStatus || driver.paymentStatus || '-',
+        statusLabel,
         driver.batchStatus || batchStatus || '-',
       ];
     });
