@@ -4636,6 +4636,7 @@ function mapOutstandingOrderRow(row) {
     soNumber: getDisplayFinanceSoNumber(row) || '-',
     invoiceNumber: row.invoice_number || '',
     customer: row.customer_name || '-',
+    customerRollupName: row.customer_rollup_name || row.customer_name || '-',
     destination: row.destination || '-',
     destinations: Array.isArray(row.destinations) ? row.destinations.filter(Boolean) : [],
     billingStatus: row.billing_status,
