@@ -739,7 +739,9 @@ function CustomerOutstandingPage() {
     setDetailLoading(true);
     setDetailError('');
     fetchFinanceOutstanding({ query: customerName, pageSize: DETAIL_PAGE_SIZE, dateFrom, dateTo })
-      .then((result) => setDetailRows((result?.rows || []).filter((row) => row.customer === customerName)))
+      .then((result) => setDetailRows((result?.rows || []).filter((row) => (
+        (row.customerRollupName || row.customer) === customerName
+      ))))
       .catch((err) => setDetailError(err.message || 'Rincian invoice gagal dimuat.'))
       .finally(() => setDetailLoading(false));
   }
