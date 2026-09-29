@@ -470,18 +470,18 @@ async function findEligibleRows(period, db = { query }) {
         cj.destination,
         (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date as completed_date,
         coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
-        coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
-        coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
+        coalesce(cj.commission_driver_id, cj.driver_id, ad.id) as driver_id,
+        coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, ''), nullif(ad.name, '')) as driver_name,
         case
-          when coalesce(nullif(cj.commission_driver_snapshot->>'driverPaymentMethod', ''), nullif(cj.assignment_snapshot->>'driverPaymentMethod', ''), nullif(d.payment_method, ''), 'bank') = 'emoney' then 'emoney'
+          when coalesce(nullif(cj.commission_driver_snapshot->>'driverPaymentMethod', ''), nullif(cj.assignment_snapshot->>'driverPaymentMethod', ''), nullif(d.payment_method, ''), nullif(ad.payment_method, ''), 'bank') = 'emoney' then 'emoney'
           else 'bank'
         end as payment_method,
-        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankName', ''), nullif(cj.assignment_snapshot->>'driverBankName', ''), nullif(d.bank_name, '')) as bank_name,
-        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankAccountNumber', ''), nullif(cj.assignment_snapshot->>'driverBankAccountNumber', ''), nullif(d.bank_account_number, '')) as bank_account_number,
-        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankAccountHolder', ''), nullif(cj.assignment_snapshot->>'driverBankAccountHolder', ''), nullif(d.bank_account_holder, '')) as bank_account_holder,
-        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyProvider', ''), nullif(cj.assignment_snapshot->>'driverEmoneyProvider', ''), nullif(d.emoney_provider, '')) as emoney_provider,
-        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyNumber', ''), nullif(cj.assignment_snapshot->>'driverEmoneyNumber', ''), nullif(d.emoney_number, '')) as emoney_number,
-        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyAccountHolder', ''), nullif(cj.assignment_snapshot->>'driverEmoneyAccountHolder', ''), nullif(d.emoney_account_holder, '')) as emoney_account_holder,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankName', ''), nullif(cj.assignment_snapshot->>'driverBankName', ''), nullif(d.bank_name, ''), nullif(ad.bank_name, '')) as bank_name,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankAccountNumber', ''), nullif(cj.assignment_snapshot->>'driverBankAccountNumber', ''), nullif(d.bank_account_number, ''), nullif(ad.bank_account_number, '')) as bank_account_number,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverBankAccountHolder', ''), nullif(cj.assignment_snapshot->>'driverBankAccountHolder', ''), nullif(d.bank_account_holder, ''), nullif(ad.bank_account_holder, '')) as bank_account_holder,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyProvider', ''), nullif(cj.assignment_snapshot->>'driverEmoneyProvider', ''), nullif(d.emoney_provider, ''), nullif(ad.emoney_provider, '')) as emoney_provider,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyNumber', ''), nullif(cj.assignment_snapshot->>'driverEmoneyNumber', ''), nullif(d.emoney_number, ''), nullif(ad.emoney_number, '')) as emoney_number,
+        coalesce(nullif(cj.commission_driver_snapshot->>'driverEmoneyAccountHolder', ''), nullif(cj.assignment_snapshot->>'driverEmoneyAccountHolder', ''), nullif(d.emoney_account_holder, ''), nullif(ad.emoney_account_holder, '')) as emoney_account_holder,
         cj.assignment_snapshot->>'plateNumber' as truck_plate_number,
         coalesce(cj.commission_locked_amount, cj.driver_commission_amount) as amount,
         cj.driver_commission_source_destination_id as source_destination_id,
@@ -501,6 +501,25 @@ async function findEligibleRows(period, db = { query }) {
       from container_jobs cj
       join sales_orders so on so.id = cj.sales_order_id
       left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
+      left join lateral (
+        select d2.*
+        from drivers d2
+        where d2.archived_at is null
+          and coalesce(cj.commission_driver_id, cj.driver_id) is null
+          and lower(btrim(coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', '')))) in (
+            lower(btrim(d2.name)),
+            lower(btrim(coalesce(d2.nickname, ''))),
+            lower(btrim(coalesce(d2.bank_account_holder, '')))
+          )
+        order by
+          case
+            when lower(btrim(coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', '')))) = lower(btrim(d2.name)) then 1
+            when lower(btrim(coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', '')))) = lower(btrim(coalesce(d2.nickname, ''))) then 2
+            else 3
+          end,
+          d2.updated_at desc nulls last
+        limit 1
+      ) ad on true
       left join container_pickup_items cpi on cpi.container_job_id = cj.id
       left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
       where cj.status in ('completed', 'repo_stored')
@@ -509,7 +528,7 @@ async function findEligibleRows(period, db = { query }) {
         and coalesce(cj.repo_stored_at, cj.completed_at) is not null
         and coalesce(cj.has_driver_commission, false)
         and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) > 0
-        and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is not null
+        and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, ad.name, cj.assignment_snapshot->>'driver', ''), '') is not null
         and coalesce(cj.commission_status, 'with_commission') = 'with_commission'
         and so.status <> 'cancelled'
         and not exists (
@@ -559,8 +578,8 @@ async function findCommissionReviewRows(period, db = { query }) {
           cj.destination,
           (coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date as completed_date,
           coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
-          coalesce(cj.commission_driver_id, cj.driver_id) as driver_id,
-          coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, '')) as driver_name,
+          coalesce(cj.commission_driver_id, cj.driver_id, ad.id) as driver_id,
+          coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', ''), nullif(d.name, ''), nullif(ad.name, '')) as driver_name,
           'bank' as payment_method,
           null::text as bank_name,
           null::text as bank_account_number,
@@ -575,7 +594,7 @@ async function findCommissionReviewRows(period, db = { query }) {
           coalesce(cj.commission_status, 'pending') as commission_status,
           array_remove(array[
             case when coalesce(cj.has_driver_commission, false) and coalesce(cj.commission_locked_amount, cj.driver_commission_amount, 0) <= 0 then 'Nominal komisi belum valid' end,
-            case when coalesce(cj.has_driver_commission, false) and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, cj.assignment_snapshot->>'driver', ''), '') is null then 'Sopir penerima komisi belum terkunci' end,
+            case when coalesce(cj.has_driver_commission, false) and nullif(coalesce(cj.commission_driver_name, cj.commission_driver_snapshot->>'driver', d.name, ad.name, cj.assignment_snapshot->>'driver', ''), '') is null then 'Sopir penerima komisi belum terkunci' end,
             case when coalesce(cj.has_driver_commission, false) and coalesce(cj.commission_status, 'pending') <> 'with_commission' then 'Status komisi perlu dicek' end
           ], null) as review_reasons,
           coalesce(cj.entry_source, 'realtime') as entry_source,
@@ -583,6 +602,25 @@ async function findCommissionReviewRows(period, db = { query }) {
         from container_jobs cj
         join sales_orders so on so.id = cj.sales_order_id
         left join drivers d on d.id = coalesce(cj.commission_driver_id, cj.driver_id) and d.archived_at is null
+        left join lateral (
+          select d2.*
+          from drivers d2
+          where d2.archived_at is null
+            and coalesce(cj.commission_driver_id, cj.driver_id) is null
+            and lower(btrim(coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', '')))) in (
+              lower(btrim(d2.name)),
+              lower(btrim(coalesce(d2.nickname, ''))),
+              lower(btrim(coalesce(d2.bank_account_holder, '')))
+            )
+          order by
+            case
+              when lower(btrim(coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', '')))) = lower(btrim(d2.name)) then 1
+              when lower(btrim(coalesce(nullif(cj.commission_driver_name, ''), nullif(cj.commission_driver_snapshot->>'driver', ''), nullif(cj.assignment_snapshot->>'driver', '')))) = lower(btrim(coalesce(d2.nickname, ''))) then 2
+              else 3
+            end,
+            d2.updated_at desc nulls last
+          limit 1
+        ) ad on true
         left join container_pickup_items cpi on cpi.container_job_id = cj.id
         left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
         where cj.status in ('completed', 'repo_stored')
