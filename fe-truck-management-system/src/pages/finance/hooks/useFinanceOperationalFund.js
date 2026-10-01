@@ -431,7 +431,7 @@ function useFinanceOperationalFund({ activeTab, query, canRequestOperationalFund
     if (expenseCheckProofError) {
       return;
     }
-    if (targetRow?.paymentStatus === 'sudah_dibayar' && expenseCheckProofCount === 0) {
+    if (targetRow?.paymentStatus === 'sudah_dibayar' && !targetRow?.proofAttachment && expenseCheckProofCount === 0) {
       setExpenseCheckProofError('Bukti pembayaran wajib diupload Finance sebelum validasi.');
       return;
     }

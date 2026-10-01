@@ -672,6 +672,13 @@ function normalizeExpenseGroup(value) {
   return group;
 }
 
+function expenseInputSourceFromActor(actor) {
+  const role = String(actor?.role || '').trim().toLowerCase();
+  if (role === 'finance') return 'finance';
+  if (['operational', 'operations', 'operation'].includes(role)) return 'operational';
+  return 'operational';
+}
+
 function normalizeExpensePaymentStatus(value) {
   const status = String(value || 'belum_dibayar').trim();
   if (!expensePaymentStatuses.has(status)) {
@@ -695,7 +702,10 @@ function normalizeExpenseText(value, field, maxLength = 500) {
 }
 
 export function createContainerJobExpense(id, payload = {}, actor) {
-  const paymentStatus = normalizeExpensePaymentStatus(payload.paymentStatus);
+  const inputSource = expenseInputSourceFromActor(actor);
+  const paymentStatus = inputSource === 'finance'
+    ? normalizeExpensePaymentStatus(payload.paymentStatus)
+    : 'belum_dibayar';
   const category = normalizeExpenseCategory(payload.category);
   return createContainerJobExpenseRecord(id, {
     category,
@@ -705,8 +715,9 @@ export function createContainerJobExpense(id, payload = {}, actor) {
     recipientType: normalizeExpenseText(payload.recipientType || 'driver', 'Tipe penerima', 80) || 'driver',
     recipientName: normalizeExpenseText(payload.recipientName, 'Nama penerima', 160),
     paymentStatus,
-    paidAt: payload.paidAt || null,
+    paidAt: inputSource === 'finance' ? (payload.paidAt || null) : null,
     proofAttachmentId: payload.proofAttachmentId || null,
+    inputSource,
     idempotencyKey: normalizeExpenseText(payload.idempotencyKey, 'Idempotency key', 100) || null,
     paidByName: getActorName(actor),
     actorName: getActorName(actor),

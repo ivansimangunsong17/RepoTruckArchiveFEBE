@@ -2,10 +2,29 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import OperationalForm, { shouldPersistRecommendedDriverCommission } from './OperationalForm';
-import { fetchContainerJobAssignmentHistory } from '../../services/archive/containerJobService';
+import { createContainerJobExpense, fetchContainerJobAssignmentHistory, uploadContainerJobExpenseProof } from '../../services/archive/containerJobService';
 
 vi.mock('../../services/archive/containerJobService', () => ({
   fetchContainerJobAssignmentHistory: vi.fn().mockResolvedValue([]),
+  createContainerJobExpense: vi.fn().mockResolvedValue({
+    id: 'expense-new',
+    expenseGroup: 'reimbursement',
+    category: 'bongkar',
+    amount: 150000,
+    description: 'Bon bongkar',
+    recipientName: 'Petugas depo',
+    paymentStatus: 'belum_dibayar',
+  }),
+  uploadContainerJobExpenseProof: vi.fn().mockResolvedValue({
+    id: 'expense-proofed',
+    expenseGroup: 'operational',
+    category: 'tol',
+    amount: 75000,
+    description: 'Tol',
+    recipientName: 'Gerbang tol',
+    paymentStatus: 'belum_dibayar',
+    proofAttachmentId: 'proof-1',
+  }),
 }));
 
 const container = {
@@ -37,6 +56,74 @@ function expectedDateTimeLocalValue(value) {
 }
 
 describe('OperationalForm', () => {
+  it('mencatat biaya tambahan langsung ke ritasi aktif tanpa memilih ritasi', async () => {
+    const user = userEvent.setup();
+    render(
+      <OperationalForm
+        container={{ ...container, expenses: [{ id: 'uj-1', category: 'uj_awal', expenseGroup: 'operational', amount: 700000 }] }}
+        initialPhase="rpuj"
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Pilih Ritasi')).not.toBeInTheDocument();
+    expect(screen.getByText('Ritasi aktif')).toBeInTheDocument();
+    expect(screen.getByText('SO-2026-001')).toBeInTheDocument();
+    expect(screen.getAllByText('MSCU-123456-7').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/700\.000/)).not.toBeInTheDocument();
+
+    expect(screen.queryByLabelText('Kategori')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Status pembayaran')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Keterangan biaya'), 'Reimbursement Bon Muat/Bongkar');
+    await user.type(screen.getByLabelText('Nominal'), '150000');
+    await user.type(screen.getByLabelText('Penerima'), 'Petugas depo');
+    await user.click(screen.getByRole('button', { name: 'Tambah biaya' }));
+
+    await waitFor(() => expect(createContainerJobExpense).toHaveBeenCalledWith('job-1', expect.objectContaining({
+      expenseGroup: 'reimbursement',
+      category: 'lainnya',
+      amount: 150000,
+      recipientName: 'Petugas depo',
+      paymentStatus: 'belum_dibayar',
+      description: 'Reimbursement Bon Muat/Bongkar',
+    })));
+  });
+
+  it('mengizinkan Operational melengkapi bukti biaya yang belum tersedia', async () => {
+    const user = userEvent.setup();
+    uploadContainerJobExpenseProof.mockClear();
+    render(
+      <OperationalForm
+        container={{ ...container, expenses: [{
+          id: 'expense-1',
+          category: 'tol',
+          expenseGroup: 'operational',
+          amount: 75000,
+          description: 'Tol',
+          recipientName: 'Gerbang tol',
+          paymentStatus: 'sudah_dibayar',
+        }] }}
+        initialPhase="rpuj"
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Menunggu bukti Finance')).toBeInTheDocument();
+    const proofInput = screen.getByLabelText('Upload bukti');
+    await user.upload(proofInput, new File(['proof'], 'tol.pdf', { type: 'application/pdf' }));
+
+    await waitFor(() => expect(uploadContainerJobExpenseProof).toHaveBeenCalledWith('job-1', 'expense-1', expect.objectContaining({
+      description: 'Tol',
+      proofFile: expect.any(File),
+    })));
+    expect(await screen.findByText('Bukti tersedia')).toBeInTheDocument();
+  });
+
   it('menyederhanakan form ritasi vendor dan mengirim sumber pelaksanaan', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

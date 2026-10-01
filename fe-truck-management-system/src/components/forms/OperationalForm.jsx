@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Building2, Plus, ShieldCheck, Trash2, Truck, X } from 'lucide-react';
+import { AlertTriangle, Building2, FileUp, Plus, ShieldCheck, Trash2, Truck, X } from 'lucide-react';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { hasPermission } from '../../constants/roles';
 import AssignmentHistorySection from './AssignmentHistorySection';
@@ -12,6 +12,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
 import { formatDate } from '../../utils/formatDate';
 import { isApiDataSource } from '../../services/config/dataSource';
+import { createContainerJobExpense, uploadContainerJobExpenseProof } from '../../services/archive/containerJobService';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
 
 const documentFields = [
@@ -59,6 +60,34 @@ const statusOptions = [
 
 const OPERATIONAL_FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png';
 const DRIVER_SEARCH_MAX_RESULTS = 8;
+const REIMBURSEMENT_LAINNYA_PRESET = 'Reimbursement Lainnya';
+const UANG_ADMIN_TF_PRESET = 'Uang Admin TF';
+const EXPENSE_DESCRIPTION_GROUPS = [
+  {
+    id: 'operational',
+    label: 'Biaya Operational',
+    presets: ['Biaya MEL', 'Biaya Tambal Ban', 'Biaya Ganti Ban Dalam', 'Biaya BAN Kurang Angin', UANG_ADMIN_TF_PRESET],
+  },
+  {
+    id: 'reimbursement',
+    label: 'Biaya Reimbursement',
+    presets: ['Reimbursement Bon Muat/Bongkar', 'Reimbursement Gatepass/TILA', 'Ekstend Closing', REIMBURSEMENT_LAINNYA_PRESET],
+  },
+];
+const EXPENSE_DESCRIPTION_PRESETS = EXPENSE_DESCRIPTION_GROUPS.flatMap((group) => group.presets);
+const EXPENSE_GROUP_BY_PRESET = EXPENSE_DESCRIPTION_GROUPS.reduce((acc, group) => {
+  for (const preset of group.presets) acc[preset] = group.id;
+  return acc;
+}, {});
+const CUSTOM_DESCRIPTION_VALUE = 'custom';
+
+function expenseCategoryLabel(category) {
+  const labels = {
+    uang_admin_tf: 'Uang Admin TF',
+    lainnya: 'Lainnya',
+  };
+  return labels[category] || String(category || 'Lainnya').replaceAll('_', ' ');
+}
 
 function getMasterData(storageKey, fallback) {
   try {
@@ -572,6 +601,24 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [defaultDriverReason, setDefaultDriverReason] = useState('');
   const [defaultDriverSaving, setDefaultDriverSaving] = useState(false);
   const [defaultDriverError, setDefaultDriverError] = useState('');
+  const [containerJobExpenses, setContainerJobExpenses] = useState(() => (
+    Array.isArray(container.expenses) ? container.expenses : []
+  ));
+  const [expenseForm, setExpenseForm] = useState({
+    expenseGroup: 'operational',
+    category: 'lainnya',
+    amount: '',
+    description: '',
+    lainnyaNote: '',
+    recipientType: 'driver',
+    recipientName: container.driver || '',
+    paymentStatus: 'belum_dibayar',
+    proofFile: null,
+    idempotencyKey: crypto.randomUUID(),
+  });
+  const [expenseSaving, setExpenseSaving] = useState(false);
+  const [expenseProofSaving, setExpenseProofSaving] = useState('');
+  const [expenseDescriptionManualMode, setExpenseDescriptionManualMode] = useState(false);
   const submitInFlightRef = useRef(false);
   const driverCommissionEditedRef = useRef(false);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
@@ -723,6 +770,124 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   function updateField(event) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function updateExpenseField(event) {
+    const { name, value, files } = event.target;
+    setExpenseForm((current) => ({ ...current, [name]: name === 'proofFile' ? (files?.[0] || null) : value }));
+  }
+
+  const isPresetExpenseDescription = EXPENSE_DESCRIPTION_PRESETS.includes(expenseForm.description);
+  const showManualExpenseDescription = expenseDescriptionManualMode || (expenseForm.description.trim() && !isPresetExpenseDescription);
+  const expenseDescriptionSelectValue = showManualExpenseDescription ? CUSTOM_DESCRIPTION_VALUE : (isPresetExpenseDescription ? expenseForm.description : '');
+  const showReimbursementLainnyaExpenseNote = expenseForm.description === REIMBURSEMENT_LAINNYA_PRESET;
+
+  function handleExpenseDescriptionSelectChange(event) {
+    const selected = event.target.value;
+    if (selected === CUSTOM_DESCRIPTION_VALUE) {
+      setExpenseDescriptionManualMode(true);
+      setExpenseForm((current) => ({
+        ...current,
+        category: 'lainnya',
+        description: '',
+        expenseGroup: '',
+        lainnyaNote: '',
+      }));
+      return;
+    }
+    setExpenseDescriptionManualMode(false);
+    setExpenseForm((current) => ({
+      ...current,
+      category: selected === UANG_ADMIN_TF_PRESET ? 'uang_admin_tf' : 'lainnya',
+      description: selected,
+      expenseGroup: EXPENSE_GROUP_BY_PRESET[selected] || '',
+      lainnyaNote: '',
+      proofFile: null,
+      paymentStatus: 'belum_dibayar',
+    }));
+  }
+
+  async function addOperationalExpense(event) {
+    event.preventDefault();
+    const amount = Number(expenseForm.amount || 0);
+    if (!amount || amount <= 0) {
+      showSubmitNotification('Nominal biaya wajib lebih dari Rp 0.');
+      return;
+    }
+    if (!String(expenseForm.description || '').trim()) {
+      showSubmitNotification('Keterangan biaya wajib diisi.');
+      return;
+    }
+    if (expenseForm.description === REIMBURSEMENT_LAINNYA_PRESET && !String(expenseForm.lainnyaNote || '').trim()) {
+      showSubmitNotification('Isi keterangan untuk Reimbursement Lainnya.');
+      return;
+    }
+    if (!['operational', 'reimbursement'].includes(expenseForm.expenseGroup)) {
+      showSubmitNotification('Jenis biaya Operational/Reimbursement wajib dipilih.');
+      return;
+    }
+    if (!String(expenseForm.recipientName || '').trim()) {
+      showSubmitNotification('Penerima biaya wajib diisi.');
+      return;
+    }
+    setExpenseSaving(true);
+    try {
+      const description = showReimbursementLainnyaExpenseNote
+        ? `${expenseForm.description} - ${expenseForm.lainnyaNote.trim()}`
+        : expenseForm.description.trim();
+      const idempotencyKey = crypto.randomUUID();
+      const saved = await createContainerJobExpense(container.id, {
+        ...expenseForm,
+        amount,
+        description,
+        recipientName: expenseForm.recipientName.trim(),
+        paymentStatus: 'belum_dibayar',
+        paidAt: null,
+        idempotencyKey,
+        updatedBy: currentUser?.fullName || currentUser?.name || currentUser?.email || 'Operational',
+      });
+      setContainerJobExpenses((current) => [...current, saved]);
+      setExpenseForm((current) => ({
+        ...current,
+        category: 'lainnya',
+        expenseGroup: 'operational',
+        amount: '',
+        description: '',
+        lainnyaNote: '',
+        paymentStatus: 'belum_dibayar',
+        proofFile: null,
+        idempotencyKey: crypto.randomUUID(),
+      }));
+      setExpenseDescriptionManualMode(false);
+      setNotification({ title: 'Biaya tersimpan', message: 'Biaya sudah tercatat pada Container Job ini.' });
+    } catch (requestError) {
+      if (requestError?.payload?.error?.code?.includes('IDEMPOTENCY')) {
+        setExpenseForm((current) => ({ ...current, idempotencyKey: crypto.randomUUID() }));
+      }
+      showSubmitNotification(requestError?.message || 'Biaya gagal disimpan.');
+    } finally {
+      setExpenseSaving(false);
+    }
+  }
+
+  async function uploadExpenseProof(expense, event) {
+    const proofFile = event.target.files?.[0];
+    event.target.value = '';
+    if (!proofFile || expenseProofSaving) return;
+    setExpenseProofSaving(expense.id);
+    try {
+      const saved = await uploadContainerJobExpenseProof(container.id, expense.id, {
+        proofFile,
+        description: expense.description || expense.category || 'Bukti pembayaran biaya',
+        updatedBy: currentUser?.fullName || currentUser?.name || currentUser?.email || 'Operational',
+      });
+      setContainerJobExpenses((current) => current.map((item) => item.id === expense.id ? saved : item));
+      setNotification({ title: 'Bukti tersimpan', message: 'Bukti biaya sudah melekat pada ritasi ini.' });
+    } catch (requestError) {
+      showSubmitNotification(requestError?.message || 'Bukti biaya gagal diupload.');
+    } finally {
+      setExpenseProofSaving('');
+    }
   }
 
   function applyExecutionSource(executionSource) {
@@ -1864,6 +2029,122 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                   )}
                 </div>
               </div>
+            </div>
+            <div className="operational-document-card operational-expense-entry-card">
+              <div className="operational-rpuj-card-head operational-expense-heading">
+                <div>
+                  <span>Reimbursement & Biaya Lainnya</span>
+                  <small>Catat biaya tambahan di luar UJ utama untuk ritasi ini.</small>
+                </div>
+                <strong>{containerJobExpenses.filter((expense) => !['uj_awal', 'top_up_uj'].includes(expense.category)).length} biaya</strong>
+              </div>
+              <div className="operational-expense-job-context">
+                <div>
+                  <span>Ritasi aktif</span>
+                  <strong>{container.soNumber || '-'}</strong>
+                </div>
+                <div>
+                  <span>No. Container</span>
+                  <strong>{container.containerNumber || form.containerNumber || 'Belum diisi'}</strong>
+                </div>
+              </div>
+              <div className="operational-expense-list">
+                {containerJobExpenses.filter((expense) => !['uj_awal', 'top_up_uj'].includes(expense.category)).length ? containerJobExpenses
+                  .filter((expense) => !['uj_awal', 'top_up_uj'].includes(expense.category)).map((expense) => (
+                  <div className="operational-expense-row" key={expense.id || `${expense.category}-${expense.amount}`}>
+                    <div className="operational-expense-row-info">
+                      <strong>{expense.description || expenseCategoryLabel(expense.category)}</strong>
+                      <small>
+                        <span>{expense.expenseGroup === 'reimbursement' ? 'Reimbursement' : 'Biaya operational'}</span>
+                        <span>{expenseCategoryLabel(expense.category)}</span>
+                        {expense.recipientName ? <span>Penerima: {expense.recipientName}</span> : null}
+                      </small>
+                    </div>
+                    <div className="operational-expense-proof-actions">
+                      <small className={expense.proofAttachmentId || expense.proofAttachment ? 'is-proof-ready' : 'is-proof-missing'}>
+                        {expense.proofAttachmentId || expense.proofAttachment ? 'Bukti tersedia' : 'Menunggu bukti Finance'}
+                      </small>
+                      {!expense.proofAttachmentId && !expense.proofAttachment && canUpdateOperational ? (
+                        <label className="operational-expense-proof-button">
+                          <FileUp size={13} />
+                          {expenseProofSaving === expense.id ? 'Mengupload...' : 'Upload bukti'}
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(event) => uploadExpenseProof(expense, event)} disabled={Boolean(expenseProofSaving)} />
+                        </label>
+                      ) : null}
+                    </div>
+                    <div className="operational-expense-row-meta">
+                      <strong>{formatCurrency(Number(expense.amount || 0))}</strong>
+                      <small>{expense.paymentStatus === 'sudah_dibayar' ? 'Sudah dibayar' : 'Belum dibayar'}{expense.proofAttachmentId || expense.proofAttachment ? ' ? Bukti ada' : ' ? Bukti opsional'}</small>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="operational-expense-empty">
+                    <strong>Belum ada biaya tambahan</strong>
+                    <small>Tambahkan reimbursement atau biaya operational jika ada pengeluaran di luar UJ utama.</small>
+                  </div>
+                )}
+              </div>
+              {apiDataMode && canUpdateOperational ? (
+                <div className={`operational-expense-form ${showManualExpenseDescription || showReimbursementLainnyaExpenseNote ? 'has-extra-fields' : 'is-standard'}`}>
+                  <label className="operational-expense-field operational-expense-field--description-select">
+                    <span>Keterangan</span>
+                    <select aria-label="Keterangan biaya" value={expenseDescriptionSelectValue} onChange={handleExpenseDescriptionSelectChange} disabled={expenseSaving}>
+                      <option disabled value="">Pilih keterangan...</option>
+                      {EXPENSE_DESCRIPTION_GROUPS.map((group) => (
+                        <optgroup key={group.id} label={group.label}>
+                          {group.presets.map((preset) => (
+                            <option key={preset} value={preset}>{preset}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                      <option value={CUSTOM_DESCRIPTION_VALUE}>Lainnya (Input Manual)</option>
+                    </select>
+                  </label>
+                  {showManualExpenseDescription ? (
+                    <>
+                      <label className="operational-expense-field operational-expense-field--description-manual">
+                        <span>Keterangan manual</span>
+                        <input name="description" value={expenseForm.description} onChange={updateExpenseField} placeholder="Contoh: Parkir depo / tol Cikampek / bongkar" disabled={expenseSaving} />
+                      </label>
+                      <label className="operational-expense-field operational-expense-field--group">
+                        <span>Jenis biaya</span>
+                        <select name="expenseGroup" value={expenseForm.expenseGroup} onChange={updateExpenseField} disabled={expenseSaving}>
+                          <option disabled value="">Pilih jenis biaya...</option>
+                          <option value="operational">Biaya Operational</option>
+                          <option value="reimbursement">Biaya Reimbursement</option>
+                        </select>
+                      </label>
+                    </>
+                  ) : null}
+                  {showReimbursementLainnyaExpenseNote ? (
+                    <label className="operational-expense-field operational-expense-field--description-manual">
+                      <span>Keterangan Reimbursement Lainnya</span>
+                      <input name="lainnyaNote" value={expenseForm.lainnyaNote} onChange={updateExpenseField} placeholder="Contoh: biaya admin, LOLO, seal, atau catatan lain" disabled={expenseSaving} />
+                    </label>
+                  ) : null}
+                  <label className="operational-expense-field operational-expense-field--amount">
+                    <span>Nominal</span>
+                    <input name="amount" type="number" min="1" value={expenseForm.amount} onChange={updateExpenseField} placeholder="Rp 0" disabled={expenseSaving} />
+                  </label>
+                  <label className="operational-expense-field operational-expense-field--recipient">
+                    <span>Penerima</span>
+                    <input name="recipientName" value={expenseForm.recipientName} onChange={updateExpenseField} placeholder="Petugas depo / vendor / driver" disabled={expenseSaving} />
+                  </label>
+                  <label className="operational-expense-file-field">
+                    <span>Bukti <em>(opsional)</em></span>
+                    <span className="operational-expense-file-control">
+                      <FileUp size={15} />
+                      <span>{expenseForm.proofFile?.name || 'Pilih file'}</span>
+                      <input aria-label="Bukti biaya (opsional)" name="proofFile" type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={updateExpenseField} disabled={expenseSaving} />
+                    </span>
+                  </label>
+                  <div className="operational-expense-actions">
+                    <button className="secondary-button operational-expense-submit" type="button" onClick={addOperationalExpense} disabled={expenseSaving}>
+                      <Plus size={15} /> {expenseSaving ? 'Menyimpan...' : 'Tambah biaya'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
           ) : null}
