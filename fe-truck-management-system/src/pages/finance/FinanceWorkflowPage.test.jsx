@@ -861,6 +861,20 @@ describe('FinanceWorkflowPage validation modals', () => {
     });
   });
 
+  it('mengisi tanggal bukti transfer dari batch dropping yang sedang dibuka', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense();
+
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    const batchDateInput = await screen.findByLabelText('Batch Dropping');
+    fireEvent.change(batchDateInput, { target: { value: '2026-09-23' } });
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+
+    expect(screen.getByLabelText('Tanggal bukti transfer')).toHaveValue('2026-09-23');
+  });
+
   it('menampilkan error saldo di bawah biaya admin dan memfokuskan inputnya', async () => {
     const user = userEvent.setup();
     mockPaidExpense();
@@ -940,12 +954,33 @@ describe('FinanceWorkflowPage validation modals', () => {
     render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
 
     await user.click(await screen.findByRole('button', { name: 'Validasi' }));
-    expect(await screen.findByText('bukti-lama.pdf')).toBeInTheDocument();
+    expect((await screen.findAllByText('bukti-lama.pdf')).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
     expect(screen.queryByLabelText(/file bukti/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Tambah Bukti' }));
     expect(screen.getByLabelText(/file bukti/i)).toBeInTheDocument();
     expect(screen.getByLabelText('Nominal bukti transfer')).toHaveValue(null);
+  });
+
+  it('mengizinkan validasi tanpa upload ulang saat bukti Operational tersedia', async () => {
+    const user = userEvent.setup();
+    mockPaidExpense({
+      proofAttachment: { id: 'proof-operational', name: 'bukti-operational.pdf', path: 'proof-operational' },
+    });
+    render(<FinanceWorkflowPage initialTabId="rpuj-approval" />);
+
+    await user.click(await screen.findByRole('button', { name: 'Validasi' }));
+    expect(await screen.findByText('Bukti dari Operational')).toBeInTheDocument();
+    expect(screen.getByText('bukti-operational.pdf')).toBeInTheDocument();
+    expect(screen.getByText(/tidak perlu mengunggah ulang/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/file bukti/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Validasi Transaksi' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Validasi Transaksi' }));
+    await waitFor(() => expect(reconcileFinanceContainerJobExpense).toHaveBeenCalledWith('expense-1', expect.objectContaining({
+      financeCheckStatus: 'sudah_dicek',
+      proofFile: null,
+    })));
   });
 
   it('membuka kembali transaksi tervalidasi untuk diedit selama batch masih open', async () => {

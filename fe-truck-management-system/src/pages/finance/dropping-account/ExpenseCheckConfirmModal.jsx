@@ -9,7 +9,12 @@ import DetailField from '../shared/DetailField';
 import FinanceActionModal from '../shared/FinanceActionModal';
 import { expenseCategoryLabels, readableLabel } from './operationalFundUtils';
 
-const emptyForm = (amount = '') => ({ amount, transferDate: new Date().toISOString().slice(0, 10), note: '', proofFile: null });
+const emptyForm = (amount = '', batchDate = '') => ({
+  amount,
+  transferDate: String(batchDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
+  note: '',
+  proofFile: null,
+});
 
 function DeleteProofConfirmDialog({ proof, busy, onCancel, onConfirm }) {
   if (!proof) return null;
@@ -27,16 +32,17 @@ function DeleteProofConfirmDialog({ proof, busy, onCancel, onConfirm }) {
   );
 }
 
-function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmount, adminFeeNote, adjustmentNote, onAdminFeeAmountChange, onAdminFeeNoteChange, onAdjustmentNoteChange, onProofsChange, onClose, onConfirm }) {
+function ExpenseCheckConfirmModal({ row, batchDate, error, busy, adminFeeError, adminFeeAmount, adminFeeNote, adjustmentNote, onAdminFeeAmountChange, onAdminFeeNoteChange, onAdjustmentNoteChange, onProofsChange, onClose, onConfirm }) {
+  const activeBatchDate = String(batchDate || row?.batchDate || '').slice(0, 10);
   const [proofs, setProofs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [proofBusy, setProofBusy] = useState(false);
   const [proofError, setProofError] = useState('');
   const [editingId, setEditingId] = useState('');
-  const [showProofForm, setShowProofForm] = useState(true);
+  const [showProofForm, setShowProofForm] = useState(false);
   const [showAdminFee, setShowAdminFee] = useState(false);
   const [proofToDelete, setProofToDelete] = useState(null);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => emptyForm('', activeBatchDate));
   const adminFeeInputRef = useRef(null);
   const adminFee = Math.max(0, Number(adminFeeAmount || 0));
   const normalAmount = Math.max(0, Number(row?.amount || 0) - adminFee);
@@ -54,7 +60,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
       if (next.length > 0 && !editingId) setShowProofForm(false);
       setForm((current) => (
         !editingId && !current.proofFile
-          ? emptyForm(next.length === 0 && normalAmount > 0 ? String(normalAmount) : '')
+          ? emptyForm(next.length === 0 && normalAmount > 0 ? String(normalAmount) : '', activeBatchDate)
           : current
       ));
       onProofsChange?.(next);
@@ -69,11 +75,11 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
   useEffect(() => {
     setProofs([]);
     setEditingId('');
-    setShowProofForm(true);
+    setShowProofForm(!row?.proofAttachment);
     setShowAdminFee(Number(adminFeeAmount || 0) > 0);
-    setForm(emptyForm(normalAmount > 0 ? String(normalAmount) : ''));
+    setForm(emptyForm(normalAmount > 0 ? String(normalAmount) : '', activeBatchDate));
     if (row?.id) loadProofs();
-  }, [row?.id]);
+  }, [row?.id, activeBatchDate]);
 
   useEffect(() => {
     if (adminFeeError) adminFeeInputRef.current?.focus();
@@ -93,7 +99,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
 
   function cancelEdit() {
     setEditingId('');
-    setForm(emptyForm());
+    setForm(emptyForm('', activeBatchDate));
     setShowProofForm(false);
   }
 
@@ -134,6 +140,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
 
   if (!row) return null;
   const hasProofs = proofs.length > 0;
+  const hasOperationalProof = Boolean(row.proofAttachment);
   const hasAdjustment = hasProofs && adjustment !== 0;
   const isAdminFeeAdjustment = hasAdjustment && adminFee > 0 && adjustment === adminFee;
   const manualAdjustmentNote = String(adjustmentNote || '').trim() === 'Biaya admin' ? '' : String(adjustmentNote || '').trim();
@@ -145,17 +152,19 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
     ? 'Batch sudah ditutup dan tidak dapat diubah.'
     : loading
       ? 'Daftar bukti transfer sedang dimuat.'
-      : !hasProofs && form.proofFile
+      : hasOperationalProof
+        ? 'Bukti pembayaran dari Operational sudah tersedia. Transaksi siap divalidasi.'
+        : !hasProofs && form.proofFile
         ? 'File sudah dipilih. Klik Simpan Bukti untuk melanjutkan.'
         : !hasProofs
           ? 'Pilih file bukti transfer, lalu klik Simpan Bukti.'
         : needsNote
           ? 'Isi alasan selisih untuk melanjutkan validasi.'
           : 'Data bukti sudah lengkap dan transaksi siap divalidasi.';
-  const verificationReady = !locked && !loading && hasProofs && !needsNote;
+  const verificationReady = !locked && !loading && (hasOperationalProof || hasProofs) && !needsNote;
 
   return (
-    <FinanceActionModal busy={busy || proofBusy} confirmDisabled={locked || loading || proofs.length === 0 || needsNote} confirmLabel={editingValidatedTransaction ? 'Simpan Perubahan' : 'Validasi Transaksi'} description={editingValidatedTransaction ? 'Perbarui bukti transfer dan nominal selama batch masih terbuka.' : 'Cocokkan nominal sistem dengan seluruh transfer aktual.'} onClose={onClose} onConfirm={(event) => onConfirm(event, { adjustmentNote: effectiveAdjustmentNote })} footerError={error} footerErrorId="expense-check-general-error" footerNotice={verificationMessage} footerNoticeReady={verificationReady} title={editingValidatedTransaction ? 'Edit UJ dan Bukti Transfer' : 'Validasi UJ dan Bukti Transfer'} tone="approve" widthClassName="max-w-5xl">
+    <FinanceActionModal busy={busy || proofBusy} confirmDisabled={locked || loading || (!hasOperationalProof && proofs.length === 0) || needsNote} confirmLabel={editingValidatedTransaction ? 'Simpan Perubahan' : 'Validasi Transaksi'} description={editingValidatedTransaction ? 'Perbarui bukti pembayaran selama batch masih terbuka.' : 'Cocokkan biaya dengan bukti pembayaran yang tersedia.'} onClose={onClose} onConfirm={(event) => onConfirm(event, { adjustmentNote: effectiveAdjustmentNote })} footerError={error} footerErrorId="expense-check-general-error" footerNotice={verificationMessage} footerNoticeReady={verificationReady} title={editingValidatedTransaction ? 'Edit UJ dan Bukti Transfer' : 'Validasi UJ dan Bukti Transfer'} tone="approve" widthClassName="max-w-5xl">
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <DetailField label="UJ Sistem" value={formatCurrency(row.amount)} />
@@ -168,7 +177,8 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
         </div>
 
         <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-black text-slate-950">Bukti Transfer</h3><p className="mt-0.5 text-xs font-medium text-slate-500">Total seluruh bukti dihitung untuk ritasi ini.</p></div><div className="flex items-center gap-2"><span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-600">{locked ? 'Batch ditutup' : `${proofs.length} bukti`}</span>{hasProofs && !showProofForm && !locked ? <button className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-bold text-white hover:bg-slate-800" onClick={() => { setForm(emptyForm()); setShowProofForm(true); }} type="button"><Plus size={14} /> Tambah Bukti</button> : null}</div></div>
+          {hasOperationalProof ? <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-bold uppercase tracking-wide text-emerald-800">Bukti dari Operational</p><div className="mt-1"><DocumentLink file={row.proofAttachment} label={row.proofAttachment.name || 'Lihat bukti pembayaran'} /></div><p className="mt-1 text-xs font-medium text-emerald-700">Finance tidak perlu mengunggah ulang bukti ini.</p></div> : null}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-sm font-black text-slate-950">{hasOperationalProof ? 'Bukti Tambahan Finance' : 'Bukti Pembayaran Finance'}</h3><p className="mt-0.5 text-xs font-medium text-slate-500">{hasOperationalProof ? 'Opsional, hanya bila ada transfer aktual tambahan.' : 'Bukti ini wajib bila Operational belum mengunggahnya.'}</p></div><div className="flex items-center gap-2"><span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-600">{locked ? 'Batch ditutup' : `${proofs.length} bukti`}</span>{hasProofs && !showProofForm && !locked ? <button className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-900 px-3 text-xs font-bold text-white hover:bg-slate-800" onClick={() => { setForm(emptyForm('', activeBatchDate)); setShowProofForm(true); }} type="button"><Plus size={14} /> Tambah Bukti</button> : null}</div></div>
           {loading ? <p className="text-sm text-slate-500">Memuat bukti...</p> : null}
           {!loading && !proofs.length ? <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">Belum ada bukti yang disimpan.</p> : null}
           {proofs.map((proof) => (
@@ -180,7 +190,7 @@ function ExpenseCheckConfirmModal({ row, error, busy, adminFeeError, adminFeeAmo
           ))}
         </section>
 
-        {(!hasProofs || showProofForm || editingId) ? <section className={`rounded-md border border-slate-200 bg-white p-4 ${locked ? 'pointer-events-none opacity-50' : ''}`}>
+        {((!hasOperationalProof && !hasProofs) || showProofForm || editingId) ? <section className={`rounded-md border border-slate-200 bg-white p-4 ${locked ? 'pointer-events-none opacity-50' : ''}`}>
           <div className="mb-3 flex justify-between"><div><h3 className="text-sm font-black text-slate-950">{editingId ? 'Edit Bukti Transfer' : 'Form Bukti Transfer'}</h3><p className="mt-0.5 text-xs font-medium text-slate-500">Isi data lalu simpan. Form akan kosong kembali untuk bukti berikutnya.</p></div>{editingId ? <button className="flex items-center gap-1 text-xs font-bold text-slate-600" onClick={cancelEdit} type="button"><X size={14} /> Batal Edit</button> : null}</div>
           <div className="master-form-grid">
             <label className="master-field span-quarter"><span>Nominal Transfer <em>Wajib</em></span><input aria-label="Nominal bukti transfer" min="1" placeholder="Contoh: 740000" type="number" value={form.amount} onChange={(event) => change('amount', event.target.value)} /><small>{proofs.length === 0 && !editingId ? 'Otomatis mengikuti nominal normal. Ubah hanya jika transfer aktual berbeda.' : 'Isi sesuai nominal pada bukti transfer ini.'}</small></label>
