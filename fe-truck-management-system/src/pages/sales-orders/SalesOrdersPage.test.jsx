@@ -199,6 +199,62 @@ describe('SalesOrdersPage billing status flow', () => {
     expect(fetchSalesOrdersPage).toHaveBeenLastCalledWith(expect.not.objectContaining({ status: expect.anything() }));
   });
 
+  it('memisahkan DO 20FT dan 40FT serta mengabaikan item biaya non-container', async () => {
+    const user = userEvent.setup();
+    fetchSalesOrdersPage.mockResolvedValue({
+      rows: [{
+        id: 'order-mixed-size',
+        soNumber: 'SO-MIXED-SIZE',
+        customer: 'PT Campuran',
+        tripDate: '2026-07-20',
+        destination: 'Subang',
+        lineItems: [
+          { serviceName: 'Jasa Angkut D20', containerType: 'Dry', qty: 2 },
+          { serviceName: 'Jasa Angkut D40', containerType: 'Dry', qty: 1 },
+          { serviceName: 'Bon Muat/Bongkar', qty: 5 },
+        ],
+        containers: [
+          { size: '20FT', status: 'completed' },
+          { size: '20FT', status: 'received' },
+          { size: '40FT', status: 'running' },
+        ],
+      }],
+      total: 1,
+      summary: {},
+    });
+    render(<SalesOrdersPage />);
+
+    await user.click(await screen.findByRole('button', { name: /download list do/i }));
+
+    await waitFor(() => expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith('image/png'));
+    const canvasContext = HTMLCanvasElement.prototype.getContext.mock.results[0].value;
+    expect(canvasContext.fillText).toHaveBeenCalledWith(
+      'ORDER PENDEK / 20FT - 20/07/2026',
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(canvasContext.fillText).toHaveBeenCalledWith(
+      'ORDER PANJANG / 40FT - 20/07/2026',
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(canvasContext.fillText).toHaveBeenCalledWith(
+      expect.stringContaining('PT CAMPURAN / 2X20 / SUBANG'),
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(canvasContext.fillText).toHaveBeenCalledWith(
+      expect.stringContaining('PT CAMPURAN / 1X40 / SUBANG'),
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(canvasContext.fillText).not.toHaveBeenCalledWith(
+      expect.stringContaining('7X20'),
+      expect.any(Number),
+      expect.any(Number),
+    );
+  });
+
   it('membuka form update container job langsung dari detail Sales Order', async () => {
     const user = userEvent.setup();
     render(<SalesOrdersPage />);
