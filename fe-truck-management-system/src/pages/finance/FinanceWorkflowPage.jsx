@@ -957,6 +957,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         row={expenseReconciliationDecisionRow}
       />
       <ExpenseCheckConfirmModal
+        batchDate={operationalFundBatchDate}
         busy={expenseReconciliationBusyId === expenseCheckConfirmId}
         error={expenseCheckGeneralError}
         onProofClear={clearExpenseCheckProofFile}
