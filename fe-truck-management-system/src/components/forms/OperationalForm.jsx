@@ -589,7 +589,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     adminCorrectionReason: '',
     commissionDriverAction: '',
   });
-  const canUpdateOperational = !currentUser || hasPermission(currentUser, 'operations.update');
+  const isSalesRole = String(currentUser?.role || '').trim().toLowerCase() === 'sales';
+  const canUpdateOperational = !isSalesRole && (!currentUser || hasPermission(currentUser, 'operations.update'));
   const canUpdateDocuments = hasPermission(currentUser, 'documents.operational.update') || canUpdateOperational;
   const isDocumentOnlyMode = canUpdateDocuments && !canUpdateOperational;
   const [activePhase, setActivePhase] = useState(() => (isDocumentOnlyMode ? 'closing' : initialPhase));
@@ -1533,7 +1534,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       return;
     }
     const selectedTruck = isVendorExecution ? null : trucks.find((truck) => truck.plateNumber === submitForm.plateNumber);
-    if (selectedTruck && !isTruckCompatibleForRepoPickup(selectedTruck, containerSize, isRepoComboPickupMode)) {
+    const truckAssignmentChanged = selectedTruck
+      && selectedTruck.plateNumber !== container.plateNumber;
+    if (truckAssignmentChanged && !isTruckCompatibleForRepoPickup(selectedTruck, containerSize, isRepoComboPickupMode)) {
       showSubmitNotification(isRepoComboPickupMode
         ? `Combo 2x20 wajib memakai truck/chassis 40FT. ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak bisa dipilih.`
         : `Truck ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
