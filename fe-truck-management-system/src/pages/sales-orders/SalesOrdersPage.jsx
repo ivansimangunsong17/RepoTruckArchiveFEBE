@@ -142,18 +142,48 @@ function getDoReportStatusLabel(order) {
   return 'BELUM JALAN';
 }
 
+function getDoContainerSize(...values) {
+  const sizeText = values
+    .filter((value) => value != null && value !== '')
+    .map((value) => String(value).toUpperCase())
+    .join(' ');
+  const has20Ft = /(^|\D)20(?:\s*FT)?(\D|$)/.test(sizeText);
+  const has40Ft = /(^|\D)40(?:\s*FT)?(\D|$)/.test(sizeText);
+
+  if (has40Ft && !has20Ft) return '40FT';
+  if (has20Ft && !has40Ft) return '20FT';
+  return null;
+}
+
 function getDoReportQuantities(order) {
   const lineItems = getOrderLineItems(order);
   const quantities = lineItems.reduce((accumulator, item) => {
     const qty = Math.max(0, Number(item.qty || 0));
-    const rawSize = String(item.size || item.containerSize || item.containerType || item.serviceName || '').toUpperCase();
-    const size = rawSize.includes('40') ? '40FT' : '20FT';
+    const size = getDoContainerSize(item.size, item.containerSize, item.containerType, item.serviceName);
+    if (!size || !qty) return accumulator;
     accumulator[size] = (accumulator[size] || 0) + qty;
     return accumulator;
   }, {});
+
+  if (quantities['20FT'] || quantities['40FT']) return quantities;
+
+  const container20Qty = Math.max(0, Number(order?.container20Qty || order?.do20Quantity || 0));
+  const container40Qty = Math.max(0, Number(order?.container40Qty || order?.do40Quantity || 0));
+  if (container20Qty || container40Qty) {
+    if (container20Qty) quantities['20FT'] = container20Qty;
+    if (container40Qty) quantities['40FT'] = container40Qty;
+    return quantities;
+  }
+
+  getOrderContainers(order).forEach((container) => {
+    const size = getDoContainerSize(container.size, container.containerSize);
+    if (size) quantities[size] = (quantities[size] || 0) + 1;
+  });
+  if (quantities['20FT'] || quantities['40FT']) return quantities;
+
   const fallbackQuantity = Number(order?.quantity || 0);
-  if (!quantities['20FT'] && !quantities['40FT'] && fallbackQuantity) {
-    const fallbackSize = String(order?.container || order?.cargoType || '').toUpperCase().includes('40') ? '40FT' : '20FT';
+  const fallbackSize = getDoContainerSize(order?.container, order?.cargoType, order?.serviceName);
+  if (fallbackSize && fallbackQuantity) {
     quantities[fallbackSize] = fallbackQuantity;
   }
   return quantities;
