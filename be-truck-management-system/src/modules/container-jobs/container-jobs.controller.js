@@ -280,12 +280,11 @@ export async function updateContainerJobExpenseProofController(request, response
     afterData: result,
     metadata: {
       containerJobId: request.params.id,
-      paymentStatus: result.paymentStatus,
       financeCheckStatus: result.financeCheckStatus,
       proofAttachmentId: result.proofAttachmentId,
     },
   });
-  sendSuccess(response, result, 'Bukti pembayaran berhasil diupload.');
+  sendSuccess(response, result, 'Bukti biaya berhasil disimpan untuk validasi Finance.');
 }
 
 export async function updateDroppingExpenseController(request, response) {

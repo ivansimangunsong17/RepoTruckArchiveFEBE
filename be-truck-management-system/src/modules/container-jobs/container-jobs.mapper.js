@@ -58,6 +58,7 @@ export function mapContainerJobExpense(row = {}) {
     canEdit: canOperationalEditDroppingTransaction(row),
     source: row.source || 'manual',
     sourceRefId: row.source_ref_id || row.sourceRefId || '',
+    inputSource: row.input_source || row.inputSource || 'operational',
     createdByName: row.created_by_name || row.createdByName || '',
     updatedByName: row.updated_by_name || row.updatedByName || '',
     createdAt: row.created_at || row.createdAt || null,

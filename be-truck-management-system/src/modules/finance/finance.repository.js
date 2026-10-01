@@ -3356,6 +3356,8 @@ function mapOperationalFundTransactionRow(row) {
     financeCheckStatus: row.finance_check_status || '',
     source: row.source || 'manual',
     sourceRefId: row.source_ref_id || '',
+    expenseGroup: row.expense_group || '',
+    inputSource: row.input_source || '',
     createdByName: row.created_by_name || '',
     updatedByName: row.updated_by_name || '',
     createdAt: row.created_at,
@@ -3378,6 +3380,8 @@ function operationalFundTransactionSelect() {
       cj.destination,
       cj.container_number,
       expense.category as expense_category,
+      expense.expense_group,
+      expense.input_source,
       expense.payment_status as expense_payment_status,
       expense.finance_check_status,
       case when oft.transaction_type = 'credit' then oft.amount else 0 end as money_in,
@@ -3614,6 +3618,8 @@ function mapFinanceContainerJobExpenseRow(row) {
     batchStatus: row.batch_status || 'open',
     source: row.source || 'manual',
     sourceRefId: row.source_ref_id || '',
+    expenseGroup: row.expense_group || 'operational',
+    inputSource: row.input_source || 'finance',
     createdByName: row.created_by_name || '',
     createdAt: row.created_at || null,
     updatedByName: row.updated_by_name || '',
@@ -3816,12 +3822,15 @@ export async function reconcileContainerJobExpenseRecord(id, payload = {}) {
        from container_job_expense_transfer_proofs where container_job_expense_id = $1`,
       [id],
     );
-    const totalActualTransfer = Number(proofSummary.rows[0]?.total_actual_transfer || 0);
+    const transferProofTotal = Number(proofSummary.rows[0]?.total_actual_transfer || 0);
     const transferProofCount = Number(proofSummary.rows[0]?.proof_count || 0);
+    const totalActualTransfer = transferProofCount > 0
+      ? transferProofTotal
+      : (proofAttachmentId ? Number(existingExpense.amount || 0) : 0);
     const adminFeeAmount = Number(payload.adminFeeAmount || 0);
     const normalTransferAmount = Math.max(0, Number(existingExpense.amount || 0) - adminFeeAmount);
     const adjustmentAmount = totalActualTransfer - normalTransferAmount;
-    if (payload.financeCheckStatus === 'sudah_dicek' && existingExpense.payment_status === 'sudah_dibayar' && transferProofCount === 0) {
+    if (payload.financeCheckStatus === 'sudah_dicek' && existingExpense.payment_status === 'sudah_dibayar' && !proofAttachmentId && transferProofCount === 0) {
       const error = new Error('Bukti pembayaran wajib diupload Finance sebelum transaksi ditandai sudah dicek.');
       error.statusCode = 400;
       error.code = 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED';

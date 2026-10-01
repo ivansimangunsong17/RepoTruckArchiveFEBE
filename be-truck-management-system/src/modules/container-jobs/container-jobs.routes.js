@@ -64,7 +64,7 @@ export const containerJobRoutes = [
   {
     method: 'PATCH',
     path: '/api/container-jobs/:id/expenses/:expenseId/proof',
-    permission: 'finance.operational_fund.reconcile',
+    permissions: ['container_job.update', 'finance.operational_fund.reconcile'],
     handler: updateContainerJobExpenseProofController,
   },
   {

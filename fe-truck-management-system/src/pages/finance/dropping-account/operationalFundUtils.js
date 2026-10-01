@@ -213,6 +213,8 @@ function normalizeExpenseReconciliationRow(row = {}) {
     driverName: row.driverName || row.driver_name || row.driver || '-',
     truck: row.truck || '-',
     category: row.category || 'lainnya',
+    expenseGroup: row.expenseGroup || row.expense_group || 'operational',
+    inputSource: row.inputSource || row.input_source || 'finance',
     amount: Number(row.amount || 0),
     description: row.description || '-',
     recipientName: row.recipientName || row.recipient_name || '-',

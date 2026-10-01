@@ -94,6 +94,7 @@ const EXPENSE_GROUP_BY_PRESET = EXPENSE_DESCRIPTION_GROUPS.reduce((acc, group) =
   return acc;
 }, {});
 const EXPENSE_GROUP_LABELS = { operational: 'Biaya Operational', reimbursement: 'Biaya Reimbursement' };
+const EXPENSE_INPUT_SOURCE_LABELS = { operational: 'Input Operational', finance: 'Input Finance', system: 'Otomatis Sistem' };
 const CUSTOM_DESCRIPTION_VALUE = 'custom';
 
 const expenseCategoryOptions = [
@@ -153,7 +154,7 @@ function normalizeExpenseRow(job, expense) {
     transactionType: 'debit',
     transactionDate: expense.paidAt || expense.createdAt || expense.tripDate || null,
     moneyIn: 0,
-    moneyOut: Number(expense.amount || 0),
+    moneyOut: paymentStatus === 'sudah_dibayar' ? Number(expense.amount || 0) : 0,
     runningBalance: expense.runningBalance,
     jobId: expense.jobId || expense.containerJobId || sourceJob.id,
     soNumber: expense.soNumber || sourceJob.soNumber || sourceJob.internalSoNumber || '-',
@@ -170,6 +171,9 @@ function normalizeExpenseRow(job, expense) {
     amount: Number(expense.amount || 0),
     paymentStatus,
     financeCheckStatus,
+    expenseGroup: expense.expenseGroup || '',
+    inputSource: expense.inputSource || '',
+    isPendingExpense: paymentStatus !== 'sudah_dibayar',
     canEdit: expense.canEdit ?? canOperationalEditRow(financeCheckStatus, paymentStatus),
   };
 }
@@ -201,6 +205,9 @@ function normalizeFundTransactionRow(row = {}) {
     doNumber: row.doNumber || '-',
     paymentStatus: row.expensePaymentStatus || row.paymentStatus || '',
     financeCheckStatus: row.financeCheckStatus || '',
+    expenseGroup: row.expenseGroup || '',
+    inputSource: row.inputSource || '',
+    isPendingExpense: false,
     proofAttachment: row.proofAttachment || null,
     proofAttachmentId: row.proofAttachmentId || '',
     canEdit: row.containerJobExpenseId ? canOperationalEditRow(row.financeCheckStatus, row.expensePaymentStatus || row.paymentStatus) : false,
@@ -779,10 +786,17 @@ function OperationalDroppingAccountPage() {
         const normalizedExpenseRows = expenses.map((expense) => normalizeExpenseRow(expense, expense)).sort((left, right) => (
           String(right.paidAt || right.createdAt || '').localeCompare(String(left.paidAt || left.createdAt || ''))
         ));
+        const postedExpenseIds = new Set(fundRows.map((row) => actionExpenseId(row)).filter(Boolean));
+        const pendingExpenseRows = normalizedExpenseRows
+          .filter((row) => row.isPendingExpense && !postedExpenseIds.has(actionExpenseId(row)))
+          .map((row) => ({ ...row, runningBalance: null }));
+        const allRows = [...fundRows, ...pendingExpenseRows].sort((left, right) => (
+          String(right.transactionDate || right.paidAt || right.createdAt || '').localeCompare(String(left.transactionDate || left.paidAt || left.createdAt || ''))
+        ));
         if (!active) return;
         setBatchStatus(batchResult?.rows?.[0]?.status || 'open');
-        setTotalRows(Number((useExpenseRows ? expenseLedger?.total : fundLedger?.total) || (useExpenseRows ? normalizedExpenseRows.length : fundRows.length) || 0));
-        setLedgerRows(useExpenseRows ? normalizedExpenseRows : fundRows);
+        setTotalRows(Number((useExpenseRows ? expenseLedger?.total : fundLedger?.total + pendingExpenseRows.length) || (useExpenseRows ? normalizedExpenseRows.length : allRows.length) || 0));
+        setLedgerRows(useExpenseRows ? normalizedExpenseRows : allRows);
         setLedgerSummary(fundLedger?.summary || {
           totalCredit: 0,
           totalDebit: 0,
@@ -1307,6 +1321,12 @@ function OperationalDroppingAccountPage() {
                       <td className="px-4 py-3">
                         <strong className="block text-sm font-semibold text-slate-950">{row.description || fundCategoryLabels[row.fundCategory] || expenseCategoryLabels[row.category] || '-'}</strong>
                         <span className="mt-1 block text-xs font-medium text-slate-500">{fundCategoryLabels[row.fundCategory] || expenseCategoryLabels[row.category] || row.category || '-'}</span>
+                        {row.expenseGroup || row.inputSource ? (
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            {row.expenseGroup ? <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">{EXPENSE_GROUP_LABELS[row.expenseGroup] || row.expenseGroup}</span> : null}
+                            {row.inputSource ? <span className="inline-flex rounded-full border border-sky-100 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">{EXPENSE_INPUT_SOURCE_LABELS[row.inputSource] || row.inputSource}</span> : null}
+                          </span>
+                        ) : null}
                         {secondaryInfo ? <span className="mt-0.5 block truncate text-xs font-medium text-slate-500/70">{secondaryInfo}</span> : null}
                         {row.financeNote ? <span className="mt-1 block rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{row.financeNote}</span> : null}
                       </td>
@@ -1316,6 +1336,9 @@ function OperationalDroppingAccountPage() {
                             {isVoided ? 'Void/Batal' : financeStatusLabels[row.financeCheckStatus] || row.financeCheckStatus}
                           </span>
                         ) : <span className="text-slate-300">-</span>}
+                        {row.isPendingExpense ? (
+                          <span className="mt-1 inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold normal-case text-sky-700">Belum Dibayar</span>
+                        ) : null}
                         {missingProof ? (
                           <span className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold normal-case ${proofStatusBadgeTone}`}>Belum Ada Bukti</span>
                         ) : null}

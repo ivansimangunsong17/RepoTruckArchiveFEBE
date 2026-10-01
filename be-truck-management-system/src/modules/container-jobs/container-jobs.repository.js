@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 
@@ -129,6 +130,7 @@ const expenseColumns = `
   expense.finance_note,
   expense.source,
   expense.source_ref_id,
+  expense.input_source,
   expense.created_by_name,
   expense.updated_by_name,
   expense.created_at,
@@ -1300,10 +1302,11 @@ export async function syncAutoJourneyMoneyExpense(client, {
         finance_checked_at,
         source,
         source_ref_id,
+        input_source,
         created_by_name,
         updated_by_name
       )
-      values ($1, $2, $3, 'uj_awal', 'operational', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'belum_dicek', null, null, 'auto_uj_order', $9, $8, $8)
+      values ($1, $2, $3, 'uj_awal', 'operational', $4, $5, 'driver', $6, 'sudah_dibayar', $7::timestamptz, $8, 'belum_dicek', null, null, 'auto_uj_order', $9, 'system', $8, $8)
       on conflict (source, source_ref_id)
         where source = 'auto_uj_order' and source_ref_id is not null
       do update set
@@ -2142,6 +2145,13 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
 
     const job = jobResult.rows[0];
     const idempotencyKey = normalizeOptionalText(payload.idempotencyKey);
+    const sourceRefId = idempotencyKey
+      ? `manual:${idempotencyKey}`
+      : `manual:${job.id}:${payload.category}:${crypto.randomUUID()}`;
+    const requestedInputSource = String(payload.inputSource || '').trim().toLowerCase();
+    const inputSource = ['operational', 'finance', 'system'].includes(requestedInputSource)
+      ? requestedInputSource
+      : 'operational';
     const result = await client.query(
       `
         insert into container_job_expenses (
@@ -2160,11 +2170,17 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
           proof_attachment_id,
           source,
           source_ref_id,
+          input_source,
           idempotency_key,
           created_by_name,
           updated_by_name
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamptz, $12, $13, 'manual', $14, $15, $16, $16)
+        values (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamptz, $12, $13,
+          'manual', $14,
+          case when $16 = any(array['operational', 'finance', 'system']) then $16 else 'operational' end,
+          $15, $17, $17
+        )
         on conflict (idempotency_key) where idempotency_key is not null do nothing
         returning id
       `,
@@ -2182,17 +2198,30 @@ export async function createContainerJobExpenseRecord(id, payload = {}) {
         payload.paidAt || (payload.paymentStatus === 'sudah_dibayar' ? new Date().toISOString() : null),
         payload.paidByName || null,
         payload.proofAttachmentId || null,
-        `manual:${job.id}:${payload.category}`,
+        sourceRefId,
         idempotencyKey,
+        inputSource,
         payload.actorName || 'Operational',
       ],
     );
 
     if (!result.rows[0]) {
+      if (!idempotencyKey) {
+        const error = new Error('Biaya sudah pernah diproses, tetapi kunci submit tidak tersedia. Silakan ulangi tambah biaya sebagai entri baru.');
+        error.statusCode = 409;
+        error.code = 'CONTAINER_JOB_EXPENSE_IDEMPOTENCY_KEY_MISSING';
+        throw error;
+      }
       const duplicate = await client.query(
         `select id from container_job_expenses where idempotency_key = $1 limit 1`,
         [idempotencyKey],
       );
+      if (!duplicate.rows[0]) {
+        const error = new Error('Biaya sudah pernah diproses dengan kunci submit ini, tetapi data duplikat tidak ditemukan. Silakan ulangi tambah biaya sebagai entri baru.');
+        error.statusCode = 409;
+        error.code = 'CONTAINER_JOB_EXPENSE_IDEMPOTENCY_KEY_NOT_FOUND';
+        throw error;
+      }
       const existingExpense = await getMappedExpenseById(client, duplicate.rows[0].id);
       const payloadMatches = existingExpense
         && existingExpense.category === payload.category
@@ -2616,89 +2645,19 @@ export async function updateContainerJobExpenseProofRecord(id, expenseId, payloa
     const existing = await fetchDroppingExpenseForUpdate(client, id, expenseId);
     ensureExpenseNotVoid(existing);
     ensureTransactionNotFinanceChecked(existing);
-    await ensureOperationalFundBatchOpenForExpense(client, expenseId);
 
     await client.query(
       `
         update container_job_expenses
-        set payment_status = 'sudah_dibayar',
-            paid_at = coalesce($1::timestamptz, paid_at, now()),
-            paid_by_name = coalesce($2, paid_by_name),
-            proof_attachment_id = $3,
-            finance_check_status = 'belum_dicek',
-            finance_checked_by_name = null,
-            finance_checked_at = null,
-            updated_by_name = $4,
+        set proof_attachment_id = $1,
+            updated_by_name = $2,
             updated_at = now()
-        where id = $5
+        where id = $3
       `,
       [
-        payload.paidAt || null,
-        payload.paidByName || null,
         payload.proofAttachmentId,
         payload.actorName || 'Operational',
         expenseId,
-      ],
-    );
-
-    const batchDate = payload.paidAt ? String(payload.paidAt).slice(0, 10) : null;
-    const batch = await ensureOperationalFundBatch(client, batchDate, payload.actorName || 'Operational');
-    await ensureSufficientOperationalFundBalance(client, batch, expenseId, existing.amount);
-    await client.query(
-      `
-        insert into operational_fund_transactions (
-          batch_id,
-          container_job_id,
-          container_job_expense_id,
-          transaction_date,
-          transaction_type,
-          category,
-          amount,
-          description,
-          proof_attachment_id,
-          top_name,
-          driver_name,
-          do_number,
-          customer_name,
-          source,
-          source_ref_id,
-          created_by_name,
-          updated_by_name
-        )
-        values ($1, $2, $3, coalesce($4::date, current_date), 'debit', $5, $6, $7, $8, $9, $10, $11, $12, 'container_job_expense', $14, $13, $13)
-        on conflict (container_job_expense_id)
-          where container_job_expense_id is not null
-            and transaction_type = 'debit'
-            and status = 'posted'
-        do update set
-          proof_attachment_id = excluded.proof_attachment_id,
-          transaction_date = excluded.transaction_date,
-          category = excluded.category,
-          batch_id = excluded.batch_id,
-          top_name = excluded.top_name,
-          driver_name = excluded.driver_name,
-          do_number = excluded.do_number,
-          customer_name = excluded.customer_name,
-          source = excluded.source,
-          source_ref_id = excluded.source_ref_id,
-          updated_by_name = excluded.updated_by_name,
-          updated_at = now()
-      `,
-      [
-        batch.id,
-        id,
-        expenseId,
-        batchDate,
-        operationalFundCategoryFromExpense(existing.category),
-        existing.amount,
-        existing.description || `${existing.so_number || '-'} ${existing.container_number || ''}`.trim(),
-        payload.proofAttachmentId,
-        payload.actorName || 'Operational',
-        existing.recipient_name || existing.assignment_snapshot?.driver || null,
-        existing.do_number || existing.destination || null,
-        existing.customer_name || null,
-        payload.actorName || 'Operational',
-        String(expenseId),
       ],
     );
 
