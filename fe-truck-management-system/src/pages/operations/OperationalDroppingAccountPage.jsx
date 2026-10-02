@@ -890,12 +890,6 @@ function OperationalDroppingAccountPage() {
     setFileError('');
   }
 
-  function openUpload(row) {
-    setSelectedExpense(row);
-    setProofFile(null);
-    setFileError('');
-  }
-
   function openCorrection(row) {
     setCorrectionExpense(row);
     setCorrectionForm({
@@ -912,12 +906,6 @@ function OperationalDroppingAccountPage() {
 
   function openEditExpense(row) {
     setEditExpenseTarget(row);
-  }
-
-  function openUjProof(row) {
-    setUjProofTarget(row);
-    setUjProofFile(null);
-    setFileError('');
   }
 
   function openAddExpense() {

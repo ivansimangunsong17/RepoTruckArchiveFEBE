@@ -94,7 +94,6 @@ function InvoiceTable({
   total,
   totalPages,
   currentPage,
-  query,
   activeInvoiceTab,
   activeInvoiceDocumentFilter,
   onActiveInvoiceTabChange,

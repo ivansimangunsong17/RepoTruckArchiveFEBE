@@ -16,7 +16,6 @@ import {
   expensePaymentStatusLabels,
   operationalFundBatchStatusLabel,
   operationalFundTransactionCategoryLabel,
-  operationalFundTransactionCategoryLabels,
   operationalFundTransactionCsvRows,
   operationalFundTransactionTypeLabels,
   readableLabel,
