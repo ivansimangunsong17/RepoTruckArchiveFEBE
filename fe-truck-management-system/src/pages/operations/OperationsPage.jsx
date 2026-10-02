@@ -285,11 +285,12 @@ function nextActionHint(job, documents, rpuj, { documentFollowUp = false, repoSu
 function groupJobsBySo(rows = []) {
   const groups = new Map();
   rows.forEach((job) => {
-    const key = job.orderId || job.soNumber || `${job.customer || 'SO'}-${job.origin || ''}-${job.destination || ''}`;
+    const displayedSoNumber = job.accurateSoNumber || job.soNumber || job.salesOrderNumber || '';
+    const key = job.orderId || job.salesOrderId || displayedSoNumber || `${job.customer || 'SO'}-${job.origin || ''}-${job.destination || ''}`;
     if (!groups.has(key)) {
       groups.set(key, {
         key,
-        soNumber: job.soNumber || '-',
+        soNumber: displayedSoNumber || '-',
         customer: job.customer || '-',
         route: `${job.origin || '-'} ke ${job.destination || '-'}`,
         jobs: [],
@@ -568,7 +569,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     ].some((value) => value?.toLowerCase().includes(query.toLowerCase()));
     const matchesRpujStage = !rpujStage || (job.status !== 'cancelled' && getRpujStage(job) === rpujStage);
     const matchesRepoStorage = !repoStorageOnly || isRepoStoredJob(job);
-    const matchesStatus = !effectiveStatus || (effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
+    const matchesStatus = !effectiveStatus
+      || (effectiveStatus === 'running'
+        ? ['running', 'inap'].includes(job.status)
+        : effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
     const matchesTripDate = !effectiveTripDateFilter || getDateFilterKey(job.tripDate) === effectiveTripDateFilter;
     const matchesCompletedDate = !effectiveCompletedDateFilter || getDateFilterKey(job.completedAt) === effectiveCompletedDateFilter;
     const matchesDocumentFollowUp = !documentFollowUp
@@ -578,9 +582,12 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
 
   const visibleJobs = archive.isDatabaseMode ? databaseJobs : filteredDemoJobs;
   const allGroupedJobs = useMemo(() => groupJobsBySo(visibleJobs), [visibleJobs]);
-  const counts = archive.isDatabaseMode ? statusCounts : {
+  const counts = archive.isDatabaseMode ? {
+    ...statusCounts,
+    running: Number(statusCounts.running || 0) + Number(statusCounts.inap || 0),
+  } : {
     received: demoJobs.filter((job) => job.status === 'received').length,
-    running: demoJobs.filter((job) => job.status === 'running').length,
+    running: demoJobs.filter((job) => ['running', 'inap'].includes(job.status)).length,
     inap: demoJobs.filter((job) => isInapJob(job)).length,
     repo_stored: demoJobs.filter((job) => isRepoStoredJob(job)).length,
     completed: demoJobs.filter((job) => job.status === 'completed').length,
@@ -592,7 +599,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     approved: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'approved').length,
     paid: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'paid').length,
   };
-  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.inap || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
+  // `running` sudah mencakup job inap karena inap tetap merupakan perjalanan aktif.
+  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotalRows : filteredDemoJobs.length;
   const totalGroups = archive.isDatabaseMode ? serverTotal : allGroupedJobs.length;
   const totalPages = Math.max(1, Math.ceil(totalGroups / PAGE_SIZE));
@@ -636,7 +644,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           pageSize: PAGE_SIZE,
           groupByOrder: true,
           query,
-          status: documentFollowUp ? 'completed' : effectiveStatus,
+          status: documentFollowUp ? 'completed' : effectiveStatus === 'running' ? 'active_journey' : effectiveStatus,
           rpujStage: documentFollowUp || repoStorageOnly ? '' : rpujStage,
           documentStatus: documentFollowUp ? 'incomplete' : '',
           tripDate: effectiveTripDateFilter,
