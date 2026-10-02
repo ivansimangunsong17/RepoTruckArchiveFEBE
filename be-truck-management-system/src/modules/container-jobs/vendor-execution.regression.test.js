@@ -33,7 +33,7 @@ test('backend menjadi pengaman vendor dari UJ, dropping, SPK, dan histori assign
   assert.match(source, /ensureInternalExecution\(client, id, 'Uang Jalan'\)/i);
   assert.match(source, /ensureInternalExecution\(client, id, 'SPK internal'\)/i);
   assert.match(source, /if \(!isVendorExecution && \(driverIdentityChanging \|\| vehicleIdentityChanging\)\)/i);
-  assert.match(source, /const nextHasDriverCommission = isVendorExecution \? false/i);
+  assert.match(source, /const nextHasDriverCommission = isVendorExecution \|\| isRepoJob \? false/i);
 });
 
 test('status pemenuhan SO tetap menghitung job internal dan vendor bersama-sama', () => {

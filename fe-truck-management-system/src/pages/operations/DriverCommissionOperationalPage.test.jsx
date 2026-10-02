@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import DriverCommissionOperationalPage from './DriverCommissionOperationalPage';
 import {
   fetchDriverCommissionBatches,
@@ -247,6 +247,12 @@ describe('DriverCommissionOperationalPage', () => {
   });
 
   it('memuat report sesuai batch yang dipilih dari dropdown', async () => {
+    // Dropdown hanya menampilkan batch dalam jendela 9 minggu terakhir dari "hari ini", jadi tanggal
+    // dikunci supaya fixture Agustus 2026 selalu masuk jendela. Hanya Date yang dipalsukan agar
+    // timer userEvent/findBy tetap berjalan normal.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-12T10:00:00+07:00'));
+    onTestFinished(() => vi.useRealTimers());
     const user = userEvent.setup();
     fetchDriverCommissionBatches.mockResolvedValue({
       rows: [
