@@ -126,6 +126,18 @@ describe('financeService correction endpoints', () => {
     }));
   });
 
+  it('menandai error.code EXPENSE_PROOF_INVALID saat bukti pembayaran tidak valid', async () => {
+    const invalidFile = new File(['proof'], 'bukti-transfer.exe', { type: 'application/x-msdownload' });
+
+    await expect(reconcileFinanceContainerJobExpense('expense-1', {
+      financeCheckStatus: 'sudah_dicek',
+      financeNote: '',
+      proofFile: invalidFile,
+    })).rejects.toMatchObject({ code: 'EXPENSE_PROOF_INVALID' });
+
+    expect(httpClient.patch).not.toHaveBeenCalled();
+  });
+
   it('mengelola beberapa bukti transfer biaya container job', async () => {
     const proofFile = new File(['proof'], 'bukti-susulan.pdf', { type: 'application/pdf' });
     await fetchExpenseTransferProofs('expense-1');
