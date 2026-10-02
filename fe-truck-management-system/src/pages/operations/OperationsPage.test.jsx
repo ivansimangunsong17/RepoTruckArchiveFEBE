@@ -126,6 +126,40 @@ describe('OperationsPage status inap', () => {
     await waitFor(() => expect(updateJob).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: 'running' })));
   });
 
+  it('menampilkan job inap di tab Sedang Jalan karena inap tetap perjalanan aktif', async () => {
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [
+        runningJobRow(),
+        runningJobRow({
+          id: 'job-2',
+          containerNumber: 'TCLU7654321',
+          status: 'inap',
+          inapReason: 'Curfew malam, truk tidak boleh jalan sampai subuh',
+          inapStartedAt: '2026-07-11T20:00:00.000Z',
+        }),
+      ],
+      total: 2,
+      totalRows: 2,
+      counts: { received: 0, running: 1, inap: 1, repo_stored: 0, completed: 0, cancelled: 0 },
+      rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
+    });
+
+    const user = userEvent.setup();
+    render(<OperationsPage />);
+
+    const runningTab = await screen.findByRole('tab', { name: /^Sedang Jalan/ });
+    await waitFor(() => expect(runningTab).toHaveTextContent('2'));
+
+    await user.click(runningTab);
+
+    await waitFor(() => expect(fetchContainerJobsPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      status: 'active_journey',
+    })));
+    expect(runningTab).toHaveAttribute('aria-selected', 'true');
+    expect((await screen.findAllByText('TCLU7654321')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('TCLU1234567').length).toBeGreaterThan(0);
+  });
+
   it('mengirim filter tanggal selesai ke API Container Job', async () => {
     render(<OperationsPage />);
 
