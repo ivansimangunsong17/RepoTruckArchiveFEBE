@@ -6,6 +6,7 @@ import {
   fetchFinanceInvoicePayments,
   fetchFinanceOutstanding,
   fetchFinanceOutstandingByCustomer,
+  exportFinanceOutstandingByCustomer,
   recordFinanceCustomerPayment,
   recordFinanceInvoicePayment,
 } from '../../services/finance/financeService';
@@ -24,6 +25,7 @@ vi.mock('../../contexts/FeedbackContext', () => ({
 vi.mock('../../services/finance/financeService', () => ({
   fetchFinanceOutstanding: vi.fn(),
   fetchFinanceOutstandingByCustomer: vi.fn(),
+  exportFinanceOutstandingByCustomer: vi.fn(),
   fetchFinanceInvoicePayments: vi.fn(),
   recordFinanceCustomerPayment: vi.fn(),
   recordFinanceInvoicePayment: vi.fn(),
@@ -107,6 +109,7 @@ describe('CustomerOutstandingPage finance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchFinanceOutstandingByCustomer.mockResolvedValue(rollupResult);
+    exportFinanceOutstandingByCustomer.mockResolvedValue({ rows: rollupResult.rows });
     fetchFinanceOutstanding.mockResolvedValue(customerInvoiceRows);
     fetchFinanceInvoicePayments.mockResolvedValue([]);
     recordFinanceCustomerPayment.mockResolvedValue({});
@@ -191,6 +194,78 @@ describe('CustomerOutstandingPage finance', () => {
     ]);
   });
 
+  it('mengekspor seluruh customer sesuai filter tanpa mengubah pagination tabel atau menduplikasi baris', async () => {
+    const user = userEvent.setup();
+    const allRows = Array.from({ length: 25 }, (_, index) => ({
+      customer: `Customer ${String(index + 1).padStart(2, '0')}`,
+      invoiceCount: index + 1,
+      totalOutstandingAmount: 25000000 - index,
+      currentAmount: 1000,
+      overdueAmount: 2000,
+      oldestOverdueDays: index,
+    }));
+    fetchFinanceOutstandingByCustomer.mockResolvedValue({
+      ...rollupResult,
+      rows: allRows.slice(0, 20),
+      total: 25,
+      totalPages: 2,
+    });
+    exportFinanceOutstandingByCustomer.mockResolvedValue({ rows: [...allRows, allRows[4]] });
+
+    render(<CustomerOutstandingPage />);
+
+    expect(await screen.findByText('Customer 01')).toBeInTheDocument();
+    expect(screen.getByText('Customer 20')).toBeInTheDocument();
+    expect(screen.queryByText('Customer 21')).not.toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Nama customer'), 'Customer');
+    await user.selectOptions(screen.getByLabelText('Umur Piutang'), 'overdue_all');
+    await user.selectOptions(screen.getByLabelText('Urutkan'), 'customer_asc');
+    await user.type(screen.getByLabelText('Trip Date Dari'), '2026-09-01');
+    await user.type(screen.getByLabelText('Trip Date Sampai'), '2026-09-30');
+    await user.click(screen.getByRole('button', { name: /export csv/i }));
+
+    expect(exportFinanceOutstandingByCustomer).toHaveBeenCalledWith({
+      query: 'Customer',
+      agingBucket: 'overdue_all',
+      sortBy: 'customer_asc',
+      dateFrom: '2026-09-01',
+      dateTo: '2026-09-30',
+    });
+    const [, , csvRows] = downloadCsv.mock.calls[0];
+    expect(csvRows).toHaveLength(25);
+    expect(csvRows.map((row) => row[0])).toEqual(allRows.map((row) => row.customer));
+  });
+
+  it('mengunci tombol selama export dan memulihkan state setelah request gagal', async () => {
+    const user = userEvent.setup();
+    let rejectExport;
+    exportFinanceOutstandingByCustomer.mockImplementation(() => new Promise((resolve, reject) => {
+      rejectExport = reject;
+    }));
+
+    render(<CustomerOutstandingPage />);
+    await screen.findByText('PT Mitra Kimia');
+
+    const exportButton = screen.getByRole('button', { name: /export csv/i });
+    await user.dblClick(exportButton);
+
+    expect(exportFinanceOutstandingByCustomer).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: /mengekspor/i })).toBeDisabled();
+
+    rejectExport(new Error('Server export tidak tersedia'));
+
+    await waitFor(() => {
+      expect(notify).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error',
+        title: 'Export CSV gagal',
+        message: 'Server export tidak tersedia',
+      }));
+      expect(screen.getByRole('button', { name: /export csv/i })).not.toBeDisabled();
+    });
+    expect(downloadCsv).not.toHaveBeenCalled();
+  });
+
   it('membuka detail piutang customer lalu mencatat pembayaran cicilan salah satu invoice', async () => {
     const user = userEvent.setup();
     fetchFinanceInvoicePayments.mockResolvedValue([
@@ -208,7 +283,7 @@ describe('CustomerOutstandingPage finance', () => {
         paymentDate: '2026-09-12',
         referenceNumber: 'TRF-002',
         recordedByName: 'Fitri Finance',
-        proofAttachment: { id: 'proof-2', path: 'proof-2', name: 'bukti-2.pdf', type: 'application/pdf' },
+        proofAttachment: null,
       },
     ]);
     render(<CustomerOutstandingPage />);
@@ -224,7 +299,8 @@ describe('CustomerOutstandingPage finance', () => {
     await user.click(within(detailDialog).getAllByRole('button', { name: /^catat pembayaran$/i })[0]);
 
     const paymentDialog = await screen.findByRole('dialog', { name: /SO-202608-001/i });
-    expect(await within(paymentDialog).findAllByRole('button', { name: /lihat bukti/i })).toHaveLength(2);
+    expect(await within(paymentDialog).findAllByRole('button', { name: /lihat bukti/i })).toHaveLength(1);
+    expect(within(paymentDialog).getByText(/bukti menyusul/i)).toBeInTheDocument();
     const amountInput = within(paymentDialog).getByLabelText(/nominal dibayar/i);
     expect(amountInput).toHaveValue(1000000);
     await user.clear(amountInput);
