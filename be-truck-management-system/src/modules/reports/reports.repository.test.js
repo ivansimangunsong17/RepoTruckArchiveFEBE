@@ -153,6 +153,37 @@ test('monthly comparison memasukkan revenue vendor tetapi utilisasi hanya unit s
   assert.equal(rows[0].utilizationPercent, (3 / (5 * 31)) * 100);
 });
 
+test('monthly comparison menghitung combo pickup 2x20 sebagai 1 trip internal tapi volume tetap 2 container', () => {
+  const rows = buildMonthlyComparisonRows([
+    {
+      id: 'combo-job-1',
+      completed_date: '2026-01-03',
+      customer_name: 'Customer Combo',
+      price: 1000000,
+      execution_source: 'internal',
+      vehicle_id: 'truck-40',
+      pickup_type: 'combo_2x20',
+      pickup_sequence_no: 1,
+    },
+    {
+      id: 'combo-job-2',
+      completed_date: '2026-01-03',
+      customer_name: 'Customer Combo',
+      price: 1000000,
+      execution_source: 'internal',
+      vehicle_id: 'truck-40',
+      pickup_type: 'combo_2x20',
+      pickup_sequence_no: 2,
+    },
+  ], [], { year: 2026, activeTruckCount: 1 }, new Date('2026-02-01T00:00:00.000Z'));
+
+  assert.equal(rows[0].totalRevenue, 2000000);
+  assert.equal(rows[0].totalVolume, 2);
+  assert.equal(rows[0].totalTrips, 1);
+  assert.equal(rows[0].usedTruckDays, 1);
+  assert.equal(rows[0].utilizationPercent, (1 / 31) * 100);
+});
+
 test('koreksi chassis utilisasi tidak mengubah baris jika tidak ada mapping', () => {
   const rows = [
     { id: 'job-1', vehicleId: 'truck-9211', plateNumber: 'B 9211 BEL', completedDate: '2026-08-10' },

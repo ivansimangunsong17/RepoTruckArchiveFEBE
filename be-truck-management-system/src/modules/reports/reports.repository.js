@@ -1,5 +1,6 @@
 import { query } from '../../db/client.js';
 import { getCustomerOutstandingRollupPage } from '../finance/finance.repository.js';
+import { utilizationChassisJoinsSql, utilizationChassisSizeSql, utilizationChassisSourceSql } from './utilization-chassis.sql.js';
 import {
   getTransportLineItemForSize,
   splitFinancialLineItems,
@@ -117,8 +118,14 @@ function getReportDateKey(row = {}) {
     || row.updatedAt
     || row.updated_at;
   if (!value) return '';
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  return String(value).trim().slice(0, 10);
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = value instanceof Date ? value : new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date).map(({ type, value: part }) => [type, part]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function collectReportVehicleKeys(row = {}) {
@@ -152,8 +159,12 @@ function normalizeUtilizationChassisCorrection(correction = {}) {
   const sourceKeys = [sourceVehicleId, sourcePlateNumber, sourceUnitCode]
     .map(normalizeReportIdentity)
     .filter(Boolean);
+  const sourceVehicleKey = normalizeReportIdentity(sourceVehicleId);
+  const sourcePlateKey = normalizeReportIdentity(sourcePlateNumber);
+  const sourceUnitKey = normalizeReportIdentity(sourceUnitCode);
 
-  if (!sourceKeys.length || !targetVehicleId || !effectiveFrom || !effectiveTo) return null;
+  if (!sourceKeys.length || !targetVehicleId || !effectiveFrom || !effectiveTo
+    || effectiveFrom > effectiveTo || !['20FT', '40FT'].includes(targetChassisSize)) return null;
 
   return {
     id: correction.id || '',
@@ -169,11 +180,58 @@ function normalizeUtilizationChassisCorrection(correction = {}) {
     effectiveTo,
     reason: correction.reason || '',
     note: correction.note || '',
+    createdAt: correction.createdAt || correction.created_at || '',
+    sourceVehicleKey,
+    sourcePlateKey,
+    sourceUnitKey,
     sourceKeys,
   };
 }
 
-// Koreksi ini hanya mengubah identitas truck untuk tampilan laporan utilisasi.
+function reportDateDistanceDays(dateFrom, dateTo) {
+  const from = new Date(`${dateFrom}T00:00:00.000Z`);
+  const to = new Date(`${dateTo}T00:00:00.000Z`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return Number.MAX_SAFE_INTEGER;
+  return Math.max(0, Math.round((to.getTime() - from.getTime()) / 86400000));
+}
+
+function utilizationCorrectionMatchScore(correction, rowKeys = new Set()) {
+  let score = 0;
+  if (correction.sourceVehicleKey && rowKeys.has(correction.sourceVehicleKey)) score += 4;
+  if (correction.sourcePlateKey && rowKeys.has(correction.sourcePlateKey)) score += 2;
+  if (correction.sourceUnitKey && rowKeys.has(correction.sourceUnitKey)) score += 1;
+  return score;
+}
+
+function chooseUtilizationChassisCorrection(corrections = [], rowKeys = new Set(), rowDate = '') {
+  const matches = corrections
+    .map((correction) => ({
+      correction,
+      score: utilizationCorrectionMatchScore(correction, rowKeys),
+      days: reportDateDistanceDays(correction.effectiveFrom, correction.effectiveTo),
+    }))
+    .filter((entry) => entry.score > 0
+      && rowDate >= entry.correction.effectiveFrom
+      && rowDate <= entry.correction.effectiveTo);
+
+  if (!matches.length) return null;
+
+  matches.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    if (left.days !== right.days) return left.days - right.days;
+    if (right.correction.effectiveFrom !== left.correction.effectiveFrom) {
+      return right.correction.effectiveFrom.localeCompare(left.correction.effectiveFrom);
+    }
+    if (right.correction.createdAt !== left.correction.createdAt) {
+      return String(right.correction.createdAt || '').localeCompare(String(left.correction.createdAt || ''));
+    }
+    return String(right.correction.id || '').localeCompare(String(left.correction.id || ''));
+  });
+
+  return matches[0].correction;
+}
+
+// Koreksi hanya mengubah ukuran chassis, bukan identitas truck pelaksana.
 // Data asli container_jobs tetap utuh dan bisa diaudit lewat original* fields.
 export function applyUtilizationChassisCorrectionsToRows(rows = [], corrections = []) {
   const normalizedCorrections = (corrections || [])
@@ -183,15 +241,12 @@ export function applyUtilizationChassisCorrectionsToRows(rows = [], corrections 
   if (!normalizedCorrections.length) return rows;
 
   return (rows || []).map((row) => {
+    if (row.utilizationChassisCorrection) return row;
     const rowDate = getReportDateKey(row);
     if (!rowDate) return row;
 
     const rowKeys = new Set(collectReportVehicleKeys(row));
-    const correction = normalizedCorrections.find((entry) => (
-      rowDate >= entry.effectiveFrom
-      && rowDate <= entry.effectiveTo
-      && entry.sourceKeys.some((key) => rowKeys.has(key))
-    ));
+    const correction = chooseUtilizationChassisCorrection(normalizedCorrections, rowKeys, rowDate);
 
     if (!correction) return row;
 
@@ -206,7 +261,8 @@ export function applyUtilizationChassisCorrectionsToRows(rows = [], corrections 
       originalPlateNumber,
       originalUnitCode,
       originalChassisSize,
-      chassisSize: correction.targetChassisSize || row.chassisSize,
+      chassisSize: correction.targetChassisSize,
+      chassisSource: 'manual',
       utilizationChassisCorrection: {
         id: correction.id,
         sourceVehicleId: correction.sourceVehicleId,
@@ -254,15 +310,18 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
     const customerKey = normalizeCustomerName(row).toLowerCase();
     const salesKey = normalizeSalesName(row).toLowerCase();
     const isInternal = (row.execution_source || row.executionSource || 'internal') !== 'vendor';
+    const pickupType = row.pickup_type || row.pickupType || '';
+    const pickupSequence = Number(row.pickup_sequence_no ?? row.pickupSequenceNo ?? 1);
+    const countsAsInternalTrip = isInternal && !(pickupType === 'combo_2x20' && pickupSequence > 1);
     const truckKey = isInternal ? getComparisonTruckKey(row) : '';
     const dateKey = isInternal ? getComparisonDateKey(row) : '';
 
     month.totalRevenue += revenue;
-    if (isInternal) month.totalTrips += 1;
+    if (countsAsInternalTrip) month.totalTrips += 1;
     month.totalVolume += 1;
     if (customerKey) month.customerKeys.add(customerKey);
     if (salesKey) month.salesKeys.add(salesKey);
-    if (truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
+    if (countsAsInternalTrip && truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
   });
 
   repoRows.forEach((row) => {
@@ -1283,6 +1342,8 @@ export async function getMonthlyComparisonReport(options = {}) {
             ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
             cj.completed_at,
             cj.vehicle_id,
+            cpm.pickup_type,
+            cpi.sequence_no as pickup_sequence_no,
             coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number) as plate_number,
             coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code) as unit_code,
             greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
@@ -1298,6 +1359,8 @@ export async function getMonthlyComparisonReport(options = {}) {
             )
           left join vehicles v on v.id = cj.vehicle_id
           left join order_job_totals ojt on ojt.sales_order_id = so.id
+          left join container_pickup_items cpi on cpi.container_job_id = cj.id
+          left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
           where so.status <> 'cancelled'
             and cj.status = 'completed'
             ${completedSourceWhereSql}
@@ -1374,6 +1437,7 @@ async function findActiveUtilizationChassisCorrections(options = {}) {
              target_vehicle.container_size as target_chassis_size,
              to_char(c.effective_from, 'YYYY-MM-DD') as effective_from,
              to_char(c.effective_to, 'YYYY-MM-DD') as effective_to,
+             c.created_at,
              c.reason,
              c.note
       from utilization_chassis_corrections c
@@ -1448,27 +1512,19 @@ export async function getOperationReport(options = {}) {
                cj.repo_location, cj.repo_stored_at, cj.repo_eir_number, cj.repo_reason, cj.repo_notes, cj.repo_container_condition,
                cj.repo_released_driver_id, cj.repo_released_vehicle_id,
                cj.repo_created_by_name, cj.repo_picked_up_at, cj.repo_picked_up_by_name,
-               coalesce(cj.entry_source, 'realtime') as entry_source, cj.historical_period, cj.historical_notes,
-               so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
-               so.sales_name, so.created_by_name,
-               so.origin, cj.destination,
-               coalesce(cj.vehicle_id, snapshot_vehicle.id) as display_vehicle_id,
-               coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number, snapshot_vehicle.plate_number) as plate_number,
-               coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code,
-               -- Ukuran operasional truck HARUS ikut chassis yang benar-benar terpasang (kir_chassis.container_size
-               -- via current_chassis_id), bukan vehicles.container_size yang statis dan tidak ikut berubah saat
-               -- chassis diganti. vehicles.container_size sengaja TIDAK dipakai di sini lagi -- fallback terakhir
-               -- kalau truck sama sekali belum/tidak lagi punya chassis terpasang adalah cj.container_size (ukuran
-               -- container ritasi ini sendiri), bukan data master truck.
-               coalesce(v_chassis.container_size, snapshot_chassis.container_size) as vehicle_chassis_size
-        from container_jobs cj
-        join sales_orders so on so.id = cj.sales_order_id
-        left join vehicles v on v.id = cj.vehicle_id
-        left join kir_chassis v_chassis on v_chassis.id = v.current_chassis_id
-        left join vehicles snapshot_vehicle on snapshot_vehicle.archived_at is null
-          and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
-        left join kir_chassis snapshot_chassis on snapshot_chassis.id = snapshot_vehicle.current_chassis_id
-        ${whereSql}
+                coalesce(cj.entry_source, 'realtime') as entry_source, cj.historical_period, cj.historical_notes,
+                so.so_number, so.do_number, so.customer_name, so.so_date, so.trip_date,
+                so.sales_name, so.created_by_name,
+                so.origin, cj.destination,
+                coalesce(cj.vehicle_id, snapshot_vehicle.id) as display_vehicle_id,
+                coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number, snapshot_vehicle.plate_number) as plate_number,
+                coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code,
+                ${utilizationChassisSizeSql} as vehicle_chassis_size,
+                ${utilizationChassisSourceSql} as chassis_source
+         from container_jobs cj
+         join sales_orders so on so.id = cj.sales_order_id
+         ${utilizationChassisJoinsSql}
+         ${whereSql}
         ${orderBySql}
         limit $${limitIndex} offset $${offsetIndex}
       `,
@@ -1528,7 +1584,8 @@ export async function getOperationReport(options = {}) {
       driver: row.assignment_snapshot?.driver || null,
       unitCode: row.unit_code || row.assignment_snapshot?.unitCode || '',
       plateNumber: row.plate_number || row.assignment_snapshot?.plateNumber || null,
-      chassisSize: row.vehicle_chassis_size || row.container_size || '',
+      chassisSize: row.vehicle_chassis_size || '',
+      chassisSource: row.chassis_source,
       receivedAt: row.received_at,
       runningAt: row.running_at,
       completedAt: row.completed_at,

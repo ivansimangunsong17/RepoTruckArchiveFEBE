@@ -22,7 +22,7 @@ export async function setFleetVehicleDefaultDriver(vehicleId, payload = {}) {
   return { before, after, reason, note };
 }
 
-export async function setFleetVehicleChassis(vehicleId, payload = {}) {
+export async function setFleetVehicleChassis(vehicleId, payload = {}, actor = {}) {
   const chassisId = String(payload.chassisId || '').trim();
   if (!chassisId) {
     const error = new Error('Chassis wajib dipilih.');
@@ -32,7 +32,11 @@ export async function setFleetVehicleChassis(vehicleId, payload = {}) {
   }
   const reason = String(payload.reason || '').trim();
   const note = String(payload.note || '').trim();
-  const { before, after } = await updateVehicleChassis(vehicleId, chassisId);
+  const { before, after } = await updateVehicleChassis(vehicleId, chassisId, {
+    source: 'fleet_assignment', reason, note,
+    actorName: actor.name || null,
+    actorRole: actor.role || null,
+  });
   return { before, after, reason, note };
 }
 

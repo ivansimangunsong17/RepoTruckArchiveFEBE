@@ -1,6 +1,5 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
-import { recordVehicleAssignmentHistory } from '../operations/fleet-assignment/fleet-assignment.repository.js';
 import {
   calculateDestinationUj,
   getMasterRow,
@@ -68,7 +67,7 @@ export async function getMasterController(request, response) {
 }
 
 export async function createMasterController(request, response) {
-  const saved = await saveMasterRow(request.params.resource, request.body);
+  const saved = await saveMasterRow(request.params.resource, request.body, undefined, request.user);
   const names = resourceActionNames(request.params.resource);
   await safeRecordActivityLog(request, {
     action: names.create,
@@ -82,7 +81,7 @@ export async function createMasterController(request, response) {
 
 export async function updateMasterController(request, response) {
   const before = await getMasterRow(request.params.resource, request.params.id);
-  const saved = await saveMasterRow(request.params.resource, request.body, request.params.id);
+  const saved = await saveMasterRow(request.params.resource, request.body, request.params.id, request.user);
   const names = resourceActionNames(request.params.resource, { before, after: saved });
 
   // Chassis truck bisa berubah lewat Master Truck (form Admin) atau Assignment Armada -- keduanya
@@ -109,24 +108,6 @@ export async function updateMasterController(request, response) {
       },
     } : {}),
   });
-
-  if (chassisChanged) {
-    try {
-      await recordVehicleAssignmentHistory({
-        vehicleId: saved.id,
-        changeType: 'chassis',
-        source: 'master_truck',
-        previousChassisId: before.currentChassisId,
-        previousChassisCode: before.currentChassisCode,
-        nextChassisId: saved.currentChassisId,
-        nextChassisCode: saved.currentChassisCode,
-        actorName: request.user?.name || '',
-        actorRole: request.user?.role || '',
-      });
-    } catch (error) {
-      console.error('Gagal mencatat vehicle_assignment_history dari Master Truck', error);
-    }
-  }
 
   sendSuccess(response, saved, 'Data master berhasil diperbarui.');
 }

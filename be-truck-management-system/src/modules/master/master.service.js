@@ -1,3 +1,4 @@
+import { withTransaction } from '../../db/client.js';
 import {
   archiveMasterRow,
   clearVehicleDefaultDriverByNames,
@@ -107,28 +108,30 @@ function driverIdentityNames(...drivers) {
 // bebas seperti sebelumnya. Setelah sinkron, kirChassisNumber di payload diisi ulang dengan nilai
 // yang SUDAH benar supaya generic update field lain (plat, status, dokumen, dst) tidak menimpanya
 // balik dengan nilai basi.
-async function saveTruckRow(payload, id) {
+async function saveTruckRow(payload, id, actor = {}) {
   const hasChassisField = Object.prototype.hasOwnProperty.call(payload, 'kirChassisNumber');
-
-  if (!id) {
-    if (!hasChassisField || !String(payload.kirChassisNumber || '').trim()) {
-      return upsertMasterRow('trucks', payload, id);
-    }
-    const { kirChassisNumber, ...restPayload } = payload;
-    const created = await upsertMasterRow('trucks', restPayload, id);
-    const { after } = await updateVehicleChassis(created.id, kirChassisNumber);
-    return after;
-  }
-
-  if (!hasChassisField) {
+  if (!hasChassisField || (!id && !String(payload.kirChassisNumber || '').trim())) {
     return upsertMasterRow('trucks', payload, id);
   }
 
-  const { after } = await updateVehicleChassis(id, payload.kirChassisNumber);
-  return upsertMasterRow('trucks', { ...payload, kirChassisNumber: after.kirChassisNumber }, id);
+  const context = {
+    source: 'master_truck',
+    actorName: actor.name || null,
+    actorRole: actor.role || null,
+  };
+  return withTransaction(async (client) => {
+    if (!id) {
+      const { kirChassisNumber, ...restPayload } = payload;
+      const created = await upsertMasterRow('trucks', restPayload, id, client);
+      const { after } = await updateVehicleChassis(created.id, kirChassisNumber, context, client);
+      return after;
+    }
+    const { after } = await updateVehicleChassis(id, payload.kirChassisNumber, context, client);
+    return upsertMasterRow('trucks', { ...payload, kirChassisNumber: after.kirChassisNumber }, id, client);
+  });
 }
 
-export async function saveMasterRow(resource, payload, id) {
+export async function saveMasterRow(resource, payload, id, actor = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload master data harus berupa object.');
     error.statusCode = 400;
@@ -138,7 +141,7 @@ export async function saveMasterRow(resource, payload, id) {
   const currentDriver = resource === 'drivers' && id ? await findMasterRowById(resource, id) : null;
   const normalizedPayload = await normalizePayloadForResource(resource, payload);
   const saved = resource === 'trucks'
-    ? await saveTruckRow(normalizedPayload, id)
+    ? await saveTruckRow(normalizedPayload, id, actor)
     : await upsertMasterRow(resource, normalizedPayload, id);
 
   if (resource === 'drivers' && shouldDetachDriverFromUnit(saved.status)) {
