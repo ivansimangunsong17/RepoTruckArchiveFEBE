@@ -32,7 +32,7 @@ function DeleteProofConfirmDialog({ proof, busy, onCancel, onConfirm }) {
   );
 }
 
-function ExpenseCheckConfirmModal({ row, batchDate, error, busy, adminFeeError, adminFeeAmount, adminFeeNote, adjustmentNote, onAdminFeeAmountChange, onAdminFeeNoteChange, onAdjustmentNoteChange, onProofsChange, onClose, onConfirm }) {
+function ExpenseCheckConfirmModal({ row, batchDate, error, busy, adminFeeError, adminFeeAmount, adjustmentNote, onAdminFeeAmountChange, onAdjustmentNoteChange, onProofsChange, onClose, onConfirm }) {
   const activeBatchDate = String(batchDate || row?.batchDate || '').slice(0, 10);
   const [proofs, setProofs] = useState([]);
   const [loading, setLoading] = useState(false);
