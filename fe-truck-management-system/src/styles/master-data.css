@@ -1286,6 +1286,10 @@
   border-radius: 8px;
   background: #fff;
 }
+.finance-invoice-container-card.has-inap {
+  border-color: #f6c56f;
+  background: #fffaf0;
+}
 .finance-invoice-container-header {
   display: flex;
   align-items: center;
@@ -1294,6 +1298,10 @@
   padding: 7px 8px;
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
+}
+.finance-invoice-container-card.has-inap .finance-invoice-container-header {
+  border-bottom-color: #f6d7a3;
+  background: #fff7e6;
 }
 .finance-invoice-container-header div {
   display: grid;
@@ -1310,6 +1318,26 @@
   color: #0f172a;
   font-size: 11px;
   font-weight: 850;
+}
+.finance-invoice-container-title-row {
+  display: flex !important;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.finance-invoice-container-title-row strong {
+  min-width: 0;
+}
+.finance-invoice-container-inap-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #9a3412 !important;
+  background: #ffedd5;
+  font-size: 8px !important;
+  font-weight: 850 !important;
+  letter-spacing: .03em;
+  text-transform: uppercase;
 }
 .finance-invoice-container-count {
   flex-shrink: 0;
