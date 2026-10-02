@@ -23,6 +23,20 @@ function compactText(value) {
   return normalizeText(value).replace(/\s/g, '');
 }
 
+export const REEFER_UJ_SURCHARGE = 100000;
+
+export function isReeferContainer(job = {}) {
+  const containerType = normalizeText(
+    job.type || job.containerType || job.container_type || job.cargoType || job.cargo_type,
+  );
+  return containerType === 'reefer' || containerType.includes('reefer');
+}
+
+export function isRepoShipment(job = {}) {
+  const shipment = normalizeText(job.shipment || job.shipmentType || job.shipment_type).replace(/\s+/g, '_');
+  return shipment === 'repo_empty' || shipment === 'repo_full';
+}
+
 function destinationSearchTerms(destination = {}) {
   return [
     destination.name,
@@ -71,7 +85,10 @@ export function findDestinationMaster(destinations = [], destinationName = '') {
 }
 
 export function calculateUjRecommendation(job = {}, destinations = []) {
-  const destination = findDestinationMaster(destinations, job.destination);
+  const destinationId = String(job.destinationId || job.destination_id || '').trim();
+  const destination = (destinationId
+    ? destinations.find((item) => String(item.id) === destinationId)
+    : null) || findDestinationMaster(destinations, job.destination);
   const currentSize = normalizeSize(job.size || job.containerSize);
   const fallbackQty20ft = currentSize === '20FT' ? 1 : 0;
   const fallbackQty40ft = currentSize === '40FT' ? 1 : 0;
@@ -108,7 +125,10 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
       : fallbackDriverCommissionAmount || driverCommission20ftAmount || driverCommission40ftAmount;
   const totalUj20ft = qty20ft * uj20ft;
   const totalUj40ft = qty40ft * uj40ft;
-  const currentContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
+  const baseContainerUj = currentSize === '40FT' ? uj40ft : uj20ft;
+  const reeferSurcharge = isReeferContainer(job) && !isRepoShipment(job) && baseContainerUj > 0 ? REEFER_UJ_SURCHARGE : 0;
+  const currentContainerUj = baseContainerUj + reeferSurcharge;
+  const effectiveDriverCommissionAmount = isRepoShipment(job) ? 0 : driverCommissionAmount;
   const hasCurrentContainerTariff = currentSize === '40FT'
     ? uj40ft > 0
     : currentSize === '20FT'
@@ -121,7 +141,10 @@ export function calculateUjRecommendation(job = {}, destinations = []) {
     destinationName: destination?.name || job.destination || '',
     currentSize: currentSize || '',
     currentContainerUj,
-    driverCommissionAmount,
+    baseContainerUj,
+    reeferSurcharge,
+    isReefer: reeferSurcharge > 0,
+    driverCommissionAmount: effectiveDriverCommissionAmount,
     driverCommission20ftAmount,
     driverCommission40ftAmount,
     uj20ft,

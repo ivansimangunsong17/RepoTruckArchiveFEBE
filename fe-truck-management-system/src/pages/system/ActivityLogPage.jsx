@@ -15,6 +15,7 @@ const actionOptions = [
   ['CREATE_SALES_ORDER', 'Buat Sales Order'],
   ['UPDATE_SALES_ORDER', 'Ubah Sales Order'],
   ['ADMIN_CORRECTION_SALES_ORDER', 'Koreksi Admin Sales Order'],
+  ['UPDATE_SALES_ORDER_LOCATION', 'Ubah Lokasi Gudang/Tujuan SO'],
   ['REQUEST_CANCEL_SALES_ORDER', 'Ajukan Batal Sales Order'],
   ['APPROVE_CANCEL_SALES_ORDER', 'Setujui Batal Sales Order'],
   ['REJECT_CANCEL_SALES_ORDER', 'Tolak Batal Sales Order'],
@@ -31,6 +32,10 @@ const actionOptions = [
   ['LOCK_HISTORICAL_PERIOD', 'Kunci Periode Data Lama'],
   ['UNLOCK_HISTORICAL_PERIOD', 'Buka Kunci Data Lama'],
   ['UPDATE_JOB_STATUS', 'Ubah Status Job'],
+  ['UPDATE_CONTAINER_JOB_TARIFF_SOURCE', 'Ubah Sumber Tarif UJ/Komisi'],
+  ['MOVE_DRIVER_COMMISSION_RECIPIENT', 'Pindahkan Penerima Komisi Sopir'],
+  ['KEEP_DRIVER_COMMISSION_RECIPIENT', 'Pertahankan Penerima Komisi Sopir'],
+  ['MARK_COMMISSION_BATCH_CHANGED', 'Tandai Revisi Batch Komisi'],
   ['REQUEST_CANCEL_CONTAINER_JOB', 'Ajukan Batal Container'],
   ['APPROVE_CANCEL_CONTAINER_JOB', 'Setujui Batal Container'],
   ['REJECT_CANCEL_CONTAINER_JOB', 'Tolak Batal Container'],
@@ -146,8 +151,31 @@ function formatPeriod(value) {
   return new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(year, month - 1, 1));
 }
 
+function formatCurrency(value) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
 function formatLogTarget(item) {
   const metadata = item.metadata || {};
+  if (['MOVE_DRIVER_COMMISSION_RECIPIENT', 'KEEP_DRIVER_COMMISSION_RECIPIENT', 'MARK_COMMISSION_BATCH_CHANGED'].includes(item.action)) {
+    const beforeDriver = item.beforeData?.driverName || '-';
+    const afterDriver = item.afterData?.driverName || beforeDriver;
+    const reference = [metadata.soNumber, metadata.containerNumber].filter(Boolean).join(' / ');
+    const driverChange = item.action === 'KEEP_DRIVER_COMMISSION_RECIPIENT'
+      ? `Komisi tetap untuk ${beforeDriver}`
+      : `${beforeDriver} ke ${afterDriver}`;
+    const batchStatus = metadata.batchStatus ? `Batch: ${metadata.batchStatus}` : '';
+    const amount = metadata.amount !== undefined ? `Nominal: ${formatCurrency(metadata.amount)}` : '';
+    const reason = metadata.adminCorrectionReason ? `Alasan: ${metadata.adminCorrectionReason}` : '';
+    return [reference || item.target || 'Komisi Sopir', driverChange, batchStatus, amount, reason]
+      .filter(Boolean)
+      .join(' - ');
+  }
   if (item.action === 'ADMIN_CORRECTION_CONTAINER_JOB') {
     const reference = [
       metadata.soNumber,

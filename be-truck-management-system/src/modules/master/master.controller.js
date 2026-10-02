@@ -10,6 +10,7 @@ import {
   removeMasterRow,
   saveMasterRow,
   saveMasterViewerNote,
+  sanitizeMasterResultForActor,
   setVehicleDefaultDriver,
 } from './master.service.js';
 
@@ -53,17 +54,17 @@ function resourceActionNames(resource, { before, after } = {}) {
 
 export async function listMasterController(request, response) {
   const rows = await listMasterRows(request.params.resource);
-  sendSuccess(response, rows);
+  sendSuccess(response, sanitizeMasterResultForActor(request.params.resource, rows, request.user));
 }
 
 export async function listMasterPageController(request, response) {
   const result = await listMasterRowsPage(request.params.resource, request.query);
-  sendSuccess(response, result);
+  sendSuccess(response, sanitizeMasterResultForActor(request.params.resource, result, request.user));
 }
 
 export async function getMasterController(request, response) {
   const row = await getMasterRow(request.params.resource, request.params.id);
-  sendSuccess(response, row);
+  sendSuccess(response, sanitizeMasterResultForActor(request.params.resource, row, request.user));
 }
 
 export async function createMasterController(request, response) {

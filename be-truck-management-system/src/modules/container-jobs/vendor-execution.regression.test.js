@@ -47,6 +47,17 @@ test('status pemenuhan SO tetap menghitung job internal dan vendor bersama-sama'
   assert.doesNotMatch(refreshStatus, /execution_source/i);
 });
 
+test('Sales Order selalu memakai lifecycle container job normal', () => {
+  const mapper = read('../sales-orders/sales-orders.mapper.js');
+  const repository = read('../sales-orders/sales-orders.repository.js');
+
+  assert.match(mapper, /is_vendor_order:\s*false/i);
+  assert.doesNotMatch(repository, /if \(!payload\.is_vendor_order\)/i);
+  assert.doesNotMatch(repository, /if \(payload\.is_vendor_order\)/i);
+  assert.match(repository, /for \(const container of form\.containers \|\| \[\]\)/i);
+  assert.match(repository, /reconcileSalesOrderContainers\(form\.containers \|\| \[\], currentJobs\.rows\)/i);
+});
+
 test('query komisi, utilisasi, dan ketersediaan armada mengecualikan vendor', () => {
   const commissions = read('../driver-commissions/driver-commissions.repository.js');
   const reports = read('../reports/reports.repository.js');

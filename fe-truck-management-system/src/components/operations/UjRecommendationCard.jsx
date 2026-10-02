@@ -40,6 +40,11 @@ function UjRecommendationCard({ job, destinations = [] }) {
               <strong className="block text-sm font-bold text-slate-950">{recommendation.currentSize || job.size || '-'}</strong>
             </div>
             <strong className="whitespace-nowrap text-xl font-black text-emerald-700">{formatCurrency(recommendation.currentContainerUj)}</strong>
+            {recommendation.isReefer ? (
+              <div className="w-full border-t border-emerald-100 pt-2 text-xs text-emerald-800">
+                UJ dasar {formatCurrency(recommendation.baseContainerUj)} + Reefer {formatCurrency(recommendation.reeferSurcharge)}
+              </div>
+            ) : null}
             <div className="w-full border-t border-emerald-100 pt-2">
               <span className="text-[11px] font-bold uppercase text-slate-500">Komisi Sopir</span>
               <strong className="ml-2 text-sm font-black text-slate-900">

@@ -36,6 +36,21 @@ export function listMasterRowsPage(resource, query) {
   });
 }
 
+export function sanitizeMasterResultForActor(resource, result, actor = {}) {
+  if (resource !== 'end-users' || String(actor.role || '').toLowerCase() !== 'sales') return result;
+  const sanitizeRow = (row = {}) => {
+    const sanitized = { ...row };
+    delete sanitized.address;
+    delete sanitized.googleMapsUrl;
+    delete sanitized.latitude;
+    delete sanitized.longitude;
+    return sanitized;
+  };
+  if (Array.isArray(result)) return result.map(sanitizeRow);
+  if (Array.isArray(result?.data)) return { ...result, data: result.data.map(sanitizeRow) };
+  return sanitizeRow(result);
+}
+
 export async function getMasterRow(resource, id) {
   const row = await findMasterRowById(resource, id);
   if (!row) {

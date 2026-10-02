@@ -50,6 +50,10 @@ const salesOrderColumnCandidates = [
   'total_amount',
   'origin',
   'destination',
+  'warehouse_location_id',
+  'warehouse_location_name_snapshot',
+  'warehouse_location_address_snapshot',
+  'destination_id',
   'status',
   'sales_name',
   'is_vendor_order',
@@ -113,6 +117,7 @@ async function filterSalesOrderPayload(payload, executor = query) {
 
 const jobColumns = `
   id, sales_order_id, execution_source, container_number, container_size, container_type, container_notes, destination,
+  warehouse_location_id, warehouse_location_name_snapshot, warehouse_location_address_snapshot, destination_id,
   rpuj_status, rpuj_notes, rpuj_requested_by_name, rpuj_requested_at,
   rpuj_reviewed_by_name, rpuj_reviewed_at, rpuj_rejection_note,
   rpuj_transfer_uploaded_by_name, rpuj_transfer_uploaded_at,
@@ -272,6 +277,60 @@ async function findCustomer(client, form) {
     [form.customer],
   );
   return result.rows[0] || null;
+}
+
+// Dipakai untuk snapshot lokasi gudang (Phase 5) -- hanya dipanggil saat warehouse_location_id
+// BENAR-BENAR berubah pada request ini (lihat createSalesOrder/updateSalesOrder), sama seperti
+// findCustomer() di atas untuk snapshot customer_name/pic/phone/address. Lokasi yang sudah
+// diarsipkan sengaja tidak ditemukan -- id lama tidak lagi bisa dipilih ulang secara sengaja.
+async function findLocationForSnapshot(client, locationId) {
+  if (!locationId) return null;
+  const result = await client.query(
+    'select id, name, address, destination_id, operational_status from end_users where id = $1 and archived_at is null',
+    [locationId],
+  );
+  return result.rows[0] || null;
+}
+
+async function findDestinationForTransaction(client, destinationId) {
+  if (!destinationId) return null;
+  const result = await client.query(
+    'select id, name, operational_status from destination_locations where id = $1 and archived_at is null',
+    [destinationId],
+  );
+  return result.rows[0] || null;
+}
+
+export function validateLocationSelection(location, destination, requestedLocationId) {
+  if (!requestedLocationId) return;
+  if (!location) {
+    const error = new Error('Lokasi gudang tidak ditemukan atau sudah diarsipkan.');
+    error.statusCode = 400;
+    error.code = 'WAREHOUSE_LOCATION_NOT_FOUND';
+    throw error;
+  }
+  if (location.operational_status !== 'Aktif') {
+    const error = new Error('Lokasi gudang tidak aktif dan tidak dapat dipilih untuk transaksi baru.');
+    error.statusCode = 409;
+    error.code = 'WAREHOUSE_LOCATION_INACTIVE';
+    throw error;
+  }
+  if (!destination || !location.destination_id || location.destination_id !== destination.id) {
+    const error = new Error('Lokasi gudang tidak terhubung dengan Master Tujuan yang dipilih.');
+    error.statusCode = 409;
+    error.code = 'WAREHOUSE_LOCATION_DESTINATION_MISMATCH';
+    throw error;
+  }
+}
+
+export function buildPendingJobLocationPatch(status, locationOrDestinationChanged, payload = {}) {
+  if (status !== 'received' || !locationOrDestinationChanged) return {};
+  return {
+    warehouse_location_id: payload.warehouse_location_id || null,
+    warehouse_location_name_snapshot: payload.warehouse_location_name_snapshot || null,
+    warehouse_location_address_snapshot: payload.warehouse_location_address_snapshot || null,
+    destination_id: payload.destination_id || null,
+  };
 }
 
 async function fetchOrderAttachments(orderIds) {
@@ -615,7 +674,16 @@ export async function findSalesOrderById(id) {
 export async function createSalesOrder(form) {
   return withTransaction(async (client) => {
     const customer = await findCustomer(client, form);
-    const payload = toSalesOrderDb(form, customer);
+    const destination = await findDestinationForTransaction(client, form.destinationId);
+    if (form.destinationId && (!destination || destination.operational_status !== 'Aktif')) {
+      const error = new Error('Master Tujuan tidak ditemukan atau tidak aktif.');
+      error.statusCode = 400;
+      error.code = 'DESTINATION_NOT_AVAILABLE';
+      throw error;
+    }
+    const location = await findLocationForSnapshot(client, form.warehouseLocationId);
+    validateLocationSelection(location, destination, form.warehouseLocationId);
+    const payload = toSalesOrderDb(form, customer, location, destination);
     const filteredPayload = await filterSalesOrderPayload(payload, client.query.bind(client));
     const entries = Object.entries(filteredPayload);
     const orderColumns = await getSalesOrderColumns(client.query.bind(client));
@@ -629,24 +697,19 @@ export async function createSalesOrder(form) {
     );
     const order = orderResult.rows[0];
 
-    // Order vendor (Phase 2) hanya pencatatan Sales Order -- tidak pernah membuat
-    // container_jobs, jadi tidak akan pernah muncul sebagai ritasi di Operational,
-    // dashboard truck, atau butuh assignment truck/sopir sama sekali.
-    if (!payload.is_vendor_order) {
-      for (const container of form.containers || []) {
-        const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
-        const jobEntries = Object.entries(jobPayload);
-        await client.query(
-          `
-            insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
-            values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
-          `,
-          jobEntries.map(([, value]) => value),
-        );
-      }
-
-      await refreshOrderStatus(client, order.id);
+    for (const container of form.containers || []) {
+      const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
+      const jobEntries = Object.entries(jobPayload);
+      await client.query(
+        `
+          insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
+          values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
+        `,
+        jobEntries.map(([, value]) => value),
+      );
     }
+
+    await refreshOrderStatus(client, order.id);
     const finalOrder = await client.query(`select ${orderColumns} from sales_orders where id = $1`, [order.id]);
     const jobs = await client.query(`select ${jobColumns} from container_jobs where sales_order_id = $1 order by created_at asc`, [order.id]);
     const jobAttachments = jobs.rows.length
@@ -723,7 +786,37 @@ export async function updateSalesOrder(id, form) {
       : requestedCustomerName !== currentCustomerName;
 
     const customer = customerChangeRequested ? await findCustomer(client, form) : null;
-    const payload = toSalesOrderDb(form, customer);
+
+    // Snapshot lokasi gudang (Phase 5) dibekukan dengan pola yang SAMA PERSIS dengan customer di
+    // atas -- findLocationForSnapshot() hanya dipanggil kalau warehouse_location_id benar-benar
+    // berubah pada request ini, supaya histori transaksi lama tidak diam-diam ikut berubah kalau
+    // nama/alamat lokasi dikoreksi belakangan di Master Lokasi.
+    const requestedDestinationId = form.destinationId || null;
+    const currentDestinationId = existing.rows[0].destination_id || null;
+    const destinationChangeRequested = requestedDestinationId !== currentDestinationId;
+    const destination = destinationChangeRequested
+      ? await findDestinationForTransaction(client, requestedDestinationId)
+      : (currentDestinationId ? { id: currentDestinationId, operational_status: 'Aktif' } : null);
+    if (destinationChangeRequested && requestedDestinationId && (!destination || destination.operational_status !== 'Aktif')) {
+      const error = new Error('Master Tujuan tidak ditemukan atau tidak aktif.');
+      error.statusCode = 400;
+      error.code = 'DESTINATION_NOT_AVAILABLE';
+      throw error;
+    }
+
+    const requestedLocationId = form.warehouseLocationId || null;
+    const currentLocationId = existing.rows[0].warehouse_location_id || null;
+    const locationChangeRequested = requestedLocationId !== currentLocationId;
+    const mustValidateLocation = Boolean(requestedLocationId) && (locationChangeRequested || destinationChangeRequested);
+    const location = mustValidateLocation ? await findLocationForSnapshot(client, requestedLocationId) : null;
+    if (mustValidateLocation) validateLocationSelection(location, destination, requestedLocationId);
+
+    const payload = toSalesOrderDb(
+      form,
+      customer,
+      locationChangeRequested ? location : null,
+      destinationChangeRequested ? destination : null,
+    );
     if (!customerChangeRequested) {
       payload.customer_id = existing.rows[0].customer_id;
       payload.customer_name = existing.rows[0].customer_name;
@@ -731,6 +824,12 @@ export async function updateSalesOrder(id, form) {
       payload.customer_phone = existing.rows[0].customer_phone;
       payload.customer_address = existing.rows[0].customer_address;
     }
+    if (!locationChangeRequested) {
+      payload.warehouse_location_id = existing.rows[0].warehouse_location_id;
+      payload.warehouse_location_name_snapshot = existing.rows[0].warehouse_location_name_snapshot;
+      payload.warehouse_location_address_snapshot = existing.rows[0].warehouse_location_address_snapshot;
+    }
+    if (!destinationChangeRequested) payload.destination_id = existing.rows[0].destination_id;
     const filteredPayload = await filterSalesOrderPayload(payload, client.query.bind(client));
     const entries = Object.entries(filteredPayload);
     await client.query(
@@ -748,28 +847,14 @@ export async function updateSalesOrder(id, form) {
       [id],
     );
 
-    if (payload.is_vendor_order) {
-      // Order vendor (Phase 2) tidak boleh punya container_jobs sama sekali -- kalau order ini
-      // sebelumnya sudah internal dan sudah punya ritasi, tolak perubahan supaya tidak ada ritasi
-      // "hantu" yang nyangkut di order yang sudah ditandai vendor. Batalkan/hapus dulu container
-      // job yang ada lewat flow existing sebelum menandai order ini sebagai vendor.
-      if (currentJobs.rows.length > 0) {
-        const error = new Error('Order ini masih punya container job/ritasi yang tercatat. Batalkan atau hapus container job tersebut terlebih dahulu sebelum menandai order sebagai Vendor.');
-        error.statusCode = 409;
-        error.code = 'SALES_ORDER_VENDOR_HAS_CONTAINER_JOBS';
-        throw error;
-      }
-      // Tidak ada container job untuk disinkronkan/dibuat, dan status operational tidak relevan
-      // untuk order vendor -- refreshOrderStatus sengaja dilewati.
-    } else {
-      const { assignments, removableIds } = reconcileSalesOrderContainers(form.containers || [], currentJobs.rows);
-      if (removableIds.length) {
-        await client.query('delete from container_jobs where id = any($1::uuid[])', [removableIds]);
-      }
+    const { assignments, removableIds } = reconcileSalesOrderContainers(form.containers || [], currentJobs.rows);
+    if (removableIds.length) {
+      await client.query('delete from container_jobs where id = any($1::uuid[])', [removableIds]);
+    }
 
-      for (const { container, currentJob } of assignments) {
-        const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
-        if (currentJob) {
+    for (const { container, currentJob } of assignments) {
+      const jobPayload = toContainerJobDb(container, { ...payload, id }, payload.updated_by_name);
+      if (currentJob) {
           // Catatan: is_backdate_entry/backdate_reason SENGAJA tidak ikut disentuh di sini seperti
           // entry_source/historical_period di atas -- toContainerJobDb() jatuh ke default order-level
           // (bukan "nilai existing container ini"), jadi kalau ikut disertakan, edit SO apa pun yang
@@ -784,6 +869,11 @@ export async function updateSalesOrder(id, form) {
             historical_period: jobPayload.historical_period,
             historical_notes: jobPayload.historical_notes,
             updated_by_name: jobPayload.updated_by_name,
+            ...buildPendingJobLocationPatch(
+              currentJob.status,
+              locationChangeRequested || destinationChangeRequested,
+              payload,
+            ),
           };
           const jobEntries = Object.entries(salesJobPayload);
           await client.query(
@@ -795,20 +885,19 @@ export async function updateSalesOrder(id, form) {
             `,
             [...jobEntries.map(([, value]) => value), currentJob.id],
           );
-        } else {
-          const jobEntries = Object.entries(jobPayload);
-          await client.query(
-            `
-              insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
-              values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
-            `,
-            jobEntries.map(([, value]) => value),
-          );
-        }
+      } else {
+        const jobEntries = Object.entries(jobPayload);
+        await client.query(
+          `
+            insert into container_jobs (${jobEntries.map(([key]) => key).join(', ')})
+            values (${jobEntries.map((_, index) => `$${index + 1}`).join(', ')})
+          `,
+          jobEntries.map(([, value]) => value),
+        );
       }
-
-      await refreshOrderStatus(client, id);
     }
+
+    await refreshOrderStatus(client, id);
     const finalOrder = await client.query(`select ${orderColumns} from sales_orders where id = $1`, [id]);
     const jobs = await client.query(`select ${jobColumns} from container_jobs where sales_order_id = $1 order by created_at asc`, [id]);
     const jobAttachments = jobs.rows.length
