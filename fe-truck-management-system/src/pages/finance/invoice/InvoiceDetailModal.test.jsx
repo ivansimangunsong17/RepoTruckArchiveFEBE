@@ -42,6 +42,14 @@ function renderModal(invoice, extraProps = {}) {
 }
 
 describe('InvoiceDetailModal destinations', () => {
+  it('menampilkan seluruh nomor container order pada header invoice', () => {
+    renderModal(baseInvoice({
+      containerNumbers: ['SOUJLEGACY21790332749038CNTR1', 'SOUJLEGACY21790332749038CNTR2', 'SOUJLEGACY21790332749038CNTR3'],
+    }));
+
+    expect(screen.getByText(/SOUJLEGACY21790332749038CNTR1, SOUJLEGACY21790332749038CNTR2, SOUJLEGACY21790332749038CNTR3/)).toBeInTheDocument();
+  });
+
   it('menampilkan badge Multi-tujuan di header saat container invoice punya lebih dari satu tujuan', () => {
     renderModal(baseInvoice({ destinations: ['Cikarang', 'Karawang'] }));
     expect(screen.getByText('Multi-tujuan (2)')).toBeInTheDocument();
@@ -198,6 +206,37 @@ describe('InvoiceDetailModal biaya inap / revenue manual (milik Finance, masuk I
     expect(screen.getByText(/Cek apakah biaya inap perlu ditagihkan/)).toBeInTheDocument();
     expect(screen.getByText(/CNTR001 - Cilegon/)).toBeInTheDocument();
     expect(screen.getByText(/Curfew malam/)).toBeInTheDocument();
+  });
+
+  it('menandai hanya container yang inap pada tab File Operational', async () => {
+    const user = userEvent.setup();
+    renderModal(baseInvoice({
+      containerBreakdown: [
+        {
+          containerJobId: 'job-1',
+          containerNumber: 'CNTR001',
+          destination: 'Cilegon',
+          hasInap: true,
+          inapReason: 'Akses bongkar tutup malam',
+        },
+        {
+          containerJobId: 'job-2',
+          containerNumber: 'CNTR002',
+          destination: 'Cilegon',
+          hasInap: false,
+        },
+      ],
+      documents: [
+        { id: 'doc-1', source: 'Operational', jobId: 'job-1', containerNumber: 'CNTR001', label: 'Surat Jalan', ready: false },
+        { id: 'doc-2', source: 'Operational', jobId: 'job-2', containerNumber: 'CNTR002', label: 'Surat Jalan', ready: false },
+      ],
+    }));
+
+    await user.click(screen.getByRole('tab', { name: /File Operational/i }));
+
+    const inapBadge = screen.getByText('Inap');
+    expect(inapBadge).toBeInTheDocument();
+    expect(inapBadge).toHaveAttribute('title', 'Akses bongkar tutup malam');
   });
 
   it('menampilkan rincian manual revenue line dengan nominal di kartu Invoice / Revenue', () => {
