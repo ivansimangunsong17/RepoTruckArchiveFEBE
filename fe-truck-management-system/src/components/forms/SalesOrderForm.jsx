@@ -28,7 +28,7 @@ const SERVICE_ALIASES = {
   'Stevedoring and Port Service': 'Handling',
 };
 
-const CONTAINER_TYPE_OPTIONS = ['Dry', 'Reefer', 'Special'];
+const CONTAINER_TYPE_OPTIONS = ['Dry', 'Reefer', 'Special', 'Isotank'];
 const DEFAULT_LINE_ITEM_SERVICE = 'Jasa Angkut D20';
 
 const EMPTY_DOCUMENT = {

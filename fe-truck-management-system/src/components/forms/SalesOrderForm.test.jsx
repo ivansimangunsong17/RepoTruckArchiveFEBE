@@ -147,6 +147,22 @@ describe('SalesOrderForm', () => {
     expect(optionLabels).toEqual(['Jasa Angkut D20', 'Jasa Angkut D40', 'Handling', 'Jasa Lainnya']);
   });
 
+  it('dropdown jenis container menyediakan Isotank', () => {
+    render(
+      <SalesOrderForm
+        customers={customers}
+        {...locationMasters}
+        existingOrders={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const containerTypeSelect = screen.getAllByLabelText('Jenis Container')[0];
+    const optionLabels = within(containerTypeSelect).getAllByRole('option').map((option) => option.value);
+    expect(optionLabels).toEqual(['', 'Dry', 'Reefer', 'Special', 'Isotank']);
+  });
+
   it('rincian lama dengan layanan reimbursement (Bon Muat/Bongkar) tetap tampil apa adanya saat diedit', () => {
     const order = {
       id: 'so-legacy',
