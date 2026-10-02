@@ -121,6 +121,12 @@ function commissionAmount(driver, field, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function driverPaymentAccountNumber(driver = {}) {
+  return driver.paymentMethod === 'emoney'
+    ? driver.emoneyNumber || '-'
+    : driver.bankAccountNumber || '-';
+}
+
 function buildCommissionPdfRows(drivers = [], statusResolver = driverPaymentStatus) {
   return drivers.map((driver, index) => {
     const grossAmount = commissionAmount(driver, 'grossAmount', commissionAmount(driver, 'totalAmount'));
@@ -146,7 +152,11 @@ function buildCommissionPeriodOptions(batches = [], selectedReport = null) {
   const current = currentCommissionPeriod();
   const windowStart = addDateKeyDays(current.periodStart, -(COMMISSION_PERIOD_LOOKBACK - 1) * 7);
   const byPeriod = new Map();
-  byPeriod.set(commissionPeriodKey(current), { ...current, status: 'draft', totalItems: 0, totalAmount: 0 });
+  for (let offset = 0; offset < COMMISSION_PERIOD_LOOKBACK; offset += 1) {
+    const periodStart = addDateKeyDays(current.periodStart, -offset * 7);
+    const period = { periodStart, periodEnd: addDateKeyDays(periodStart, 6) };
+    byPeriod.set(commissionPeriodKey(period), { ...period, status: 'draft', totalItems: 0, totalAmount: 0 });
+  }
 
   for (const batch of batches) {
     if (!batch.periodStart || batch.periodStart < windowStart || batch.periodStart > current.periodStart) continue;
@@ -859,10 +869,12 @@ function DriverCommissionOperationalPage() {
             </div>
           ) : null}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1060px] divide-y divide-slate-200 text-left text-sm">
+            <table className="w-full min-w-[1180px] divide-y divide-slate-200 text-left text-sm">
               <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
                 <tr>
+                  <th className="w-14 px-4 py-3">No</th>
                   <th className="px-4 py-3">Sopir</th>
+                  <th className="px-4 py-3">No. Rekening</th>
                   <th className="px-4 py-3 text-right">Job</th>
                   <th className="px-4 py-3 text-right">Sebelum Potongan</th>
                   <th className="px-4 py-3 text-right">Potongan Finance</th>
@@ -873,10 +885,11 @@ function DriverCommissionOperationalPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {drivers.map((driver) => {
+                {drivers.map((driver, index) => {
                   const driverKey = driver.driverKey || driver.driverId || driver.driverName;
                   return (
                   <tr key={driverKey} className="align-middle hover:bg-slate-50/70">
+                    <td className="px-4 py-3 text-xs font-black text-slate-600">{index + 1}</td>
                     <td className="px-4 py-3 text-xs font-bold text-slate-950">
                       <span className="flex flex-wrap items-center gap-1.5">
                         {driver.driverName}
@@ -887,6 +900,7 @@ function DriverCommissionOperationalPage() {
                         ) : null}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-700">{driverPaymentAccountNumber(driver)}</td>
                     <td className="px-4 py-3 text-right text-xs font-semibold text-slate-700">{driver.totalItems}</td>
                     <td className="px-4 py-3 text-right text-xs font-semibold text-amber-700">{formatCurrency(driver.grossAmount ?? driver.totalAmount)}</td>
                     <td className="px-4 py-3 text-right text-xs font-semibold text-rose-600">{driver.deductionAmount ? formatCurrency(driver.deductionAmount) : '-'}</td>
@@ -910,7 +924,7 @@ function DriverCommissionOperationalPage() {
                 })}
                 {!drivers.length ? (
                   <tr>
-                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={8}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
+                    <td className="px-4 py-8 text-center text-xs font-semibold text-slate-500" colSpan={10}>{loading ? 'Memuat report komisi...' : 'Belum ada komisi pada periode ini.'}</td>
                   </tr>
                 ) : null}
               </tbody>
