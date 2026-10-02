@@ -109,7 +109,11 @@ export async function reconcileFinanceContainerJobExpense(id, payload = {}) {
   const uploadFile = proofFile.type?.startsWith('image/') ? await compressImageFile(proofFile) : proofFile;
   const validationError = validateArchiveFile(uploadFile, { label: 'Bukti pembayaran' })
     || validateFinalUploadFile(uploadFile, { label: 'Bukti pembayaran' });
-  if (validationError) throw new Error(validationError);
+  if (validationError) {
+    const error = new Error(validationError);
+    error.code = 'EXPENSE_PROOF_INVALID';
+    throw error;
+  }
 
   const fileBase64 = await readFileAsDataUrl(uploadFile);
   return httpClient.patch(`/finance/container-job-expenses/${encodeURIComponent(id)}/reconcile`, {
