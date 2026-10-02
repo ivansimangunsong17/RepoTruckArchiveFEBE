@@ -24,6 +24,9 @@ vi.mock('../../services/archive/containerJobService', () => ({
   fetchContainerJob: vi.fn(),
   fetchContainerJobsPage: vi.fn(),
   generateContainerJobSpk: vi.fn(),
+  pickupComboRepoContainerJobs: vi.fn(),
+  pickupRepoContainerJob: vi.fn(),
+  resetContainerJobAssignment: vi.fn(),
 }));
 
 function runningJobRow(overrides = {}) {
@@ -101,29 +104,42 @@ describe('OperationsPage status inap', () => {
     expect(notify).toHaveBeenCalledWith(expect.objectContaining({ title: 'Container ditandai inap' }));
   });
 
-  it('menampilkan tombol Selesai Inap dan histori inap untuk job yang sedang inap, tanpa tombol Tandai Inap lagi', async () => {
+  it('menampilkan job inap di Sedang Jalan dan membuka Update Ritasi untuk menyelesaikannya', async () => {
+    const inapJob = runningJobRow({
+      status: 'inap',
+      inapReason: 'Curfew malam, truk tidak boleh jalan sampai subuh',
+      inapStartedAt: '2026-07-11T20:00:00.000Z',
+    });
     fetchContainerJobsPage.mockResolvedValue({
-      rows: [runningJobRow({
-        status: 'inap',
-        inapReason: 'Curfew malam, truk tidak boleh jalan sampai subuh',
-        inapStartedAt: '2026-07-11T20:00:00.000Z',
-      })],
+      rows: [inapJob],
       total: 1,
       totalRows: 1,
       counts: { received: 0, running: 0, inap: 1, repo_stored: 0, completed: 0, cancelled: 0 },
       rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
     });
-    updateJob.mockResolvedValue(runningJobRow({ status: 'running', inapReason: 'Curfew malam, truk tidak boleh jalan sampai subuh' }));
+    fetchContainerJob.mockResolvedValue({
+      ...inapJob,
+      hasDriverCommission: true,
+      driverCommissionAmount: 100000,
+    });
 
     const user = userEvent.setup();
     render(<OperationsPage />);
 
-    expect(await screen.findByRole('button', { name: /Selesai Inap/i })).toBeInTheDocument();
+    const runningTab = await screen.findByTitle('Sedang Jalan');
+    await waitFor(() => expect(runningTab).toHaveTextContent('1'));
+    await user.click(runningTab);
+
+    await waitFor(() => expect(fetchContainerJobsPage).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'active_journey',
+    })));
+    expect(screen.getByRole('button', { name: /Update Ritasi/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Tandai Inap/i })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Selesai Inap/i }));
+    await user.click(screen.getByRole('button', { name: /Update Ritasi/i }));
 
-    await waitFor(() => expect(updateJob).toHaveBeenCalledWith('job-1', expect.objectContaining({ status: 'running' })));
+    expect(await screen.findByText('Dokumen & Closing')).toBeInTheDocument();
+    expect(updateJob).not.toHaveBeenCalled();
   });
 
   it('mengirim filter tanggal selesai ke API Container Job', async () => {
@@ -153,6 +169,74 @@ describe('OperationsPage status inap', () => {
     render(<OperationsPage />);
 
     expect(await screen.findByText('Party 1 x 20FT + 2 x 40FT')).toBeInTheDocument();
+  });
+
+  it('menampilkan toolbar combo saat dua container titip 20FT dipilih', async () => {
+    const repoJob = (id, containerNumber) => runningJobRow({
+      id,
+      containerNumber,
+      status: 'repo_stored',
+      size: '20FT',
+      repoLocation: 'DEPO TGI',
+      repoStoredAt: '2026-09-22T02:00:00.000Z',
+      repoReason: 'Menunggu ambil lanjutan',
+      repoContainerCondition: 'empty',
+    });
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [repoJob('repo-1', 'MSDU1111111'), repoJob('repo-2', 'MSDU2222222')],
+      total: 1,
+      totalRows: 2,
+      counts: { received: 0, running: 0, inap: 0, repo_stored: 2, completed: 0, cancelled: 0 },
+      rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
+    });
+
+    const user = userEvent.setup();
+    render(<OperationsPage />);
+
+    const comboChecks = await screen.findAllByRole('checkbox', { name: /combo/i });
+    expect(comboChecks).toHaveLength(2);
+    await user.click(comboChecks[0]);
+    await user.click(comboChecks[1]);
+
+    expect(screen.getByText('2/2 container 20FT dipilih')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Combo 2x20/i })).not.toBeDisabled();
+  });
+
+  it('menampilkan ringkasan pickup combo di detail tanpa menganggap dokumen container lain lengkap', async () => {
+    const comboJob = runningJobRow({
+      id: 'combo-1',
+      containerNumber: 'MSDU1111111',
+      status: 'running',
+      repoLocation: 'DEPO TGI',
+      repoStoredAt: '2026-09-22T02:00:00.000Z',
+      repoPickedUpAt: '2026-09-22T04:00:00.000Z',
+      pickupMovement: {
+        id: 'movement-1',
+        type: 'combo_2x20',
+        sequenceNo: 1,
+        itemCount: 2,
+        containerNumbers: ['MSDU1111111', 'MSDU2222222'],
+      },
+      travelDocumentFile: { name: 'surat-jalan-1.pdf', path: '/docs/surat-jalan-1.pdf' },
+    });
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [comboJob],
+      total: 1,
+      totalRows: 1,
+      counts: { received: 0, running: 1, inap: 0, repo_stored: 0, completed: 0, cancelled: 0 },
+      rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
+    });
+    fetchContainerJob.mockResolvedValue(comboJob);
+
+    const user = userEvent.setup();
+    render(<OperationsPage />);
+
+    await user.click(await screen.findByRole('button', { name: /Detail/i }));
+
+    expect(await screen.findByText('Pickup Movement')).toBeInTheDocument();
+    expect(screen.getByText('Combo 2x20')).toBeInTheDocument();
+    expect(screen.getByText('MSDU1111111 + MSDU2222222')).toBeInTheDocument();
+    expect(screen.getAllByText('1/4').length).toBeGreaterThanOrEqual(1);
   });
 
 });

@@ -8,6 +8,8 @@ import {
   listContainerJobExpensesController,
   listContainerJobsController,
   moveDroppingExpenseController,
+  pickupComboRepoContainerJobController,
+  pickupRepoContainerJobController,
   requestCancelContainerJobController,
   resetMisassignedContainerJobController,
   reviewCancelContainerJobController,
@@ -30,6 +32,18 @@ export const containerJobRoutes = [
     path: '/api/container-jobs/expenses',
     permission: 'container_job.read',
     handler: listContainerJobExpenseLedgerController,
+  },
+  {
+    method: 'POST',
+    path: '/api/container-jobs/repo-pickups/single/:id',
+    permission: 'container_job.update',
+    handler: pickupRepoContainerJobController,
+  },
+  {
+    method: 'POST',
+    path: '/api/container-jobs/repo-pickups/combo-2x20',
+    permission: 'container_job.update',
+    handler: pickupComboRepoContainerJobController,
   },
   {
     method: 'GET',

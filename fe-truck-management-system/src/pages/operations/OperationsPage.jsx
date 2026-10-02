@@ -37,6 +37,8 @@ import {
   fetchContainerJob,
   fetchContainerJobsPage,
   generateContainerJobSpk,
+  pickupComboRepoContainerJobs,
+  pickupRepoContainerJob,
   resetContainerJobAssignment,
 } from '../../services/archive/containerJobService';
 
@@ -283,11 +285,12 @@ function nextActionHint(job, documents, rpuj, { documentFollowUp = false, repoSu
 function groupJobsBySo(rows = []) {
   const groups = new Map();
   rows.forEach((job) => {
-    const key = job.orderId || job.soNumber || `${job.customer || 'SO'}-${job.origin || ''}-${job.destination || ''}`;
+    const displayedSoNumber = job.accurateSoNumber || job.soNumber || job.salesOrderNumber || '';
+    const key = job.orderId || job.salesOrderId || displayedSoNumber || `${job.customer || 'SO'}-${job.origin || ''}-${job.destination || ''}`;
     if (!groups.has(key)) {
       groups.set(key, {
         key,
-        soNumber: job.soNumber || '-',
+        soNumber: displayedSoNumber || '-',
         customer: job.customer || '-',
         route: `${job.origin || '-'} ke ${job.destination || '-'}`,
         jobs: [],
@@ -454,6 +457,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     repoEirDocument: null,
   });
   const [repoSaving, setRepoSaving] = useState(false);
+  const [repoComboSelection, setRepoComboSelection] = useState([]);
   const [inapTarget, setInapTarget] = useState(null);
   const [inapForm, setInapForm] = useState({ inapReason: '', inapNotes: '' });
   const [inapSaving, setInapSaving] = useState(false);
@@ -565,7 +569,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     ].some((value) => value?.toLowerCase().includes(query.toLowerCase()));
     const matchesRpujStage = !rpujStage || (job.status !== 'cancelled' && getRpujStage(job) === rpujStage);
     const matchesRepoStorage = !repoStorageOnly || isRepoStoredJob(job);
-    const matchesStatus = !effectiveStatus || (effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
+    const matchesStatus = !effectiveStatus
+      || (effectiveStatus === 'running'
+        ? ['running', 'inap'].includes(job.status)
+        : effectiveStatus === 'repo_stored' ? isRepoStoredJob(job) : job.status === effectiveStatus);
     const matchesTripDate = !effectiveTripDateFilter || getDateFilterKey(job.tripDate) === effectiveTripDateFilter;
     const matchesCompletedDate = !effectiveCompletedDateFilter || getDateFilterKey(job.completedAt) === effectiveCompletedDateFilter;
     const matchesDocumentFollowUp = !documentFollowUp
@@ -575,9 +582,12 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
 
   const visibleJobs = archive.isDatabaseMode ? databaseJobs : filteredDemoJobs;
   const allGroupedJobs = useMemo(() => groupJobsBySo(visibleJobs), [visibleJobs]);
-  const counts = archive.isDatabaseMode ? statusCounts : {
+  const counts = archive.isDatabaseMode ? {
+    ...statusCounts,
+    running: Number(statusCounts.running || 0) + Number(statusCounts.inap || 0),
+  } : {
     received: demoJobs.filter((job) => job.status === 'received').length,
-    running: demoJobs.filter((job) => job.status === 'running').length,
+    running: demoJobs.filter((job) => ['running', 'inap'].includes(job.status)).length,
     inap: demoJobs.filter((job) => isInapJob(job)).length,
     repo_stored: demoJobs.filter((job) => isRepoStoredJob(job)).length,
     completed: demoJobs.filter((job) => job.status === 'completed').length,
@@ -589,7 +599,8 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     approved: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'approved').length,
     paid: demoJobs.filter((job) => job.status !== 'cancelled' && getRpujStage(job) === 'paid').length,
   };
-  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.inap || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
+  // `running` sudah mencakup job inap karena inap tetap merupakan perjalanan aktif.
+  const totalJobs = (counts.received || 0) + (counts.running || 0) + (counts.repo_stored || 0) + (counts.completed || 0) + (counts.cancelled || 0);
   const totalItems = archive.isDatabaseMode ? serverTotalRows : filteredDemoJobs.length;
   const totalGroups = archive.isDatabaseMode ? serverTotal : allGroupedJobs.length;
   const totalPages = Math.max(1, Math.ceil(totalGroups / PAGE_SIZE));
@@ -607,6 +618,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     (archive.isDatabaseMode ? pendingDatabaseJobs : flattenPendingCancelJobs(archive.orders || []))
       .filter((job) => job && job.cancelRequestStatus === 'submitted')
   ), [archive.isDatabaseMode, archive.orders, pendingDatabaseJobs]);
+  const selectedRepoComboJobs = useMemo(() => {
+    const selected = new Set(repoComboSelection);
+    return visibleJobs.filter((job) => selected.has(job.id));
+  }, [repoComboSelection, visibleJobs]);
 
   useEffect(() => {
     setPage(1);
@@ -629,7 +644,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           pageSize: PAGE_SIZE,
           groupByOrder: true,
           query,
-          status: documentFollowUp ? 'completed' : effectiveStatus,
+          status: documentFollowUp ? 'completed' : effectiveStatus === 'running' ? 'active_journey' : effectiveStatus,
           rpujStage: documentFollowUp || repoStorageOnly ? '' : rpujStage,
           documentStatus: documentFollowUp ? 'incomplete' : '',
           tripDate: effectiveTripDateFilter,
@@ -718,7 +733,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
 
     const containerNumber = form.containerNumber || containerLabel(editing);
     const actorName = user?.fullName || user?.name || 'Operational';
-    const payload = editing.repoPickupMode
+    const payload = editing.repoPickupMode || editing.repoComboPickupMode
       ? {
           ...form,
           status: 'running',
@@ -729,21 +744,34 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
         }
       : form;
     try {
-      const saved = await archive.updateJob(editing.id, payload);
+      const saved = editing.repoComboPickupMode
+        ? await pickupComboRepoContainerJobs({
+            ...payload,
+            containerJobIds: editing.repoComboPickupIds,
+          })
+        : editing.repoPickupMode
+          ? await pickupRepoContainerJob(editing.id, payload)
+          : await archive.updateJob(editing.id, payload);
       if (archive.isDatabaseMode) {
-        if (saved) {
+        const updatedRows = Array.isArray(saved?.jobs) ? saved.jobs : null;
+        if (updatedRows?.length) {
+          setDatabaseJobs((current) => current.map((job) => updatedRows.find((item) => item.id === job.id) || job));
+        } else if (saved) {
           setDatabaseJobs((current) => current.map((job) => (job.id === saved.id ? saved : job)));
         }
         setListVersion((value) => value + 1);
         archive.refresh?.();
       }
       setEditing(null);
+      setRepoComboSelection([]);
       const updateWarning = Array.isArray(saved?.updateWarnings) ? saved.updateWarnings[0] : null;
       notify({
         title: updateWarning
           ? 'Proses Operational diperbarui dengan catatan'
-          : editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
-        message: editing.repoPickupMode
+          : editing.repoComboPickupMode ? 'Combo container diambil dari Repo' : editing.repoPickupMode ? 'Container diambil dari Repo' : 'Proses Operational diperbarui',
+        message: editing.repoComboPickupMode
+          ? `${editing.repoComboPickupIds?.length || 2} container berhasil diambil dari Repo dengan 1 truck 40FT.`
+          : editing.repoPickupMode
           ? `${containerNumber} berhasil diambil dari Repo dan lanjut Sedang Jalan dengan assignment perjalanan.`
           : updateWarning?.message || `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
@@ -915,6 +943,44 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     setDetail(null);
   }
 
+  function toggleRepoComboSelection(job) {
+    if (!isRepoStoredJob(job) || String(job.size || '').toUpperCase().replace(/\s/g, '') !== '20FT') return;
+    setRepoComboSelection((current) => {
+      if (current.includes(job.id)) return current.filter((id) => id !== job.id);
+      return [...current, job.id].slice(-2);
+    });
+  }
+
+  function openRepoComboPickup() {
+    if (selectedRepoComboJobs.length !== 2) {
+      notify({ type: 'error', title: 'Pilih 2 container', message: 'Combo pickup membutuhkan tepat 2 container titip 20FT.' });
+      return;
+    }
+    const [first, second] = selectedRepoComboJobs;
+    const firstLocation = String(first.repoLocation || '').trim().toLowerCase();
+    const secondLocation = String(second.repoLocation || '').trim().toLowerCase();
+    if (firstLocation && secondLocation && firstLocation !== secondLocation) {
+      notify({ type: 'error', title: 'Depo berbeda', message: 'Combo pickup hanya bisa dari lokasi titip yang sama.' });
+      return;
+    }
+    setEditing({
+      ...first,
+      status: 'received',
+      plateNumber: '',
+      driver: '',
+      driverId: null,
+      vehicleId: null,
+      chassis: '',
+      runningAt: '',
+      completedAt: '',
+      repoPickupMode: true,
+      repoComboPickupMode: true,
+      repoComboPickupIds: selectedRepoComboJobs.map((job) => job.id),
+      repoComboContainers: selectedRepoComboJobs.map((job) => job.containerNumber || containerLabel(job)),
+    });
+    setDetail(null);
+  }
+
   async function storeRepoJob(event) {
     event.preventDefault();
     if (!repoFormValid || repoSaving) return;
@@ -991,28 +1057,6 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       notify({ type: 'error', title: 'Penandaan inap gagal', message: requestError.message });
     } finally {
       setInapSaving(false);
-    }
-  }
-
-  async function resumeFromInap(job) {
-    const actorName = user?.fullName || user?.name || 'Operational';
-    try {
-      const saved = await archive.updateJob(job.id, {
-        status: 'running',
-        containerNumber: job.containerNumber,
-        driver: job.driver,
-        plateNumber: job.plateNumber,
-        updatedBy: actorName,
-      });
-      if (archive.isDatabaseMode) {
-        if (saved) setDatabaseJobs((current) => current.map((item) => (item.id === saved.id ? saved : item)));
-        setListVersion((value) => value + 1);
-        archive.refresh?.();
-      }
-      setDetail(null);
-      notify({ title: 'Perjalanan dilanjutkan', message: `${containerLabel(job)} keluar dari status inap.` });
-    } catch (requestError) {
-      notify({ type: 'error', title: 'Gagal melanjutkan perjalanan', message: requestError.message });
     }
   }
 
@@ -1200,6 +1244,19 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           ) : null}
         </div> : null}
 
+        {canEdit && repoComboSelection.length ? (
+          <div className="repo-combo-toolbar">
+            <div>
+              <strong>{repoComboSelection.length}/2 container 20FT dipilih</strong>
+              <span>{selectedRepoComboJobs.map((job) => job.containerNumber || containerLabel(job)).join(' + ')}</span>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => setRepoComboSelection([])}>Batal</button>
+            <button className="operational-primary-action repo" type="button" disabled={repoComboSelection.length !== 2} onClick={openRepoComboPickup}>
+              <Truck size={15} /> Combo 2x20
+            </button>
+          </div>
+        ) : null}
+
         <div className="operational-so-list">
           {loading ? <div className="archive-inline-state"><span className="inline-loader" /><p>Memuat Container Job...</p></div> : null}
           {!loading && error ? (
@@ -1254,12 +1311,26 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   const repoSummary = isRepoStoredJob(job) ? repoStorageSummary(job) : null;
                   const actionHint = nextActionHint(job, documents, rpuj, { documentFollowUp, repoSummary });
                   const historicalLocked = isHistoricalJob(job) && !canManageHistoricalEntry;
+                  const isVendorExecution = job.executionSource === 'vendor';
+                  const canSelectRepoCombo = canEdit && !historicalLocked && isRepoStoredJob(job) && String(job.size || '').toUpperCase().replace(/\s/g, '') === '20FT';
+                  const repoComboChecked = repoComboSelection.includes(job.id);
                   return (
-                    <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''}`} key={job.id}>
+                    <article className={`operational-container-row ${repoSummary ? 'is-repo-stored' : ''} ${isVendorExecution ? 'is-vendor-execution' : ''}`} key={job.id}>
                       <div className="container-row-main">
                         <div className="container-row-title">
+                          {canSelectRepoCombo ? (
+                            <label className="repo-combo-check" title="Pilih untuk combo pickup 2x20">
+                              <input
+                                type="checkbox"
+                                checked={repoComboChecked}
+                                onChange={() => toggleRepoComboSelection(job)}
+                              />
+                              <span>Combo</span>
+                            </label>
+                          ) : null}
                           <span className="container-sequence" title={`Container ${jobIndex + 1} dari ${group.jobs.length}`}>#{jobIndex + 1}</span>
                           <strong className={hasContainerNumber ? '' : 'is-empty'}>{containerLabel(job)}</strong>
+                          {isVendorExecution ? <span className="container-vendor-badge">Vendor</span> : null}
                         </div>
                         <small>{repoSummary ? `Container Titip - ${repoSummary.reason}` : `${shipmentLabel} - ${sizeTypeLabel}`}</small>
                         {historicalLocked ? <em className="container-action-hint warning">Data Lama - Admin only</em> : null}
@@ -1298,7 +1369,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                         {canEdit && !historicalLocked && canStoreRepoJob(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(job)}><Archive size={14} /> Titipkan</button> : null}
                         {canEdit && !historicalLocked && isRepoStoredJob(job) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(job)}><Truck size={14} /> Ambil Container</button> : null}
                         {canEdit && !historicalLocked && canMarkInap(job) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(job)}><Moon size={14} /> Tandai Inap</button> : null}
-                        {canEdit && !historicalLocked && isInapJob(job) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(job)}><CheckCircle2 size={14} /> Selesai Inap</button> : null}
+                        {canEdit && !historicalLocked && isInapJob(job) ? <button className="operational-primary-action" type="button" onClick={() => openJobEditor(job)}>Update Ritasi</button> : null}
                         {canEdit && !historicalLocked && !['cancelled'].includes(job.status) ? <button className="secondary-button" type="button" onClick={() => openResetAssignment(job)}><RotateCcw size={14} /> Reset</button> : null}
                         {canEdit && !historicalLocked && !isRepoStoredJob(job) && !isInapJob(job) && !['cancelled'].includes(job.status) ? <button className="operational-primary-action" type="button" onClick={() => openJobEditor(job)}>{documentFollowUp ? 'Lengkapi' : 'Update'}</button> : null}
                       </div>
@@ -1386,6 +1457,13 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                     <span>Dicatat oleh<strong>{detail.repoCreatedByName || detail.updatedBy || '-'}</strong></span>
                     <span>Resource<strong>Truck & sopir sudah lepas</strong><small>Bisa dipakai untuk job lain</small></span>
                     <span>Diambil oleh<strong>{detail.repoPickedUpByName || '-'}</strong><small>{formatDateTime(detail.repoPickedUpAt)}</small></span>
+                    {detail.pickupMovement ? (
+                      <span>
+                        Pickup Movement
+                        <strong>{detail.pickupMovement.type === 'combo_2x20' ? 'Combo 2x20' : 'Single'}</strong>
+                        <small>{detail.pickupMovement.containerNumbers?.length ? detail.pickupMovement.containerNumbers.join(' + ') : `${detail.pickupMovement.itemCount || 1} container`}</small>
+                      </span>
+                    ) : null}
                   </div>
                   {detail.repoNotes ? <p>{detail.repoNotes}</p> : null}
                 </section>
@@ -1421,7 +1499,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && canStoreRepoJob(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openRepoStorage(detail)}><Archive size={16} /> Titipkan Container</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isRepoStoredJob(detail) ? <button className="operational-primary-action repo" type="button" onClick={() => openRepoPickup(detail)}><Truck size={16} /> Ambil Container</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && canMarkInap(detail) ? <button className="secondary-button repo-action-button" type="button" onClick={() => openInap(detail)}><Moon size={16} /> Tandai Inap</button> : null}
-              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isInapJob(detail) ? <button className="operational-primary-action" type="button" onClick={() => resumeFromInap(detail)}><CheckCircle2 size={16} /> Selesai Inap</button> : null}
+              {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && isInapJob(detail) ? <button className="operational-primary-action" type="button" onClick={() => openJobEditor(detail)}>Update Ritasi</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !hasRepoStorageHistory(detail) && !['completed', 'cancelled'].includes(detail.status) ? <button className="danger-button" type="button" onClick={() => openCancelOperational(detail)}><Ban size={16} /> Batalkan Job</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !['cancelled'].includes(detail.status) ? <button className="secondary-button" type="button" onClick={() => openResetAssignment(detail)}><RotateCcw size={16} /> Reset Ritasi</button> : null}
               {canEdit && !(isHistoricalJob(detail) && !canManageHistoricalEntry) && !isRepoStoredJob(detail) && !isInapJob(detail) && !['cancelled'].includes(detail.status) ? <button className="operational-primary-action" type="button" onClick={() => openJobEditor(detail)}>Update Proses</button> : null}
@@ -1678,9 +1756,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           masterTrucks={archive.masters.trucks}
           masterDrivers={archive.masters.drivers}
           masterDestinations={archive.masters.destinations}
+          masterLocations={archive.masters['end-users']}
           activeJobs={archive.isDatabaseMode ? databaseJobs : demoJobs}
           currentUser={user}
-          initialPhase={documentFollowUp ? 'closing' : 'preparation'}
+          initialPhase={documentFollowUp || isInapJob(editing) ? 'closing' : 'preparation'}
           onClose={() => setEditing(null)}
           onSubmit={updateOperational}
           onGenerateSpk={generateOperationalSpk}
