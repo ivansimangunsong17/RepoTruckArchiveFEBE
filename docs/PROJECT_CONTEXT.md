@@ -112,7 +112,7 @@ Defined in `be-truck-management-system/src/modules/users/users.mapper.js` (`ROLE
 
 - **Hino Connect API** (`modules/telematics/`): token, vehicles, vehicle positions. Credentials via `HINO_*` env vars; auto-sync scheduler disabled by default (`HINO_AUTO_SYNC_ENABLED=false`).
 - **Accurate** (accounting software): not integrated by API. Finance manually enters Accurate SO/invoice numbers and uploads Accurate PDFs.
-- **Google Maps**: URL links only (`fe/src/utils/googleMapsUrl.js`, currently untracked — see `CURRENT_STATUS.md` Reproducibility Gap).
+- **Google Maps**: URL links only (`fe/src/utils/googleMapsUrl.js`); warehouse locations store `google_maps_url` and coordinates.
 - No email/WhatsApp/cloud storage integrations found.
 
 ## Important Technical Constraints

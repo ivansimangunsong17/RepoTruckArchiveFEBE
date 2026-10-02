@@ -1,6 +1,6 @@
 # Current Project Status
 
-Last Updated: 2026-10-02 (branch `sync-production-development`; baseline commits `78d045c`…`9bd1041` + docs; Group C and Group I still uncommitted)
+Last Updated: 2026-10-02 (branch `sync-production-development`, not pushed; all feature work committed — only Group I left uncommitted)
 
 ## Stable / Implemented
 
@@ -16,6 +16,8 @@ Implemented in backend routes + frontend pages, with unit tests:
 - Historical entry with period locks
 - Reports (sales, revenue, operations, documents, driver performance, input monitoring), truck utilization, activity log
 - Storage trash/restore, backup lock, Hino telematics sync + live positions
+- Warehouse locations: `GET /api/locations`, SO/job location snapshots, Sales Order location picker, end-user maps fields
+- Container pickup (single / combo 2×20) and truck chassis history in utilization reports
 
 ## Git Baseline (2026-10-02)
 
@@ -29,37 +31,25 @@ Committed on `sync-production-development` (not pushed):
 | `2acb613` | Truck chassis history + utilization reporting |
 | `0bc9704` | Finance invoice detail UI + tests, integration-test alignment |
 | `9bd1041` | Driver commission page (Sunday–Saturday dropdown, account column) |
-| docs commit | `docs/*`, `CLAUDE.md` |
+| `dd1364d` | `docs/*`, `CLAUDE.md` |
+| `b691940` | `WarehouseLocationCard.jsx` + `utils/googleMapsUrl.js` (+ tests): fixes the fresh-clone frontend build broken since `dea6450` |
+| `d068c53` | Warehouse locations (`GET /api/locations`, SO/job location snapshots, end-user maps fields) + DEPRECATED Sales-level vendor flag |
+
+Reproducibility: since `b691940` a fresh clone builds and passes all frontend tests; the backend was already self-contained after `78d045c`.
 
 ## In Progress (still uncommitted)
 
-**Group C — locations + SO-level vendor deprecation. Blocked: NEEDS OWNER DECISION on the vendor change.**
-- Locations: `app.js` (registers `GET /api/locations`), `modules/locations/*`, `sales-orders.controller.js` (location audit), sales-order mapper/repository location snapshot, `master.{controller,mapper,service}.js` (end-users fields, `sanitizeMasterResultForActor`), `EndUsersPage`, `LocationMasterPage`, `ActivityLogPage` + `activityLogService` (location filter), `SalesOrderForm`, `WarehouseLocationCard`, `locationService`, `utils/googleMapsUrl`, `ujRecommendation` + `UjRecommendationCard`, `sales-order.css` (`.operational-modal` width), and their tests.
-- Vendor change (current behavior at `HEAD` still allows SO-level vendor orders):
-  - `sales-orders.mapper.js` `toSalesOrderDb` always writes `is_vendor_order: false`, `vendor_name/vendor_note: null`.
-  - `sales-orders.service.js` drops `VENDOR_ORDER_ALLOWED_STATUSES`.
-  - `sales-orders.repository.js` removes the `is_vendor_order` branches (create always inserts container jobs; `SALES_ORDER_VENDOR_HAS_CONTAINER_JOBS` removed).
-  - `SalesOrderForm.jsx` removes the "Dikerjakan oleh Vendor" checkbox.
-  - Tests: `sales-orders.mapper.test.js`, `sales-orders.service.test.js`, `SalesOrderForm.test.jsx`, and `vendor-execution.regression.test.js` (2 added tests).
-  - `package.json` scripts `vendor-orders:audit|convert` → `scripts/convert-legacy-vendor-orders.js`.
-- Not separable by hunk staging:
-  - `sales-orders.repository.js` raw diff is two whole-file line-ending hunks mixing both features.
-  - Mapper hunk 4, `SalesOrderForm.jsx` hunks 2 and 8, and `SalesOrderForm.test.jsx` hunks 4 and 6 contain both.
-  - A locations-only version would need hand-written, untested intermediate code.
-
-**Group I — intentionally left untouched:** deleted `FiturOutstanding.md`, `SOP_DAN_DOKUMENTASI_FLOW_BESAR.md`, `fe-truck-management-system/NEW UPDATE SHIPMENT TRUCKING .xlsx`. Untracked `be-truck-management-system/scripts/{clear-e2e-transactions,convert-legacy-vendor-orders,seed-progress-report-demo}.js`.
-
-**Line-ending only (no content change):** `container-jobs.service.test.js`.
-
-## Reproducibility Gap (open)
-
-- Committed `fe/src/components/forms/OperationalForm.jsx` imports `../operations/WarehouseLocationCard` since commit `dea6450` (2026-09-29). That component and its dependency `utils/googleMapsUrl.js` are untracked (Group C). **A clean checkout of any commit since `dea6450` cannot build or test the frontend** (`Failed to resolve import`).
-- The working tree is unaffected. Fix: commit `WarehouseLocationCard.jsx`, `googleMapsUrl.js` (+ tests). They depend only on `lucide-react`, not on the vendor change. NEEDS OWNER DECISION (they belong to Group C).
-- The backend at `HEAD` is self-contained: migrations committed, `node --check` passes, unit tests pass on a clean export.
+- **Group I, intentionally untouched (owner decision pending):**
+  - deleted `FiturOutstanding.md`, `SOP_DAN_DOKUMENTASI_FLOW_BESAR.md`, `fe-truck-management-system/NEW UPDATE SHIPMENT TRUCKING .xlsx`
+  - untracked `be-truck-management-system/scripts/{clear-e2e-transactions,convert-legacy-vendor-orders,seed-progress-report-demo}.js`
+- Tied to the conversion script and therefore left out of `d068c53`:
+  - the `package.json` scripts `vendor-orders:audit` / `vendor-orders:convert`
+  - the regression test "konversi SO vendor lama bersifat dry-run…" in `vendor-execution.regression.test.js` (still in the working tree)
+- Line-ending only (no content change): `container-jobs.service.test.js`.
 
 ### Migration integrity (verified 2026-10-02, not executed)
 
-All four are additive and idempotent, and are now committed in `78d045c`. Committed code needs `…0002`, `…0003` and `…0260001`; `…0001` is used by Group C.
+All four are additive and idempotent, committed in `78d045c`. `…0001` is used by the locations module (`d068c53`); the others by container-job reads and repo pickups.
 
 | Migration | Change |
 |---|---|
@@ -87,7 +77,6 @@ Their numbers are older than some committed migrations. This is valid because `r
   - The Operational dropping page's upload/UJ-proof modals have no opener.
 - `0bc9704` removes the "Dokumen Dasar Tagih" and "Internal Cost" cards from the invoice detail modal (as found in the working tree).
 - Remaining: 6 `react-hooks/exhaustive-deps` lint warnings. No TODO/FIXME markers in `src/`.
-- See also **Reproducibility Gap** above.
 
 ## Security Concerns
 
@@ -116,9 +105,12 @@ Observable from code/migrations:
 - Frozen snapshots (UJ amount, assignment/bank, customer, destination, warehouse location).
 - DB-level partial unique indexes guard one active job per driver/vehicle.
 - Container destination per job (`202608270001`); vendor execution per job (`202609250001`).
+- CURRENT: vendor execution is handled by the container-job vendor workflow (`execution_source`). DEPRECATED: Sales marking an SO as vendor/non-vendor (`d068c53`, owner decision 2026-10-02).
 
 ## Owner Decisions / Production Verification
 
+- NEEDS OWNER DECISION: Group I files (deleted root docs/xlsx, three dev scripts incl. `convert-legacy-vendor-orders.js`).
+- NEEDS PRODUCTION VERIFICATION: number of legacy SOs with `is_vendor_order = true`, and whether to run the vendor conversion (`--apply`) before deploying `d068c53`. Editing such an SO now turns it into internal container jobs.
 - NEEDS OWNER DECISION: Sales SO visibility (currently all SOs readable; writes are owner-only).
 - NEEDS OWNER DECISION: retire the LEGACY RPUJ endpoints, and remove or update the Thursday–Wednesday design docs and the unused `buildCommissionWeekOptions`.
 - NEEDS OWNER DECISION: should cancellation approval re-check that the job is still `received`? Vendor job completion requirements. `under_review` batch status. `FinanceWorkflowPage` demo rows (`initialOrderRows`, `initialInvoiceRows`).
@@ -126,15 +118,15 @@ Observable from code/migrations:
 
 ## Build / Test Status
 
-Run on 2026-10-02. **Working tree** = all files incl. uncommitted Group C. **Clean `HEAD`** = `git archive HEAD` export (what a fresh clone gets).
+Run on 2026-10-02 after `d068c53`. **Clean `HEAD`** = `git archive HEAD` export (what a fresh clone gets). **Working tree** additionally holds the uncommitted Group I scripts, the `package.json` vendor scripts, and one script-dependent regression test.
 
-| Check | Command | Working tree | Clean `HEAD` |
+| Check | Command | Clean `HEAD` | Working tree |
 |---|---|---|---|
 | Backend syntax | `cd be-truck-management-system && npm run check` | PASS | PASS |
-| Backend unit tests | `DATABASE_URL= node --test` | PASS — 284/286 (2 skipped) | PASS — 260/262 (2 skipped) |
-| Frontend lint | `cd fe-truck-management-system && npm run lint` | PASS — 0 errors, 6 warnings | PASS |
-| Frontend tests | `npm run test:run` | PASS — 491/491 | **FAIL** — 3 files can't load (`WarehouseLocationCard` missing); 387 loaded tests pass |
-| Frontend build | `npx vite build --outDir <temp>` (keeps `dist/` intact) | PASS | **FAIL** — `Could not resolve "../operations/WarehouseLocationCard"` |
+| Backend unit tests | `DATABASE_URL= node --test` | PASS — 283/285 (2 skipped) | PASS — 284/286 (2 skipped) |
+| Frontend lint | `cd fe-truck-management-system && npm run lint` | PASS — 0 errors, 6 warnings | same (no uncommitted frontend code) |
+| Frontend tests | `npm run test:run` | PASS — 491/491 (54 files) | same |
+| Frontend build | `npx vite build --outDir <temp>` (keeps `dist/` intact) | PASS | same |
 | Backend integration | `npm test` with `DATABASE_URL` set | NOT RUN — destructive; disposable DB only | NOT RUN |
 | Utilization chassis SQL | needs `CHASSIS_TEST_DATABASE_URL` | NOT RUN (opt-in) | NOT RUN |
 | Health check | `GET http://localhost:3000/health` | NOT RUN — server not started | NOT RUN |

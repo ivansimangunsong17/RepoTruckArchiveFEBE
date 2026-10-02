@@ -22,8 +22,14 @@ Cross-cutting rules:
 - CURRENT — read access: Sales can list and open **all** SOs. `GET /api/sales-orders` and `GET /api/sales-orders/:id` need only `sales_order.read` and do no owner check. `findSalesOrdersPage` supports `ownerUserId`/`ownerName` filters, but `listSalesOrders` never passes them. NEEDS OWNER DECISION: whether Sales should see only their own SOs.
 - New SOs start with no SO number: `finance_verification_status = 'pending_so'`. The working SO number is `accurate_so_number`, entered by Finance. DEPRECATED: auto-generated internal `SO-ARM-…` numbers (cleared by migration `202609070001`).
 - Locks for Sales once Finance assigned the SO number or RPUJ was sent: Sales may still revise only if all containers are `received`, no invoice number/invoice PDFs, no active expenses, no debit-note document, no active payments, and no commission items (`SALES_ORDER_ADVANCED_PROCESSING_LOCKED`). Admin needs correction mode (`SALES_ORDER_FINANCE_NUMBER_LOCKED_CORRECTION_REQUIRED` / `…_RPUJ_LOCKED_…`).
-- `cancelled` SOs cannot be edited; `completed` SOs cannot be edited unless `is_vendor_order`.
-- Vendor orders (`is_vendor_order`, `vendor_name`): marker that the order is executed by a vendor; Sales owner can still correct/cancel them.
+- `cancelled` SOs cannot be edited; `completed` SOs cannot be edited (exception: LEGACY vendor SOs, below).
+- CURRENT — vendor execution is handled by the container-job vendor workflow (`execution_source`, see Container Jobs), not by Sales.
+- DEPRECATED — Sales marking an SO as vendor/non-vendor (owner decision 2026-10-02, commit `d068c53`). The form no longer has the "Dikerjakan oleh Vendor" checkbox, and `toSalesOrderDb` always writes `is_vendor_order = false`, `vendor_name/vendor_note = null`. Every SO creates and reconciles container jobs normally.
+- LEGACY — SOs saved earlier with `is_vendor_order = true` are still read: the "Vendor" badge and list filter (`vendorFilter`), exclusion from dashboard/report revenue and missing-SO-number counts (`reports.repository.js`), and exemption from the completed-edit lock and the Sales lock.
+  - Editing such an SO saves it as non-vendor and reconciles container jobs from its line items as `internal` jobs.
+  - The conversion script `scripts/convert-legacy-vendor-orders.js` (untracked; dry-run unless `--apply`) instead converts them to `execution_source = 'vendor'` jobs.
+  - NEEDS PRODUCTION VERIFICATION: how many legacy vendor SOs exist, and whether they must be converted before this release.
+- CURRENT — warehouse location (optional, `warehouseLocationId` → `end_users`): when chosen it must exist, be `Aktif`, and belong to the SO's destination (`WAREHOUSE_LOCATION_NOT_FOUND | _INACTIVE | _DESTINATION_MISMATCH`). Name/address are snapshotted and re-snapshotted only when the location actually changes. Container-job location snapshots follow SO changes only while the job is `received`. Location changes are audited separately.
 
 ### Status Flow (operational, derived — `refreshOrderStatus`)
 ```
@@ -76,7 +82,10 @@ received/running → cancelled
 - Documents locked after completion; timeline (`runningAt`/`completedAt`) editable only by Admin correction after completion.
 - Driver commission on a job is locked after completion/cancel or RPUJ approved/paid.
 - Document-only actors (Sales: `container_job.document.update` only) can update documents without touching status/assignment/UJ.
-- Vendor execution (`execution_source = 'vendor'`): driver/truck cleared, no auto UJ, no assignment checks.
+- CURRENT — vendor execution (`execution_source = 'internal' | 'vendor'`, migration `202609250001`, commit `dcd5907`) is the only vendor mechanism.
+  - Set per container job in the Operational form.
+  - Vendor jobs: driver/truck cleared; no auto UJ, Rekening Dropping, internal SPK, assignment checks or assignment history (`ensureInternalExecution`); no driver commission; cannot use `repo_stored` / `inap`.
+  - Excluded from commission, fleet availability and utilization queries; still counted in the SO's fulfilment status.
 - Cancellation request by SO owner; Sales cannot request once RPUJ was sent (`CONTAINER_JOB_RPUJ_LOCKED_ADMIN_ONLY`). Review by operational/admin.
 - Reset misassigned job (`/reset-assignment`): operational/admin, reason ≥8.
 
