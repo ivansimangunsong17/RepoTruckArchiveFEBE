@@ -3111,13 +3111,22 @@ if (!hasDatabase) {
         fileBase64: Buffer.from(`%PDF-1.4\n% payment proof 1 ${runId}\n`).toString('base64'),
       };
 
-      const missingProof = await api(`/api/finance/invoices/${created.orderId}/payments`, {
+      const paymentWithoutProof = await api(`/api/finance/invoices/${created.orderId}/payments`, {
         method: 'POST',
         token: financeToken,
-        body: { amount: 1000 },
+        body: { amount: 1000, referenceNumber: `TRF-${runId}-PROOF-LATER` },
       });
-      assert.equal(missingProof.status, 400);
-      assert.equal(missingProof.body.error.code, 'SALES_ORDER_PAYMENT_PROOF_REQUIRED');
+      assert.equal(paymentWithoutProof.status, 200);
+      assert.equal(paymentWithoutProof.body.data.payment.proofAttachment, null);
+      const voidProoflessPayment = await api(
+        `/api/finance/invoices/${created.orderId}/payments/${paymentWithoutProof.body.data.payment.id}/void`,
+        {
+          method: 'PATCH',
+          token: financeToken,
+          body: { reason: 'Pembayaran tanpa bukti untuk regression test' },
+        },
+      );
+      assert.equal(voidProoflessPayment.status, 200);
 
       const invalidAmount = await api(`/api/finance/invoices/${created.orderId}/payments`, {
         method: 'POST',
@@ -3292,11 +3301,11 @@ if (!hasDatabase) {
       await query(
         `
           update sales_orders
-          set status = 'completed', finance_verification_status = 'verified', accurate_so_number = so_number,
+          set status = 'completed', finance_verification_status = 'verified', accurate_so_number = $3,
               invoice_number = $2, payment_type = 'cash', invoice_issued_at = now()
           where id = $1
         `,
-        [revenueOrderId, `INV-${revenueSoNumber}`],
+        [revenueOrderId, `INV-${revenueSoNumber}`, revenueSoNumber],
       );
 
       const beforeDetail = await api(`/api/finance/invoices/${revenueOrderId}`, { token: financeToken });

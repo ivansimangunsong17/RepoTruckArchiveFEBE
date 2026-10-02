@@ -273,7 +273,7 @@ function RevenueLineModal({ draft, saving, error, onChange, onClose, onSave }) {
 
   return (
     <div className="master-modal-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
-      <section className="master-modal w-full max-w-xl" role="dialog" aria-modal="true" aria-labelledby="revenue-line-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="master-modal revenue-line-modal" role="dialog" aria-modal="true" aria-labelledby="revenue-line-modal-title" onMouseDown={(event) => event.stopPropagation()}>
         <form className="master-form" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
           <div className="master-form-heading">
             <div className="min-w-0">
@@ -496,20 +496,35 @@ function InvoiceDetailModal({
   const pendingUploadSlots = financeInvoiceUploadSlots.filter((slot) => pendingInvoiceFiles[slot.type]);
   const hasPendingInvoiceFiles = pendingUploadSlots.length > 0;
   const isSavingInvoiceDocuments = uploadResultModal?.status === 'loading';
+  const containerBreakdownByJobId = new Map();
+  const containerBreakdownByNumber = new Map();
+  (invoice.containerBreakdown || []).forEach((row) => {
+    if (row.containerJobId) containerBreakdownByJobId.set(row.containerJobId, row);
+    if (row.containerNumber) containerBreakdownByNumber.set(row.containerNumber, row);
+  });
   const documentGroups = Array.from(supportDocuments.reduce((groups, document) => {
     const isSalesDocument = document.source === 'Sales';
     const groupId = isSalesDocument
       ? 'sales-order'
       : `container-${document.jobId || document.containerNumber || document.jobReference || 'unknown'}`;
+    const breakdown = isSalesDocument
+      ? null
+      : containerBreakdownByJobId.get(document.jobId) || containerBreakdownByNumber.get(document.containerNumber);
     const currentGroup = groups.get(groupId) || {
       id: groupId,
       eyebrow: isSalesDocument ? 'Dokumen Sales / SO' : 'Nomor Container',
       title: isSalesDocument
         ? invoice.soNumber
         : document.containerNumber || document.jobReference || 'Nomor belum diisi',
+      hasInap: Boolean(breakdown?.hasInap),
+      inapReason: breakdown?.inapReason || '',
       documents: [],
     };
 
+    if (breakdown?.hasInap) {
+      currentGroup.hasInap = true;
+      currentGroup.inapReason = breakdown.inapReason || currentGroup.inapReason;
+    }
     currentGroup.documents.push(document);
     groups.set(groupId, currentGroup);
     return groups;
@@ -710,6 +725,12 @@ function InvoiceDetailModal({
                 </span>
               ) : null}
             </p>
+            {invoice.containerNumbers?.length ? (
+              <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[11px] font-semibold text-slate-600">
+                <span className="font-black uppercase tracking-wide text-slate-400">Container</span>
+                <span>{invoice.containerNumbers.join(', ')}</span>
+              </p>
+            ) : null}
           </div>
           <button className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50" onClick={onClose} type="button">
             Tutup
@@ -868,12 +889,37 @@ function InvoiceDetailModal({
             </div>
 
             <section className={`finance-invoice-support-grid ${activeSection === 'ringkasan' ? '' : 'hidden'}`}>
-              <div className="finance-invoice-detail-card">
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <h4 className="text-xs font-black text-slate-950">Dokumen Dasar Tagih</h4>
-                  <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-700">Siap Invoice</span>
+              <div className="finance-invoice-support-stack">
+                <div className="finance-invoice-detail-card">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-slate-950">Dokumen Dasar Tagih</h4>
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-black text-emerald-700">Siap Invoice</span>
+                  </div>
+                  <CompactList items={invoice.documentChecklist} />
                 </div>
-                <CompactList items={invoice.documentChecklist} />
+                <div className="finance-invoice-detail-card">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-slate-950">Internal Cost</h4>
+                    <strong className="text-xs font-black text-slate-950">{formatCurrency(internalCost.total)}</strong>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-1 py-1">
+                    <span className="text-xs font-semibold text-slate-700">UJ (Uang Jalan): {formatCurrency(internalCost.journeyMoney)}</span>
+                    {internalCost.journeyMoneyNeedsReview ? (
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-800" title="Belum pernah punya snapshot -- nominal masih estimasi dari tarif master saat ini, bisa berubah kalau tarif diedit">
+                        Perlu Review
+                      </span>
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-800" title="Nominal sudah dibekukan saat job pertama kali jalan, tidak berubah lagi meski tarif master diedit">
+                        Snapshot
+                      </span>
+                    )}
+                  </div>
+                  <CompactList items={[
+                    { label: `Biaya Tambahan: ${formatCurrency(internalCost.additionalCost)}` },
+                    { label: `Komisi Sopir: ${formatCurrency(internalCost.driverCommissionCost)}` },
+                    { label: `Biaya Operasional: ${formatCurrency(internalCost.operationalExpenseTotal)}` },
+                  ]} />
+                </div>
               </div>
               <div className="finance-invoice-support-stack">
                 <div className="finance-invoice-detail-card">
@@ -1009,30 +1055,6 @@ function InvoiceDetailModal({
                   <button className="mt-2 text-[10px] font-black uppercase text-slate-700 underline" onClick={() => setActiveSection('debit-note')} type="button">
                     Lihat rincian di tab Debit Note
                   </button>
-                </div>
-
-                <div className="finance-invoice-detail-card">
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-black text-slate-950">Internal Cost</h4>
-                    <strong className="text-xs font-black text-slate-950">{formatCurrency(internalCost.total)}</strong>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 px-1 py-1">
-                    <span className="text-xs font-semibold text-slate-700">UJ (Uang Jalan): {formatCurrency(internalCost.journeyMoney)}</span>
-                    {internalCost.journeyMoneyNeedsReview ? (
-                      <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-800" title="Belum pernah punya snapshot -- nominal masih estimasi dari tarif master saat ini, bisa berubah kalau tarif diedit">
-                        Perlu Review
-                      </span>
-                    ) : (
-                      <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-800" title="Nominal sudah dibekukan saat job pertama kali jalan, tidak berubah lagi meski tarif master diedit">
-                        Snapshot
-                      </span>
-                    )}
-                  </div>
-                  <CompactList items={[
-                    { label: `Biaya Tambahan: ${formatCurrency(internalCost.additionalCost)}` },
-                    { label: `Komisi Sopir: ${formatCurrency(internalCost.driverCommissionCost)}` },
-                    { label: `Biaya Operasional: ${formatCurrency(internalCost.operationalExpenseTotal)}` },
-                  ]} />
                 </div>
 
                 <div className="finance-invoice-detail-card">
@@ -1291,11 +1313,18 @@ function InvoiceDetailModal({
               {documents.length ? (
                 <div className="finance-invoice-container-grid">
                   {documentGroups.map((group) => (
-                    <section className="finance-invoice-container-card" key={group.id}>
+                    <section className={`finance-invoice-container-card ${group.hasInap ? 'has-inap' : ''}`} key={group.id}>
                       <header className="finance-invoice-container-header">
                         <div className="min-w-0">
                           <span>{group.eyebrow}</span>
-                          <strong className="truncate" title={group.title}>{group.title}</strong>
+                          <div className="finance-invoice-container-title-row">
+                            <strong className="truncate" title={group.title}>{group.title}</strong>
+                            {group.hasInap ? (
+                              <span className="finance-invoice-container-inap-badge" title={group.inapReason || 'Ritasi ini tercatat inap'}>
+                                Inap
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                         <span className="finance-invoice-container-count">
                           {group.id === 'sales-order' ? `${group.readyCount} file` : `${group.readyCount}/${group.documents.length} lengkap`}
