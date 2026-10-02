@@ -59,6 +59,7 @@ const reportFixture = {
     {
       driverId: 'driver-1',
       driverName: 'Rahmat',
+      bankAccountNumber: '1234567890',
       totalItems: 2,
       totalAmount: 125000,
       grossAmount: 125000,
@@ -98,6 +99,8 @@ const reportFixture = {
       driverKey: 'name:jajam',
       driverId: null,
       driverName: 'Jajam',
+      paymentMethod: 'emoney',
+      emoneyNumber: '081234567890',
       totalItems: 1,
       totalAmount: 100000,
       unpaidAmount: 100000,
@@ -190,6 +193,10 @@ describe('DriverCommissionOperationalPage', () => {
     expect((await screen.findAllByText('Rahmat')).length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Pilih batch komisi')).toBeInTheDocument();
     expect(screen.getByText('Jajam')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'No' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'No. Rekening' })).toBeInTheDocument();
+    expect(screen.getByText('1234567890')).toBeInTheDocument();
+    expect(screen.getByText('081234567890')).toBeInTheDocument();
     expect(screen.getAllByText(/Rp\s*125\.000/i).length).toBeGreaterThan(0);
 
     await user.click(screen.getAllByRole('button', { name: /detail/i })[0]);
