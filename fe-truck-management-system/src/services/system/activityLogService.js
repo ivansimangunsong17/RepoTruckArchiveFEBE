@@ -16,6 +16,8 @@ function mapApiLog(log) {
     module: log.module || log.target || '',
     entityType: log.entityType || '',
     entityId: log.entityId || '',
+    beforeData: log.beforeData || null,
+    afterData: log.afterData || null,
     metadata: log.metadata || {},
   };
 }

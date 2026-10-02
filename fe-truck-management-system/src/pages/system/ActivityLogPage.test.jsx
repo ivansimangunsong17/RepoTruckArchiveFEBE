@@ -22,6 +22,25 @@ const rows = Array.from({ length: 12 }, (_, index) => ({
     : index === 9 ? { soNumber: 'SO-HIST-001', historicalPeriod: '2026-07' } : {},
 }));
 
+const commissionCorrectionRow = {
+  id: 99,
+  time: '2026-09-23T10:00:00+07:00',
+  user: 'Admin Test',
+  role: 'admin',
+  action: 'MOVE_DRIVER_COMMISSION_RECIPIENT',
+  target: 'driver_commissions',
+  module: 'driver_commissions',
+  beforeData: { driverName: 'Sopir Lama' },
+  afterData: { driverName: 'Sopir Baru' },
+  metadata: {
+    soNumber: 'SO-KOM-001',
+    containerNumber: 'CONT-001',
+    batchStatus: 'submitted',
+    amount: 100000,
+    adminCorrectionReason: 'Salah pilih sopir',
+  },
+};
+
 describe('ActivityLogPage', () => {
   beforeEach(() => {
     fetchActivityLogPage.mockImplementation(async ({
@@ -116,5 +135,19 @@ describe('ActivityLogPage', () => {
 
     expect((await screen.findAllByText('Koreksi Admin Container')).length).toBeGreaterThan(0);
     expect(screen.getByText('SO-ARM-001 / MSCU1234567 - Alasan: Koreksi tanggal selesai')).toBeInTheDocument();
+  });
+
+  it('menampilkan jejak perpindahan penerima komisi secara jelas', async () => {
+    fetchActivityLogPage.mockResolvedValue({ total: 1, rows: [commissionCorrectionRow] });
+
+    render(<ActivityLogPage />);
+
+    const actionLabel = await screen.findByText('Pindahkan Penerima Komisi Sopir', { selector: 'strong' });
+    const activityRow = actionLabel.closest('article');
+    expect(activityRow).toHaveTextContent('SO-KOM-001 / CONT-001');
+    expect(activityRow).toHaveTextContent('Sopir Lama ke Sopir Baru');
+    expect(activityRow).toHaveTextContent('Batch: submitted');
+    expect(activityRow).toHaveTextContent(/Nominal: Rp\s*100\.000/);
+    expect(activityRow).toHaveTextContent('Alasan: Salah pilih sopir');
   });
 });
