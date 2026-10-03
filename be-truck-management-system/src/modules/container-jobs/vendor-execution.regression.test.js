@@ -58,6 +58,15 @@ test('Sales Order selalu memakai lifecycle container job normal', () => {
   assert.match(repository, /reconcileSalesOrderContainers\(form\.containers \|\| \[\], currentJobs\.rows\)/i);
 });
 
+test('konversi SO vendor lama bersifat dry-run kecuali diminta eksplisit', () => {
+  const script = read('../../../scripts/convert-legacy-vendor-orders.js');
+
+  assert.match(script, /const applyChanges = process\.argv\.includes\('--apply'\)/i);
+  assert.match(script, /if \(!applyChanges \|\| orders\.length === 0\) return/i);
+  assert.match(script, /execution_source, container_number, container_size/i);
+  assert.match(script, /update sales_orders set is_vendor_order = false/i);
+});
+
 test('query komisi, utilisasi, dan ketersediaan armada mengecualikan vendor', () => {
   const commissions = read('../driver-commissions/driver-commissions.repository.js');
   const reports = read('../reports/reports.repository.js');
