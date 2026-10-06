@@ -144,7 +144,7 @@ async function applyFinanceCorrectionValue(client, orderId, correctionType, requ
   );
 }
 
-function mapOrderVerificationRow(row) {
+export function mapOrderVerificationRow(row) {
   const verificationStatus = normalizeVerificationStatus(row);
   const isCancelled = row.status === 'cancelled';
   const cancelReason = row.cancel_review_note || row.cancel_request_note || row.cancel_reason || '';
@@ -174,6 +174,10 @@ function mapOrderVerificationRow(row) {
     })),
     runningDate: row.trip_date,
     container: formatContainerSummary(row),
+    // Jumlah container job aktif (bukan cancelled) per ukuran, dipisah dari qty order di lineItems
+    // supaya Finance bisa membandingkan keduanya. null = query sumber tidak menghitungnya.
+    activeContainer20Qty: row.qty_20ft == null ? null : Number(row.qty_20ft),
+    activeContainer40Qty: row.qty_40ft == null ? null : Number(row.qty_40ft),
     vesselName: row.vessel_name,
     terminal: row.terminal,
     depo: row.origin,

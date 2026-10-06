@@ -12,6 +12,7 @@ const {
   financeRowsCte,
   invoiceOrdersCte,
   outstandingOrdersCte,
+  mapOrderVerificationRow,
 } = await import('./finance.repository.js');
 
 test('billing readiness vendor tidak mensyaratkan dokumen atau UJ internal', () => {
@@ -152,4 +153,24 @@ test('filter dropdown jatuh tempo dekat/lewat jatuh tempo hanya menyertakan invo
   assert.match(overdue, /billing_status\s*<>\s*'lunas'/i);
   assert.match(overdue, /<\s*\(now\(\) at time zone 'Asia\/Jakarta'\)::date/i);
   assert.doesNotMatch(overdue, /\+\s*7/i);
+});
+
+test('order verification mengirim jumlah container aktif per ukuran terpisah dari qty order', () => {
+  const mapped = mapOrderVerificationRow({
+    id: 'so-1',
+    status: 'running',
+    line_items: [{ serviceName: 'Jasa Angkut D40', qty: 2, price: 2800000 }],
+    qty_20ft: 0,
+    qty_40ft: 1,
+  });
+  assert.equal(mapped.activeContainer20Qty, 0);
+  assert.equal(mapped.activeContainer40Qty, 1);
+  assert.equal(mapped.lineItems[0].qty, 2);
+  assert.equal(mapped.container, '1 x 40FT');
+});
+
+test('order verification tanpa kolom hitungan job mengirim jumlah container aktif null', () => {
+  const mapped = mapOrderVerificationRow({ id: 'so-2', status: 'running', container_summary: 'Jasa Angkut D20 - Dry x1' });
+  assert.equal(mapped.activeContainer20Qty, null);
+  assert.equal(mapped.activeContainer40Qty, null);
 });
