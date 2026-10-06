@@ -1621,6 +1621,57 @@ export async function getOperationReport(options = {}) {
   };
 }
 
+// Identitas sopir di laporan = container_jobs.driver_id (stabil), BUKAN nama di assignment_snapshot.
+// Snapshot nama dibekukan saat assignment, jadi kalau nama master sopir diedit di tengah bulan,
+// job lama dan baru membawa nama berbeda untuk sopir yang sama -- dulu ini memecah satu sopir
+// jadi dua baris. Label memakai nama master TERKINI (driver_master_name). Job lama tanpa
+// driver_id tetap dikelompokkan per nama snapshot seperti sebelumnya (tidak digabung ke sopir
+// master mana pun hanya karena namanya sama).
+export function buildDriverPerformanceRows(rows = []) {
+  const drivers = new Map();
+  rows.forEach((row) => {
+    const snapshotName = String(row.driver || '').trim();
+    const key = row.driver_id ? `id:${row.driver_id}` : `name:${snapshotName}`;
+    if (!drivers.has(key)) {
+      drivers.set(key, {
+        driverId: row.driver_id || null,
+        driver: row.driver_id ? (row.driver_master_name || snapshotName) : snapshotName,
+        weeklyTrips: 0,
+        monthlyTrips: 0,
+        totalTrips: 0,
+        totalRevenue: 0,
+        totalDriverCommission: 0,
+        paidDriverCommission: 0,
+        unpaidDriverCommission: 0,
+      });
+    }
+
+    const summary = drivers.get(key);
+    const revenue = calculateCompletedJobRevenue(row);
+    const driverCommission = calculateDriverCommissionAmount(row);
+    const paymentAmount = splitDriverCommissionPaymentAmount(row);
+    summary.weeklyTrips += 1;
+    summary.monthlyTrips += 1;
+    summary.totalTrips += 1;
+    summary.totalRevenue += revenue;
+    summary.totalDriverCommission += driverCommission;
+    summary.paidDriverCommission += paymentAmount.paid;
+    summary.unpaidDriverCommission += paymentAmount.unpaid;
+  });
+
+  return Array.from(drivers.values())
+    .map((row) => ({
+      ...row,
+      averageRevenuePerTrip: row.totalTrips ? row.totalRevenue / row.totalTrips : 0,
+      averageCommissionPerTrip: row.totalTrips ? row.totalDriverCommission / row.totalTrips : 0,
+    }))
+    .sort((left, right) => {
+      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+      if (right.monthlyTrips !== left.monthlyTrips) return right.monthlyTrips - left.monthlyTrips;
+      return left.driver.localeCompare(right.driver);
+    });
+}
+
 export async function getDriverPerformanceReport(options = {}) {
   const month = String(options.month || '').trim();
   const weekFrom = String(options.weekFrom || '').trim();
@@ -1665,6 +1716,8 @@ export async function getDriverPerformanceReport(options = {}) {
         ),
         completed_jobs as (
           select cj.id,
+                 cj.driver_id,
+                 nullif(btrim(d.name), '') as driver_master_name,
                  nullif(cj.assignment_snapshot->>'driver', '') as driver,
                  coalesce(${timestampToJakartaDateSql('cj.completed_at')}, so.trip_date) as completed_date,
                  so.price,
@@ -1680,6 +1733,7 @@ export async function getDriverPerformanceReport(options = {}) {
           from container_jobs cj
           join sales_orders so on so.id = cj.sales_order_id
           left join order_job_totals ojt on ojt.sales_order_id = so.id
+          left join drivers d on d.id = cj.driver_id
           left join driver_commission_items dci on dci.container_job_id = cj.id and dci.voided_at is null
           left join driver_commission_batches dcb on dcb.id = dci.batch_id
           left join driver_commission_payments dcp on dcp.id = dci.payment_id
@@ -1708,46 +1762,7 @@ export async function getDriverPerformanceReport(options = {}) {
     `),
   ]);
 
-  const drivers = new Map();
-  rows.rows.forEach((row) => {
-    const driver = row.driver || '';
-    if (!drivers.has(driver)) {
-      drivers.set(driver, {
-        driver,
-        weeklyTrips: 0,
-        monthlyTrips: 0,
-        totalTrips: 0,
-        totalRevenue: 0,
-        totalDriverCommission: 0,
-        paidDriverCommission: 0,
-        unpaidDriverCommission: 0,
-      });
-    }
-
-    const summary = drivers.get(driver);
-    const revenue = calculateCompletedJobRevenue(row);
-    const driverCommission = calculateDriverCommissionAmount(row);
-    const paymentAmount = splitDriverCommissionPaymentAmount(row);
-    summary.weeklyTrips += 1;
-    summary.monthlyTrips += 1;
-    summary.totalTrips += 1;
-    summary.totalRevenue += revenue;
-    summary.totalDriverCommission += driverCommission;
-    summary.paidDriverCommission += paymentAmount.paid;
-    summary.unpaidDriverCommission += paymentAmount.unpaid;
-  });
-
-  const performanceRows = Array.from(drivers.values())
-    .map((row) => ({
-      ...row,
-      averageRevenuePerTrip: row.totalTrips ? row.totalRevenue / row.totalTrips : 0,
-      averageCommissionPerTrip: row.totalTrips ? row.totalDriverCommission / row.totalTrips : 0,
-    }))
-    .sort((left, right) => {
-      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
-      if (right.monthlyTrips !== left.monthlyTrips) return right.monthlyTrips - left.monthlyTrips;
-      return left.driver.localeCompare(right.driver);
-    });
+  const performanceRows = buildDriverPerformanceRows(rows.rows);
 
   return {
     rows: performanceRows,

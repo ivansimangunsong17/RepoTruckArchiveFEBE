@@ -7,6 +7,7 @@ const {
   buildCustomerPerformanceRows,
   buildMonthlyComparisonRows,
   applyUtilizationChassisCorrectionsToRows,
+  buildDriverPerformanceRows,
   buildSalesPerformanceRows,
   calculateCompletedJobRevenue,
   calculateDriverCommissionAmount,
@@ -508,4 +509,88 @@ test('customer performance memecah outstanding jadi klasifikasi bucket umur piut
     customer.currentAmount + customer.overdue1To15Amount + customer.overdue16To30Amount + customer.overdue31To60Amount + customer.overdue60PlusAmount,
     customer.totalOutstandingAmount,
   );
+});
+
+function driverJobRow(overrides = {}) {
+  return {
+    driver_id: 'drv-1',
+    driver_master_name: 'DRIVER ABCD',
+    driver: 'DRIVER ABCD',
+    price: 1000000,
+    total_amount: 1000000,
+    total_containers: 1,
+    has_driver_commission: true,
+    driver_commission_amount: 50000,
+    commission_payment_status: null,
+    ...overrides,
+  };
+}
+
+test('performa sopir: nama sopir diganti di tengah bulan tetap satu baris per driver_id', () => {
+  const rows = buildDriverPerformanceRows([
+    // 1-15 Sep: job di-assign saat nama masih DRIVER ABC (snapshot lama)
+    driverJobRow({ driver: 'DRIVER ABC', completed_date: '2026-09-03' }),
+    driverJobRow({ driver: 'DRIVER ABC', completed_date: '2026-09-12' }),
+    // 16-30 Sep: setelah nama master diganti jadi DRIVER ABCD
+    driverJobRow({ driver: 'DRIVER ABCD', completed_date: '2026-09-20' }),
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].driverId, 'drv-1');
+  assert.equal(rows[0].driver, 'DRIVER ABCD');
+  assert.equal(rows[0].totalTrips, 3);
+  assert.equal(rows[0].monthlyTrips, 3);
+  assert.equal(rows[0].totalRevenue, 3000000);
+  assert.equal(rows[0].totalDriverCommission, 150000);
+});
+
+test('performa sopir: label memakai nama master terkini walau semua snapshot masih nama lama', () => {
+  const rows = buildDriverPerformanceRows([
+    driverJobRow({ driver: 'DRIVER ABC' }),
+    driverJobRow({ driver: 'DRIVER ABC' }),
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].driver, 'DRIVER ABCD');
+});
+
+test('performa sopir: dua driver_id berbeda dengan nama sama tidak digabung', () => {
+  const rows = buildDriverPerformanceRows([
+    driverJobRow({ driver_id: 'drv-1', driver_master_name: 'BUDI', driver: 'BUDI' }),
+    driverJobRow({ driver_id: 'drv-2', driver_master_name: 'BUDI', driver: 'BUDI' }),
+    driverJobRow({ driver_id: 'drv-2', driver_master_name: 'BUDI', driver: 'BUDI' }),
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => [row.driverId, row.totalTrips]).sort(), [['drv-1', 1], ['drv-2', 2]]);
+});
+
+test('performa sopir: job yang di-reassign dihitung ke driver_id terkini, bukan ke sopir lama', () => {
+  const rows = buildDriverPerformanceRows([
+    // job awalnya milik sopir A lalu di-reassign ke sopir B: driver_id & snapshot sudah milik B
+    driverJobRow({ driver_id: 'drv-b', driver_master_name: 'SOPIR B', driver: 'SOPIR B' }),
+    driverJobRow({ driver_id: 'drv-a', driver_master_name: 'SOPIR A', driver: 'SOPIR A' }),
+  ]);
+  assert.deepEqual(rows.map((row) => [row.driver, row.totalTrips]).sort(), [['SOPIR A', 1], ['SOPIR B', 1]]);
+});
+
+test('performa sopir: job lama tanpa driver_id tetap per nama snapshot dan tidak digabung ke sopir master bernama sama', () => {
+  const rows = buildDriverPerformanceRows([
+    driverJobRow({ driver_id: 'drv-1', driver_master_name: 'DRIVER ABCD', driver: 'DRIVER ABCD' }),
+    driverJobRow({ driver_id: null, driver_master_name: null, driver: 'DRIVER ABCD' }),
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.driverId).sort(), ['drv-1', null].sort());
+});
+
+test('performa sopir: total bulanan tetap sama setelah pengelompokan per driver_id', () => {
+  const input = [
+    driverJobRow({ driver: 'DRIVER ABC' }),
+    driverJobRow({ driver: 'DRIVER ABCD', commission_payment_status: 'paid' }),
+    driverJobRow({ driver_id: 'drv-2', driver_master_name: 'SITI', driver: 'SITI', price: 2000000, total_amount: 2000000 }),
+  ];
+  const rows = buildDriverPerformanceRows(input);
+  const sum = (key) => rows.reduce((total, row) => total + row[key], 0);
+  assert.equal(sum('totalTrips'), input.length);
+  assert.equal(sum('totalRevenue'), 4000000);
+  assert.equal(sum('totalDriverCommission'), 150000);
+  assert.equal(sum('paidDriverCommission') + sum('unpaidDriverCommission'), 150000);
 });
