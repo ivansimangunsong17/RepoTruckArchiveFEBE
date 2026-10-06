@@ -1,4 +1,4 @@
-import { LocationMasterPage } from './LocationMasterPage';
+import { LocationMasterPage, MapsCell } from './LocationMasterPage';
 
 function splitDepotName(value = '') {
   const match = String(value).match(/^(.*?)\s*\((.*?)\)\s*$/);
@@ -83,6 +83,9 @@ function DepotsPage({ readOnly = false }) {
           required: true,
         },
         { key: 'address', section: 'Alamat', label: 'Alamat / Area', placeholder: 'Contoh: Marunda, Jakarta Utara', full: true },
+        { key: 'googleMapsUrl', section: 'Peta', label: 'Link Google Maps', type: 'url', placeholder: 'https://maps.google.com/?q=...' },
+        { key: 'latitude', section: 'Peta', label: 'Latitude', type: 'number', step: 'any', placeholder: 'Contoh: -6.123456', hint: 'Opsional, isi bila link Maps tidak tersedia.' },
+        { key: 'longitude', section: 'Peta', label: 'Longitude', type: 'number', step: 'any', placeholder: 'Contoh: 106.123456' },
       ]}
       columns={[
         {
@@ -105,6 +108,13 @@ function DepotsPage({ readOnly = false }) {
           headerClassName: '!w-36 !text-center',
           cellClassName: '!w-36 !text-center',
           render: (value) => <CodeCell value={value} />,
+        },
+        {
+          key: 'maps',
+          label: 'Maps',
+          headerClassName: '!w-20 !text-center',
+          cellClassName: '!w-20 !text-center',
+          render: (_value, row) => <MapsCell row={row} useAddressFallback={false} />,
         },
       ]}
       statusFieldOverride={null}

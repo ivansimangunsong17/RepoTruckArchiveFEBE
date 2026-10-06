@@ -1,4 +1,6 @@
+import { MapPin } from 'lucide-react';
 import MasterDataPage from '../../components/master/MasterDataPage';
+import { resolveGoogleMapsUrl } from '../../utils/googleMapsUrl';
 
 const emptyRows = [];
 
@@ -77,4 +79,33 @@ export function LocationMasterPage({
 
 export function TextCell({ value, strong = false }) {
   return <span className={`master-plain-cell ${strong ? 'strong' : ''}`.trim()}>{value || '-'}</span>;
+}
+
+// Tombol Maps bersama untuk Master Lokasi, Terminal, dan Depo. Fallback pencarian alamat hanya
+// dipakai bila alamatnya cukup spesifik (Master Lokasi); Terminal/Depo hanya link atau koordinat.
+export function MapsCell({ row, useAddressFallback = true }) {
+  const mapsUrl = resolveGoogleMapsUrl({
+    googleMapsUrl: row.googleMapsUrl,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    address: useAddressFallback ? row.address : '',
+  });
+  if (!mapsUrl) {
+    return (
+      <button type="button" className="customer-document-button" disabled title="Belum ada link Maps atau koordinat">
+        <MapPin size={13} />
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="customer-document-button"
+      onClick={() => window.open(mapsUrl, '_blank', 'noopener,noreferrer')}
+      title="Buka lokasi di Google Maps"
+      aria-label="Buka lokasi di Google Maps"
+    >
+      <MapPin size={13} />
+    </button>
+  );
 }
