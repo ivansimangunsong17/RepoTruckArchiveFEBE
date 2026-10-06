@@ -38,7 +38,7 @@ View: `operational_fund_daily_ledger`.
 
 ### customers, end_users, drivers, vehicles, kir_heads, kir_chassis, depots, terminals, destination_locations, stid_masters
 Purpose: master data served by `/api/master/:resource` (mapping in `modules/master/master.mapper.js`: `customers`, `end-users`, `drivers`, `trucks`→`vehicles`, `kir-heads`, `kir-chassis`, `depots`, `terminals`, `destinations`→`destination_locations`, `stids`).
-Notable: `vehicles.default_driver_id → drivers`, `vehicles.current_chassis_id → kir_chassis`, `vehicles.unit_kind`, `vehicles.operational_status` (`Aktif`, `Bertugas`, `Maintenance`, `Tidak Aktif`); `drivers.operational_status` (`Aktif`, `Bertugas`, `Cuti`, `Tidak Aktif`), bank/e-money fields, `nik` unique; `destination_locations.uj_20ft/uj_40ft`, `driver_commission_20ft_amount/40ft_amount`; `end_users.destination_id`, coordinates.
+Notable: `vehicles.default_driver_id → drivers`, `vehicles.current_chassis_id → kir_chassis`, `vehicles.unit_kind`, `vehicles.operational_status` (`Aktif`, `Bertugas`, `Maintenance`, `Tidak Aktif`); `drivers.operational_status` (`Aktif`, `Bertugas`, `Cuti`, `Tidak Aktif`), bank/e-money fields, `nik` unique; `destination_locations.uj_20ft/uj_40ft`, `driver_commission_20ft_amount/40ft_amount`; `end_users.destination_id`, coordinates; `depots`/`terminals` `google_maps_url`, `latitude`, `longitude` (nullable, `202610060001`).
 
 ### driver_commission_batches / _payments / _items / _payment_deductions
 Purpose: weekly commission payout. Batch (`draft|submitted|approved|rejected|paid`, `period_start/end`, `revision_count`) → payment per driver (`bank|emoney`, `pending|paid`, proof attachment) → items per container job (unique active per job) → deductions (`active|void`).
@@ -115,4 +115,4 @@ attachments (entity_type/entity_id: sales_order, container_job, operational_fund
 
 - NEEDS OWNER DECISION: `operational_fund_batches.status = 'under_review'` is allowed by the constraint but not set by code.
 - Exact current `vehicle_documents.document_type` list (expanded in `202607200001`); not re-checked.
-- NEEDS PRODUCTION VERIFICATION: each environment has applied the latest migrations, including `202609180001`–`202609180003` (warehouse locations), `202609260001` (container pickups) and `202609290001` (assignment-history change sources). Check `schema_migrations`.
+- NEEDS PRODUCTION VERIFICATION: each environment has applied the latest migrations, including `202609180001`–`202609180003` (warehouse locations), `202609260001` (container pickups) `202609290001` (assignment-history change sources) and `202610060001` (Terminal/Depo Maps fields). Check `schema_migrations`.

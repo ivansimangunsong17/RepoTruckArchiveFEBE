@@ -1,34 +1,5 @@
-import { MapPin } from 'lucide-react';
 import { useArchiveData } from '../../hooks/useArchiveData';
-import { resolveGoogleMapsUrl } from '../../utils/googleMapsUrl';
-import { LocationMasterPage, TextCell, StatusCell } from './LocationMasterPage';
-
-function MapsCell({ row }) {
-  const mapsUrl = resolveGoogleMapsUrl({
-    googleMapsUrl: row.googleMapsUrl,
-    latitude: row.latitude,
-    longitude: row.longitude,
-    address: row.address,
-  });
-  if (!mapsUrl) {
-    return (
-      <button type="button" className="customer-document-button" disabled title="Belum ada link Maps atau koordinat">
-        <MapPin size={13} />
-      </button>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className="customer-document-button"
-      onClick={() => window.open(mapsUrl, '_blank', 'noopener,noreferrer')}
-      title="Buka lokasi di Google Maps"
-      aria-label="Buka lokasi di Google Maps"
-    >
-      <MapPin size={13} />
-    </button>
-  );
-}
+import { LocationMasterPage, MapsCell, TextCell, StatusCell } from './LocationMasterPage';
 
 function EndUsersPage({ readOnly = false }) {
   const archive = useArchiveData();
@@ -84,13 +55,6 @@ function EndUsersPage({ readOnly = false }) {
           headerClassName: '!text-left',
           cellClassName: '!text-left',
           render: (value) => <TextCell value={value ? destinationsById.get(value)?.name || '' : ''} />,
-        },
-        {
-          key: 'address',
-          label: 'Alamat',
-          headerClassName: '!text-left',
-          cellClassName: '!text-left',
-          render: (value) => <TextCell value={value} />,
         },
         {
           key: 'status',

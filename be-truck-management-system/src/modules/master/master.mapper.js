@@ -6,6 +6,24 @@ function toNullableNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function locationFieldsToApi(row) {
+  return {
+    googleMapsUrl: row.google_maps_url || '',
+    latitude: row.latitude == null ? null : Number(row.latitude),
+    longitude: row.longitude == null ? null : Number(row.longitude),
+  };
+}
+
+// Field yang tidak dikirim tetap undefined (tidak ditulis ulang), supaya klien lama yang belum
+// mengenal field Maps tidak mengosongkan link/koordinat yang sudah tersimpan.
+function locationFieldsToDb(row) {
+  return {
+    google_maps_url: row.googleMapsUrl === undefined ? undefined : row.googleMapsUrl || null,
+    latitude: row.latitude === undefined ? undefined : toNullableNumber(row.latitude),
+    longitude: row.longitude === undefined ? undefined : toNullableNumber(row.longitude),
+  };
+}
+
 export const resourceConfig = {
   customers: {
     table: 'customers',
@@ -318,6 +336,7 @@ export const resourceConfig = {
       status: row.operational_status || 'Aktif',
       depotType: row.depot_type || 'destination',
       notes: row.notes || '',
+      ...locationFieldsToApi(row),
     }),
     toDb: (row) => ({
       name: row.name,
@@ -327,6 +346,7 @@ export const resourceConfig = {
       operational_status: row.status || 'Aktif',
       depot_type: row.depotType || 'destination',
       notes: row.notes || null,
+      ...locationFieldsToDb(row),
     }),
   },
   terminals: {
@@ -342,6 +362,7 @@ export const resourceConfig = {
       portArea: row.port_area || '',
       status: row.operational_status || 'Aktif',
       notes: row.notes || '',
+      ...locationFieldsToApi(row),
     }),
     toDb: (row) => ({
       name: row.name,
@@ -349,6 +370,7 @@ export const resourceConfig = {
       port_area: row.portArea || null,
       operational_status: row.status || 'Aktif',
       notes: row.notes || null,
+      ...locationFieldsToDb(row),
     }),
   },
   destinations: {

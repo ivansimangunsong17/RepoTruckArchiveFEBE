@@ -12,7 +12,7 @@ Implemented in backend routes + frontend pages, with unit tests:
 - Container job expenses + auto UJ (reefer surcharge) + Rekening Dropping (requests, deposits, daily batches with carry-forward, reconciliation, multi transfer proofs)
 - Finance: SO number verification, invoice number/documents, payments (incl. bulk customer allocation, proof optional), voids, revenue lines, debit notes, customer outstanding (+ CSV export), finance corrections, completed trips, billing readiness. The invoice detail shows container numbers and per-container inap badges (in production since Batch 1).
 - Driver commissions: weekly Sunday–Saturday batches, approval, payment, deductions, void, CSV export, driver-alias resolution. The Operational page shows the payout account and the last 9 weekly periods (in production since Batch 2; account numbers visible to admin, operational and sales users by owner approval, 2026-10-05).
-- Master data (10 resources), vehicle documents with expiry monitoring, fleet assignment (default driver, chassis) with history, warehouse locations (`GET /api/locations`, maps fields)
+- Master data (10 resources), vehicle documents with expiry monitoring, fleet assignment (default driver, chassis) with history, warehouse locations (`GET /api/locations`, maps fields). Development only: Terminal and Depo have Maps link/coordinates and a Maps column; the Master Lokasi table no longer shows Alamat (migration `202610060001`)
 - Historical entry with period locks
 - Reports (sales, revenue, operations, documents, driver performance, input monitoring), truck utilization with historical chassis, activity log with location and commission events (in production since Batch 1)
 - Storage trash/restore, backup lock, Hino telematics sync + live positions
