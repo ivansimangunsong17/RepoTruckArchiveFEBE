@@ -1,7 +1,7 @@
 import { formatCurrency } from '../../../utils/formatCurrency';
 import CorrectionHistoryList from '../shared/CorrectionHistoryList';
 import DetailField from '../shared/DetailField';
-import { isCancelledFinanceOrder } from './orderVerificationUtils';
+import { buildContainerQuantityComparison, isCancelledFinanceOrder } from './orderVerificationUtils';
 
 function OrderDetailModal({ order, corrections = [], correctionsLoading = false, correctionsError = '', canRequestCorrection = false, onClose, onOpenCorrection }) {
   if (!order) return null;
@@ -9,6 +9,7 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
   const isCancelled = isCancelledFinanceOrder(order);
   const priceItems = Array.isArray(order.lineItems) ? order.lineItems.filter((item) => item.serviceName || item.price || item.total) : [];
   const priceTotal = Number(order.totalAmount || priceItems.reduce((sum, item) => sum + Number(item.total || 0), 0) || order.price || 0);
+  const containerComparison = buildContainerQuantityComparison(order);
 
   return (
     <div className="finance-order-detail-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" role="presentation" onMouseDown={onClose}>
@@ -33,7 +34,23 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
             <DetailField label="PIC Customer" value={order.customerPic} />
             <DetailField label="Kontak" value={order.customerPhone} />
             <DetailField label="Tujuan" value={order.destination} />
-            <DetailField label="Container" value={order.container} />
+            {containerComparison.orderLabel ? <DetailField label="Qty Order" value={containerComparison.orderLabel} /> : null}
+            <DetailField
+              label="Container Aktif"
+              value={(
+                <>
+                  <span className="block">{containerComparison.activeLabel || order.container || '-'}</span>
+                  {containerComparison.isMismatch ? (
+                    <span
+                      className="mt-1 inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase text-amber-700"
+                      title="Jumlah container job aktif berbeda dengan qty order Sales (mis. ada container batal atau qty diubah setelah job berjalan)."
+                    >
+                      Selisih dengan order
+                    </span>
+                  ) : null}
+                </>
+              )}
+            />
             <DetailField label="Nama Kapal" value={order.vesselName} />
             <DetailField label="Terminal" value={order.terminal} />
             <DetailField label="Depo" value={order.depo} />
@@ -58,7 +75,7 @@ function OrderDetailModal({ order, corrections = [], correctionsLoading = false,
                   <thead className="bg-slate-100 text-[10px] font-black uppercase text-slate-500">
                     <tr>
                       <th className="px-3 py-2">Layanan</th>
-                      <th className="px-3 py-2 text-right">Qty</th>
+                      <th className="px-3 py-2 text-right">Qty Order</th>
                       <th className="px-3 py-2 text-right">Harga</th>
                       <th className="px-3 py-2 text-right">Total</th>
                     </tr>

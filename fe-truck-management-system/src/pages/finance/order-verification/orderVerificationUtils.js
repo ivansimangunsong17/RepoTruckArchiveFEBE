@@ -39,6 +39,39 @@ function orderVerificationStatusParam(tabId) {
   return 'pending_so';
 }
 
+function toNullableCount(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatContainerSizes(qty20, qty40) {
+  const parts = [];
+  if (qty20) parts.push(`${qty20} x 20FT`);
+  if (qty40) parts.push(`${qty40} x 40FT`);
+  return parts.join(', ');
+}
+
+// Qty order (line item Jasa Angkut D20/D40 dari Sales) vs container job aktif (bukan cancelled)
+// dibandingkan per ukuran. Hanya ditandai selisih kalau kedua sisi datanya tersedia; SO lama tanpa
+// line item D20/D40 atau data tanpa hitungan job tidak dibandingkan agar tidak muncul selisih palsu.
+function buildContainerQuantityComparison(order = {}) {
+  const lineItems = Array.isArray(order.lineItems) ? order.lineItems : [];
+  const sizedItems = lineItems.filter((item) => item.serviceName === 'Jasa Angkut D20' || item.serviceName === 'Jasa Angkut D40');
+  const ordered20 = sizedItems.filter((item) => item.serviceName === 'Jasa Angkut D20').reduce((total, item) => total + Number(item.qty || 0), 0);
+  const ordered40 = sizedItems.filter((item) => item.serviceName === 'Jasa Angkut D40').reduce((total, item) => total + Number(item.qty || 0), 0);
+  const active20 = toNullableCount(order.activeContainer20Qty);
+  const active40 = toNullableCount(order.activeContainer40Qty);
+  const hasOrder = sizedItems.length > 0;
+  const hasActive = active20 !== null && active40 !== null;
+
+  return {
+    orderLabel: hasOrder ? formatContainerSizes(ordered20, ordered40) || '0' : '',
+    activeLabel: hasActive ? formatContainerSizes(active20, active40) || 'Tidak ada container aktif' : '',
+    isMismatch: hasOrder && hasActive && !isCancelledFinanceOrder(order) && (ordered20 !== active20 || ordered40 !== active40),
+  };
+}
+
 function normalizeFinanceOrderRow(row = {}) {
   const isCancelled = isCancelledFinanceOrder(row);
   const accurateSoNumber = row.accurateSoNumber || row.soNumber || '';
@@ -68,6 +101,8 @@ function normalizeFinanceOrderRow(row = {}) {
     lineItems,
     runningDate: formatDisplayDate(row.runningDate),
     container: row.container || '-',
+    activeContainer20Qty: toNullableCount(row.activeContainer20Qty),
+    activeContainer40Qty: toNullableCount(row.activeContainer40Qty),
     vesselName: row.vesselName || '-',
     terminal: row.terminal || '-',
     depo: row.depo || row.origin || '-',
@@ -88,6 +123,7 @@ function normalizeFinanceOrderRow(row = {}) {
 
 export {
   ORDER_TABLE_PAGE_SIZE,
+  buildContainerQuantityComparison,
   isCancelledFinanceOrder,
   isVerifiedFinanceOrder,
   normalizeFinanceOrderRow,
