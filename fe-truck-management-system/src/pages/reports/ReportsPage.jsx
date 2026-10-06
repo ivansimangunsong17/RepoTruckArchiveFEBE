@@ -1037,10 +1037,13 @@ export function buildMonthlyDriverUtilizationPivot(masterDrivers = [], rows = []
     driver.totalTrips += 1;
   });
 
-  const rowsByDriver = Array.from(drivers.values()).sort((left, right) => {
-    if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
-    return left.driver.localeCompare(right.driver);
-  });
+  // Sopir master tanpa ritasi pada bulan ini tidak ditampilkan; totalnya 0 jadi total tidak berubah.
+  const rowsByDriver = Array.from(drivers.values())
+    .filter((driver) => driver.totalTrips > 0)
+    .sort((left, right) => {
+      if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+      return left.driver.localeCompare(right.driver);
+    });
 
   return {
     days,
@@ -1102,11 +1105,14 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
     driver.averageCommissionPerTrip = Number(row.averageCommissionPerTrip || (driver.totalTrips ? driver.totalDriverCommission / driver.totalTrips : 0));
   });
 
-  return Array.from(drivers.values()).sort((left, right) => {
-    if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
-    if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
-    return left.driver.localeCompare(right.driver);
-  });
+  // Hanya sopir yang punya trip pada periode terpilih yang ditampilkan.
+  return Array.from(drivers.values())
+    .filter((driver) => driver.totalTrips > 0)
+    .sort((left, right) => {
+      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+      if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+      return left.driver.localeCompare(right.driver);
+    });
 }
 
 function repoStoredDate(row = {}) {
