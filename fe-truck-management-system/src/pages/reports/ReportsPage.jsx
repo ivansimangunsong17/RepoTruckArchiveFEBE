@@ -217,6 +217,14 @@ function getDriverName(row = {}) {
   return String(row.driver || row.defaultDriver || row.defaultDriverName || row.name || 'Sopir belum diisi').trim() || 'Sopir belum diisi';
 }
 
+// Laporan sopir dikelompokkan per driver_id, bukan per teks nama: nama di snapshot job dibekukan
+// saat assignment, jadi sopir yang namanya diedit di tengah bulan akan punya dua nama berbeda.
+// Hanya data lama tanpa driver_id yang tetap memakai nama sebagai kunci (tidak pernah digabung
+// ke sopir master hanya karena namanya sama).
+function driverIdentityKey(driverId, name) {
+  return driverId ? `id:${driverId}` : `name:${name}`;
+}
+
 function monthKey(month, year) {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
@@ -985,9 +993,12 @@ export function buildMonthlyDriverUtilizationPivot(masterDrivers = [], rows = []
 
   masterDrivers.forEach((driver) => {
     const name = getDriverName(driver);
-    if (!drivers.has(name)) {
-      drivers.set(name, {
+    const key = driverIdentityKey(driver.id, name);
+    if (!drivers.has(key)) {
+      drivers.set(key, {
+        driverId: driver.id || null,
         driver: name,
+        fromMaster: true,
         cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
         totalTrips: 0,
       });
@@ -1001,15 +1012,24 @@ export function buildMonthlyDriverUtilizationPivot(masterDrivers = [], rows = []
     if (!dayKeys.has(dateKey)) return;
 
     const name = getDriverName(row);
-    if (!drivers.has(name)) {
-      drivers.set(name, {
+    const key = driverIdentityKey(row.driverId, name);
+    if (!drivers.has(key)) {
+      drivers.set(key, {
+        driverId: row.driverId || null,
         driver: name,
+        fromMaster: false,
+        latestDateKey: dateKey,
         cells: days.reduce((cells, day) => ({ ...cells, [day.key]: { count: 0, labels: [] } }), {}),
         totalTrips: 0,
       });
     }
 
-    const driver = drivers.get(name);
+    const driver = drivers.get(key);
+    // Sopir yang tidak ada di daftar master (mis. sudah diarsipkan) memakai nama snapshot terbaru.
+    if (!driver.fromMaster && dateKey >= (driver.latestDateKey || '')) {
+      driver.driver = name;
+      driver.latestDateKey = dateKey;
+    }
     const cell = driver.cells[dateKey];
     cell.count += 1;
     const label = compactCellLabel(row);
@@ -1039,8 +1059,10 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
 
   masterDrivers.forEach((driver) => {
     const name = getDriverName(driver);
-    if (!drivers.has(name)) {
-      drivers.set(name, {
+    const key = driverIdentityKey(driver.id, name);
+    if (!drivers.has(key)) {
+      drivers.set(key, {
+        driverId: driver.id || null,
         driver: name,
         totalTrips: 0,
         totalRevenue: 0,
@@ -1055,8 +1077,10 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
 
   performanceRows.forEach((row) => {
     const name = getDriverName(row);
-    if (!drivers.has(name)) {
-      drivers.set(name, {
+    const key = driverIdentityKey(row.driverId, name);
+    if (!drivers.has(key)) {
+      drivers.set(key, {
+        driverId: row.driverId || null,
         driver: name,
         totalTrips: 0,
         totalRevenue: 0,
@@ -1068,7 +1092,7 @@ export function buildDriverPerformanceRows(masterDrivers = [], performanceRows =
       });
     }
 
-    const driver = drivers.get(name);
+    const driver = drivers.get(key);
     driver.totalTrips = Number(row.monthlyTrips ?? row.totalTrips ?? 0);
     driver.totalRevenue = Number(row.totalRevenue || 0);
     driver.totalDriverCommission = Number(row.totalDriverCommission || 0);
@@ -2697,7 +2721,7 @@ export function DriverMonthlyUtilizationModal({
               </thead>
               <tbody>
                 {pivot.rows.map((driver, index) => (
-                  <tr key={driver.driver} className="odd:bg-white even:bg-slate-50/80">
+                  <tr key={driver.driverId || driver.driver} className="odd:bg-white even:bg-slate-50/80">
                     <td className="sticky left-0 z-10 min-w-[34px] border-x border-slate-200 border-b border-b-slate-400 bg-inherit px-1 py-0.5 text-center font-black text-slate-700 shadow-[inset_0_-1px_0_#94a3b8]">
                       {index + 1}
                     </td>
@@ -3939,7 +3963,7 @@ function ReportsPage() {
               ]}
               rows={driverRows}
               rowRenderer={(driver, index) => (
-                <tr key={driver.driver} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                <tr key={driver.driverId || driver.driver} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
                   <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
                   <td className="px-3 py-2 font-semibold text-slate-950" data-label="Sopir">{driver.driver}</td>
                   <td className="px-3 py-2 text-right" data-label="Jumlah Trip">

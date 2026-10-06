@@ -29,11 +29,12 @@ describe('buildDriverPerformanceRows', () => {
   it('menggunakan monthlyTrips 0 tanpa jatuh ke totalTrips lama', () => {
     const rows = buildDriverPerformanceRows(
       [{ id: 'driver-1', name: 'Budi' }],
-      [{ driver: 'Budi', monthlyTrips: 0, totalTrips: 12 }],
+      [{ driverId: 'driver-1', driver: 'Budi', monthlyTrips: 0, totalTrips: 12 }],
     );
 
     expect(rows).toEqual([
       {
+        driverId: 'driver-1',
         driver: 'Budi',
         totalTrips: 0,
         totalRevenue: 0,
@@ -49,11 +50,12 @@ describe('buildDriverPerformanceRows', () => {
   it('tetap memakai monthlyTrips saat bernilai positif', () => {
     const rows = buildDriverPerformanceRows(
       [{ id: 'driver-1', name: 'Budi' }],
-      [{ driver: 'Budi', monthlyTrips: 4, totalTrips: 12 }],
+      [{ driverId: 'driver-1', driver: 'Budi', monthlyTrips: 4, totalTrips: 12 }],
     );
 
     expect(rows).toEqual([
       {
+        driverId: 'driver-1',
         driver: 'Budi',
         totalTrips: 4,
         totalRevenue: 0,
@@ -70,13 +72,14 @@ describe('buildDriverPerformanceRows', () => {
     const rows = buildDriverPerformanceRows(
       [{ id: 'driver-1', name: 'Budi' }, { id: 'driver-2', name: 'Agus' }],
       [
-        { driver: 'Budi', monthlyTrips: 2, totalRevenue: 6000000, totalDriverCommission: 100000, averageRevenuePerTrip: 3000000, averageCommissionPerTrip: 50000 },
-        { driver: 'Agus', monthlyTrips: 3, totalRevenue: 4500000, totalDriverCommission: 120000, averageRevenuePerTrip: 1500000 },
+        { driverId: 'driver-1', driver: 'Budi', monthlyTrips: 2, totalRevenue: 6000000, totalDriverCommission: 100000, averageRevenuePerTrip: 3000000, averageCommissionPerTrip: 50000 },
+        { driverId: 'driver-2', driver: 'Agus', monthlyTrips: 3, totalRevenue: 4500000, totalDriverCommission: 120000, averageRevenuePerTrip: 1500000 },
       ],
     );
 
     expect(rows).toEqual([
       {
+        driverId: 'driver-1',
         driver: 'Budi',
         totalTrips: 2,
         totalRevenue: 6000000,
@@ -87,6 +90,7 @@ describe('buildDriverPerformanceRows', () => {
         averageCommissionPerTrip: 50000,
       },
       {
+        driverId: 'driver-2',
         driver: 'Agus',
         totalTrips: 3,
         totalRevenue: 4500000,
@@ -97,6 +101,28 @@ describe('buildDriverPerformanceRows', () => {
         averageCommissionPerTrip: 40000,
       },
     ]);
+  });
+});
+
+describe('buildDriverPerformanceRows identitas sopir', () => {
+  it('memakai nama master terkini untuk driver_id yang sama walau API membawa nama lama', () => {
+    const rows = buildDriverPerformanceRows(
+      [{ id: 'drv-1', name: 'DRIVER ABCD' }],
+      [{ driverId: 'drv-1', driver: 'DRIVER ABC', monthlyTrips: 5, totalRevenue: 5000000 }],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ driverId: 'drv-1', driver: 'DRIVER ABCD', totalTrips: 5, totalRevenue: 5000000 });
+  });
+
+  it('dua sopir berbeda dengan nama sama tetap dua baris', () => {
+    const rows = buildDriverPerformanceRows(
+      [{ id: 'drv-1', name: 'BUDI' }, { id: 'drv-2', name: 'BUDI' }],
+      [
+        { driverId: 'drv-1', driver: 'BUDI', monthlyTrips: 1 },
+        { driverId: 'drv-2', driver: 'BUDI', monthlyTrips: 2 },
+      ],
+    );
+    expect(rows.map((row) => [row.driverId, row.totalTrips]).sort()).toEqual([['drv-1', 1], ['drv-2', 2]]);
   });
 });
 
@@ -366,10 +392,10 @@ describe('buildMonthlyDriverUtilizationPivot', () => {
         { id: 'driver-2', name: 'Agus' },
       ],
       [
-        { driver: 'Budi', completedAt: '2026-07-01T10:00:00.000Z', destination: 'Jakarta', status: 'completed' },
-        { driver: 'Budi', completedAt: '2026-07-01T16:00:00.000Z', destination: 'Bekasi', status: 'completed' },
-        { driver: 'Agus', completedDate: '2026-07-02', destination: 'Cilegon', status: 'completed' },
-        { driver: 'Agus', completedDate: '2026-07-02', destination: 'Cilegon', status: 'cancelled' },
+        { driverId: 'driver-1', driver: 'Budi', completedAt: '2026-07-01T10:00:00.000Z', destination: 'Jakarta', status: 'completed' },
+        { driverId: 'driver-1', driver: 'Budi', completedAt: '2026-07-01T16:00:00.000Z', destination: 'Bekasi', status: 'completed' },
+        { driverId: 'driver-2', driver: 'Agus', completedDate: '2026-07-02', destination: 'Cilegon', status: 'completed' },
+        { driverId: 'driver-2', driver: 'Agus', completedDate: '2026-07-02', destination: 'Cilegon', status: 'cancelled' },
       ],
       7,
       2026,
@@ -389,6 +415,47 @@ describe('buildMonthlyDriverUtilizationPivot', () => {
     expect(pivot.totalsByDay['2026-07-01']).toBe(2);
     expect(pivot.totalsByDay['2026-07-02']).toBe(1);
     expect(pivot.grandTotal).toBe(3);
+  });
+});
+
+describe('buildMonthlyDriverUtilizationPivot identitas sopir', () => {
+  const masters = [{ id: 'drv-1', name: 'DRIVER ABCD' }, { id: 'drv-2', name: 'SITI' }];
+
+  it('nama sopir diganti di tengah bulan tetap satu baris dengan nama master terkini', () => {
+    const pivot = buildMonthlyDriverUtilizationPivot(masters, [
+      { driverId: 'drv-1', driver: 'DRIVER ABC', completedDate: '2026-09-03', status: 'completed' },
+      { driverId: 'drv-1', driver: 'DRIVER ABC', completedDate: '2026-09-12', status: 'completed' },
+      { driverId: 'drv-1', driver: 'DRIVER ABCD', completedDate: '2026-09-20', status: 'completed' },
+      { driverId: 'drv-2', driver: 'SITI', completedDate: '2026-09-20', status: 'completed' },
+    ], 9, 2026);
+
+    const abcd = pivot.rows.filter((row) => row.driverId === 'drv-1');
+    expect(abcd).toHaveLength(1);
+    expect(abcd[0].driver).toBe('DRIVER ABCD');
+    expect(abcd[0].totalTrips).toBe(3);
+    expect(abcd[0].cells['2026-09-03'].count).toBe(1);
+    expect(abcd[0].cells['2026-09-20'].count).toBe(1);
+    expect(pivot.rows.some((row) => row.driver === 'DRIVER ABC')).toBe(false);
+    expect(pivot.grandTotal).toBe(4);
+    expect(pivot.totalsByDay['2026-09-20']).toBe(2);
+  });
+
+  it('dua driver_id berbeda dengan nama snapshot sama tidak digabung', () => {
+    const pivot = buildMonthlyDriverUtilizationPivot([], [
+      { driverId: 'drv-7', driver: 'BUDI', completedDate: '2026-09-05', status: 'completed' },
+      { driverId: 'drv-8', driver: 'BUDI', completedDate: '2026-09-05', status: 'completed' },
+    ], 9, 2026);
+    expect(pivot.rows).toHaveLength(2);
+    expect(pivot.grandTotal).toBe(2);
+  });
+
+  it('sopir yang tidak ada di master memakai nama snapshot terbaru', () => {
+    const pivot = buildMonthlyDriverUtilizationPivot([], [
+      { driverId: 'drv-9', driver: 'NAMA BARU', completedDate: '2026-09-25', status: 'completed' },
+      { driverId: 'drv-9', driver: 'NAMA LAMA', completedDate: '2026-09-02', status: 'completed' },
+    ], 9, 2026);
+    expect(pivot.rows).toHaveLength(1);
+    expect(pivot.rows[0]).toMatchObject({ driver: 'NAMA BARU', totalTrips: 2 });
   });
 });
 
