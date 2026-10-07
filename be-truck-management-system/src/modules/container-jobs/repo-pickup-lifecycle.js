@@ -24,23 +24,30 @@ export async function lockRepoPickupMovementForJob(client, jobId) {
   return result.rows[0] || null;
 }
 
+// Lifecycle movement Repo yang masih running, dihitung ulang setiap kali job terkait berubah:
+// - masih ada job non-terminal -> tetap running;
+// - semua job terminal (completed/cancelled) dan perjalanan fisik sudah dimulai (started_at
+//   terisi) -> completed, walau semua job-nya cancelled: trip Repo-nya sudah terjadi;
+// - cancelled hanya untuk movement lama yang belum pernah dimulai (started_at kosong) dan
+//   semua job-nya cancelled.
+// started_at dibaca dari baris movement sendiri, bukan dari objek pemanggil.
 export async function reconcileRepoPickupMovement(client, movement) {
   if (!movement || movement.status !== 'running') return movement;
   const result = await client.query(`
     select count(*)::int as total,
       count(*) filter (where cj.status = 'completed')::int as completed,
       count(*) filter (where cj.status = 'cancelled')::int as cancelled,
-      max(cj.completed_at) as last_completed_at
+      max(cj.completed_at) as last_completed_at,
+      (select cpm.started_at is not null from container_pickup_movements cpm where cpm.id = $1) as started
     from container_pickup_items cpi
     join container_jobs cj on cj.id = cpi.container_job_id
     where cpi.movement_id = $1
   `, [movement.id]);
-  const { total, completed, cancelled, last_completed_at: lastCompletedAt } = result.rows[0] || {};
-  if (!total) return movement;
-  let nextStatus = '';
-  if (cancelled === total) nextStatus = 'cancelled';
-  else if (completed > 0 && completed + cancelled === total) nextStatus = 'completed';
-  if (!nextStatus) return movement;
+  const {
+    total, completed, cancelled, last_completed_at: lastCompletedAt, started,
+  } = result.rows[0] || {};
+  if (!total || completed + cancelled !== total) return movement;
+  const nextStatus = started || completed > 0 ? 'completed' : 'cancelled';
   const updated = await client.query(`
     update container_pickup_movements
     set status = $2,

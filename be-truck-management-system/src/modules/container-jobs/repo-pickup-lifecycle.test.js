@@ -6,8 +6,13 @@ import {
   requirePhysicalRepoPickup,
 } from './repo-pickup-lifecycle.js';
 
-function lifecycleClient(jobStatuses, initialStatus = 'running') {
-  const movement = { id: 'movement-1', status: initialStatus, completed_at: null };
+function lifecycleClient(jobStatuses, initialStatus = 'running', { started = true } = {}) {
+  const movement = {
+    id: 'movement-1',
+    status: initialStatus,
+    started_at: started ? '2026-10-07T08:00:00.000Z' : null,
+    completed_at: null,
+  };
   const jobs = jobStatuses.map((status, index) => ({ id: `job-${index + 1}`, status }));
   let updates = 0;
   const client = {
@@ -21,14 +26,15 @@ function lifecycleClient(jobStatuses, initialStatus = 'running') {
           total: jobs.length,
           completed: jobs.filter((job) => job.status === 'completed').length,
           cancelled: jobs.filter((job) => job.status === 'cancelled').length,
-          last_completed_at: '2026-10-07T10:00:00.000Z',
+          last_completed_at: jobs.some((job) => job.status === 'completed') ? '2026-10-07T10:00:00.000Z' : null,
+          started: movement.started_at !== null,
         }] };
       }
       if (sql.includes('update container_pickup_movements')) {
         assert.equal(params[0], movement.id);
         if (movement.status !== 'running') return { rows: [] };
         movement.status = params[1];
-        movement.completed_at = movement.status === 'completed' ? params[2] : null;
+        movement.completed_at = movement.status === 'completed' ? (params[2] || 'now()') : null;
         updates += 1;
         return { rows: [{ ...movement }] };
       }
@@ -69,19 +75,21 @@ test('combo first completion remains running; second completion closes one movem
   assert.equal(state.updates, 1);
 });
 
+// Movement yang sudah dimulai (pickup fisik terkonfirmasi, started_at terisi).
 for (const { jobs, expected } of [
-  { jobs: ['completed', 'cancelled'], expected: 'completed' },
-  { jobs: ['cancelled', 'cancelled'], expected: 'cancelled' },
-  { jobs: ['completed', 'running'], expected: 'running' },
   { jobs: ['completed', 'completed'], expected: 'completed' },
+  { jobs: ['completed', 'cancelled'], expected: 'completed' },
+  { jobs: ['cancelled', 'cancelled'], expected: 'completed' },
+  { jobs: ['completed', 'running'], expected: 'running' },
+  { jobs: ['cancelled', 'running'], expected: 'running' },
 ]) {
-  test(`combo ${jobs.join(' + ')} resolves to ${expected}`, async () => {
+  test(`started combo ${jobs.join(' + ')} resolves to ${expected}`, async () => {
     const state = lifecycleClient(jobs);
     const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[1].id);
     assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, expected);
     assert.equal(state.updates, expected === 'running' ? 0 : 1);
-    assert.equal(state.movement.completed_at,
-      expected === 'completed' ? '2026-10-07T10:00:00.000Z' : null);
+    assert.equal(Boolean(state.movement.completed_at), expected === 'completed');
+    // Idempotent: reconcile ulang tidak menulis lagi.
     assert.equal((await reconcileRepoPickupMovement(state.client, {
       id: state.movement.id, status: state.movement.status,
     })).status, expected);
@@ -89,16 +97,36 @@ for (const { jobs, expected } of [
   });
 }
 
-test('all linked jobs cancelled cancels the movement; repeated cancellation is safe', async () => {
+test('started movement whose linked jobs are all cancelled after pickup completes, never cancels', async () => {
   const state = lifecycleClient(['cancelled', 'running']);
   let locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
   assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'running');
   state.jobs[1].status = 'cancelled';
   locked = await lockRepoPickupMovementForJob(state.client, state.jobs[1].id);
+  assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'completed');
+  assert.equal(state.updates, 1);
+
+  // Pemanggil yang tidak membawa started_at tetap tidak bisa membuat trip yang sudah jalan jadi cancelled.
+  const bare = lifecycleClient(['cancelled', 'cancelled']);
+  assert.equal((await reconcileRepoPickupMovement(bare.client, { id: bare.movement.id, status: 'running' })).status, 'completed');
+  assert.notEqual(bare.movement.status, 'cancelled');
+});
+
+test('legacy movement without started_at and all jobs cancelled is cancelled (trip never happened)', async () => {
+  const state = lifecycleClient(['cancelled', 'cancelled'], 'running', { started: false });
+  const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
   assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'cancelled');
-  locked = await lockRepoPickupMovementForJob(state.client, state.jobs[1].id);
+  assert.equal(state.movement.completed_at, null);
+  locked.status = state.movement.status;
   assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'cancelled');
   assert.equal(state.updates, 1);
+});
+
+test('cancelled movement is terminal and is not revived by reconciliation', async () => {
+  const state = lifecycleClient(['completed'], 'cancelled');
+  const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
+  assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'cancelled');
+  assert.equal(state.updates, 0);
 });
 
 test('completed movement cannot revert to running or cancelled on later reconciliation', async () => {
