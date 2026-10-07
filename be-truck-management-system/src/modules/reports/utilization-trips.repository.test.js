@@ -20,7 +20,7 @@ test('utilization query reads one original leg and one row per pickup movement',
           plate_number: 'A', driver: 'Original Driver', container_number: 'CONT-A',
         },
         {
-          id: 'repo:movement-1', movement_id: 'movement-1', trip_source: 'repo_pickup',
+          id: 'repo:movement-1', movement_id: 'movement-1', trip_source: 'repo_pickup', status: 'completed',
           trip_date: '2026-10-02', vehicle_id: 'truck-c', driver_id: 'driver-c',
           plate_number: 'C', driver: 'Repo Driver', container_number: 'CONT-A, CONT-B',
         },
@@ -33,10 +33,11 @@ test('utilization query reads one original leg and one row per pickup movement',
   assert.match(sql, /coalesce\(cj\.repo_released_driver_id, history\.previous_driver_id, cj\.driver_id\)/);
   assert.match(sql, /from container_pickup_movements cpm/);
   assert.match(sql, /join lateral \([\s\S]*from container_pickup_items cpi/);
-  assert.match(sql, /cpm\.status <> 'cancelled'/);
+  assert.match(sql, /where cpm\.status <> 'cancelled' and cpm\.started_at is not null/);
   assert.deepEqual(rows.map((row) => [row.id, row.vehicleId, row.driverId]), [
     ['job:job-1', 'truck-a', 'driver-a'],
     ['repo:movement-1', 'truck-c', 'driver-c'],
   ]);
   assert.equal(rows[1].containerNumber, 'CONT-A, CONT-B');
+  assert.equal(rows[1].status, 'completed');
 });

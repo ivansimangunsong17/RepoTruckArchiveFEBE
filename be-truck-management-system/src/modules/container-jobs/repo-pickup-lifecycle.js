@@ -38,8 +38,8 @@ export async function reconcileRepoPickupMovement(client, movement) {
   const { total, completed, cancelled, last_completed_at: lastCompletedAt } = result.rows[0] || {};
   if (!total) return movement;
   let nextStatus = '';
-  if (completed === total) nextStatus = 'completed';
-  else if (cancelled === total) nextStatus = 'cancelled';
+  if (cancelled === total) nextStatus = 'cancelled';
+  else if (completed > 0 && completed + cancelled === total) nextStatus = 'completed';
   if (!nextStatus) return movement;
   const updated = await client.query(`
     update container_pickup_movements
