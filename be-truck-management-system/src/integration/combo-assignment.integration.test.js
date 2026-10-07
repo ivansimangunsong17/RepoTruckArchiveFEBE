@@ -46,6 +46,7 @@ if (!databaseUrl) {
       container_number: `CMB${nextTag()}`.padEnd(11, '0').slice(0, 11),
       container_size: '20FT',
       repo_location: `Repo Combo ${tag}`,
+      repo_eir_number: `EIR-TITIP-${tag}`,
       driver_id: null,
       vehicle_id: null,
       assignment_group_id: null,
@@ -241,5 +242,82 @@ if (!databaseUrl) {
 
     const unrelated = await createJob('received');
     await assert.rejects(updateContainerJob(unrelated.id, form), { code: 'ASSIGNMENT_ALREADY_ACTIVE' });
+  });
+
+  // --- Validasi ukuran truck vs container setelah pickup ---
+
+  function routineForm(driver, vehicle, extra = {}) {
+    return {
+      status: 'running',
+      driverId: driver.id,
+      vehicleId: vehicle.id,
+      driver: driver.name,
+      plateNumber: vehicle.plate_number,
+      updatedBy: 'Integration Test',
+      ...extra,
+    };
+  }
+
+  async function attachCompletionDocuments(jobId) {
+    for (const category of ['spkDocument', 'eirDocument', 'repoEirDocument']) {
+      await cloneRow('attachments', 'select * from attachments order by created_at limit 1', {
+        entity_type: 'container_job', entity_id: jobId, category,
+      });
+    }
+  }
+
+  test('9. job biasa 20FT dengan truck 40FT tetap ditolak', async () => {
+    const job = await createJob('received');
+    const driver = await createDriver();
+    const vehicle = await createVehicle('40FT');
+    await assert.rejects(updateContainerJob(job.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
+  });
+
+  test('10. Repo single 20FT dengan truck 40FT: aturan lama tetap (update biasa ditolak)', async () => {
+    const job = await createJob();
+    const driver = await createDriver();
+    const vehicle = await createVehicle('40FT');
+    await pickupSingleRepoContainerJob(job.id, {
+      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
+    });
+    await assert.rejects(updateContainerJob(job.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
+  });
+
+  test('11. combo 2x20 dengan truck 40FT: kedua job bisa di-update dan diselesaikan normal', async () => {
+    const { jobs, driver, vehicle, movement } = await startCombo();
+    for (const job of jobs) {
+      await updateContainerJob(job.id, routineForm(driver, vehicle));
+    }
+    for (const job of jobs) {
+      await attachCompletionDocuments(job.id);
+      await updateContainerJob(job.id, routineForm(driver, vehicle, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+      }));
+    }
+    const rows = await query('select status from container_jobs where id = any($1::uuid[])', [jobs.map((job) => job.id)]);
+    assert.deepEqual(rows.rows.map((row) => row.status), ['completed', 'completed']);
+    const movementRow = await query('select status from container_pickup_movements where id = $1', [movement.id]);
+    assert.equal(movementRow.rows[0].status, 'completed');
+  });
+
+  test('12. job combo yang dipindah ke truck 40FT lain (di luar combo) kembali divalidasi normal', async () => {
+    const { jobs, driver } = await startCombo();
+    const otherTruck = await createVehicle('40FT');
+    await assert.rejects(updateContainerJob(jobs[0].id, routineForm(driver, otherTruck, {
+      assignmentChangeReason: 'Truck combo diganti',
+    })), { code: 'VEHICLE_SIZE_MISMATCH' });
+  });
+
+  test('13. job lain tidak bisa memakai assignment_group_id combo untuk lolos validasi ukuran', async () => {
+    const { driver, vehicle, movement } = await startCombo();
+    const intruder = await createJob('received');
+    // Disisipkan langsung di DB ke grup combo (API tidak pernah melakukan ini): exclusion constraint
+    // percaya pada grup, tetapi validasi ukuran memeriksa keanggotaan movement yang sebenarnya.
+    await query(
+      "update container_jobs set status = 'running', driver_id = $2, vehicle_id = $3, assignment_group_id = $4 where id = $1",
+      [intruder.id, driver.id, vehicle.id, movement.id],
+    );
+    await assert.rejects(updateContainerJob(intruder.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
   });
 }

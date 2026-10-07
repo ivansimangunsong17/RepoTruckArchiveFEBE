@@ -617,6 +617,32 @@ function assertVehicleMatchesContainer(vehicle, containerSize) {
   }
 }
 
+// Pengecualian validasi ukuran untuk job 20FT yang masih bagian dari pickup combo 2x20: truck
+// 40FT/COMBO yang sama dengan truck movement combo itu sah (aturan pickup yang sama). Diverifikasi
+// ke data movement, bukan hanya assignment_group_id, dan gugur begitu truck job diganti
+// (trigger DB juga mengeluarkan job dari grup saat itu).
+async function isComboPickupVehicle(client, job, vehicle) {
+  if (!vehicle || !job?.assignment_group_id) return false;
+  if (String(vehicle.id) !== String(job.vehicle_id || '')) return false;
+  if (normalizeContainerSize(job.container_size) !== '20FT') return false;
+  const vehicleSize = normalizeContainerSize(vehicle.chassis_size || vehicle.container_size);
+  if (vehicleSize !== '40FT' && vehicleSize !== 'COMBO') return false;
+  const result = await client.query(
+    `
+      select 1
+      from container_pickup_items cpi
+      join container_pickup_movements cpm on cpm.id = cpi.movement_id
+      where cpm.id = $1
+        and cpi.container_job_id = $2
+        and cpm.pickup_type = 'combo_2x20'
+        and cpm.vehicle_id = $3
+      limit 1
+    `,
+    [job.assignment_group_id, job.id, vehicle.id],
+  );
+  return result.rows.length > 0;
+}
+
 export function assertVehicleCanPickupRepo(vehicle, jobs = [], pickupType = 'single') {
   if (!vehicle) return;
   const vehicleSize = normalizeContainerSize(vehicle.chassis_size || vehicle.container_size);
@@ -2999,7 +3025,11 @@ async function updateContainerJobTransaction(id, form) {
       assertVehicleAssignable(vehicle, currentJob.vehicle_id);
     }
     if (!documentOnlyUpdate && !isVendorExecution && shouldValidateVehicleContainerSize(form, currentJob)) {
-      assertVehicleMatchesContainer(vehicle, currentJob.container_size);
+      try {
+        assertVehicleMatchesContainer(vehicle, currentJob.container_size);
+      } catch (error) {
+        if (error.code !== 'VEHICLE_SIZE_MISMATCH' || !(await isComboPickupVehicle(client, currentJob, vehicle))) throw error;
+      }
     }
     const nextStatus = documentOnlyUpdate ? currentJob.status || 'received' : form.status || currentJob.status || 'received';
     const pickupMovement = !documentOnlyUpdate && ['completed', 'cancelled'].includes(nextStatus)
