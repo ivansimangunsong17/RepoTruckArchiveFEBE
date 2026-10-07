@@ -105,6 +105,7 @@ const operationalFundTransactionCategoryLabels = {
 
 function operationalFundTransactionCategoryLabel(row = {}) {
   if (row.source === 'container_job_expense_admin_fee') return 'Admin Transfer';
+  if (row.source === 'repo_uj') return 'UJ Repo';
   return operationalFundTransactionCategoryLabels[row.category] || row.category || '';
 }
 

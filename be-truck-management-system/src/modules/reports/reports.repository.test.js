@@ -630,3 +630,28 @@ test('performa sopir: total bulanan tetap sama setelah pengelompokan per driver_
   assert.equal(sum('totalDriverCommission'), 150000);
   assert.equal(sum('paidDriverCommission') + sum('unpaidDriverCommission'), 150000);
 });
+
+test('monthly comparison memisahkan revenue Repo per bulan (tanggal pickup) dari revenue transport', () => {
+  const completed = [
+    { completed_date: '2026-10-03', line_items: [{ serviceName: 'Jasa Angkut D20', qty: 1, price: 2000000 }], container_size: '20FT' },
+  ];
+  const repoRevenueRows = [
+    { id: 'repo-1', amount: 300000, revenueDate: '2026-10-05' },
+    { id: 'repo-2', amount: 300000, revenueDate: '2026-10-05' },
+    { id: 'repo-3', amount: 300000, revenueDate: '2026-09-30' },
+  ];
+  const rows = buildMonthlyComparisonRows(completed, [], {
+    year: 2026, activeTruckCount: 1, utilizationTrips: [], repoRevenueRows,
+  }, new Date('2026-12-31T00:00:00.000Z'));
+
+  // Transport tidak tercampur Repo.
+  assert.equal(rows[9].totalRevenue, 2000000);
+  assert.equal(rows[9].repoRevenue, 600000);
+  assert.equal(rows[9].operationalRevenue, 2600000);
+  assert.equal(rows[8].totalRevenue, 0);
+  assert.equal(rows[8].repoRevenue, 300000);
+  // Tanpa input Repo (pemanggil lama) revenue Repo 0.
+  const legacy = buildMonthlyComparisonRows(completed, [], { year: 2026, activeTruckCount: 1, utilizationTrips: [] });
+  assert.equal(legacy[9].repoRevenue, 0);
+  assert.equal(legacy[9].operationalRevenue, 2000000);
+});
