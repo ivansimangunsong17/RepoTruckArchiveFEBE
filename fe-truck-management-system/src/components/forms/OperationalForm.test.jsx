@@ -1655,6 +1655,35 @@ describe('OperationalForm', () => {
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ plateNumber: 'B 2000 BB', vehicleId: 'truck-1' }));
   });
 
+  it('job combo 20FT yang sudah jalan dengan truck 40FT combo tetap bisa disimpan tanpa ganti truck', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{
+          ...runningAssignmentContainer,
+          size: '20FT',
+          driver: 'Budi',
+          plateNumber: 'B 4040 CB',
+          vehicleId: 'truck-40',
+        }}
+        masterTrucks={[
+          { id: 'truck-40', plateNumber: 'B 4040 CB', unitCode: 'TRK-040', capacity: '40FT', brand: 'Hino', type: 'FM', status: 'Aktif' },
+          { id: 'truck-20', plateNumber: 'B 2020 AA', unitCode: 'TRK-020', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif' },
+        ]}
+        masterDrivers={[{ id: 'driver-1', name: 'Budi', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByLabelText('Truck')).toHaveValue('B 4040 CB');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(screen.queryByText(/tidak sesuai untuk container/i)).not.toBeInTheDocument();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ plateNumber: 'B 4040 CB', vehicleId: 'truck-40' }));
+  });
+
   it('dua sopir bernama sama tetap dibedakan lewat id saat dipilih', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
