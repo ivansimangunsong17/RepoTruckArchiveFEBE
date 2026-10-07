@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 import { lockRepoPickupMovementForJob, reconcileRepoPickupMovement, requirePhysicalRepoPickup } from './repo-pickup-lifecycle.js';
+import { buildRepoUjDescription, normalizeRepoUjAmount, postRepoUjToDroppingAccount } from './repo-pickup-uj.js';
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type,
@@ -3600,14 +3601,15 @@ async function insertRepoPickupMovement(client, {
   assignment,
   actorName,
   runningAt,
+  repoUjAmount,
 }) {
   const movementResult = await client.query(
     `
       insert into container_pickup_movements (
         pickup_type, vehicle_id, driver_id, assignment_snapshot, pickup_location,
-        status, started_at, created_by_name, updated_by_name
+        status, started_at, created_by_name, updated_by_name, repo_uj_amount
       )
-      values ($1, $2, $3, $4::jsonb, $5, 'running', $6::timestamptz, $7, $7)
+      values ($1, $2, $3, $4::jsonb, $5, 'running', $6::timestamptz, $7, $7, $8)
       returning *
     `,
     [
@@ -3618,6 +3620,7 @@ async function insertRepoPickupMovement(client, {
       jobs[0]?.repo_location || null,
       runningAt,
       actorName,
+      repoUjAmount,
     ],
   );
   const movement = movementResult.rows[0];
@@ -3721,6 +3724,7 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     throw validationError('Pickup combo membutuhkan tepat 2 container job.', 'REPO_PICKUP_COMBO_INVALID', 400);
   }
   const actorName = normalizeOptionalText(payload.updatedBy || payload.actorName) || 'Operational';
+  const repoUjAmount = normalizeRepoUjAmount(payload);
 
   return withTransaction(async (client) => {
     const jobs = await findLockedRepoPickupJobs(client, uniqueIds);
@@ -3746,6 +3750,7 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
       assignment,
       actorName,
       runningAt,
+      repoUjAmount,
     });
 
     for (const job of orderedJobs) {
@@ -3766,21 +3771,24 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
       await refreshOrderStatus(client, job.sales_order_id);
     }
 
-    const ujAnchorJob = pickupType === 'combo_2x20'
-      ? { ...orderedJobs[0], container_size: '40FT' }
-      : orderedJobs[0];
-    await syncAutoJourneyMoneyExpense(client, {
-      job: ujAnchorJob,
-      nextStatus: 'running',
-      nextEntrySource: 'realtime',
-      nextDriverId: driver.id,
-      runningAt: financialRunningAt,
-      assignment,
+    // UJ Repo manual: satu debit per movement, tidak menyentuh UJ/expense Container Job asli.
+    // Satu transaksi dengan pembuatan movement -- kalau posting gagal, semuanya rollback.
+    const repoUjTransaction = await postRepoUjToDroppingAccount(client, {
+      movementId: movement.id,
+      amount: repoUjAmount,
+      batchDate: toJakartaDateKey(financialRunningAt),
+      ensureBatch: ensureOperationalFundBatch,
+      description: buildRepoUjDescription({
+        pickupType,
+        plateNumber: assignment.plateNumber,
+        containerNumbers: orderedJobs.map((job) => job.container_number),
+      }),
+      driverName: assignment.driver,
       actorName,
     });
 
     const updatedJobs = await mapUpdatedRepoPickupJobs(client, uniqueIds);
-    return { movement, jobs: updatedJobs };
+    return { movement, jobs: updatedJobs, repoUjTransaction };
   });
 }
 

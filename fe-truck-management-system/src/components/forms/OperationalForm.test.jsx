@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import OperationalForm, { shouldPersistRecommendedDriverCommission } from './OperationalForm';
@@ -838,6 +838,18 @@ describe('OperationalForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     await user.click(screen.getByRole('checkbox', { name: /sudah diambil secara fisik/i }));
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('Total UJ Repo wajib diisi (boleh 0).')).toBeInTheDocument();
+
+    // Negatif diblokir validasi bawaan input (min=0) sebelum submit; backend juga menolaknya.
+    fireEvent.change(screen.getByLabelText('Total UJ Repo'), { target: { value: '-5000' } });
+    expect(screen.getByLabelText('Total UJ Repo')).toBeInvalid();
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByLabelText('Total UJ Repo'));
+    await user.type(screen.getByLabelText('Total UJ Repo'), '150000');
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       status: 'running',
@@ -845,7 +857,29 @@ describe('OperationalForm', () => {
       driver: 'Driver Aktif',
       runningAt: expect.any(String),
       pickupConfirmed: true,
+      repoUjAmount: 150000,
     }));
+  });
+
+  it('combo 2x20 hanya punya satu field Total UJ Repo untuk satu perjalanan', () => {
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'received',
+          repoPickupMode: true,
+          repoComboPickupMode: true,
+          repoComboContainerNumbers: ['MSCU-123456-7', 'MSCU-765432-1'],
+          repoLocation: 'Repo Cakung',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByLabelText('Total UJ Repo')).toHaveLength(1);
+    expect(screen.getByText(/untuk 1 perjalanan combo/i)).toBeInTheDocument();
   });
 
   it('mengizinkan pickup container titip oleh sopir dan truck yang sama', async () => {
@@ -872,6 +906,8 @@ describe('OperationalForm', () => {
     );
 
     await user.click(screen.getByRole('checkbox', { name: /sudah diambil secara fisik/i }));
+    // UJ 0 sah (tidak ada debit rekening dropping) dan dikirim eksplisit sebagai 0.
+    await user.type(screen.getByLabelText('Total UJ Repo'), '0');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -880,6 +916,7 @@ describe('OperationalForm', () => {
       driver: 'Driver Repo',
       runningAt: expect.any(String),
       pickupConfirmed: true,
+      repoUjAmount: 0,
     }));
   });
 
