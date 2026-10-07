@@ -2,6 +2,7 @@ import { query } from '../../db/client.js';
 import { getCustomerOutstandingRollupPage } from '../finance/finance.repository.js';
 import { utilizationChassisJoinsSql, utilizationChassisSizeSql, utilizationChassisSourceSql } from './utilization-chassis.sql.js';
 import { getUtilizationTripRows } from './utilization-trips.repository.js';
+import { getRepoRevenueRows } from './repo-revenue.repository.js';
 import {
   getTransportLineItemForSize,
   splitFinancialLineItems,
@@ -297,6 +298,7 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
     activeSales: 0,
     utilizationPercent: 0,
     repoStoredCount: 0,
+    repoRevenue: 0,
     customerKeys: new Set(),
     salesKeys: new Set(),
     truckDayKeys: new Set(),
@@ -337,6 +339,12 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
     if (months[monthIndex]) months[monthIndex].repoStoredCount += 1;
   });
 
+  // Revenue Repo terpisah dari revenue transport (totalRevenue), bertanggal movement.started_at.
+  (options.repoRevenueRows || []).forEach((row) => {
+    const monthIndex = monthIndexFromDate(row.revenueDate);
+    if (months[monthIndex]) months[monthIndex].repoRevenue += Number(row.amount || 0);
+  });
+
   return months.map((month) => {
     const utilizationDays = utilizationDaysInMonth(month.month, year, baseDate);
     const potentialTruckDays = activeTruckCount * utilizationDays;
@@ -355,6 +363,8 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
       usedTruckDays: month.truckDayKeys.size,
       utilizationPercent: potentialTruckDays ? (month.totalTrips / potentialTruckDays) * 100 : 0,
       repoStoredCount: month.repoStoredCount,
+      repoRevenue: month.repoRevenue,
+      operationalRevenue: month.totalRevenue + month.repoRevenue,
     };
   });
 }
@@ -1079,7 +1089,7 @@ export async function getMonthlyRevenueReport(options = {}) {
   const params = [period.dateFrom, period.dateToExclusive];
   appendEntrySourceFilters(clauses, params, options, 'cj');
   const sourceWhereSql = clauses.length ? `and ${clauses.join(' and ')}` : '';
-  const result = await query(
+  const [result, repoRevenueRows] = await Promise.all([query(
     `
       with order_job_totals as (
         select sales_order_id, count(*)::int as total_jobs
@@ -1122,7 +1132,12 @@ export async function getMonthlyRevenueReport(options = {}) {
       order by completed_date desc, plate_number asc nulls last, so_number asc, job_id asc
     `,
     params,
-  );
+  ), getRepoRevenueRows({
+    dateFrom: period.dateFrom,
+    dateToExclusive: period.dateToExclusive,
+    entrySource: normalizeEntrySourceFilter(options.entrySource),
+    historicalPeriod: options.historicalPeriod,
+  })]);
 
   const rows = result.rows.map((row) => ({
     id: row.id,
@@ -1141,6 +1156,8 @@ export async function getMonthlyRevenueReport(options = {}) {
     entrySource: row.entry_source || 'realtime',
     historicalPeriod: row.historical_period || '',
   }));
+  const transportRevenue = rows.reduce((total, row) => total + row.revenue, 0);
+  const repoRevenue = repoRevenueRows.reduce((total, row) => total + row.amount, 0);
 
   return {
     period: {
@@ -1148,8 +1165,15 @@ export async function getMonthlyRevenueReport(options = {}) {
       year: period.year,
     },
     rows,
+    // Revenue Repo dipisah dari transport: Rp300.000 per container (draft+active, tanpa void),
+    // tanggal movement.started_at. totalRevenue tetap = revenue transport seperti sebelumnya.
+    repoRevenueRows,
     summary: {
-      totalRevenue: rows.reduce((total, row) => total + row.revenue, 0),
+      totalRevenue: transportRevenue,
+      transportRevenue,
+      repoRevenue,
+      repoContainers: repoRevenueRows.length,
+      totalOperationalRevenue: transportRevenue + repoRevenue,
       totalOrders: new Set(rows.map((row) => row.id)).size,
       totalContainers: rows.length,
       totalTrucks: new Set(rows.map((row) => row.plateNumber).filter(Boolean)).size,
@@ -1325,7 +1349,7 @@ export async function getMonthlyComparisonReport(options = {}) {
   appendEntrySourceFilters(repoClauses, repoParams, options, 'cj');
   const repoSourceWhereSql = repoClauses.length ? `and ${repoClauses.join(' and ')}` : '';
 
-  const [completedResult, repoResult, activeTruckResult, utilizationTrips] = await Promise.all([
+  const [completedResult, repoResult, activeTruckResult, utilizationTrips, repoRevenueRows] = await Promise.all([
     query(
       `
         with order_job_totals as (
@@ -1408,16 +1432,22 @@ export async function getMonthlyComparisonReport(options = {}) {
     ),
     getUtilizationTripRows({ dateFrom, dateTo: `${year}-12-31`,
       entrySource: options.entrySource, historicalPeriod: options.historicalPeriod }),
+    getRepoRevenueRows({ dateFrom, dateToExclusive,
+      entrySource: normalizeEntrySourceFilter(options.entrySource), historicalPeriod: options.historicalPeriod }),
   ]);
 
   const activeTruckCount = Number(activeTruckResult.rows[0]?.total || 0);
-  const rows = buildMonthlyComparisonRows(completedResult.rows, repoResult.rows, { year, activeTruckCount, utilizationTrips });
+  const rows = buildMonthlyComparisonRows(completedResult.rows, repoResult.rows, { year, activeTruckCount, utilizationTrips, repoRevenueRows });
+  const totalRevenue = rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
+  const repoRevenue = rows.reduce((total, row) => total + Number(row.repoRevenue || 0), 0);
 
   return {
     year,
     rows,
     summary: {
-      totalRevenue: rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0),
+      totalRevenue,
+      repoRevenue,
+      totalOperationalRevenue: totalRevenue + repoRevenue,
       totalTrips: rows.reduce((total, row) => total + Number(row.totalTrips || 0), 0),
       totalVolume: rows.reduce((total, row) => total + Number(row.totalVolume || 0), 0),
       repoStoredCount: rows.reduce((total, row) => total + Number(row.repoStoredCount || 0), 0),

@@ -135,6 +135,12 @@ function canOperationalEditRow(financeCheckStatus, paymentStatus) {
   return (financeCheckStatus || 'belum_dicek') === 'belum_dicek' && paymentStatus !== 'batal';
 }
 
+// UJ Repo (satu per perjalanan Repo) memakai kategori uj_order, dibedakan lewat source.
+function fundCategoryLabel(row = {}) {
+  if (row.source === 'repo_uj') return 'UJ Repo';
+  return fundCategoryLabels[row.fundCategory];
+}
+
 function isAutoJourneyMoneyRow(row = {}) {
   return row.source === 'auto_uj_order' || row.sourceRefId === row.jobId && row.category === 'uj_awal';
 }
@@ -258,7 +264,7 @@ function rowSearchText(row) {
     row.description,
     row.recipientName,
     expenseCategoryLabels[row.category],
-    fundCategoryLabels[row.fundCategory],
+    fundCategoryLabel(row),
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -285,7 +291,7 @@ function ledgerCsvRows(rows = []) {
     ...chronologicalRows.map((row, index) => [
       index + 1,
       formatDate(row.transactionDate || row.paidAt || row.createdAt),
-      row.description || fundCategoryLabels[row.fundCategory] || expenseCategoryLabels[row.category] || '',
+      row.description || fundCategoryLabel(row) || expenseCategoryLabels[row.category] || '',
       row.topName || '',
       row.driverName || row.driver || '',
       row.doNumber || row.destination || '',
@@ -1307,8 +1313,8 @@ function OperationalDroppingAccountPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <strong className="block text-sm font-semibold text-slate-950">{row.description || fundCategoryLabels[row.fundCategory] || expenseCategoryLabels[row.category] || '-'}</strong>
-                        <span className="mt-1 block text-xs font-medium text-slate-500">{fundCategoryLabels[row.fundCategory] || expenseCategoryLabels[row.category] || row.category || '-'}</span>
+                        <strong className="block text-sm font-semibold text-slate-950">{row.description || fundCategoryLabel(row) || expenseCategoryLabels[row.category] || '-'}</strong>
+                        <span className="mt-1 block text-xs font-medium text-slate-500">{fundCategoryLabel(row) || expenseCategoryLabels[row.category] || row.category || '-'}</span>
                         {row.expenseGroup || row.inputSource ? (
                           <span className="mt-1 flex flex-wrap gap-1">
                             {row.expenseGroup ? <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">{EXPENSE_GROUP_LABELS[row.expenseGroup] || row.expenseGroup}</span> : null}

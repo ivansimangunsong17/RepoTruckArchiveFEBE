@@ -80,8 +80,8 @@ const financeViews = {
   },
   completed: {
     eyebrow: 'Finance',
-    title: 'Perjalanan Selesai',
-    description: 'Daftar seluruh perjalanan selesai untuk audit revenue, uang jalan, dan margin.',
+    title: 'Perjalanan Layak Tagih',
+    description: 'Perjalanan yang transportnya layak ditagih (selesai, atau container sudah dititip di depo) untuk audit revenue, uang jalan, dan margin.',
   },
   readiness: {
     eyebrow: 'Finance',
@@ -287,7 +287,7 @@ function FinanceDetailModal({ trip, loading, error, onClose, onRetry }) {
 
 function FinanceTripMobileCards({ rows, onDetail }) {
   return (
-    <div className="finance-trip-mobile-list" aria-label="Daftar perjalanan selesai">
+    <div className="finance-trip-mobile-list" aria-label="Daftar perjalanan layak tagih">
       {rows.map((row) => (
         <article className="finance-trip-mobile-card" key={row.id}>
           <header>
@@ -595,7 +595,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
           <section className="mb-4 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
             <div className="grid gap-2 text-sm md:grid-cols-3 xl:grid-cols-6">
               <div className="rounded-md border border-slate-200 bg-white p-3">
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Perjalanan selesai</span>
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">Perjalanan layak tagih</span>
                 <strong className="mt-1 block text-sm text-slate-950">{summary.totalCompletedTrips || 0} trip</strong>
               </div>
               <div className="rounded-md border border-slate-200 bg-white p-3">
@@ -725,8 +725,8 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
       <section className="rounded-md border border-slate-200 bg-white shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
-            <h2 className="text-sm font-black text-slate-950">Perjalanan Selesai</h2>
-            <p className="text-xs text-slate-500">Menampilkan {rows.length} dari {trips.total || 0} perjalanan selesai.</p>
+            <h2 className="text-sm font-black text-slate-950">Perjalanan Layak Tagih</h2>
+            <p className="text-xs text-slate-500">Menampilkan {rows.length} dari {trips.total || 0} perjalanan layak tagih (selesai atau container dititip).</p>
           </div>
           {loading ? <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-500"><Loader2 className="animate-spin" size={15} /> Memuat</span> : null}
         </header>
@@ -747,7 +747,7 @@ export function FinanceWorkspace({ mode = 'dashboard' }) {
           <div className="grid min-h-72 place-items-center px-4 py-10 text-center">
             <div>
               <FileQuestion className="mx-auto text-slate-300" size={42} />
-              <h3 className="mt-3 text-base font-black text-slate-800">Belum ada perjalanan selesai</h3>
+              <h3 className="mt-3 text-base font-black text-slate-800">Belum ada perjalanan layak tagih</h3>
               <p className="mt-1 text-sm text-slate-500">Data akan muncul setelah Container Job berstatus Selesai.</p>
             </div>
           </div>

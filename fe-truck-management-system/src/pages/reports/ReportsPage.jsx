@@ -55,6 +55,9 @@ function formatPivotDateLabel(value) {
 
 const DEFAULT_REVENUE_SUMMARY = {
   totalRevenue: 0,
+  repoRevenue: 0,
+  repoContainers: 0,
+  totalOperationalRevenue: 0,
   totalOrders: 0,
   totalContainers: 0,
   totalTrucks: 0,
@@ -1602,8 +1605,11 @@ function buildMonthlyComparisonSummary(rows = [], selectedReport, config = {}) {
     ];
   }
 
+  // Revenue Repo (Rp300.000 per container, tanggal pickup) ditampilkan terpisah dari transport.
+  const totalRepoRevenue = rows.reduce((total, row) => total + Number(row.repoRevenue || 0), 0);
   return [
-    { label: 'Total Revenue', value: formatCurrency(totalRevenue) },
+    { label: 'Revenue Transport', value: formatCurrency(totalRevenue) },
+    { label: 'Revenue Repo', value: formatCurrency(totalRepoRevenue) },
     { label: 'Total Trip', value: formatMonthlyCount(totalTrips, 'trip') },
     { label: 'Rata-rata / Trip', value: totalTrips ? formatCurrency(totalRevenue / totalTrips) : 'Rp 0' },
     { label: 'Tertinggi', value: peakRow && Number(peakRow.totalRevenue || 0) > 0 ? `${peakRow.label} - ${formatCurrency(peakRow.totalRevenue)}` : '-' },
@@ -2798,6 +2804,7 @@ function ReportsPage() {
   const [month, setMonth] = useState(initialPeriod.month);
   const [year, setYear] = useState(initialPeriod.year);
   const [revenueRows, setRevenueRows] = useState([]);
+  const [repoRevenueRows, setRepoRevenueRows] = useState([]);
   const [revenueSummary, setRevenueSummary] = useState(DEFAULT_REVENUE_SUMMARY);
   const [revenueLoading, setRevenueLoading] = useState(true);
   const [revenueError, setRevenueError] = useState('');
@@ -2996,8 +3003,12 @@ function ReportsPage() {
       if (revenueResult.status === 'fulfilled') {
         const result = revenueResult.value;
         setRevenueRows(Array.isArray(result?.rows) ? result.rows : []);
+        setRepoRevenueRows(Array.isArray(result?.repoRevenueRows) ? result.repoRevenueRows : []);
         setRevenueSummary({
           totalRevenue: Number(result?.summary?.totalRevenue || 0),
+          repoRevenue: Number(result?.summary?.repoRevenue || 0),
+          repoContainers: Number(result?.summary?.repoContainers || 0),
+          totalOperationalRevenue: Number(result?.summary?.totalOperationalRevenue ?? result?.summary?.totalRevenue ?? 0),
           totalOrders: Number(result?.summary?.totalOrders || 0),
           totalContainers: Number(result?.summary?.totalContainers || 0),
           totalTrucks: Number(result?.summary?.totalTrucks || 0),
@@ -3005,6 +3016,7 @@ function ReportsPage() {
         });
       } else {
         setRevenueRows([]);
+        setRepoRevenueRows([]);
         setRevenueSummary(DEFAULT_REVENUE_SUMMARY);
         setRevenueError(revenueResult.reason?.message || 'Laporan revenue gagal dimuat.');
       }
@@ -3313,8 +3325,10 @@ function ReportsPage() {
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Performance"
-          value={formatCurrency(revenueSummary.totalRevenue)}
-          helper="Tidak termasuk reimbursement / jasa lainnya"
+          value={formatCurrency(revenueSummary.totalOperationalRevenue)}
+          helper={revenueSummary.repoRevenue
+            ? `Transport ${formatCurrency(revenueSummary.totalRevenue)} + Repo ${formatCurrency(revenueSummary.repoRevenue)}; tanpa reimbursement`
+            : 'Tidak termasuk reimbursement / jasa lainnya'}
           secondaryLabel="AVG Revenue/Trip"
           secondaryValue={formatCurrency(averageRevenuePerTrip)}
           tone="emerald"
@@ -3442,6 +3456,36 @@ function ReportsPage() {
             <div className="p-6 text-center">
               <h3 className="text-sm font-bold text-slate-900">Belum ada data truck</h3>
               <p className="mt-1 text-xs text-slate-500">Data truck belum tersedia pada {activeMonthLabel} {year}.</p>
+            </div>
+          ) : null}
+
+          {!revenueLoading && !revenueError && repoRevenueRows.length ? (
+            <div className="border-t border-slate-100" aria-label="Revenue Repo">
+              <div className="px-3 py-2.5">
+                <h3 className="text-sm font-bold text-slate-950">Revenue Repo</h3>
+                <p className="text-xs text-slate-500">{revenueSummary.repoContainers} container x Rp300.000 = {formatCurrency(revenueSummary.repoRevenue)} (tanggal pickup Repo; terpisah dari tarif transport).</p>
+              </div>
+              <DetailTable
+                columns={[
+                  { label: 'Tanggal' },
+                  { label: 'Container' },
+                  { label: 'SO / Customer' },
+                  { label: 'Truck / Sopir Repo' },
+                  { label: 'Status Tagih' },
+                  { label: 'Revenue', align: 'right' },
+                ]}
+                rows={repoRevenueRows}
+                rowRenderer={(row) => (
+                  <tr key={row.id} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                    <td className="px-3 py-2" data-label="Tanggal">{row.revenueDate}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-950" data-label="Container">{row.containerNumber}{row.pickupType === 'combo_2x20' ? ' (combo)' : ''}</td>
+                    <td className="px-3 py-2" data-label="SO / Customer">{row.soNumber} - {row.customer}</td>
+                    <td className="px-3 py-2" data-label="Truck / Sopir Repo">{row.plateNumber} / {row.driver}</td>
+                    <td className="px-3 py-2" data-label="Status Tagih">{row.status === 'active' ? 'Masuk tagihan' : 'Belum masuk tagihan'}</td>
+                    <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(row.amount)}</td>
+                  </tr>
+                )}
+              />
             </div>
           ) : null}
         </section>
