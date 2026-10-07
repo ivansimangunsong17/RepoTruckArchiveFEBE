@@ -75,6 +75,8 @@ if (!databaseUrl) {
       repo_eir_number: `EIR-${tag}`,
       repo_released_driver_id: originalDriver.id,
       repo_released_vehicle_id: originalVehicle.id,
+      // Snapshot saat titip = assignment asli (seperti alur nyata), bukan warisan job template.
+      assignment_snapshot: { driver: originalDriver.name, plateNumber: originalVehicle.plate_number, unitCode: originalVehicle.unit_code },
       driver_id: null, vehicle_id: null, assignment_group_id: null,
       entry_source: 'realtime', is_backdate_entry: false, rpuj_status: 'pending',
       completed_at: null, cancelled_at: null, repo_picked_up_at: null, running_at: null,
@@ -150,8 +152,14 @@ if (!databaseUrl) {
     assert.equal(repoRows.length, 1);
     assert.equal(repoRows[0].amount, 300000);
     assert.equal(repoRows[0].revenueDate, jakartaToday);
-    // Job Repo belum selesai: tidak ada revenue transport yang tercampur.
-    assert.equal(report.rows.filter((row) => row.jobId === single.job.id).length, 0);
+    // Transport asli dilaporkan sekali sejak titip (tanggal titip, truck/sopir asli A), terpisah
+    // dari Revenue Repo milik truck/sopir B.
+    const transport = report.rows.filter((row) => row.jobId === single.job.id);
+    assert.equal(transport.length, 1);
+    assert.equal(transport[0].completedDate, jakartaToday);
+    assert.equal(transport[0].plateNumber, single.truckA.plate_number);
+    assert.equal(transport[0].driver, single.driverA.name);
+    assert.notEqual(transport[0].plateNumber, repoRows[0].plateNumber);
   });
 
   test('CASE C: combo = 2 trip asli + 1 trip Repo (C), satu UJ Repo, Rp600.000 ke SO masing-masing', async () => {

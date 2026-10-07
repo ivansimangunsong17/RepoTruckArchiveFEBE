@@ -86,6 +86,15 @@ select '7c. INDIKASI (cek manual): UJ otomatis asli job titip bertanggal bayar >
     and e.payment_status <> 'batal'
     and e.paid_at >= cj.repo_picked_up_at
 union all
+-- Revenue transport job titip diatribusikan ke assignment yang dilepas saat titip; tanpa itu
+-- (dan tanpa riwayat pickup) laporan jatuh ke snapshot/assignment job yang ada (fallback).
+select '7e. job titip tanpa assignment asli yang tercatat (atribusi revenue transport memakai fallback)', count(*)
+  from container_jobs cj
+  where cj.repo_stored_at is not null
+    and (cj.repo_released_vehicle_id is null or cj.repo_released_driver_id is null)
+    and not exists (select 1 from container_job_assignment_history h
+      where h.container_job_id = cj.id and h.change_source in ('repo_pickup', 'repo_combo_pickup'))
+union all
 select '7d. job titip dengan dua job aktif berbagi sopir/truck di luar satu grup combo', count(*)
   from container_jobs a
   join container_jobs b on b.id > a.id

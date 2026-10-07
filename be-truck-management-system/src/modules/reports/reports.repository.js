@@ -1083,6 +1083,50 @@ function parseRevenuePeriod(options = {}) {
   return { year, month, dateFrom, dateToExclusive };
 }
 
+// Leg transport asli untuk revenue operasional. Job yang sah dititip (repo_stored_at) memakai
+// tanggal titip dan assignment yang dilepas saat titip -- sumber yang sama dengan Truck/Driver
+// Utilization (repo_released_*, lalu riwayat pickup Repo, lalu assignment job). Job lain (termasuk
+// data lama status repo_stored tanpa repo_stored_at) tetap: completed_at + assignment saat ini.
+// Truck/sopir Repo dan revenue Repo tidak pernah ikut ke leg ini.
+const transportRevenueJobFilterSql = "(cj.status = 'completed' or (cj.repo_stored_at is not null and cj.status <> 'cancelled'))";
+const transportRevenueDateSql = timestampToJakartaDateSql('coalesce(cj.repo_stored_at, cj.completed_at)');
+const transportRevenueOriginalAssignmentJoinsSql = `
+  left join lateral (
+    select h.previous_vehicle_id, h.previous_driver_id, h.previous_plate_number, h.previous_driver_name
+    from container_job_assignment_history h
+    where h.container_job_id = cj.id
+      and h.change_source in ('repo_pickup', 'repo_combo_pickup')
+    order by h.created_at asc, h.id asc
+    limit 1
+  ) repo_history on cj.repo_stored_at is not null
+  left join vehicles original_vehicle on cj.repo_stored_at is not null
+    and original_vehicle.id = coalesce(cj.repo_released_vehicle_id, repo_history.previous_vehicle_id, cj.vehicle_id)
+  left join drivers original_driver on cj.repo_stored_at is not null
+    and original_driver.id = coalesce(cj.repo_released_driver_id, repo_history.previous_driver_id, cj.driver_id)
+`;
+
+function originalTransportSql(repoExpression, normalExpression) {
+  return `case when cj.repo_stored_at is not null then ${repoExpression} else ${normalExpression} end`;
+}
+
+const originalTransportDriverSql = (normalExpression) => originalTransportSql(
+  `coalesce(nullif(repo_history.previous_driver_name, ''),
+    case when cj.repo_picked_up_at is null then nullif(cj.assignment_snapshot->>'driver', '') end,
+    original_driver.name)`,
+  normalExpression,
+);
+const originalTransportPlateSql = (normalExpression) => originalTransportSql(
+  `coalesce(nullif(repo_history.previous_plate_number, ''),
+    case when cj.repo_picked_up_at is null then nullif(cj.assignment_snapshot->>'plateNumber', '') end,
+    original_vehicle.plate_number)`,
+  normalExpression,
+);
+const originalTransportUnitCodeSql = (normalExpression) => originalTransportSql(
+  `coalesce(case when cj.repo_picked_up_at is null then nullif(cj.assignment_snapshot->>'unitCode', '') end,
+    original_vehicle.unit_code)`,
+  normalExpression,
+);
+
 export async function getMonthlyRevenueReport(options = {}) {
   const period = parseRevenuePeriod(options);
   const clauses = [];
@@ -1108,12 +1152,12 @@ export async function getMonthlyRevenueReport(options = {}) {
           to_jsonb(so)->'line_items' as line_items,
           cj.container_number,
           cj.container_size,
-          ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
+          ${transportRevenueDateSql} as completed_date,
           coalesce(cj.entry_source, 'realtime') as entry_source,
           cj.historical_period,
-          nullif(cj.assignment_snapshot->>'driver', '') as driver,
-          coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code) as unit_code,
-          nullif(cj.assignment_snapshot->>'plateNumber', '') as plate_number,
+          ${originalTransportDriverSql("nullif(cj.assignment_snapshot->>'driver', '')")} as driver,
+          ${originalTransportUnitCodeSql("coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code, snapshot_vehicle.unit_code)")} as unit_code,
+          ${originalTransportPlateSql("nullif(cj.assignment_snapshot->>'plateNumber', '')")} as plate_number,
           greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
         from sales_orders so
         join container_jobs cj on cj.sales_order_id = so.id
@@ -1121,8 +1165,9 @@ export async function getMonthlyRevenueReport(options = {}) {
         left join vehicles v on v.id = cj.vehicle_id
         left join vehicles snapshot_vehicle on snapshot_vehicle.archived_at is null
           and trim(snapshot_vehicle.plate_number) = trim(nullif(cj.assignment_snapshot->>'plateNumber', ''))
+        ${transportRevenueOriginalAssignmentJoinsSql}
         where so.status <> 'cancelled'
-          and cj.status = 'completed'
+          and ${transportRevenueJobFilterSql}
           ${sourceWhereSql}
       )
       select *
@@ -1371,11 +1416,11 @@ export async function getMonthlyComparisonReport(options = {}) {
             to_jsonb(so)->'line_items' as line_items,
             cj.container_size,
             cj.execution_source,
-            ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
-            cj.completed_at,
-            cj.vehicle_id,
-            coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number) as plate_number,
-            coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code) as unit_code,
+            ${transportRevenueDateSql} as completed_date,
+            coalesce(cj.repo_stored_at, cj.completed_at) as completed_at,
+            ${originalTransportSql('original_vehicle.id', 'cj.vehicle_id')} as vehicle_id,
+            ${originalTransportPlateSql("coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number)")} as plate_number,
+            ${originalTransportUnitCodeSql("coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code)")} as unit_code,
             greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
           from sales_orders so
           join container_jobs cj on cj.sales_order_id = so.id
@@ -1389,8 +1434,9 @@ export async function getMonthlyComparisonReport(options = {}) {
             )
           left join vehicles v on v.id = cj.vehicle_id
           left join order_job_totals ojt on ojt.sales_order_id = so.id
+          ${transportRevenueOriginalAssignmentJoinsSql}
           where so.status <> 'cancelled'
-            and cj.status = 'completed'
+            and ${transportRevenueJobFilterSql}
             ${completedSourceWhereSql}
         )
         select *
