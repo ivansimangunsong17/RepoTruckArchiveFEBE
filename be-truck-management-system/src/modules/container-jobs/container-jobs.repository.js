@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
+import { lockRepoPickupMovementForJob, reconcileRepoPickupMovement, requirePhysicalRepoPickup } from './repo-pickup-lifecycle.js';
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type,
@@ -2982,6 +2983,10 @@ async function updateContainerJobTransaction(id, form) {
       assertVehicleMatchesContainer(vehicle, currentJob.container_size);
     }
     const nextStatus = documentOnlyUpdate ? currentJob.status || 'received' : form.status || currentJob.status || 'received';
+    const pickupMovement = !documentOnlyUpdate && ['completed', 'cancelled'].includes(nextStatus)
+      && currentJob.repo_picked_up_at
+      ? await lockRepoPickupMovementForJob(client, id)
+      : null;
     if (isVendorExecution && ['repo_stored', 'inap'].includes(nextStatus)) {
       throw validationError(
         'Ritasi Vendor tidak dapat menggunakan status Container Titip atau Inap armada internal.',
@@ -3489,6 +3494,7 @@ async function updateContainerJobTransaction(id, form) {
         vehicleId: nextVehicleId,
       }, nextStatus, nextEntrySource, nextIsBackdateEntry);
     }
+    if (pickupMovement) await reconcileRepoPickupMovement(client, pickupMovement);
     await refreshOrderStatus(client, existing.rows[0].sales_order_id);
     const updated = await client.query(
       `
@@ -3675,6 +3681,9 @@ async function mapUpdatedRepoPickupJobs(client, ids = []) {
 }
 
 async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'single') {
+  // A confirmed physical pickup uses server time, never a client-supplied start time.
+  const runningAt = requirePhysicalRepoPickup(payload);
+  const financialRunningAt = payload.runningAt || payload.repoPickedUpAt || runningAt;
   const uniqueIds = [...new Set(ids.map((id) => normalizeOptionalUuid(id, 'Container Job')).filter(Boolean))];
   if (pickupType === 'single' && uniqueIds.length !== 1) {
     throw validationError('Pickup single membutuhkan tepat 1 container job.', 'REPO_PICKUP_SINGLE_INVALID', 400);
@@ -3683,7 +3692,6 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     throw validationError('Pickup combo membutuhkan tepat 2 container job.', 'REPO_PICKUP_COMBO_INVALID', 400);
   }
   const actorName = normalizeOptionalText(payload.updatedBy || payload.actorName) || 'Operational';
-  const runningAt = payload.runningAt || payload.repoPickedUpAt || new Date().toISOString();
 
   return withTransaction(async (client) => {
     const jobs = await findLockedRepoPickupJobs(client, uniqueIds);
@@ -3737,7 +3745,7 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
       nextStatus: 'running',
       nextEntrySource: 'realtime',
       nextDriverId: driver.id,
-      runningAt,
+      runningAt: financialRunningAt,
       assignment,
       actorName,
     });
@@ -3832,6 +3840,7 @@ export async function reviewContainerJobCancellation(id, form = {}) {
     }
 
     if (form.approved) {
+      const pickupMovement = await lockRepoPickupMovementForJob(client, id);
       const activeExpenses = await client.query(
         `
           select coalesce(count(*), 0)::int as count, coalesce(sum(amount), 0)::numeric as total
@@ -3891,6 +3900,7 @@ export async function reviewContainerJobCancellation(id, form = {}) {
         driverId: existing.rows[0].driver_id,
         vehicleId: existing.rows[0].vehicle_id,
       }, 'cancelled');
+      if (pickupMovement) await reconcileRepoPickupMovement(client, pickupMovement);
       return refreshOrderStatusAndMapJob(client, existing.rows[0].sales_order_id, id);
     }
 

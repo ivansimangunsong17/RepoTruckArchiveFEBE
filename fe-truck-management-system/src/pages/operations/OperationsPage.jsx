@@ -737,8 +737,6 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       ? {
           ...form,
           status: 'running',
-          runningAt: form.runningAt || new Date().toISOString(),
-          repoPickedUpAt: new Date().toISOString(),
           repoPickedUpByName: actorName,
           updatedBy: actorName,
         }

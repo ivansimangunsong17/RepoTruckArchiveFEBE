@@ -622,6 +622,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [expenseProofSaving, setExpenseProofSaving] = useState('');
   const [expenseDescriptionManualMode, setExpenseDescriptionManualMode] = useState(false);
   const submitInFlightRef = useRef(false);
+  const [repoPickupConfirmed, setRepoPickupConfirmed] = useState(false);
   const driverCommissionEditedRef = useRef(false);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const driverCommissionAmountValue = form.hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
@@ -1526,10 +1527,15 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       showSubmitNotification('Ambil container titip wajib melengkapi truck dan sopir perjalanan lanjutan terlebih dahulu.');
       return;
     }
+    if (isRepoPickupMode && !repoPickupConfirmed) {
+      showSubmitNotification('Konfirmasi bahwa container sudah diambil secara fisik sebelum memulai perjalanan Repo.');
+      return;
+    }
     if (isRepoPickupMode) {
       submitForm.containerNumber = container.containerNumber || submitForm.containerNumber;
       submitForm.status = 'running';
       submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
+      submitForm.pickupConfirmed = true;
     }
     const shouldStartTrip = activePhase === 'closing'
       && hasCompleteAssignment
@@ -1646,6 +1652,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               {isRepoComboPickupMode
                 ? `Combo pickup ${comboContainerLabel} dari depo penitipan. Gunakan truck/chassis 40FT; UJ dicatat satu kali untuk perjalanan combo.`
                 : 'Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.'}
+              <label className="mt-3 flex items-start gap-2 font-semibold">
+                <input type="checkbox" checked={repoPickupConfirmed} onChange={(event) => setRepoPickupConfirmed(event.target.checked)} />
+                <span>Container sudah diambil secara fisik; mulai perjalanan Repo sekarang.</span>
+              </label>
             </div>
           ) : null}
           {isRepoComboPickupMode ? (
@@ -2371,14 +2381,20 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                     </small>
                   ) : null}
                 </label>
-                <label className="operational-date-field operational-date-start">
-                  Waktu Mulai
-                  <DateTimeWibInput value={form.runningAt} onChange={(value) => setForm((current) => ({ ...current, runningAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal mulai" timeLabel="Jam mulai WIB" />
-                </label>
-                <label className="operational-date-field operational-date-end">
-                  Waktu Selesai
-                  <DateTimeWibInput value={form.completedAt} onChange={(value) => setForm((current) => ({ ...current, completedAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal selesai" timeLabel="Jam selesai WIB" />
-                </label>
+                {isRepoPickupMode ? (
+                  <p className="text-xs font-semibold text-slate-600">Waktu pickup dicatat otomatis saat konfirmasi disimpan.</p>
+                ) : (
+                  <>
+                    <label className="operational-date-field operational-date-start">
+                      Waktu Mulai
+                      <DateTimeWibInput value={form.runningAt} onChange={(value) => setForm((current) => ({ ...current, runningAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal mulai" timeLabel="Jam mulai WIB" />
+                    </label>
+                    <label className="operational-date-field operational-date-end">
+                      Waktu Selesai
+                      <DateTimeWibInput value={form.completedAt} onChange={(value) => setForm((current) => ({ ...current, completedAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal selesai" timeLabel="Jam selesai WIB" />
+                    </label>
+                  </>
+                )}
               </div>
             </div>
           </div>
