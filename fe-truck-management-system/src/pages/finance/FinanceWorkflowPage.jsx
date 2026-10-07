@@ -617,6 +617,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
     revenueLineVoidError,
     submitRevenueLine,
     voidRevenueLineAction,
+    activateRevenueLineAction,
     submitDebitNoteNumber,
     loadDebitNotePayments,
     confirmDebitNotePayment,
@@ -888,6 +889,7 @@ function FinanceWorkflowPage({ initialTabId = 'order-verification' }) {
         onSaveInvoiceDeliveryStatus={submitInvoiceDeliveryStatus}
         onSaveRevenueLine={submitRevenueLine}
         onVoidRevenueLine={voidRevenueLineAction}
+        onActivateRevenueLine={activateRevenueLineAction}
       />
       <SoNumberInputModal
         busy={savingSoId === soModalId}

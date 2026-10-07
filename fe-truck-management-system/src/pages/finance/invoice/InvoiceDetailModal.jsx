@@ -444,6 +444,7 @@ function InvoiceDetailModal({
   onSaveInvoiceDeliveryStatus,
   onSaveRevenueLine,
   onVoidRevenueLine,
+  onActivateRevenueLine,
 }) {
   const [dragUploadKey, setDragUploadKey] = useState('');
   const [pendingInvoiceFiles, setPendingInvoiceFiles] = useState({});
@@ -977,6 +978,9 @@ function InvoiceDetailModal({
                   {invoice.manualRevenueLines?.length ? (
                     <div className="mt-2.5 grid gap-1.5">
                       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Biaya Inap / Revenue Manual</p>
+                      {revenueLineVoidError && !voidingRevenueLineId ? (
+                        <p className="text-[10px] font-semibold text-rose-700" role="alert">{revenueLineVoidError}</p>
+                      ) : null}
                       {invoice.manualRevenueLines.map((line) => (
                         <div className="rounded-md border border-slate-200 bg-slate-50 p-2" key={line.id}>
                           <div className="flex items-center justify-between gap-2">
@@ -993,6 +997,16 @@ function InvoiceDetailModal({
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
                               <strong className={`text-xs font-black text-slate-900 ${line.status === 'void' ? 'line-through opacity-60' : ''}`}>{formatCurrency(line.totalAmount)}</strong>
+                              {canManageRevenueLine && line.chargeType === 'repo' && line.status === 'draft' ? (
+                                <button
+                                  className="rounded-md border border-emerald-200 px-2 py-1 text-[10px] font-black uppercase text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={revenueLineVoidBusyId === line.id}
+                                  onClick={() => onActivateRevenueLine?.(invoice.id, line.id)}
+                                  type="button"
+                                >
+                                  Masukkan ke tagihan
+                                </button>
+                              ) : null}
                               {line.status === 'void' ? (
                                 <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black uppercase text-rose-700">Dibatalkan</span>
                               ) : canManageRevenueLine ? (

@@ -50,6 +50,7 @@ import {
   voidDebitNotePaymentController,
   voidInvoicePaymentController,
   voidRevenueLineController,
+  activateRevenueLineController,
 } from './finance.controller.js';
 
 export const financeRoutes = [
@@ -310,6 +311,12 @@ export const financeRoutes = [
     path: '/api/finance/invoices/:id/revenue-lines/:lineId',
     permission: 'finance.invoice.revenue_line.create',
     handler: updateRevenueLineController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/finance/invoices/:id/revenue-lines/:lineId/activate',
+    permission: 'finance.invoice.revenue_line.create',
+    handler: activateRevenueLineController,
   },
   {
     method: 'PATCH',

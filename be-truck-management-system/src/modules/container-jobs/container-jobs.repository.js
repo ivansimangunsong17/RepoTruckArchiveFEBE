@@ -4,6 +4,7 @@ import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssign
 import { lockRepoPickupMovementForJob, reconcileRepoPickupMovement, requirePhysicalRepoPickup } from './repo-pickup-lifecycle.js';
 import { buildRepoUjDescription, normalizeRepoUjAmount, postRepoUjToDroppingAccount } from './repo-pickup-uj.js';
 import { createRepoRevenueLines } from './repo-pickup-revenue.js';
+import { isSalesOrderBillingAdvanced } from '../finance/finance-eligibility.js';
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type,
@@ -310,25 +311,7 @@ function ensureManualOperationalExpense(existing) {
 }
 
 async function ensureSalesOrderBillingNotAdvanced(client, salesOrderId) {
-  if (!salesOrderId) return;
-  const soResult = await client.query(
-    'select invoice_number, billing_status, debit_note_document_uploaded_at from sales_orders where id = $1',
-    [salesOrderId],
-  );
-  const so = soResult.rows[0];
-  if (!so) return;
-  const advancedByOrder = Boolean(String(so.invoice_number || '').trim())
-    || String(so.billing_status || 'belum_invoice') !== 'belum_invoice'
-    || Boolean(so.debit_note_document_uploaded_at);
-  let advanced = advancedByOrder;
-  if (!advanced) {
-    const paymentResult = await client.query(
-      'select 1 from sales_order_payments where sales_order_id = $1 and voided_at is null limit 1',
-      [salesOrderId],
-    );
-    advanced = paymentResult.rows.length > 0;
-  }
-  if (!advanced) return;
+  if (!(await isSalesOrderBillingAdvanced(client, salesOrderId))) return;
   const error = new Error('Sales Order terkait sudah masuk proses invoice/debit note/pembayaran. Perubahan hanya lewat Finance/Admin.');
   error.statusCode = 409;
   error.code = 'CONTAINER_JOB_EXPENSE_BILLING_ADVANCED';

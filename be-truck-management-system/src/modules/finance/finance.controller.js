@@ -52,6 +52,7 @@ import {
   voidDebitNotePaymentForOrder,
   voidInvoicePayment,
   voidRevenueLine,
+  activateRevenueLine,
 } from './finance.service.js';
 
 export async function financeDashboardController(request, response) {
@@ -464,6 +465,22 @@ export async function updateRevenueLineController(request, response) {
     },
   });
   sendSuccess(response, result, 'Revenue line berhasil diperbarui.');
+}
+
+export async function activateRevenueLineController(request, response) {
+  const result = await activateRevenueLine(request.params.id, request.params.lineId, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'FINANCE_ACTIVATE_REVENUE_LINE',
+    module: 'finance',
+    entityType: 'sales_order',
+    entityId: request.params.id,
+    afterData: result?.line,
+    metadata: {
+      lineId: request.params.lineId,
+      billingAmount: result?.billingAmount,
+    },
+  });
+  sendSuccess(response, result, 'Revenue Repo berhasil dimasukkan ke tagihan.');
 }
 
 export async function voidRevenueLineController(request, response) {

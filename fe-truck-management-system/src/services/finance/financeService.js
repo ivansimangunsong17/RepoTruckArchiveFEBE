@@ -258,6 +258,10 @@ export function updateFinanceRevenueLine(id, lineId, payload) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/revenue-lines/${encodeURIComponent(lineId)}`, payload);
 }
 
+export function activateFinanceRevenueLine(id, lineId) {
+  return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/revenue-lines/${encodeURIComponent(lineId)}/activate`, {});
+}
+
 export function voidFinanceRevenueLine(id, lineId, reason) {
   return httpClient.patch(`/finance/invoices/${encodeURIComponent(id)}/revenue-lines/${encodeURIComponent(lineId)}/void`, { reason });
 }
