@@ -1,0 +1,209 @@
+// Integrasi atribusi revenue transport asli untuk job Repo terhadap PostgreSQL sungguhan.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
+// (salinan dev), bukan database dev/production, karena test ini menulis data.
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import test from 'node:test';
+
+const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+
+if (!databaseUrl) {
+  test('repo transport attribution integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+} else {
+  process.env.DATABASE_URL = databaseUrl;
+  process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
+  const { query, closePool } = await import('../db/client.js');
+  const { pickupComboRepoContainerJobs, pickupSingleRepoContainerJob } = await import('../modules/container-jobs/container-jobs.repository.js');
+  const { getMonthlyComparisonReport, getMonthlyRevenueReport } = await import('../modules/reports/reports.repository.js');
+
+  const tag = crypto.randomBytes(3).toString('hex').toUpperCase();
+  let seq = 0;
+  const nextTag = () => `${tag}${String(++seq).padStart(3, '0')}`;
+  // Tahun jauh supaya tidak bercampur data lain: titip 30 Sep, pickup/selesai 2 Okt (WIB).
+  const YEAR = 2031;
+  const STORED_AT = `${YEAR}-09-30T03:00:00.000Z`;
+  const PICKUP_AT = `${YEAR}-10-02T02:00:00.000Z`;
+  const COMPLETED_AT = `${YEAR}-10-02T08:00:00.000Z`;
+
+  async function cloneRow(table, templateSql, overrides) {
+    const result = await query(
+      `insert into ${table}
+       select (jsonb_populate_record(null::${table}, to_jsonb(t) || $1::jsonb)).*
+       from (${templateSql}) t returning *`,
+      [JSON.stringify({ id: crypto.randomUUID(), ...overrides })],
+    );
+    return result.rows[0];
+  }
+
+  const createSalesOrder = () => cloneRow('sales_orders', `
+    select * from sales_orders
+    where status = 'completed' and finance_verification_status = 'verified'
+      and nullif(btrim(accurate_so_number), '') is not null
+    order by created_at limit 1
+  `, { so_number: `SO-TA-${nextTag()}`, accurate_so_number: `ACC-TA-${nextTag()}`, status: 'completed' });
+
+  const createDriver = () => cloneRow('drivers', 'select * from drivers where archived_at is null order by created_at limit 1', {
+    name: `SOPIR TA ${nextTag()}`, nik: null, operational_status: 'Aktif', archived_at: null,
+  });
+
+  const createVehicle = (size) => {
+    const code = nextTag();
+    return cloneRow('vehicles', 'select * from vehicles where archived_at is null order by created_at limit 1', {
+      plate_number: `B ${code} TA`, unit_code: `TA-${code}`, engine_number: null, kir_number: null, vin: null,
+      container_size: size, current_chassis_id: null, operational_status: 'Aktif', archived_at: null,
+    });
+  };
+
+  const jobTemplate = `
+    select * from container_jobs
+    where coalesce(execution_source, 'internal') = 'internal' and status = 'completed'
+    order by created_at limit 1
+  `;
+
+  // Job yang dititip 30 Sep oleh sopir/truck asli (snapshot + released assignment).
+  const createStoredJob = (salesOrderId, driver, vehicle) => cloneRow('container_jobs', jobTemplate, {
+    sales_order_id: salesOrderId,
+    container_number: `TAJ${nextTag()}`.padEnd(11, '0').slice(0, 11),
+    container_size: '20FT',
+    status: 'repo_stored',
+    repo_stored_at: STORED_AT,
+    repo_location: 'Depo TA',
+    repo_eir_number: `EIR-${tag}`,
+    repo_released_driver_id: driver.id,
+    repo_released_vehicle_id: vehicle.id,
+    assignment_snapshot: { driver: driver.name, plateNumber: vehicle.plate_number, unitCode: vehicle.unit_code },
+    driver_id: null, vehicle_id: null, assignment_group_id: null,
+    entry_source: 'realtime', is_backdate_entry: false, rpuj_status: 'pending',
+    completed_at: null, cancelled_at: null, repo_picked_up_at: null, running_at: null,
+  });
+
+  async function finishRepo(jobIds, movementId) {
+    await query('update container_pickup_movements set started_at = $2 where id = $1', [movementId, PICKUP_AT]);
+    await query("update container_jobs set status = 'completed', completed_at = $2 where id = any($1::uuid[])", [jobIds, COMPLETED_AT]);
+  }
+
+  const report = (month) => getMonthlyRevenueReport({ year: YEAR, month });
+  const rowsFor = (result, jobId) => result.rows.filter((row) => row.jobId === jobId);
+
+  let comparisonBefore;
+  let single;
+  let combo;
+
+  test.before(async () => {
+    comparisonBefore = await getMonthlyComparisonReport({ year: YEAR });
+
+    const so = await createSalesOrder();
+    const [driverA, truckA, driverB, truckB] = [await createDriver(), await createVehicle('20FT'), await createDriver(), await createVehicle('20FT')];
+    const job = await createStoredJob(so.id, driverA, truckA);
+    const picked = await pickupSingleRepoContainerJob(job.id, {
+      pickupConfirmed: true, driverId: driverB.id, vehicleId: truckB.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
+    });
+    await finishRepo([job.id], picked.movement.id);
+    single = { so, job, driverA, truckA, driverB, truckB, movement: picked.movement };
+
+    const soCombo = await createSalesOrder();
+    const [driverX, truckX, driverY, truckY, driverC, truckC] = [
+      await createDriver(), await createVehicle('20FT'), await createDriver(), await createVehicle('20FT'),
+      await createDriver(), await createVehicle('40FT'),
+    ];
+    const jobX = await createStoredJob(soCombo.id, driverX, truckX);
+    const jobY = await createStoredJob(soCombo.id, driverY, truckY);
+    const pickedCombo = await pickupComboRepoContainerJobs({
+      pickupConfirmed: true, containerJobIds: [jobX.id, jobY.id], driverId: driverC.id, vehicleId: truckC.id,
+      updatedBy: 'Integration Test', repoUjAmount: 175000,
+    });
+    await finishRepo([jobX.id, jobY.id], pickedCombo.movement.id);
+    combo = { jobX, jobY, truckX, truckY, driverX, driverY, truckC, driverC, movement: pickedCombo.movement };
+  });
+
+  test.after(async () => {
+    await closePool();
+  });
+
+  test('B+C: titip 30 Sep, Repo selesai 2 Okt -> transport milik September, atribusi truck/sopir asli', async () => {
+    const september = rowsFor(await report(9), single.job.id);
+    assert.equal(september.length, 1);
+    assert.equal(september[0].completedDate, `${YEAR}-09-30`);
+    assert.equal(september[0].plateNumber, single.truckA.plate_number);
+    assert.equal(september[0].driver, single.driverA.name);
+    assert.equal(september[0].unitCode, single.truckA.unit_code);
+    assert.ok(september[0].revenue > 0);
+    assert.equal(rowsFor(await report(10), single.job.id).length, 0, 'transport tidak muncul lagi di bulan Repo');
+  });
+
+  test('D: Revenue Repo tetap Oktober dan milik truck/sopir Repo', async () => {
+    const october = await report(10);
+    const repoRows = october.repoRevenueRows.filter((row) => row.movementId === single.movement.id);
+    assert.equal(repoRows.length, 1);
+    assert.equal(repoRows[0].revenueDate, `${YEAR}-10-02`);
+    assert.equal(repoRows[0].plateNumber, single.truckB.plate_number);
+    assert.equal(repoRows[0].driver, single.driverB.name);
+    assert.equal(repoRows[0].amount, 300000);
+    assert.equal((await report(9)).repoRevenueRows.filter((row) => row.movementId === single.movement.id).length, 0);
+  });
+
+  test('E: single dan combo tanpa duplikasi revenue', async () => {
+    const [september, october] = [await report(9), await report(10)];
+    for (const [job, truck, driver] of [[combo.jobX, combo.truckX, combo.driverX], [combo.jobY, combo.truckY, combo.driverY]]) {
+      const transport = [...rowsFor(september, job.id), ...rowsFor(october, job.id)];
+      assert.equal(transport.length, 1);
+      assert.equal(transport[0].plateNumber, truck.plate_number);
+      assert.equal(transport[0].driver, driver.name);
+    }
+    const comboRepo = [...september.repoRevenueRows, ...october.repoRevenueRows].filter((row) => row.movementId === combo.movement.id);
+    assert.equal(comboRepo.length, 2);
+    assert.ok(comboRepo.every((row) => row.plateNumber === combo.truckC.plate_number));
+    assert.equal(comboRepo.reduce((sum, row) => sum + row.amount, 0), 600000);
+  });
+
+  test('Monthly Comparison: transport tiga job pindah ke September, Revenue Repo di Oktober', async () => {
+    const [september, october] = [await report(9), await report(10)];
+    const ownTransport = [single.job, combo.jobX, combo.jobY]
+      .reduce((sum, job) => sum + rowsFor(september, job.id).reduce((total, row) => total + row.revenue, 0), 0);
+    const after = await getMonthlyComparisonReport({ year: YEAR });
+    assert.equal(after.rows[8].totalRevenue - comparisonBefore.rows[8].totalRevenue, ownTransport);
+    assert.equal(after.rows[9].totalRevenue - comparisonBefore.rows[9].totalRevenue, 0);
+    assert.equal(after.rows[9].repoRevenue - comparisonBefore.rows[9].repoRevenue, 900000);
+    assert.ok(october.summary.repoRevenue >= 900000);
+  });
+
+  test('A: job normal yang selesai tetap memakai completed_at dan assignment saat ini', async () => {
+    const so = await createSalesOrder();
+    const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
+    const job = await cloneRow('container_jobs', jobTemplate, {
+      sales_order_id: so.id, container_number: `TAN${nextTag()}`.padEnd(11, '0').slice(0, 11), container_size: '20FT',
+      status: 'completed', completed_at: `${YEAR}-10-05T03:00:00.000Z`, repo_stored_at: null,
+      assignment_snapshot: { driver: driver.name, plateNumber: truck.plate_number, unitCode: truck.unit_code },
+      driver_id: null, vehicle_id: null, assignment_group_id: null, entry_source: 'realtime', is_backdate_entry: false,
+    });
+    const october = rowsFor(await report(10), job.id);
+    assert.equal(october.length, 1);
+    assert.equal(october[0].completedDate, `${YEAR}-10-05`);
+    assert.equal(october[0].plateNumber, truck.plate_number);
+    assert.equal(october[0].driver, driver.name);
+  });
+
+  test('F: data lama repo_stored tanpa repo_stored_at -> tidak ada tanggal/assignment karangan', async () => {
+    const so = await createSalesOrder();
+    const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
+    const job = await cloneRow('container_jobs', jobTemplate, {
+      sales_order_id: so.id, container_number: `TAL${nextTag()}`.padEnd(11, '0').slice(0, 11), container_size: '20FT',
+      status: 'repo_stored', repo_stored_at: null, completed_at: null,
+      repo_released_driver_id: null, repo_released_vehicle_id: null,
+      assignment_snapshot: { driver: driver.name, plateNumber: truck.plate_number },
+      driver_id: null, vehicle_id: null, assignment_group_id: null, entry_source: 'realtime', is_backdate_entry: false,
+    });
+    for (const month of [9, 10, 11]) {
+      assert.equal(rowsFor(await report(month), job.id).length, 0, 'belum selesai dan tanpa tanggal titip: tidak dilaporkan');
+    }
+
+    // Setelah selesai: perilaku lama (completed_at + snapshot), tanpa repo_stored_at buatan.
+    await query("update container_jobs set status = 'completed', completed_at = $2 where id = $1", [job.id, `${YEAR}-11-03T03:00:00.000Z`]);
+    const november = rowsFor(await report(11), job.id);
+    assert.equal(november.length, 1);
+    assert.equal(november[0].completedDate, `${YEAR}-11-03`);
+    assert.equal(november[0].plateNumber, truck.plate_number);
+    const stored = await query('select repo_stored_at from container_jobs where id = $1', [job.id]);
+    assert.equal(stored.rows[0].repo_stored_at, null);
+  });
+}

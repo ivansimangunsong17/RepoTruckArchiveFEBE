@@ -43,13 +43,35 @@ if (!databaseUrl) {
   }
 
   // Sales Order yang masuk daftar invoice Finance, supaya billing_amount bisa dihitung.
+  // SO invoice milik test ini sendiri (clone SO terverifikasi + satu job selesai), supaya file
+  // integrasi lain yang berjalan paralel tidak saling mengubah billing SO yang sama.
   async function invoiceSalesOrders(limit = 2) {
-    const result = await query(
-      `${invoiceOrdersCte()} select id from invoice_orders where billing_status <> 'lunas' order by id limit $1`,
-      [limit],
-    );
-    assert.ok(result.rows.length >= limit, 'butuh Sales Order invoice di database scratch');
-    return result.rows.map((row) => row.id);
+    const ids = [];
+    for (let index = 0; index < limit; index += 1) {
+      const code = nextTag();
+      const so = await cloneRow('sales_orders', `
+        select * from sales_orders
+        where status = 'completed' and finance_verification_status = 'verified'
+          and nullif(btrim(accurate_so_number), '') is not null
+        order by created_at limit 1
+      `, [], {
+        so_number: `SO-RV-${code}`, accurate_so_number: `ACC-RV-${code}`, customer_name: `Customer RV ${code}`,
+        invoice_number: null, billing_status: 'belum_invoice', debit_note_document_uploaded_at: null, status: 'completed',
+      });
+      await cloneRow('container_jobs', `
+        select * from container_jobs
+        where coalesce(execution_source, 'internal') = 'internal' and status = 'completed'
+        order by created_at limit 1
+      `, [], {
+        sales_order_id: so.id, container_number: `RVB${nextTag()}`.padEnd(11, '0').slice(0, 11), container_size: '20FT',
+        status: 'completed', completed_at: new Date().toISOString(), repo_stored_at: null,
+        driver_id: null, vehicle_id: null, assignment_group_id: null, entry_source: 'realtime', is_backdate_entry: false,
+      });
+      ids.push(so.id);
+    }
+    const listed = await query(`${invoiceOrdersCte()} select id from invoice_orders where id = any($1::uuid[])`, [ids]);
+    assert.equal(listed.rows.length, limit, 'SO test harus masuk daftar invoice');
+    return ids;
   }
 
   async function billingAmount(salesOrderId) {
