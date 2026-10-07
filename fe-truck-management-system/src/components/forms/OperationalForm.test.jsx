@@ -1551,6 +1551,102 @@ describe('OperationalForm', () => {
     }));
   });
 
+  const runningAssignmentContainer = {
+    ...container,
+    driverId: 'driver-1',
+    plateNumber: 'B 1000 AA',
+    chassis: 'TRK-001 - Hino FG',
+    status: 'running',
+    runningAt: '2026-07-19T08:00:00.000Z',
+  };
+  const runningAssignmentTrucks = [
+    { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif' },
+  ];
+
+  it('rename sopir di master (id sama) tidak dianggap pergantian sopir', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{ ...runningAssignmentContainer, driver: 'Budi Lama' }}
+        masterTrucks={runningAssignmentTrucks}
+        masterDrivers={[{ id: 'driver-1', name: 'Budi Baru', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await chooseDriver(user, 'Budi Baru');
+    expect(screen.queryByText(/alasan perubahan sopir\/truck wajib diisi/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ driver: 'Budi Baru', driverId: 'driver-1' }));
+  });
+
+  it('ganti plat di master truck (id sama) tidak dianggap pergantian truck', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{ ...runningAssignmentContainer, driver: 'Budi', vehicleId: 'truck-1' }}
+        masterTrucks={[
+          { id: 'truck-1', plateNumber: 'B 2000 BB', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif' },
+          { id: 'truck-2', plateNumber: 'B 3000 CC', unitCode: 'TRK-002', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif' },
+        ]}
+        masterDrivers={[{ id: 'driver-1', name: 'Budi', status: 'Aktif' }]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 2000 BB');
+    expect(screen.queryByText(/alasan perubahan sopir\/truck wajib diisi/i)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 3000 CC');
+    expect(screen.getByText(/alasan perubahan sopir\/truck wajib diisi/i)).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Truck'), 'B 2000 BB');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ plateNumber: 'B 2000 BB', vehicleId: 'truck-1' }));
+  });
+
+  it('dua sopir bernama sama tetap dibedakan lewat id saat dipilih', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(
+      <OperationalForm
+        container={{ ...runningAssignmentContainer, driver: 'Budi' }}
+        masterTrucks={runningAssignmentTrucks}
+        masterDrivers={[
+          { id: 'driver-1', name: 'Budi', status: 'Aktif' },
+          { id: 'driver-2', name: 'Budi', status: 'Aktif' },
+        ]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const input = screen.getByLabelText('Sopir Aktual Ritasi');
+    await user.clear(input);
+    await user.type(input, 'Budi');
+    const options = await screen.findAllByRole('option', { name: /budi/i });
+    expect(options).toHaveLength(2);
+    await user.click(options[1]);
+
+    expect(screen.getByText(/alasan perubahan sopir\/truck wajib diisi/i)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/alasan perubahan/i), 'Ganti ke Budi yang lain');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      driver: 'Budi',
+      driverId: 'driver-2',
+      assignmentChangeReason: 'Ganti ke Budi yang lain',
+    }));
+  });
+
   it('tidak mewajibkan alasan saat mengganti truck sementara status masih Belum Jalan', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

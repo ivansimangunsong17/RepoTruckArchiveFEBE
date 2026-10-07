@@ -14,6 +14,8 @@ const {
   ensureRepoStoragePayload,
   hasCompletedTimelineChange,
   hasDriverCommissionChange,
+  hasDriverIdentityChange,
+  hasVehicleIdentityChange,
   hasOperationalDocumentChange,
   isAdminCorrectionMode,
   isBackdateEntryPayload,
@@ -127,6 +129,58 @@ test('koreksi sopir job selesai berkomisi wajib memilih tindakan komisi', () => 
     driverId: 'driver-new',
     driver: 'Sopir Baru',
   }));
+});
+
+test('identitas sopir dibandingkan lewat driver_id, bukan nama', () => {
+  const job = { driverId: 'driver-1', driver: 'Budi Lama', assignment_snapshot: { driver: 'Budi Lama' } };
+
+  // Rename di master driver: id sama, nama payload ikut nama baru -> bukan reassignment.
+  assert.equal(hasDriverIdentityChange(job, { driverId: 'driver-1', driver: 'Budi Baru' }), false);
+  // Id berubah -> reassignment.
+  assert.equal(hasDriverIdentityChange(job, { driverId: 'driver-2', driver: 'Andi' }), true);
+  // Dua sopir bernama sama tetap berbeda kalau id-nya beda.
+  assert.equal(hasDriverIdentityChange(job, { driverId: 'driver-2', driver: 'Budi Lama' }), true);
+  // Tanpa driverId (data lama/free text): fallback ke nama snapshot.
+  assert.equal(hasDriverIdentityChange(job, { driver: 'Budi Lama' }), false);
+  assert.equal(hasDriverIdentityChange(job, { driver: 'Andi' }), true);
+  assert.equal(hasDriverIdentityChange(job, {}), false);
+  // Snapshot job tidak diubah oleh pengecekan.
+  assert.deepEqual(job, { driverId: 'driver-1', driver: 'Budi Lama', assignment_snapshot: { driver: 'Budi Lama' } });
+});
+
+test('identitas truck dibandingkan lewat vehicle_id, bukan plat nomor', () => {
+  const job = { vehicleId: 'truck-1', plateNumber: 'B 1000 AA', assignment_snapshot: { plateNumber: 'B 1000 AA' } };
+
+  // Plat diganti di master truck: id sama -> bukan reassignment.
+  assert.equal(hasVehicleIdentityChange(job, { vehicleId: 'truck-1', plateNumber: 'B 2000 BB' }), false);
+  // Id berubah -> reassignment.
+  assert.equal(hasVehicleIdentityChange(job, { vehicleId: 'truck-2', plateNumber: 'B 3000 CC' }), true);
+  // Plat lama sekarang dipakai truck lain: tetap dibedakan lewat id.
+  assert.equal(hasVehicleIdentityChange(job, { vehicleId: 'truck-2', plateNumber: 'B 1000 AA' }), true);
+  // Data lama tanpa vehicleId: fallback ke plat snapshot.
+  assert.equal(hasVehicleIdentityChange(job, { plateNumber: 'B 1000 AA' }), false);
+  assert.equal(hasVehicleIdentityChange(job, { plateNumber: 'B 3000 CC' }), true);
+  assert.equal(hasVehicleIdentityChange(job, {}), false);
+  // Snapshot job tidak diubah oleh pengecekan.
+  assert.deepEqual(job, { vehicleId: 'truck-1', plateNumber: 'B 1000 AA', assignment_snapshot: { plateNumber: 'B 1000 AA' } });
+});
+
+test('rename sopir (id sama) pada job selesai berkomisi tidak memaksa tindakan komisi', () => {
+  const job = { status: 'completed', hasDriverCommission: true, driverId: 'driver-1', driver: 'Budi Lama' };
+
+  assert.doesNotThrow(() => ensureCompletedCommissionDriverAction(job, {
+    adminCorrectionMode: true,
+    driverId: 'driver-1',
+    driver: 'Budi Baru',
+  }));
+  assert.throws(
+    () => ensureCompletedCommissionDriverAction(job, {
+      adminCorrectionMode: true,
+      driverId: 'driver-2',
+      driver: 'Budi Lama',
+    }),
+    (error) => error.code === 'CONTAINER_JOB_COMMISSION_DRIVER_ACTION_REQUIRED',
+  );
 });
 
 test('keep mengunci penerima komisi lama pada data legacy tanpa commission_driver_id', async () => {
