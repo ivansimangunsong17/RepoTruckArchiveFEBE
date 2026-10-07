@@ -833,6 +833,8 @@ describe('OperationalForm', () => {
       />,
     );
 
+    expect(screen.getByLabelText('Revenue Repo')).toHaveTextContent(/300\.000/);
+    expect(screen.getByLabelText('Revenue Repo')).toHaveTextContent(/1 container/);
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -880,6 +882,9 @@ describe('OperationalForm', () => {
 
     expect(screen.getAllByLabelText('Total UJ Repo')).toHaveLength(1);
     expect(screen.getByText(/untuk 1 perjalanan combo/i)).toBeInTheDocument();
+    // Revenue Repo per container: combo 2 x Rp300.000 = Rp600.000 (otomatis, tidak bisa diedit).
+    expect(screen.getByLabelText('Revenue Repo')).toHaveTextContent(/600\.000/);
+    expect(screen.getByLabelText('Revenue Repo')).toHaveTextContent(/2 container/);
   });
 
   it('mengizinkan pickup container titip oleh sopir dan truck yang sama', async () => {

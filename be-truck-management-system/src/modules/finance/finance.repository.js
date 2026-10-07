@@ -4999,6 +4999,8 @@ function mapManualRevenueLineRow(row) {
     voidedAt: row.voided_at,
     voidedByName: row.voided_by_name || '',
     voidReason: row.void_reason || '',
+    pickupItemId: row.container_pickup_item_id || '',
+    pickupMovementId: row.pickup_movement_id || '',
   };
 }
 
@@ -5103,9 +5105,11 @@ export async function getInvoiceOrderDetail(id) {
           mrl.id, mrl.container_job_id, cj.container_number, mrl.charge_type, mrl.description,
           mrl.quantity, mrl.unit, mrl.unit_price, mrl.total_amount, mrl.note, mrl.status,
           mrl.created_by_name, mrl.created_at, mrl.updated_by_name, mrl.updated_at,
-          mrl.voided_at, mrl.voided_by_name, mrl.void_reason
+          mrl.voided_at, mrl.voided_by_name, mrl.void_reason,
+          mrl.container_pickup_item_id, cpi.movement_id as pickup_movement_id
         from manual_revenue_lines mrl
         left join container_jobs cj on cj.id = mrl.container_job_id
+        left join container_pickup_items cpi on cpi.id = mrl.container_pickup_item_id
         where mrl.sales_order_id = $1
         order by mrl.created_at asc
       `,
@@ -5222,6 +5226,14 @@ export async function updateManualRevenueLine(salesOrderId, lineId, payload = {}
       const error = new Error('Revenue line yang sudah dibatalkan tidak bisa diubah.');
       error.statusCode = 409;
       error.code = 'REVENUE_LINE_ALREADY_VOIDED';
+      throw error;
+    }
+    // Revenue Repo dibuat otomatis per pickup item dengan tarif tetap dan sengaja masih 'draft'
+    // (belum masuk invoice) sampai kebijakan invoice Repo diputuskan. Koreksi hanya lewat void.
+    if (existing.rows[0].container_pickup_item_id) {
+      const error = new Error('Revenue Repo dibuat otomatis dari pickup container titip dan tidak bisa diubah. Gunakan Batalkan bila perlu koreksi.');
+      error.statusCode = 409;
+      error.code = 'REPO_REVENUE_LINE_LOCKED';
       throw error;
     }
 
