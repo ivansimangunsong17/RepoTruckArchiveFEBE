@@ -1497,6 +1497,13 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
   if (driverId) await client.query('select id from drivers where id = $1 for update', [driverId]);
   if (vehicleId) await client.query('select id from vehicles where id = $1 for update', [vehicleId]);
 
+  // Pasangan job dalam satu combo (assignment_group_id sama) adalah perjalanan fisik yang sama,
+  // bukan bentrok -- tapi hanya selama driver/truck job ini tidak diganti (trigger DB juga
+  // mengeluarkan job dari grup begitu driver/truck-nya diganti).
+  const keepsAssignment = String(driverId || '') === String(existing.driver_id || '')
+    && String(vehicleId || '') === String(existing.vehicle_id || '');
+  const assignmentGroupId = keepsAssignment ? existing.assignment_group_id || null : null;
+
   const result = await client.query(
     `
       select cj.id, cj.container_number, cj.assignment_snapshot, so.so_number
@@ -1505,6 +1512,7 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
       where cj.id <> $1
         and coalesce(cj.execution_source, 'internal') = 'internal'
         and cj.status not in ('completed', 'cancelled', 'repo_stored')
+        and ($6::uuid is null or coalesce(cj.assignment_group_id, cj.id) <> $6::uuid)
         and (
           ($2::uuid is not null and cj.driver_id = $2::uuid)
           or ($3::uuid is not null and cj.vehicle_id = $3::uuid)
@@ -1513,7 +1521,7 @@ async function requireAssignmentAvailable(client, id, form, driver, vehicle, nex
         )
       limit 1
     `,
-    [id, driverId, vehicleId, driverName, plateNumber],
+    [id, driverId, vehicleId, driverName, plateNumber, assignmentGroupId],
   );
 
   if (result.rows[0]) {
@@ -2680,20 +2688,29 @@ export async function updateContainerJobExpenseProofRecord(id, expenseId, payloa
   });
 }
 
-const ASSIGNMENT_UNIQUE_CONSTRAINTS = new Set(['uq_container_jobs_driver_active', 'uq_container_jobs_vehicle_active']);
+// Jaring pengaman DB untuk "satu driver/truck per perjalanan aktif": exclusion constraint
+// (23P01, migrasi 202610070001) menggantikan unique index lama (23505).
+const ASSIGNMENT_ACTIVE_CONSTRAINTS = new Set([
+  'ex_container_jobs_driver_active',
+  'ex_container_jobs_vehicle_active',
+  'uq_container_jobs_driver_active',
+  'uq_container_jobs_vehicle_active',
+]);
+
+function toAssignmentConflictError(error) {
+  if (!['23505', '23P01'].includes(error?.code) || !ASSIGNMENT_ACTIVE_CONSTRAINTS.has(error.constraint)) return error;
+  return validationError(
+    'Driver atau truck baru saja ter-assign ke job lain oleh permintaan lain yang bersamaan. Muat ulang dan pilih driver/truck lain.',
+    'ASSIGNMENT_ALREADY_ACTIVE',
+    409,
+  );
+}
 
 export async function updateContainerJob(id, form) {
   try {
     return await updateContainerJobTransaction(id, form);
   } catch (error) {
-    if (error.code === '23505' && ASSIGNMENT_UNIQUE_CONSTRAINTS.has(error.constraint)) {
-      throw validationError(
-        'Driver atau truck baru saja ter-assign ke job lain oleh permintaan lain yang bersamaan. Muat ulang dan pilih driver/truck lain.',
-        'ASSIGNMENT_ALREADY_ACTIVE',
-        409,
-      );
-    }
-    throw error;
+    throw toAssignmentConflictError(error);
   }
 }
 
@@ -2909,6 +2926,7 @@ async function updateContainerJobTransaction(id, form) {
                cj.commission_driver_id, cj.commission_driver_name, cj.commission_driver_snapshot,
                cj.commission_locked_amount, cj.commission_locked_at, cj.commission_status,
                cj.uj_amount_snapshot, cj.uj_source_destination_id, cj.uj_snapshot_at, cj.uj_snapshot_source,
+               cj.assignment_group_id,
                so.so_number, so.do_number, so.customer_name, cj.destination, cj.destination_id,
                so.trip_date, so.finance_verification_status
         from container_jobs cj
@@ -3623,6 +3641,8 @@ async function updateRepoPickupJob(client, {
   movement,
   pickupType,
 }) {
+  // Combo 2x20: kedua job satu grup assignment (= movement) sehingga boleh berbagi driver/truck
+  // aktif; single tetap tanpa grup (exclusion constraint ex_container_jobs_*_active).
   await client.query(
     `
       update container_jobs
@@ -3633,11 +3653,20 @@ async function updateRepoPickupJob(client, {
           running_at = coalesce(running_at, $5::timestamptz),
           repo_picked_up_at = $5::timestamptz,
           repo_picked_up_by_name = $6,
+          assignment_group_id = $7,
           updated_by_name = $6,
           updated_at = now()
       where id = $1
     `,
-    [job.id, driver?.id || null, vehicle?.id || null, JSON.stringify(assignment || {}), runningAt, actorName],
+    [
+      job.id,
+      driver?.id || null,
+      vehicle?.id || null,
+      JSON.stringify(assignment || {}),
+      runningAt,
+      actorName,
+      pickupType === 'combo_2x20' ? movement.id : null,
+    ],
   );
   await client.query(
     `
@@ -3755,12 +3784,20 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
   });
 }
 
-export function pickupSingleRepoContainerJob(id, payload = {}) {
-  return pickupRepoContainerJobs([id], payload, 'single');
+export async function pickupSingleRepoContainerJob(id, payload = {}) {
+  try {
+    return await pickupRepoContainerJobs([id], payload, 'single');
+  } catch (error) {
+    throw toAssignmentConflictError(error);
+  }
 }
 
-export function pickupComboRepoContainerJobs(payload = {}) {
-  return pickupRepoContainerJobs(payload.containerJobIds || payload.jobIds || [], payload, 'combo_2x20');
+export async function pickupComboRepoContainerJobs(payload = {}) {
+  try {
+    return await pickupRepoContainerJobs(payload.containerJobIds || payload.jobIds || [], payload, 'combo_2x20');
+  } catch (error) {
+    throw toAssignmentConflictError(error);
+  }
 }
 
 async function ensureCanRequestCancellation(client, id) {
