@@ -69,6 +69,26 @@ test('combo first completion remains running; second completion closes one movem
   assert.equal(state.updates, 1);
 });
 
+for (const { jobs, expected } of [
+  { jobs: ['completed', 'cancelled'], expected: 'completed' },
+  { jobs: ['cancelled', 'cancelled'], expected: 'cancelled' },
+  { jobs: ['completed', 'running'], expected: 'running' },
+  { jobs: ['completed', 'completed'], expected: 'completed' },
+]) {
+  test(`combo ${jobs.join(' + ')} resolves to ${expected}`, async () => {
+    const state = lifecycleClient(jobs);
+    const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[1].id);
+    assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, expected);
+    assert.equal(state.updates, expected === 'running' ? 0 : 1);
+    assert.equal(state.movement.completed_at,
+      expected === 'completed' ? '2026-10-07T10:00:00.000Z' : null);
+    assert.equal((await reconcileRepoPickupMovement(state.client, {
+      id: state.movement.id, status: state.movement.status,
+    })).status, expected);
+    assert.equal(state.updates, expected === 'running' ? 0 : 1);
+  });
+}
+
 test('all linked jobs cancelled cancels the movement; repeated cancellation is safe', async () => {
   const state = lifecycleClient(['cancelled', 'running']);
   let locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
