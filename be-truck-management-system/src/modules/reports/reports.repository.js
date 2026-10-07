@@ -1253,7 +1253,7 @@ export async function getSalesPerformanceReport(options = {}) {
           so.total_amount,
           to_jsonb(so)->'line_items' as line_items,
           cj.container_size,
-          ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
+          ${transportRevenueDateSql} as completed_date,
           coalesce(cj.entry_source, 'realtime') as entry_source,
           cj.historical_period,
           greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
@@ -1269,7 +1269,7 @@ export async function getSalesPerformanceReport(options = {}) {
           )
         left join order_job_totals ojt on ojt.sales_order_id = so.id
         where so.status <> 'cancelled'
-          and cj.status = 'completed'
+          and ${transportRevenueJobFilterSql}
           ${sourceWhereSql}
       )
       select *
@@ -1337,7 +1337,7 @@ export async function getCustomerPerformanceReport(options = {}) {
             so.total_amount,
             to_jsonb(so)->'line_items' as line_items,
             cj.container_size,
-            ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
+            ${transportRevenueDateSql} as completed_date,
             coalesce(cj.entry_source, 'realtime') as entry_source,
             cj.historical_period,
             greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
@@ -1353,7 +1353,7 @@ export async function getCustomerPerformanceReport(options = {}) {
             )
           left join order_job_totals ojt on ojt.sales_order_id = so.id
           where so.status <> 'cancelled'
-            and cj.status = 'completed'
+            and ${transportRevenueJobFilterSql}
             ${sourceWhereSql}
         )
         select *

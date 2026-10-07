@@ -14,7 +14,12 @@ if (!databaseUrl) {
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
   const { query, closePool } = await import('../db/client.js');
   const { pickupComboRepoContainerJobs, pickupSingleRepoContainerJob } = await import('../modules/container-jobs/container-jobs.repository.js');
-  const { getMonthlyComparisonReport, getMonthlyRevenueReport } = await import('../modules/reports/reports.repository.js');
+  const {
+    getCustomerPerformanceReport,
+    getMonthlyComparisonReport,
+    getMonthlyRevenueReport,
+    getSalesPerformanceReport,
+  } = await import('../modules/reports/reports.repository.js');
 
   const tag = crypto.randomBytes(3).toString('hex').toUpperCase();
   let seq = 0;
@@ -86,11 +91,23 @@ if (!databaseUrl) {
   const rowsFor = (result, jobId) => result.rows.filter((row) => row.jobId === jobId);
 
   let comparisonBefore;
+  const performanceBefore = {};
+  const performance = async (month) => ({
+    sales: await getSalesPerformanceReport({ year: YEAR, month }),
+    customer: await getCustomerPerformanceReport({ year: YEAR, month }),
+  });
+  const customerRevenue = (report, name) => report.rows
+    .filter((row) => String(row.customer ?? row.customerName ?? '').trim().toLowerCase() === String(name).trim().toLowerCase())
+    .reduce((sum, row) => sum + Number(row.totalRevenue || 0), 0);
+  const salesRevenue = (report, name) => report.rows
+    .filter((row) => String(row.salesName || '').trim().toLowerCase() === String(name).trim().toLowerCase())
+    .reduce((sum, row) => sum + Number(row.totalRevenue || 0), 0);
   let single;
   let combo;
 
   test.before(async () => {
     comparisonBefore = await getMonthlyComparisonReport({ year: YEAR });
+    for (const month of [9, 10, 11]) performanceBefore[month] = await performance(month);
 
     const so = await createSalesOrder();
     const [driverA, truckA, driverB, truckB] = [await createDriver(), await createVehicle('20FT'), await createDriver(), await createVehicle('20FT')];
@@ -167,6 +184,47 @@ if (!databaseUrl) {
     assert.ok(october.summary.repoRevenue >= 900000);
   });
 
+  test('Sales & Customer Performance: transport job titip masuk September, atribusi sales/customer tetap', async () => {
+    const september = await report(9);
+    const ownSeptember = [single.job, combo.jobX, combo.jobY]
+      .reduce((sum, job) => sum + rowsFor(september, job.id).reduce((total, row) => total + row.revenue, 0), 0);
+    assert.ok(ownSeptember > 0);
+    const [sep, oct] = [await performance(9), await performance(10)];
+    // B: masuk September, tidak lagi di Oktober (bulan Repo selesai).
+    assert.equal(sep.sales.summary.totalRevenue - performanceBefore[9].sales.summary.totalRevenue, ownSeptember);
+    assert.equal(sep.customer.summary.totalRevenue - performanceBefore[9].customer.summary.totalRevenue, ownSeptember);
+    assert.equal(oct.sales.summary.totalRevenue - performanceBefore[10].sales.summary.totalRevenue, 0);
+    assert.equal(oct.customer.summary.totalRevenue - performanceBefore[10].customer.summary.totalRevenue, 0);
+    // C/D: tetap ke customer dan sales milik SO (tidak berubah oleh aturan tanggal).
+    const so = (await query('select customer_name, sales_name from sales_orders where id = $1', [single.so.id])).rows[0];
+    assert.ok(customerRevenue(sep.customer, so.customer_name) - customerRevenue(performanceBefore[9].customer, so.customer_name) >= rowsFor(september, single.job.id)[0].revenue);
+    const salesRow = sep.sales.rows.find((row) => (row.customers || []).some((customer) => String(customer.customer || '').trim().toLowerCase() === String(so.customer_name).trim().toLowerCase()));
+    assert.ok(salesRow, 'baris sales untuk customer SO harus ada');
+    assert.ok(salesRevenue(sep.sales, salesRow.salesName) - salesRevenue(performanceBefore[9].sales, salesRow.salesName) >= rowsFor(september, single.job.id)[0].revenue);
+    // Revenue Repo tidak tercampur ke laporan Sales/Customer (transport saja).
+    assert.ok(!('repoRevenue' in sep.sales.summary));
+  });
+
+  test('E: job batal (walau pernah dititip) tidak dihitung', async () => {
+    const before = await performance(9);
+    const so = await createSalesOrder();
+    const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
+    const job = await createStoredJob(so.id, driver, truck);
+    await query("update container_jobs set status = 'cancelled', cancelled_at = now() where id = $1", [job.id]);
+    const after = await performance(9);
+    assert.equal(after.sales.summary.totalRevenue, before.sales.summary.totalRevenue);
+    assert.equal(after.customer.summary.totalRevenue, before.customer.summary.totalRevenue);
+    assert.equal(rowsFor(await report(9), job.id).length, 0);
+  });
+
+  test('G: total transport Sales/Customer Performance = Monthly Revenue untuk periode yang sama', async () => {
+    for (const month of [9, 10]) {
+      const [monthly, perf] = [await report(month), await performance(month)];
+      assert.equal(perf.sales.summary.totalRevenue, monthly.summary.transportRevenue, `sales bulan ${month}`);
+      assert.equal(perf.customer.summary.totalRevenue, monthly.summary.transportRevenue, `customer bulan ${month}`);
+    }
+  });
+
   test('A: job normal yang selesai tetap memakai completed_at dan assignment saat ini', async () => {
     const so = await createSalesOrder();
     const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
@@ -195,6 +253,10 @@ if (!databaseUrl) {
     });
     for (const month of [9, 10, 11]) {
       assert.equal(rowsFor(await report(month), job.id).length, 0, 'belum selesai dan tanpa tanggal titip: tidak dilaporkan');
+      const perf = await performance(month);
+      const monthly = await report(month);
+      assert.equal(perf.sales.summary.totalRevenue, monthly.summary.transportRevenue, 'data lama tidak membuat revenue palsu di Sales');
+      assert.equal(perf.customer.summary.totalRevenue, monthly.summary.transportRevenue, 'data lama tidak membuat revenue palsu di Customer');
     }
 
     // Setelah selesai: perilaku lama (completed_at + snapshot), tanpa repo_stored_at buatan.
