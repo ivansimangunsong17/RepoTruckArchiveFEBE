@@ -16,6 +16,7 @@ if (!databaseUrl) {
   const { pickupComboRepoContainerJobs, pickupSingleRepoContainerJob } = await import('../modules/container-jobs/container-jobs.repository.js');
   const {
     getCustomerPerformanceReport,
+    getDriverPerformanceReport,
     getMonthlyComparisonReport,
     getMonthlyRevenueReport,
     getSalesPerformanceReport,
@@ -91,6 +92,8 @@ if (!databaseUrl) {
   const rowsFor = (result, jobId) => result.rows.filter((row) => row.jobId === jobId);
 
   let comparisonBefore;
+  const monthlyBefore = {};
+  const driverBefore = {};
   const performanceBefore = {};
   const performance = async (month) => ({
     sales: await getSalesPerformanceReport({ year: YEAR, month }),
@@ -107,7 +110,11 @@ if (!databaseUrl) {
 
   test.before(async () => {
     comparisonBefore = await getMonthlyComparisonReport({ year: YEAR });
-    for (const month of [9, 10, 11]) performanceBefore[month] = await performance(month);
+    for (const month of [9, 10, 11]) {
+      performanceBefore[month] = await performance(month);
+      monthlyBefore[month] = await report(month);
+      driverBefore[month] = await getDriverPerformanceReport({ month: `${YEAR}-${String(month).padStart(2, '0')}` });
+    }
 
     const so = await createSalesOrder();
     const [driverA, truckA, driverB, truckB] = [await createDriver(), await createVehicle('20FT'), await createDriver(), await createVehicle('20FT')];
@@ -159,6 +166,31 @@ if (!databaseUrl) {
     assert.equal((await report(9)).repoRevenueRows.filter((row) => row.movementId === single.movement.id).length, 0);
   });
 
+  test('Driver Performance: original transport follows storage driver/month, not Repo driver/month', async () => {
+    const [september, october] = await Promise.all([
+      getDriverPerformanceReport({ month: `${YEAR}-09` }),
+      getDriverPerformanceReport({ month: `${YEAR}-10` }),
+    ]);
+    const revenueSeptember = await report(9);
+    const ownTransport = [single.job, combo.jobX, combo.jobY]
+      .reduce((sum, job) => sum + rowsFor(revenueSeptember, job.id).reduce((total, row) => total + row.revenue, 0), 0);
+    for (const [driver, job] of [[single.driverA, single.job], [combo.driverX, combo.jobX], [combo.driverY, combo.jobY]]) {
+      const row = september.rows.find((item) => item.driverId === driver.id);
+      assert.ok(row);
+      assert.equal(row.totalRevenue, rowsFor(revenueSeptember, job.id)[0].revenue);
+      assert.equal(row.totalTrips, 1);
+    }
+    for (const driver of [single.driverB, combo.driverC]) {
+      const row = october.rows.find((item) => item.driverId === driver.id);
+      assert.ok(row);
+      assert.equal(row.totalTrips, 1);
+      assert.equal(row.totalRevenue, 0);
+    }
+    assert.equal(september.summary.totalRevenue - driverBefore[9].summary.totalRevenue, ownTransport);
+    assert.equal(october.summary.totalRevenue - driverBefore[10].summary.totalRevenue, 0);
+    assert.equal(ownTransport, revenueSeptember.summary.transportRevenue - monthlyBefore[9].summary.transportRevenue);
+  });
+
   test('E: single dan combo tanpa duplikasi revenue', async () => {
     const [september, october] = [await report(9), await report(10)];
     for (const [job, truck, driver] of [[combo.jobX, combo.truckX, combo.driverX], [combo.jobY, combo.truckY, combo.driverY]]) {
@@ -207,6 +239,7 @@ if (!databaseUrl) {
 
   test('E: job batal (walau pernah dititip) tidak dihitung', async () => {
     const before = await performance(9);
+    const driverRevenueBefore = (await getDriverPerformanceReport({ month: `${YEAR}-09` })).summary.totalRevenue;
     const so = await createSalesOrder();
     const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
     const job = await createStoredJob(so.id, driver, truck);
@@ -215,6 +248,7 @@ if (!databaseUrl) {
     assert.equal(after.sales.summary.totalRevenue, before.sales.summary.totalRevenue);
     assert.equal(after.customer.summary.totalRevenue, before.customer.summary.totalRevenue);
     assert.equal(rowsFor(await report(9), job.id).length, 0);
+    assert.equal((await getDriverPerformanceReport({ month: `${YEAR}-09` })).summary.totalRevenue, driverRevenueBefore);
   });
 
   test('G: total transport Sales/Customer Performance = Monthly Revenue untuk periode yang sama', async () => {
@@ -226,6 +260,7 @@ if (!databaseUrl) {
   });
 
   test('A: job normal yang selesai tetap memakai completed_at dan assignment saat ini', async () => {
+    const before = await getDriverPerformanceReport({ month: `${YEAR}-10` });
     const so = await createSalesOrder();
     const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
     const job = await cloneRow('container_jobs', jobTemplate, {
@@ -239,9 +274,13 @@ if (!databaseUrl) {
     assert.equal(october[0].completedDate, `${YEAR}-10-05`);
     assert.equal(october[0].plateNumber, truck.plate_number);
     assert.equal(october[0].driver, driver.name);
+    const after = await getDriverPerformanceReport({ month: `${YEAR}-10` });
+    assert.equal(after.summary.totalRevenue - before.summary.totalRevenue, october[0].revenue);
+    assert.equal(after.rows.find((row) => row.driver === driver.name)?.totalRevenue, october[0].revenue);
   });
 
   test('F: data lama repo_stored tanpa repo_stored_at -> tidak ada tanggal/assignment karangan', async () => {
+    const driverRevenueBefore = (await getDriverPerformanceReport({ month: `${YEAR}-09` })).summary.totalRevenue;
     const so = await createSalesOrder();
     const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
     const job = await cloneRow('container_jobs', jobTemplate, {
@@ -258,6 +297,7 @@ if (!databaseUrl) {
       assert.equal(perf.sales.summary.totalRevenue, monthly.summary.transportRevenue, 'data lama tidak membuat revenue palsu di Sales');
       assert.equal(perf.customer.summary.totalRevenue, monthly.summary.transportRevenue, 'data lama tidak membuat revenue palsu di Customer');
     }
+    assert.equal((await getDriverPerformanceReport({ month: `${YEAR}-09` })).summary.totalRevenue, driverRevenueBefore);
 
     // Setelah selesai: perilaku lama (completed_at + snapshot), tanpa repo_stored_at buatan.
     await query("update container_jobs set status = 'completed', completed_at = $2 where id = $1", [job.id, `${YEAR}-11-03T03:00:00.000Z`]);
@@ -265,6 +305,8 @@ if (!databaseUrl) {
     assert.equal(november.length, 1);
     assert.equal(november[0].completedDate, `${YEAR}-11-03`);
     assert.equal(november[0].plateNumber, truck.plate_number);
+    const novemberDriver = (await getDriverPerformanceReport({ month: `${YEAR}-11` })).rows.find((row) => row.driver === driver.name);
+    assert.equal(novemberDriver?.totalRevenue, november[0].revenue);
     const stored = await query('select repo_stored_at from container_jobs where id = $1', [job.id]);
     assert.equal(stored.rows[0].repo_stored_at, null);
   });
