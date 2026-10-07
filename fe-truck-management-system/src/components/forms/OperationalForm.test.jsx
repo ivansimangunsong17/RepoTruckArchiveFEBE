@@ -835,12 +835,16 @@ describe('OperationalForm', () => {
 
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('checkbox', { name: /sudah diambil secara fisik/i }));
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       status: 'running',
       plateNumber: 'B 1000 AA',
       driver: 'Driver Aktif',
       runningAt: expect.any(String),
+      pickupConfirmed: true,
     }));
   });
 
@@ -867,6 +871,7 @@ describe('OperationalForm', () => {
       />,
     );
 
+    await user.click(screen.getByRole('checkbox', { name: /sudah diambil secara fisik/i }));
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -874,6 +879,7 @@ describe('OperationalForm', () => {
       plateNumber: 'B 4000 RR',
       driver: 'Driver Repo',
       runningAt: expect.any(String),
+      pickupConfirmed: true,
     }));
   });
 
