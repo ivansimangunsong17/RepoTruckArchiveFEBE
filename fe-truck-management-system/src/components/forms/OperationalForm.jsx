@@ -623,6 +623,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [expenseDescriptionManualMode, setExpenseDescriptionManualMode] = useState(false);
   const submitInFlightRef = useRef(false);
   const [repoPickupConfirmed, setRepoPickupConfirmed] = useState(false);
+  // Satu Total UJ Repo per pergerakan fisik (single maupun combo), diisi manual oleh Operational.
+  const [repoUjAmount, setRepoUjAmount] = useState('');
   const driverCommissionEditedRef = useRef(false);
   const ujAmount = Number(ujRecommendation.currentContainerUj || 0);
   const driverCommissionAmountValue = form.hasDriverCommission ? Number(form.driverCommissionAmount || 0) : 0;
@@ -1531,11 +1533,21 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       showSubmitNotification('Konfirmasi bahwa container sudah diambil secara fisik sebelum memulai perjalanan Repo.');
       return;
     }
+    const repoUjText = String(repoUjAmount).trim();
+    if (isRepoPickupMode && !repoUjText) {
+      showSubmitNotification('Total UJ Repo wajib diisi (boleh 0).');
+      return;
+    }
+    if (isRepoPickupMode && !/^\d+$/.test(repoUjText)) {
+      showSubmitNotification('Total UJ Repo harus angka rupiah bulat dan tidak boleh negatif.');
+      return;
+    }
     if (isRepoPickupMode) {
       submitForm.containerNumber = container.containerNumber || submitForm.containerNumber;
       submitForm.status = 'running';
       submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
       submitForm.pickupConfirmed = true;
+      submitForm.repoUjAmount = Number(repoUjText);
     }
     const shouldStartTrip = activePhase === 'closing'
       && hasCompleteAssignment
@@ -1655,6 +1667,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <label className="mt-3 flex items-start gap-2 font-semibold">
                 <input type="checkbox" checked={repoPickupConfirmed} onChange={(event) => setRepoPickupConfirmed(event.target.checked)} />
                 <span>Container sudah diambil secara fisik; mulai perjalanan Repo sekarang.</span>
+              </label>
+              <label className="mt-3 block font-semibold">
+                Total UJ Repo (Rp){isRepoComboPickupMode ? ' untuk 1 perjalanan combo' : ''}
+                <input
+                  aria-label="Total UJ Repo"
+                  inputMode="numeric"
+                  min="0"
+                  step="1"
+                  type="number"
+                  value={repoUjAmount}
+                  onChange={(event) => setRepoUjAmount(event.target.value)}
+                  placeholder="Contoh: 175000"
+                />
               </label>
             </div>
           ) : null}
