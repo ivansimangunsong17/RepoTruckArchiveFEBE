@@ -3,6 +3,7 @@ import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 import { lockRepoPickupMovementForJob, reconcileRepoPickupMovement, requirePhysicalRepoPickup } from './repo-pickup-lifecycle.js';
 import { buildRepoUjDescription, normalizeRepoUjAmount, postRepoUjToDroppingAccount } from './repo-pickup-uj.js';
+import { createRepoRevenueLines } from './repo-pickup-revenue.js';
 
 const joinedJobColumns = `
   cj.id, cj.sales_order_id, cj.execution_source, cj.container_number, cj.container_size, cj.container_type,
@@ -3654,14 +3655,19 @@ async function insertRepoPickupMovement(client, {
     ],
   );
   const movement = movementResult.rows[0];
-  await Promise.all(jobs.map((job, index) => client.query(
-    `
-      insert into container_pickup_items (movement_id, container_job_id, sequence_no)
-      values ($1, $2, $3)
-    `,
-    [movement.id, job.id, index + 1],
-  )));
-  return movement;
+  const items = [];
+  for (const [index, job] of jobs.entries()) {
+    const itemResult = await client.query(
+      `
+        insert into container_pickup_items (movement_id, container_job_id, sequence_no)
+        values ($1, $2, $3)
+        returning id
+      `,
+      [movement.id, job.id, index + 1],
+    );
+    items.push({ id: itemResult.rows[0].id, job });
+  }
+  return { movement, items };
 }
 
 async function updateRepoPickupJob(client, {
@@ -3772,7 +3778,7 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     assertVehicleCanPickupRepo(vehicle, orderedJobs, pickupType);
 
     const assignment = toAssignmentSnapshot(payload, driver, vehicle, {});
-    const movement = await insertRepoPickupMovement(client, {
+    const { movement, items: pickupItems } = await insertRepoPickupMovement(client, {
       pickupType,
       jobs: orderedJobs,
       driver,
@@ -3817,8 +3823,16 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
       actorName,
     });
 
+    // Revenue Repo per container (draft, belum masuk invoice) -- satu baris per pickup item.
+    const repoRevenueLines = await createRepoRevenueLines(client, {
+      movementId: movement.id,
+      pickupType,
+      items: pickupItems,
+      actorName,
+    });
+
     const updatedJobs = await mapUpdatedRepoPickupJobs(client, uniqueIds);
-    return { movement, jobs: updatedJobs, repoUjTransaction };
+    return { movement, jobs: updatedJobs, repoUjTransaction, repoRevenueLines };
   });
 }
 

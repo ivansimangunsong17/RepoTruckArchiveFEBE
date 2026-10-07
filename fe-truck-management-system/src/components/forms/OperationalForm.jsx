@@ -15,6 +15,9 @@ import { isApiDataSource } from '../../services/config/dataSource';
 import { createContainerJobExpense, uploadContainerJobExpenseProof } from '../../services/archive/containerJobService';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
 
+// Tarif Revenue Repo per container (Phase 4, belum master rate); backend yang mencatat nilainya.
+const REPO_REVENUE_PER_CONTAINER = 300000;
+
 const documentFields = [
   ['eirDocument', 'Lampiran EIR'],
   ['loadingVoucherDocument', 'No. Bon Muat / Bon Bongkar'],
@@ -1681,6 +1684,12 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                   placeholder="Contoh: 175000"
                 />
               </label>
+              <p className="mt-2 text-sm font-semibold" aria-label="Revenue Repo">
+                Revenue Repo: {formatCurrency(REPO_REVENUE_PER_CONTAINER * (isRepoComboPickupMode ? 2 : 1))}
+                <span className="block text-xs font-normal">
+                  {isRepoComboPickupMode ? '2 container' : '1 container'} x {formatCurrency(REPO_REVENUE_PER_CONTAINER)}, dihitung otomatis.
+                </span>
+              </p>
             </div>
           ) : null}
           {isRepoComboPickupMode ? (

@@ -36,6 +36,12 @@ const REVENUE_LINE_CHARGE_TYPE_OPTIONS = [
   { value: 'other', label: 'Lainnya' },
 ];
 
+// Label tampilan saja: 'repo' dibuat otomatis dari pickup container titip, tidak bisa dipilih manual.
+const REVENUE_LINE_CHARGE_TYPE_LABELS = {
+  ...Object.fromEntries(REVENUE_LINE_CHARGE_TYPE_OPTIONS.map((option) => [option.value, option.label])),
+  repo: 'Revenue Repo',
+};
+
 const REVENUE_LINE_DEFAULT_UNIT_BY_CHARGE_TYPE = {
   inap: 'malam',
   waiting_charge: 'jam',
@@ -976,8 +982,11 @@ function InvoiceDetailModal({
                           <div className="flex items-center justify-between gap-2">
                             <div className={`min-w-0 ${line.status === 'void' ? 'opacity-60' : ''}`}>
                               <span className={`block text-xs font-semibold text-slate-700 ${line.status === 'void' ? 'line-through' : ''}`}>
-                                {readableLabel(Object.fromEntries(REVENUE_LINE_CHARGE_TYPE_OPTIONS.map((option) => [option.value, option.label])), line.chargeType)} - {line.description}
+                                {readableLabel(REVENUE_LINE_CHARGE_TYPE_LABELS, line.chargeType)} - {line.description}
                               </span>
+                              {line.status === 'draft' ? (
+                                <span className="mt-0.5 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase text-amber-800">Belum masuk tagihan</span>
+                              ) : null}
                               <span className="block truncate text-[10px] font-medium text-slate-500">
                                 {line.quantity} {line.unit} x {formatCurrency(line.unitPrice)}{line.note ? ` - ${line.note}` : ''}
                               </span>
