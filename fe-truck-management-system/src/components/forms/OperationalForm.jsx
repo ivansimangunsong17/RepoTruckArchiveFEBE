@@ -249,8 +249,9 @@ function SearchableDriverInput({ value, drivers = [], disabled = false, onChange
     })
     .slice(0, DRIVER_SEARCH_MAX_RESULTS);
 
-  function selectDriver(driverName) {
-    onChange({ target: { name: 'driver', value: driverName } });
+  // driverId ikut dikirim supaya dua sopir bernama sama tidak tertukar saat dipilih dari daftar.
+  function selectDriver(driverName, driverId = '') {
+    onChange({ target: { name: 'driver', value: driverName, driverId } });
     setOpen(false);
   }
 
@@ -281,7 +282,7 @@ function SearchableDriverInput({ value, drivers = [], disabled = false, onChange
             </button>
           ) : null}
           {matches.length ? matches.map((driver) => (
-            <button key={driver.id || driver.name} type="button" role="option" onMouseDown={() => selectDriver(driver.name)}>
+            <button key={driver.id || driver.name} type="button" role="option" onMouseDown={() => selectDriver(driver.name, driver.id)}>
               <strong>{driver.nickname || driver.name}</strong>
               {driver.nickname ? <span>{driver.name}</span> : null}
             </button>
@@ -646,9 +647,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const originalAssignedDriver = String(container.driver || '').trim();
   const originalAssignedPlate = String(container.plateNumber || '').trim();
   const hadCompleteAssignmentBefore = Boolean(originalAssignedDriver && originalAssignedPlate);
-  const assignmentIdentityChanged = String(form.driver || '').trim() !== originalAssignedDriver
-    || String(form.plateNumber || '').trim() !== originalAssignedPlate;
-  const driverIdentityChanged = normalizeName(form.driver) !== normalizeName(originalAssignedDriver);
+  // Sama dengan backend: identitas sopir = driverId, nama hanya fallback kalau salah satu id kosong.
+  const driverIdentityChanged = form.driverId && container.driverId
+    ? String(form.driverId) !== String(container.driverId)
+    : normalizeName(form.driver) !== normalizeName(originalAssignedDriver);
+  const vehicleIdentityChanged = form.vehicleId && container.vehicleId
+    ? String(form.vehicleId) !== String(container.vehicleId)
+    : String(form.plateNumber || '').trim() !== originalAssignedPlate;
+  const assignmentIdentityChanged = driverIdentityChanged || vehicleIdentityChanged;
   const completedCommissionDriverCorrection = canReviseLockedFields
     && container.status === 'completed'
     && existingHasDriverCommission
@@ -1035,8 +1041,13 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       return;
     }
     const driverName = event.target.value;
-    const selectedDriver = findDriverByName(driverName);
-    if (selectedDriver && isDriverBlacklisted(selectedDriver) && normalizeName(driverName) !== normalizeName(container.driver)) {
+    const selectedDriver = findDriverById(event.target.driverId) || findDriverByName(driverName);
+    // Nama snapshot lama (mis. sopir sudah di-rename di master) tetap menunjuk sopir yang sama.
+    const keepsCurrentDriver = !selectedDriver && normalizeName(driverName) === normalizeName(container.driver);
+    const isCurrentDriver = selectedDriver && container.driverId
+      ? selectedDriver.id === container.driverId
+      : normalizeName(driverName) === normalizeName(container.driver);
+    if (selectedDriver && isDriverBlacklisted(selectedDriver) && !isCurrentDriver) {
       setError(`Sopir ${selectedDriver.name} masuk blacklist dan tidak bisa di-assign.`);
       return;
     }
@@ -1045,7 +1056,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     setForm((current) => ({
       ...current,
       driver: driverName,
-      driverId: selectedDriver?.id || '',
+      driverId: selectedDriver?.id || (keepsCurrentDriver ? container.driverId || '' : ''),
       commissionDriverAction: '',
       ...driverPayment,
     }));
@@ -1534,8 +1545,9 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       return;
     }
     const selectedTruck = isVendorExecution ? null : trucks.find((truck) => truck.plateNumber === submitForm.plateNumber);
-    const truckAssignmentChanged = selectedTruck
-      && selectedTruck.plateNumber !== container.plateNumber;
+    const truckAssignmentChanged = selectedTruck && (container.vehicleId
+      ? selectedTruck.id !== container.vehicleId
+      : selectedTruck.plateNumber !== container.plateNumber);
     if (truckAssignmentChanged && !isTruckCompatibleForRepoPickup(selectedTruck, containerSize, isRepoComboPickupMode)) {
       showSubmitNotification(isRepoComboPickupMode
         ? `Combo 2x20 wajib memakai truck/chassis 40FT. ${selectedTruck.plateNumber} kapasitas ${selectedTruck.capacity || '-'} tidak bisa dipilih.`

@@ -236,20 +236,33 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function hasAssignmentChange(currentJob, payload = {}) {
-  const nextDriverId = payload.driverId || null;
-  const nextVehicleId = payload.vehicleId || null;
-  const nextDriverName = String(payload.driver || '').trim();
-  const nextPlateNumber = String(payload.plateNumber || '').trim();
-  const currentDriverName = String(currentJob?.driver || currentJob?.assignment_snapshot?.driver || '').trim();
-  const currentPlateNumber = String(currentJob?.plateNumber || currentJob?.assignment_snapshot?.plateNumber || '').trim();
+// Identitas sopir = driver_id. Nama hanya dipakai sebagai fallback kalau payload tidak membawa
+// driverId (input lama/free text) -- sama dengan driverIdentityChanging di repository. Nama di
+// snapshot dibekukan saat assignment, jadi rename di master driver (id sama) bukan reassignment,
+// dan dua sopir bernama sama tetap dibedakan lewat id.
+export function hasDriverIdentityChange(currentJob, payload = {}) {
+  const nextDriverId = payload.driverId ? String(payload.driverId) : '';
+  if (nextDriverId) return nextDriverId !== String(currentJob?.driverId || '');
 
-  return Boolean(
-    (nextDriverId && String(nextDriverId) !== String(currentJob?.driverId || ''))
-    || (nextVehicleId && String(nextVehicleId) !== String(currentJob?.vehicleId || ''))
-    || (nextDriverName && nextDriverName !== currentDriverName)
-    || (nextPlateNumber && nextPlateNumber !== currentPlateNumber)
-  );
+  const nextDriverName = normalizeText(payload.driver);
+  const currentDriverName = normalizeText(currentJob?.driver || currentJob?.assignment_snapshot?.driver);
+  return Boolean(nextDriverName && nextDriverName !== currentDriverName);
+}
+
+// Prinsip yang sama untuk truck: identitas = vehicle_id, plat nomor snapshot hanya fallback
+// (sama dengan vehicleIdentityChanging di repository). Ganti plat di master truck (id sama)
+// bukan reassignment.
+export function hasVehicleIdentityChange(currentJob, payload = {}) {
+  const nextVehicleId = payload.vehicleId ? String(payload.vehicleId) : '';
+  if (nextVehicleId) return nextVehicleId !== String(currentJob?.vehicleId || '');
+
+  const nextPlateNumber = normalizeText(payload.plateNumber);
+  const currentPlateNumber = normalizeText(currentJob?.plateNumber || currentJob?.assignment_snapshot?.plateNumber);
+  return Boolean(nextPlateNumber && nextPlateNumber !== currentPlateNumber);
+}
+
+function hasAssignmentChange(currentJob, payload = {}) {
+  return hasDriverIdentityChange(currentJob, payload) || hasVehicleIdentityChange(currentJob, payload);
 }
 
 function hasCompleteAssignmentPayload(payload = {}) {
@@ -794,20 +807,10 @@ export function voidDroppingExpenseBeforeFinanceCheck(id, expenseId, payload = {
   });
 }
 
-function hasDriverAssignmentChange(currentJob, payload = {}) {
-  const nextDriverId = payload.driverId || null;
-  const nextDriverName = normalizeText(payload.driver);
-  const currentDriverName = normalizeText(currentJob?.driver || currentJob?.assignment_snapshot?.driver);
-  return Boolean(
-    (nextDriverId && String(nextDriverId) !== String(currentJob?.driverId || ''))
-    || (nextDriverName && nextDriverName !== currentDriverName)
-  );
-}
-
 export function ensureCompletedCommissionDriverAction(currentJob = {}, payload = {}) {
   if (!isAdminCorrectionMode(payload)) return;
   if (currentJob.status !== 'completed' || !currentJob.hasDriverCommission) return;
-  if (!hasDriverAssignmentChange(currentJob, payload)) return;
+  if (!hasDriverIdentityChange(currentJob, payload)) return;
 
   const action = normalizeText(payload.commissionDriverAction).toLowerCase();
   if (['move', 'keep'].includes(action)) return;
