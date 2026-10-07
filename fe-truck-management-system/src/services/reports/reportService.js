@@ -38,6 +38,10 @@ export function fetchOperationReport(params = {}) {
   return httpClient.get(`/reports/operations${buildQuery(params)}`);
 }
 
+export function fetchUtilizationTrips(params = {}) {
+  return httpClient.get(`/reports/utilization-trips${buildQuery(params)}`);
+}
+
 export function fetchDocumentReport(params = {}) {
   return httpClient.get(`/reports/documents${buildQuery(params)}`);
 }

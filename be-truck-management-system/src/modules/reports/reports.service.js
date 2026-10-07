@@ -9,7 +9,17 @@ import {
   getOperationReport,
   getSalesPerformanceReport,
   getSalesOrderReport,
+  getUtilizationTripReport,
 } from './reports.repository.js';
+
+export function fetchUtilizationTrips(query = {}) {
+  return getUtilizationTripReport({
+    dateFrom: query.dateFrom || query.startDate || '',
+    dateTo: query.dateTo || query.endDate || '',
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
+  });
+}
 
 export function fetchDashboardReport() {
   return getDashboardReport();

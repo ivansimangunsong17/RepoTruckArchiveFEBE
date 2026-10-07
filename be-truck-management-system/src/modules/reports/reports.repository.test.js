@@ -8,6 +8,7 @@ const {
   buildMonthlyComparisonRows,
   applyUtilizationChassisCorrectionsToRows,
   buildDriverPerformanceRows,
+  mergeDriverPerformanceTripCounts,
   buildSalesPerformanceRows,
   calculateCompletedJobRevenue,
   calculateDriverCommissionAmount,
@@ -183,6 +184,41 @@ test('monthly comparison menghitung combo pickup 2x20 sebagai 1 trip internal ta
   assert.equal(rows[0].totalTrips, 1);
   assert.equal(rows[0].usedTruckDays, 1);
   assert.equal(rows[0].utilizationPercent, (1 / 31) * 100);
+});
+
+test('monthly comparison counts original legs and a combo movement, while volume stays two jobs', () => {
+  const completed = [
+    { completed_date: '2026-10-05', price: 1000000, container_size: '20FT', customer_name: 'A' },
+    { completed_date: '2026-10-05', price: 1000000, container_size: '20FT', customer_name: 'A' },
+  ];
+  const utilizationTrips = [
+    { id: 'job:a', completedDate: '2026-10-01', vehicleId: 'truck-a' },
+    { id: 'job:b', completedDate: '2026-10-01', vehicleId: 'truck-b' },
+    { id: 'repo:combo', completedDate: '2026-10-02', vehicleId: 'truck-c' },
+  ];
+  const rows = buildMonthlyComparisonRows(completed, [], {
+    year: 2026, activeTruckCount: 3, utilizationTrips,
+  }, new Date('2026-11-01'));
+  assert.equal(rows[9].totalTrips, 3);
+  assert.equal(rows[9].totalVolume, 2);
+  assert.equal(rows[9].totalRevenue, 2000000);
+  assert.equal(rows[9].usedTruckDays, 3);
+});
+
+test('driver performance trip counts follow original and Repo driver events without changing financial totals', () => {
+  const rows = mergeDriverPerformanceTripCounts([
+    { driverId: 'driver-c', driver: 'Repo Driver', totalTrips: 2,
+      totalRevenue: 2000000, totalDriverCommission: 100000 },
+  ], [
+    { id: 'job:a', driverId: 'driver-a', driver: 'Original A' },
+    { id: 'job:b', driverId: 'driver-b', driver: 'Original B' },
+    { id: 'repo:combo', driverId: 'driver-c', driver: 'Repo Driver' },
+  ]);
+  assert.deepEqual(rows.map((row) => [row.driverId, row.totalTrips]).sort(), [
+    ['driver-a', 1], ['driver-b', 1], ['driver-c', 1],
+  ]);
+  assert.equal(rows.reduce((total, row) => total + row.totalRevenue, 0), 2000000);
+  assert.equal(rows.reduce((total, row) => total + row.totalDriverCommission, 0), 100000);
 });
 
 test('koreksi chassis utilisasi tidak mengubah baris jika tidak ada mapping', () => {

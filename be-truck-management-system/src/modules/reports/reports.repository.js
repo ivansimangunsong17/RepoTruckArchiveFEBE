@@ -1,6 +1,7 @@
 import { query } from '../../db/client.js';
 import { getCustomerOutstandingRollupPage } from '../finance/finance.repository.js';
 import { utilizationChassisJoinsSql, utilizationChassisSizeSql, utilizationChassisSourceSql } from './utilization-chassis.sql.js';
+import { getUtilizationTripRows } from './utilization-trips.repository.js';
 import {
   getTransportLineItemForSize,
   splitFinancialLineItems,
@@ -309,19 +310,26 @@ export function buildMonthlyComparisonRows(completedRows = [], repoRows = [], op
     const revenue = calculateCompletedJobRevenue(row);
     const customerKey = normalizeCustomerName(row).toLowerCase();
     const salesKey = normalizeSalesName(row).toLowerCase();
-    const isInternal = (row.execution_source || row.executionSource || 'internal') !== 'vendor';
-    const pickupType = row.pickup_type || row.pickupType || '';
-    const pickupSequence = Number(row.pickup_sequence_no ?? row.pickupSequenceNo ?? 1);
-    const countsAsInternalTrip = isInternal && !(pickupType === 'combo_2x20' && pickupSequence > 1);
-    const truckKey = isInternal ? getComparisonTruckKey(row) : '';
-    const dateKey = isInternal ? getComparisonDateKey(row) : '';
-
     month.totalRevenue += revenue;
-    if (countsAsInternalTrip) month.totalTrips += 1;
     month.totalVolume += 1;
     if (customerKey) month.customerKeys.add(customerKey);
     if (salesKey) month.salesKeys.add(salesKey);
-    if (countsAsInternalTrip && truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
+  });
+
+  // Trip totals use the same physical events as Truck and Driver Utilization.
+  // Callers passing only completedRows (older tests/consumers) retain the old input contract.
+  const tripRows = options.utilizationTrips || completedRows.filter((row) =>
+    (row.execution_source || row.executionSource || 'internal') !== 'vendor'
+      && !((row.pickup_type || row.pickupType) === 'combo_2x20'
+        && Number(row.pickup_sequence_no ?? row.pickupSequenceNo ?? 1) > 1));
+  tripRows.forEach((row) => {
+    const monthIndex = monthIndexFromDate(row.completed_date || row.completedDate || row.completed_at || row.completedAt);
+    if (!months[monthIndex]) return;
+    const month = months[monthIndex];
+    month.totalTrips += 1;
+    const truckKey = getComparisonTruckKey(row);
+    const dateKey = getComparisonDateKey(row);
+    if (truckKey && dateKey) month.truckDayKeys.add(`${truckKey}|${dateKey}`);
   });
 
   repoRows.forEach((row) => {
@@ -1317,7 +1325,7 @@ export async function getMonthlyComparisonReport(options = {}) {
   appendEntrySourceFilters(repoClauses, repoParams, options, 'cj');
   const repoSourceWhereSql = repoClauses.length ? `and ${repoClauses.join(' and ')}` : '';
 
-  const [completedResult, repoResult, activeTruckResult] = await Promise.all([
+  const [completedResult, repoResult, activeTruckResult, utilizationTrips] = await Promise.all([
     query(
       `
         with order_job_totals as (
@@ -1342,8 +1350,6 @@ export async function getMonthlyComparisonReport(options = {}) {
             ${timestampToJakartaDateSql('cj.completed_at')} as completed_date,
             cj.completed_at,
             cj.vehicle_id,
-            cpm.pickup_type,
-            cpi.sequence_no as pickup_sequence_no,
             coalesce(nullif(cj.assignment_snapshot->>'plateNumber', ''), v.plate_number) as plate_number,
             coalesce(nullif(cj.assignment_snapshot->>'unitCode', ''), v.unit_code) as unit_code,
             greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
@@ -1359,8 +1365,6 @@ export async function getMonthlyComparisonReport(options = {}) {
             )
           left join vehicles v on v.id = cj.vehicle_id
           left join order_job_totals ojt on ojt.sales_order_id = so.id
-          left join container_pickup_items cpi on cpi.container_job_id = cj.id
-          left join container_pickup_movements cpm on cpm.id = cpi.movement_id and cpm.status <> 'cancelled'
           where so.status <> 'cancelled'
             and cj.status = 'completed'
             ${completedSourceWhereSql}
@@ -1402,10 +1406,12 @@ export async function getMonthlyComparisonReport(options = {}) {
           and lower(btrim(coalesce(operational_status, 'Aktif'))) not in ('maintenance', 'maintanance', 'tidak aktif', 'nonaktif', 'inactive', 'archived', 'arsip')
       `,
     ),
+    getUtilizationTripRows({ dateFrom, dateTo: `${year}-12-31`,
+      entrySource: options.entrySource, historicalPeriod: options.historicalPeriod }),
   ]);
 
   const activeTruckCount = Number(activeTruckResult.rows[0]?.total || 0);
-  const rows = buildMonthlyComparisonRows(completedResult.rows, repoResult.rows, { year, activeTruckCount });
+  const rows = buildMonthlyComparisonRows(completedResult.rows, repoResult.rows, { year, activeTruckCount, utilizationTrips });
 
   return {
     year,
@@ -1452,6 +1458,14 @@ async function findActiveUtilizationChassisCorrections(options = {}) {
   );
 
   return result.rows;
+}
+
+export async function getUtilizationTripReport(options = {}) {
+  const [trips, corrections] = await Promise.all([
+    getUtilizationTripRows(options),
+    findActiveUtilizationChassisCorrections(options),
+  ]);
+  return applyUtilizationChassisCorrectionsToRows(trips, corrections);
 }
 
 export async function getOperationReport(options = {}) {
@@ -1672,6 +1686,41 @@ export function buildDriverPerformanceRows(rows = []) {
     });
 }
 
+export function mergeDriverPerformanceTripCounts(performanceRows = [], tripRows = []) {
+  const tripsByDriver = new Map();
+  tripRows.forEach((trip) => {
+    const key = trip.driverId ? `id:${trip.driverId}` : `name:${trip.driver}`;
+    if (!trip.driverId && !trip.driver) return;
+    const entry = tripsByDriver.get(key) || { driverId: trip.driverId || null, driver: trip.driver, count: 0 };
+    entry.count += 1;
+    tripsByDriver.set(key, entry);
+  });
+  const performanceByDriver = new Map(performanceRows.map((row) => [
+    row.driverId ? `id:${row.driverId}` : `name:${row.driver}`, { ...row },
+  ]));
+  tripsByDriver.forEach((entry, key) => {
+    const row = performanceByDriver.get(key) || {
+      driverId: entry.driverId, driver: entry.driver, totalRevenue: 0,
+      totalDriverCommission: 0, paidDriverCommission: 0, unpaidDriverCommission: 0,
+    };
+    row.weeklyTrips = entry.count;
+    row.monthlyTrips = entry.count;
+    row.totalTrips = entry.count;
+    row.averageRevenuePerTrip = row.totalRevenue / entry.count;
+    row.averageCommissionPerTrip = row.totalDriverCommission / entry.count;
+    performanceByDriver.set(key, row);
+  });
+  performanceByDriver.forEach((row, key) => {
+    if (tripsByDriver.has(key)) return;
+    row.weeklyTrips = 0;
+    row.monthlyTrips = 0;
+    row.totalTrips = 0;
+    row.averageRevenuePerTrip = 0;
+    row.averageCommissionPerTrip = 0;
+  });
+  return [...performanceByDriver.values()];
+}
+
 export async function getDriverPerformanceReport(options = {}) {
   const month = String(options.month || '').trim();
   const weekFrom = String(options.weekFrom || '').trim();
@@ -1763,17 +1812,25 @@ export async function getDriverPerformanceReport(options = {}) {
   ]);
 
   const performanceRows = buildDriverPerformanceRows(rows.rows);
+  // Revenue and commission stay job based; trip counts use physical events.
+  const tripRows = await getUtilizationTripRows({
+    dateFrom: weekFrom || (monthFilter ? `${monthFilter}-01` : ''),
+    dateTo: weekTo || (monthFilter ? `${monthFilter}-${String(daysInMonth(Number(monthFilter.slice(5)), Number(monthFilter.slice(0, 4)))).padStart(2, '0')}` : ''),
+    entrySource: options.entrySource,
+    historicalPeriod: options.historicalPeriod,
+  });
+  const physicalPerformanceRows = mergeDriverPerformanceTripCounts(performanceRows, tripRows);
 
   return {
-    rows: performanceRows,
-    total: performanceRows.length,
+    rows: physicalPerformanceRows,
+    total: physicalPerformanceRows.length,
     summary: {
-      totalTrips: performanceRows.reduce((total, row) => total + row.totalTrips, 0),
-      totalRevenue: performanceRows.reduce((total, row) => total + row.totalRevenue, 0),
-      totalDriverCommission: performanceRows.reduce((total, row) => total + row.totalDriverCommission, 0),
-      paidDriverCommission: performanceRows.reduce((total, row) => total + row.paidDriverCommission, 0),
-      unpaidDriverCommission: performanceRows.reduce((total, row) => total + row.unpaidDriverCommission, 0),
-      activeDrivers: performanceRows.filter((row) => row.totalTrips > 0).length,
+      totalTrips: physicalPerformanceRows.reduce((total, row) => total + row.totalTrips, 0),
+      totalRevenue: physicalPerformanceRows.reduce((total, row) => total + row.totalRevenue, 0),
+      totalDriverCommission: physicalPerformanceRows.reduce((total, row) => total + row.totalDriverCommission, 0),
+      paidDriverCommission: physicalPerformanceRows.reduce((total, row) => total + row.paidDriverCommission, 0),
+      unpaidDriverCommission: physicalPerformanceRows.reduce((total, row) => total + row.unpaidDriverCommission, 0),
+      activeDrivers: physicalPerformanceRows.filter((row) => row.totalTrips > 0).length,
     },
     months: months.rows.map((row) => ({
       value: row.value,
