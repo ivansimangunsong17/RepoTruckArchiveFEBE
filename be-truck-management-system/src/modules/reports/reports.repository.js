@@ -1797,7 +1797,26 @@ export function mergeDriverPerformanceTripCounts(performanceRows = [], tripRows 
   return [...performanceByDriver.values()];
 }
 
-export async function getDriverPerformanceReport(options = {}) {
+export function mergeDriverPerformanceRevenue(performanceRows = [], revenueRows = []) {
+  const byDriver = new Map(performanceRows.map((row) => [
+    row.driverId ? `id:${row.driverId}` : `name:${row.driver}`,
+    { ...row, totalRevenue: 0 },
+  ]));
+  for (const revenueRow of revenueRows) {
+    const key = revenueRow.driverId ? `id:${revenueRow.driverId}` : `name:${revenueRow.driver}`;
+    const row = byDriver.get(key) || {
+      driverId: revenueRow.driverId, driver: revenueRow.driver,
+      weeklyTrips: 0, monthlyTrips: 0, totalTrips: 0,
+      totalRevenue: 0, totalDriverCommission: 0,
+      paidDriverCommission: 0, unpaidDriverCommission: 0,
+    };
+    row.totalRevenue += revenueRow.totalRevenue;
+    byDriver.set(key, row);
+  }
+  return [...byDriver.values()];
+}
+
+export async function getDriverPerformanceReport(options = {}, db = { query }) {
   const month = String(options.month || '').trim();
   const weekFrom = String(options.weekFrom || '').trim();
   const weekTo = String(options.weekTo || '').trim();
@@ -1831,8 +1850,8 @@ export async function getDriverPerformanceReport(options = {}) {
     unpaid: "and coalesce(has_driver_commission, false) and coalesce(driver_commission_amount, 0) > 0 and coalesce(commission_payment_status, 'pending') <> 'paid'",
   }[commissionPaymentStatus] || '';
 
-  const [rows, months] = await Promise.all([
-    query(
+  const [rows, revenueRows, months] = await Promise.all([
+    db.query(
       `
         with order_job_totals as (
           select sales_order_id, count(*)::int as total_jobs
@@ -1876,25 +1895,78 @@ export async function getDriverPerformanceReport(options = {}) {
       `,
       params,
     ),
-    query(`
-      select distinct to_char(coalesce(${timestampToJakartaDateSql('cj.completed_at')}, so.trip_date), 'YYYY-MM') as value
-      from container_jobs cj
-      join sales_orders so on so.id = cj.sales_order_id
-      where cj.status = 'completed'
-        and coalesce(cj.execution_source, 'internal') = 'internal'
-        and nullif(cj.assignment_snapshot->>'driver', '') is not null
+    db.query(
+      `
+        with order_job_totals as (
+          select sales_order_id, count(*)::int as total_jobs
+          from container_jobs
+          group by sales_order_id
+        ),
+        transport_jobs as (
+          select cj.id,
+                 ${originalTransportSql('coalesce(cj.repo_released_driver_id, repo_history.previous_driver_id, cj.driver_id)', 'cj.driver_id')} as driver_id,
+                 ${originalTransportSql("nullif(btrim(original_driver.name), '')", "nullif(btrim(d.name), '')")} as driver_master_name,
+                 ${originalTransportDriverSql("nullif(cj.assignment_snapshot->>'driver', '')")} as driver,
+                 ${transportRevenueDateSql} as completed_date,
+                 so.price, so.total_amount, to_jsonb(so)->'line_items' as line_items,
+                 cj.container_size, cj.has_driver_commission, cj.driver_commission_amount,
+                 dcb.status as commission_batch_status, dcp.status as commission_payment_status,
+                 greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
+          from container_jobs cj
+          join sales_orders so on so.id = cj.sales_order_id
+          left join order_job_totals ojt on ojt.sales_order_id = so.id
+          left join drivers d on d.id = cj.driver_id
+          ${transportRevenueOriginalAssignmentJoinsSql}
+          left join driver_commission_items dci on dci.container_job_id = cj.id and dci.voided_at is null
+          left join driver_commission_batches dcb on dcb.id = dci.batch_id
+          left join driver_commission_payments dcp on dcp.id = dci.payment_id
+          where ${transportRevenueJobFilterSql}
+            and coalesce(cj.execution_source, 'internal') = 'internal'
+            and so.status <> 'cancelled'
+            and ${transportRevenueDateSql} is not null
+            and (${originalTransportSql('coalesce(cj.repo_released_driver_id, repo_history.previous_driver_id, cj.driver_id)', 'cj.driver_id')} is not null
+              or ${originalTransportDriverSql("nullif(cj.assignment_snapshot->>'driver', '')")} is not null)
+            ${sourceCondition}
+            ${commissionCondition}
+        )
+        select * from transport_jobs cj
+        where true ${monthCondition} ${weekFromCondition} ${weekToCondition} ${commissionPaymentCondition}
+        order by completed_date desc, driver asc
+      `,
+      params,
+    ),
+    db.query(`
+      select distinct value from (
+        select to_char(${transportRevenueDateSql}, 'YYYY-MM') as value
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where ${transportRevenueJobFilterSql}
+          and coalesce(cj.execution_source, 'internal') = 'internal'
+          and so.status <> 'cancelled'
+          and ${transportRevenueDateSql} is not null
+        union
+        select to_char(coalesce(${timestampToJakartaDateSql('cj.completed_at')}, so.trip_date), 'YYYY-MM') as value
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.status = 'completed'
+          and coalesce(cj.execution_source, 'internal') = 'internal'
+          and nullif(cj.assignment_snapshot->>'driver', '') is not null
+      ) periods
+      where value is not null
       order by value desc
     `),
   ]);
 
-  const performanceRows = buildDriverPerformanceRows(rows.rows);
+  const performanceRows = mergeDriverPerformanceRevenue(
+    buildDriverPerformanceRows(rows.rows), buildDriverPerformanceRows(revenueRows.rows),
+  );
   // Revenue and commission stay job based; trip counts use physical events.
   const tripRows = await getUtilizationTripRows({
     dateFrom: weekFrom || (monthFilter ? `${monthFilter}-01` : ''),
     dateTo: weekTo || (monthFilter ? `${monthFilter}-${String(daysInMonth(Number(monthFilter.slice(5)), Number(monthFilter.slice(0, 4)))).padStart(2, '0')}` : ''),
     entrySource: options.entrySource,
     historicalPeriod: options.historicalPeriod,
-  });
+  }, db);
   const physicalPerformanceRows = mergeDriverPerformanceTripCounts(performanceRows, tripRows);
 
   return {
