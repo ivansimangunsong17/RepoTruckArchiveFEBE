@@ -20,6 +20,7 @@ import {
   uploadFinanceInvoiceDocument,
   voidFinanceDebitNotePayment,
   voidFinanceRevenueLine,
+  activateFinanceRevenueLine,
 } from '../../../services/finance/financeService';
 
 function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
@@ -319,6 +320,20 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     }
   }
 
+  // Revenue Repo draft -> masuk tagihan SO (ditolak backend kalau invoice/penagihan sudah berjalan).
+  async function activateRevenueLineAction(id, lineId) {
+    setRevenueLineVoidBusyId(lineId);
+    setRevenueLineVoidError('');
+    try {
+      await activateFinanceRevenueLine(id, lineId);
+      await refreshInvoiceDetail(id);
+    } catch (error) {
+      setRevenueLineVoidError(error.message || 'Revenue Repo gagal dimasukkan ke tagihan.');
+    } finally {
+      setRevenueLineVoidBusyId('');
+    }
+  }
+
   async function voidRevenueLineAction(id, lineId, reason) {
     setRevenueLineVoidBusyId(lineId);
     setRevenueLineVoidError('');
@@ -493,6 +508,7 @@ function useFinanceInvoiceWorkflow({ activeTab, query, initialInvoiceRows }) {
     revenueLineVoidError,
     submitRevenueLine,
     voidRevenueLineAction,
+    activateRevenueLineAction,
     submitDebitNoteNumber,
     loadDebitNotePayments,
     confirmDebitNotePayment,

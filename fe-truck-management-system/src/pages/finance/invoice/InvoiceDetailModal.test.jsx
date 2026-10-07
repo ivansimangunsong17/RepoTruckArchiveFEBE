@@ -253,6 +253,25 @@ describe('InvoiceDetailModal biaya inap / revenue manual (milik Finance, masuk I
     expect(screen.getByText(/1 malam x/)).toBeInTheDocument();
   });
 
+  it('Revenue Repo draft bisa dimasukkan ke tagihan oleh Finance; baris lain tidak punya tombol itu', async () => {
+    const user = userEvent.setup();
+    const onActivateRevenueLine = vi.fn();
+    renderModal(baseInvoice({
+      manualRevenueLines: [
+        { id: 'repo-1', chargeType: 'repo', description: 'Revenue Repo CNTR001', quantity: 1, unit: 'container', unitPrice: 300000, totalAmount: 300000, note: '', status: 'draft' },
+        { id: 'line-1', chargeType: 'inap', description: 'Inap 1 malam', quantity: 1, unit: 'malam', unitPrice: 500000, totalAmount: 500000, note: '', status: 'active' },
+      ],
+    }), { canManageRevenueLine: true, onActivateRevenueLine, revenueLineVoidError: 'Invoice/penagihan Sales Order ini sudah berjalan.' });
+
+    expect(screen.getByText(/Revenue Repo - Revenue Repo CNTR001/)).toBeInTheDocument();
+    expect(screen.getByText('Belum masuk tagihan')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /masukkan ke tagihan/i })).toHaveLength(1);
+    expect(screen.getByRole('alert')).toHaveTextContent('Invoice/penagihan Sales Order ini sudah berjalan.');
+
+    await user.click(screen.getByRole('button', { name: /masukkan ke tagihan/i }));
+    expect(onActivateRevenueLine).toHaveBeenCalledWith(expect.any(String), 'repo-1');
+  });
+
   it('menampilkan kartu Internal Cost terpisah dari Invoice dan Debit Note', () => {
     renderModal(baseInvoice({
       internalCost: { journeyMoney: 300000, additionalCost: 50000, driverCommissionCost: 100000, operationalExpenseTotal: 75000, total: 525000 },

@@ -23,11 +23,16 @@ test('billing readiness vendor tidak mensyaratkan dokumen atau UJ internal', () 
   assert.doesNotMatch(sql, /where[\s\S]*coalesce\(cj\.execution_source,\s*'internal'\)\s*=\s*'internal'[\s\S]*cj\.status\s*=\s*'completed'/i);
 });
 
-test('invoice CTE hanya mengambil completed job yang punya completed_at valid', () => {
+test('invoice CTE mengambil job completed dengan completed_at valid atau job yang sudah dititip (Phase 4B)', () => {
   const sql = invoiceOrdersCte();
 
-  assert.match(sql, /where\s+cj\.status\s*=\s*'completed'/i);
-  assert.match(sql, /and\s+cj\.completed_at\s+is\s+not\s+null/i);
+  // Job completed tetap wajib punya completed_at; job titip (repo_stored_at) ikut layak ditagih;
+  // SO yang billing-nya sudah maju tetap memuat job-nya.
+  assert.match(sql, /cj\.status\s*=\s*'completed'\s+and\s+cj\.completed_at\s+is\s+not\s+null/i);
+  assert.match(sql, /or\s+cj\.repo_stored_at\s+is\s+not\s+null/i);
+  assert.match(sql, /coalesce\(so\.billing_status,\s*'belum_invoice'\)\s*<>\s*'belum_invoice'/i);
+  // Gerbang SO tidak lagi bergantung pada status operasional so.status = 'completed'.
+  assert.doesNotMatch(sql, /so\.status\s*=\s*'completed'/i);
 });
 
 test('invoice CTE menghitung dokumen Surat Jalan yang sudah diupload per SO', () => {

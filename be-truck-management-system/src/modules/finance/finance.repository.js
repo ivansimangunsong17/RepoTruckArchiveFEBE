@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../../db/client.js';
+import { billingAdvancedSql, financeEligibleSalesOrderSql, isSalesOrderBillingAdvanced, jobTransportBillableSql } from './finance-eligibility.js';
 import {
   financeCorrectionStatuses,
   getFinanceCorrectionField,
@@ -556,8 +557,10 @@ export function financeRowsCte() {
           or (cj.uj_source_destination_id is null and lower(trim(dl.name)) = lower(trim(cj.destination)))
         )
       left join attachment_flags af on af.entity_id = cj.id
-      where cj.status = 'completed'
-        and cj.completed_at is not null
+      -- Transport job layak ditagih saat selesai ATAU sudah dititip (repo_stored_at); SO yang
+      -- billing-nya sudah maju tetap memuat job-nya walau job dibuka kembali, supaya nilai
+      -- invoice yang sudah terbit tidak berubah/hilang. ranked_jobs sudah mengecualikan cancelled.
+      where (${jobTransportBillableSql('cj')} or ${billingAdvancedSql('so')})
         and so.status <> 'cancelled'
     )
   `;
@@ -1650,7 +1653,7 @@ export function invoiceOrdersCte() {
       left join debit_note_payment_totals dnpt on dnpt.sales_order_id = so.id
       left join manual_revenue_totals mrt on mrt.sales_order_id = so.id
       left join internal_cost_totals ict on ict.sales_order_id = so.id
-      where so.status = 'completed'
+      where ${financeEligibleSalesOrderSql('so')}
         and so.finance_verification_status = 'verified'
         and nullif(btrim(so.accurate_so_number), '') is not null
       group by so.id
@@ -5208,6 +5211,55 @@ export async function createManualRevenueLine(salesOrderId, payload = {}) {
   });
 }
 
+// Finance mengaktifkan Revenue Repo (draft -> active) sehingga ikut billing SO yang sama -- hanya
+// selama billing SO belum maju. Kalau invoice/penagihan sudah berjalan, baris tetap draft dan
+// perlu penagihan tambahan (belum diimplementasikan). Tidak pernah otomatis.
+export async function activateManualRevenueLine(salesOrderId, lineId, payload = {}) {
+  return withTransaction(async (client) => {
+    await ensureSalesOrderNotPaidForRevenueLine(client, salesOrderId);
+
+    const existing = await client.query(
+      'select * from manual_revenue_lines where id = $1 and sales_order_id = $2 for update',
+      [lineId, salesOrderId],
+    );
+    const line = existing.rows[0];
+    if (!line) {
+      const error = new Error('Revenue line tidak ditemukan.');
+      error.statusCode = 404;
+      error.code = 'REVENUE_LINE_NOT_FOUND';
+      throw error;
+    }
+    if (!line.container_pickup_item_id || line.status !== 'draft') {
+      const error = new Error('Hanya Revenue Repo berstatus draft yang bisa diaktifkan.');
+      error.statusCode = 409;
+      error.code = 'REVENUE_LINE_ACTIVATION_INVALID';
+      throw error;
+    }
+    if (await isSalesOrderBillingAdvanced(client, salesOrderId)) {
+      const error = new Error('Invoice/penagihan Sales Order ini sudah berjalan. Revenue Repo tidak bisa ditambahkan ke tagihan yang sudah terbit dan memerlukan penagihan tambahan.');
+      error.statusCode = 409;
+      error.code = 'REPO_REVENUE_REQUIRES_ADDITIONAL_BILLING';
+      throw error;
+    }
+
+    const updated = await client.query(
+      `
+        update manual_revenue_lines
+        set status = 'active',
+            updated_by_name = $2,
+            updated_at = now()
+        where id = $1
+        returning id, container_job_id, charge_type, description, quantity, unit, unit_price,
+          total_amount, note, status, created_by_name, created_at, updated_by_name, updated_at,
+          voided_at, voided_by_name, void_reason, container_pickup_item_id
+      `,
+      [lineId, payload.actorName || 'Finance'],
+    );
+    const billingAmount = await recomputeBillingAmount(client, salesOrderId);
+    return { line: mapManualRevenueLineRow(updated.rows[0]), billingAmount };
+  });
+}
+
 export async function updateManualRevenueLine(salesOrderId, lineId, payload = {}) {
   return withTransaction(async (client) => {
     await ensureSalesOrderNotPaidForRevenueLine(client, salesOrderId);
@@ -5228,10 +5280,10 @@ export async function updateManualRevenueLine(salesOrderId, lineId, payload = {}
       error.code = 'REVENUE_LINE_ALREADY_VOIDED';
       throw error;
     }
-    // Revenue Repo dibuat otomatis per pickup item dengan tarif tetap dan sengaja masih 'draft'
-    // (belum masuk invoice) sampai kebijakan invoice Repo diputuskan. Koreksi hanya lewat void.
+    // Revenue Repo dibuat otomatis per pickup item (tarif tetap). Tidak bisa diedit; hanya bisa
+    // diaktifkan lewat activateManualRevenueLine atau dibatalkan lewat void.
     if (existing.rows[0].container_pickup_item_id) {
-      const error = new Error('Revenue Repo dibuat otomatis dari pickup container titip dan tidak bisa diubah. Gunakan Batalkan bila perlu koreksi.');
+      const error = new Error('Revenue Repo dibuat otomatis dari pickup container titip dan hanya bisa diaktifkan atau dibatalkan.');
       error.statusCode = 409;
       error.code = 'REPO_REVENUE_LINE_LOCKED';
       throw error;
@@ -5341,7 +5393,7 @@ export async function updateInvoiceNumber(id, payload = {}) {
         select id, invoice_number, billing_status
         from sales_orders
         where id = $1
-          and status = 'completed'
+          and ${financeEligibleSalesOrderSql('sales_orders')}
       `,
       [id],
     );
@@ -5425,7 +5477,7 @@ export async function markInvoiceDocumentUploaded(id, patch = {}) {
           select id
           from sales_orders
           where id = $1
-            and status = 'completed'
+            and ${financeEligibleSalesOrderSql('sales_orders')}
         `,
         [id],
       );
@@ -5469,7 +5521,7 @@ export async function markInvoiceDocumentUploaded(id, patch = {}) {
         select id
         from sales_orders
         where id = $1
-          and status = 'completed'
+          and ${financeEligibleSalesOrderSql('sales_orders')}
       `,
       [id],
     );
@@ -6121,7 +6173,7 @@ function debitNoteOrdersCte() {
         det.item_count
       from sales_orders so
       join debit_note_expense_totals det on det.sales_order_id = so.id
-      where so.status = 'completed'
+      where ${financeEligibleSalesOrderSql('so')}
     )
   `;
 }
@@ -6237,7 +6289,7 @@ export async function updateDebitNoteNumber(id, payload = {}) {
         select id, debit_note_number
         from sales_orders
         where id = $1
-          and status = 'completed'
+          and ${financeEligibleSalesOrderSql('sales_orders')}
       `,
       [id],
     );

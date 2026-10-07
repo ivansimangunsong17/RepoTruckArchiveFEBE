@@ -49,6 +49,7 @@ import {
   updateOrderVerificationSoNumber,
   voidDebitNotePayment,
   voidManualRevenueLine,
+  activateManualRevenueLine,
   voidSalesOrderPayment,
 } from './finance.repository.js';
 import {
@@ -855,6 +856,13 @@ export function updateRevenueLine(id, lineId, payload = {}, actor) {
   ensureCanManageRevenueLine(actor);
   return updateManualRevenueLine(id, lineId, {
     ...normalizeRevenueLinePayload(payload),
+    actorName: actor?.name || actor?.email || 'Finance',
+  });
+}
+
+export function activateRevenueLine(id, lineId, actor) {
+  ensureCanManageRevenueLine(actor);
+  return activateManualRevenueLine(id, lineId, {
     actorName: actor?.name || actor?.email || 'Finance',
   });
 }
