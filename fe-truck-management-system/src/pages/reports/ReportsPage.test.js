@@ -359,6 +359,59 @@ describe('buildMonthlyUtilizationPivot', () => {
   });
 });
 
+describe('Repo physical trip utilization', () => {
+  const trucks = [
+    { id: 'truck-a', plateNumber: 'A', capacity: '20FT' },
+    { id: 'truck-b', plateNumber: 'B', capacity: '20FT' },
+    { id: 'truck-c', plateNumber: 'C', capacity: '40FT' },
+  ];
+  const drivers = [
+    { id: 'driver-a', name: 'Original A' },
+    { id: 'driver-b', name: 'Original B' },
+    { id: 'driver-c', name: 'Repo Driver' },
+  ];
+  const originalA = {
+    id: 'job:a', vehicleId: 'truck-a', plateNumber: 'A',
+    driverId: 'driver-a', driver: 'Original A', completedDate: '2026-10-01',
+    status: 'completed',
+  };
+  const originalB = {
+    id: 'job:b', vehicleId: 'truck-b', plateNumber: 'B',
+    driverId: 'driver-b', driver: 'Original B', completedDate: '2026-10-01',
+    status: 'completed',
+  };
+  const repo = {
+    id: 'repo:movement-1', movementId: 'movement-1', tripSource: 'repo_pickup',
+    vehicleId: 'truck-c', plateNumber: 'C', driverId: 'driver-c',
+    driver: 'Repo Driver', completedDate: '2026-10-02', status: 'running',
+  };
+
+  it('single pickup adds exactly one truck and one driver trip', () => {
+    const rows = [originalA, repo];
+    const truck = buildTruckDayUtilizationSummary(trucks, rows, 10, 2026, new Date('2026-11-01'));
+    const driver = buildMonthlyDriverUtilizationPivot(drivers, rows, 10, 2026);
+    expect(truck.totalTrips).toBe(2);
+    expect(truck.rows.find((row) => row.id === 'truck-a').totalTrips).toBe(1);
+    expect(truck.rows.find((row) => row.id === 'truck-c').totalTrips).toBe(1);
+    expect(driver.rows.find((row) => row.driverId === 'driver-a').totalTrips).toBe(1);
+    expect(driver.rows.find((row) => row.driverId === 'driver-c').totalTrips).toBe(1);
+  });
+
+  it('combo 2x20 adds one Repo trip while original trucks and drivers retain their trips', () => {
+    const rows = [originalA, originalB, { ...repo, containerNumber: 'CONT-A, CONT-B' }];
+    const truck = buildMonthlyUtilizationPivot(trucks, rows, 10, 2026);
+    const driver = buildMonthlyDriverUtilizationPivot(drivers, rows, 10, 2026);
+    expect(truck.grandTotal).toBe(3);
+    expect(truck.rows.find((row) => row.id === 'truck-a').totalTrips).toBe(1);
+    expect(truck.rows.find((row) => row.id === 'truck-b').totalTrips).toBe(1);
+    expect(truck.rows.find((row) => row.id === 'truck-c').totalTrips).toBe(1);
+    expect(driver.grandTotal).toBe(3);
+    expect(driver.rows.map((row) => [row.driverId, row.totalTrips]).sort()).toEqual([
+      ['driver-a', 1], ['driver-b', 1], ['driver-c', 1],
+    ]);
+  });
+});
+
 describe('buildMonthlyCustomerTruckPivot', () => {
   it('membuat pivot truck per customer pada bulan terpilih', () => {
     const pivot = buildMonthlyCustomerTruckPivot(

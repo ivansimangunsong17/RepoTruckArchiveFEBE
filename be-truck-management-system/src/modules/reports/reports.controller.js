@@ -10,7 +10,12 @@ import {
   fetchOperationReport,
   fetchSalesPerformanceReport,
   fetchSalesOrderReport,
+  fetchUtilizationTrips,
 } from './reports.service.js';
+
+export async function utilizationTripsController(request, response) {
+  sendSuccess(response, { rows: await fetchUtilizationTrips(request.query) });
+}
 
 export async function dashboardReportController(_request, response) {
   const result = await fetchDashboardReport();

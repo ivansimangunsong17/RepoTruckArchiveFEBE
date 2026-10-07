@@ -16,6 +16,7 @@ import {
   fetchMonthlyRevenueReport,
   fetchOperationReport,
   fetchSalesPerformanceReport,
+  fetchUtilizationTrips,
 } from '../../services/reports/reportService';
 import { deleteUtilizationNote, fetchUtilizationNotes, saveUtilizationNote } from '../../services/reports/utilizationNoteService';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -2966,29 +2967,12 @@ function ReportsPage() {
     setRepoError('');
 
     async function loadUtilizationRows() {
-      const pageSize = 100;
-      const collected = [];
-      let page = 1;
-      let total = Number.POSITIVE_INFINITY;
-
-      while (collected.length < total) {
-        const result = await fetchOperationReport({
-          page,
-          pageSize,
-          status: 'completed',
-          dateFrom: range.dateFrom,
-          dateTo: range.dateTo,
-          applyUtilizationCorrections: 'chassis',
-          ...reportSourceParams,
-        });
-        const rows = Array.isArray(result?.rows) ? result.rows : [];
-        collected.push(...rows);
-        total = Number(result?.total || rows.length || 0);
-        if (!rows.length || rows.length < pageSize) break;
-        page += 1;
-      }
-
-      return collected;
+      const result = await fetchUtilizationTrips({
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        ...reportSourceParams,
+      });
+      return Array.isArray(result?.rows) ? result.rows : [];
     }
 
     Promise.allSettled([
@@ -3116,7 +3100,7 @@ function ReportsPage() {
     ? customerPerformanceSummary.totalRevenue / customerPerformanceSummary.activeCustomers
     : 0;
   const customerCollectionPercent = Number(customerPerformanceSummary.collectionRate || 0) * 100;
-  const utilizationSourceRows = utilizationRows.length ? utilizationRows : revenueRows;
+  const utilizationSourceRows = utilizationRows;
   const holidaysByDate = useMemo(() => buildHolidayMap(publicHolidays), [publicHolidays]);
   const utilizationSummary = useMemo(
     () => buildTruckDayUtilizationSummary(masterTruckRows || [], utilizationSourceRows, month, year),

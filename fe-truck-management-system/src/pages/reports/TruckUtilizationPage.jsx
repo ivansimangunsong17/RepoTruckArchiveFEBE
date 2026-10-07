@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, CheckCircle2, Truck } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import { formatDateTime } from '../../utils/formatDate';
-import { fetchOperationReport } from '../../services/reports/reportService';
+import { fetchUtilizationTrips } from '../../services/reports/reportService';
 
 const MONTHS = [
   { value: 1, label: 'Januari' },
@@ -142,10 +142,7 @@ function TruckUtilizationPage() {
 
     setLoading(true);
     setError('');
-    fetchOperationReport({
-      page: 1,
-      pageSize: 100,
-      status: 'completed',
+    fetchUtilizationTrips({
       dateFrom: range.dateFrom,
       dateTo: range.dateTo,
       ...(dataSource === 'historical' ? { entrySource: 'historical', historicalPeriod: activePeriodKey } : {}),
@@ -174,7 +171,7 @@ function TruckUtilizationPage() {
       <PageHeader
         eyebrow="Monitoring"
         title="Truck Utilisasi"
-        description="Ringkasan sederhana trip selesai per truck."
+        description="Ringkasan trip fisik per truck, termasuk pickup Repo."
       />
 
       <section className="mb-4 rounded-md border border-amber-200 bg-amber-50/60 p-3 shadow-sm">
@@ -218,14 +215,14 @@ function TruckUtilizationPage() {
 
       <div className="mb-4 grid gap-3 md:grid-cols-3">
         <MetricCard icon={Truck} label="Truck Terpakai" value={String(utilizationRows.length)} tone="sky" />
-        <MetricCard icon={CheckCircle2} label="Trip Selesai" value={String(totalTrips)} tone="emerald" />
+        <MetricCard icon={CheckCircle2} label="Trip Tercatat" value={String(totalTrips)} tone="emerald" />
         <MetricCard icon={CalendarDays} label="Periode" value={`${activeMonthLabel} ${year}`} tone="amber" />
       </div>
 
       <section className="rounded-md border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-sky-100 bg-sky-50/70 px-3 py-2.5">
           <h2 className="text-sm font-bold text-slate-950">Data Utilisasi Truck</h2>
-          <p className="text-xs text-sky-700">Diurutkan dari trip selesai terbanyak.</p>
+          <p className="text-xs text-sky-700">Diurutkan dari trip tercatat terbanyak.</p>
         </div>
 
         {loading ? <div className="p-4 text-sm text-slate-500">Memuat truck utilisasi...</div> : null}
@@ -239,10 +236,10 @@ function TruckUtilizationPage() {
                   <th className="px-3 py-2 font-bold">Truck</th>
                   <th className="px-3 py-2 font-bold">No Lambung</th>
                   <th className="px-3 py-2 font-bold">Driver Terakhir</th>
-                  <th className="px-3 py-2 text-right font-bold">Trip Selesai</th>
+                  <th className="px-3 py-2 text-right font-bold">Trip Tercatat</th>
                   <th className="px-3 py-2 text-right font-bold">20FT</th>
                   <th className="px-3 py-2 text-right font-bold">40FT</th>
-                  <th className="px-3 py-2 font-bold">Terakhir Selesai</th>
+                  <th className="px-3 py-2 font-bold">Trip Terakhir</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -251,10 +248,10 @@ function TruckUtilizationPage() {
                     <td className="px-3 py-2 font-semibold text-slate-950" data-label="Truck">{truck.plateNumber}</td>
                     <td className="px-3 py-2 font-semibold text-slate-700" data-label="No Lambung">{formatTruckUnitCode(truck.unitCode)}</td>
                     <td className="px-3 py-2" data-label="Driver Terakhir">{truck.driver}</td>
-                    <td className="px-3 py-2 text-right" data-label="Trip Selesai"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{truck.completedTrips}</span></td>
+                    <td className="px-3 py-2 text-right" data-label="Trip Tercatat"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{truck.completedTrips}</span></td>
                     <td className="px-3 py-2 text-right" data-label="20FT">{truck.qty20ft}</td>
                     <td className="px-3 py-2 text-right" data-label="40FT">{truck.qty40ft}</td>
-                    <td className="px-3 py-2" data-label="Terakhir Selesai">{formatDateTime(truck.lastCompletedAt)}</td>
+                    <td className="px-3 py-2" data-label="Trip Terakhir">{formatDateTime(truck.lastCompletedAt)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -264,7 +261,7 @@ function TruckUtilizationPage() {
 
         {!loading && !error && !utilizationRows.length ? (
           <div className="p-6 text-center">
-            <h3 className="text-sm font-bold text-slate-900">Belum ada trip selesai</h3>
+            <h3 className="text-sm font-bold text-slate-900">Belum ada trip tercatat</h3>
             <p className="mt-1 text-xs text-slate-500">Tidak ada utilisasi truck pada {activeMonthLabel} {year}.</p>
           </div>
         ) : null}

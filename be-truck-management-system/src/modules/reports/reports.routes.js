@@ -9,9 +9,16 @@ import {
   operationReportController,
   salesPerformanceReportController,
   salesOrderReportController,
+  utilizationTripsController,
 } from './reports.controller.js';
 
 export const reportRoutes = [
+  {
+    method: 'GET',
+    path: '/api/reports/utilization-trips',
+    permission: 'report.read',
+    handler: utilizationTripsController,
+  },
   {
     method: 'GET',
     path: '/api/reports/dashboard',
