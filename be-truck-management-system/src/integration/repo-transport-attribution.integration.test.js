@@ -180,11 +180,11 @@ if (!databaseUrl) {
       assert.equal(row.totalRevenue, rowsFor(revenueSeptember, job.id)[0].revenue);
       assert.equal(row.totalTrips, 1);
     }
+    // Repo pickup tidak menambah trip sopir Repo B/C (baris boleh ada karena komisi job), revenue 0.
     for (const driver of [single.driverB, combo.driverC]) {
       const row = october.rows.find((item) => item.driverId === driver.id);
-      assert.ok(row);
-      assert.equal(row.totalTrips, 1);
-      assert.equal(row.totalRevenue, 0);
+      assert.equal(row ? row.totalTrips : 0, 0);
+      assert.equal(row ? row.totalRevenue : 0, 0);
     }
     assert.equal(september.summary.totalRevenue - driverBefore[9].summary.totalRevenue, ownTransport);
     assert.equal(october.summary.totalRevenue - driverBefore[10].summary.totalRevenue, 0);
@@ -214,6 +214,27 @@ if (!databaseUrl) {
     assert.equal(after.rows[9].totalRevenue - comparisonBefore.rows[9].totalRevenue, 0);
     assert.equal(after.rows[9].repoRevenue - comparisonBefore.rows[9].repoRevenue, 900000);
     assert.ok(october.summary.repoRevenue >= 900000);
+  });
+
+  test('D+E: Repo pickup tidak menambah trip Driver Performance maupun Monthly Comparison', async () => {
+    // Driver Performance Oktober: sopir Repo B dan C tidak mendapat trip.
+    const october = await getDriverPerformanceReport({ month: `${YEAR}-10` });
+    for (const driver of [single.driverB, combo.driverC]) {
+      const row = october.rows.find((item) => item.driverId === driver.id);
+      assert.equal(row ? row.totalTrips : 0, 0);
+    }
+    // September: sopir asli A, X, Y masing-masing tepat satu trip dan revenue transportnya sendiri.
+    const september = await getDriverPerformanceReport({ month: `${YEAR}-09` });
+    const monthly = await report(9);
+    for (const [driver, job] of [[single.driverA, single.job], [combo.driverX, combo.jobX], [combo.driverY, combo.jobY]]) {
+      const row = september.rows.find((item) => item.driverId === driver.id);
+      assert.equal(row.totalTrips, 1);
+      assert.equal(row.totalRevenue, rowsFor(monthly, job.id)[0].revenue);
+    }
+    // Monthly Comparison: +3 trip asli di September, +0 dari dua movement Repo di Oktober.
+    const comparison = await getMonthlyComparisonReport({ year: YEAR });
+    assert.equal(comparison.rows[8].totalTrips - comparisonBefore.rows[8].totalTrips, 3);
+    assert.equal(comparison.rows[9].totalTrips - comparisonBefore.rows[9].totalTrips, 0);
   });
 
   test('Sales & Customer Performance: transport job titip masuk September, atribusi sales/customer tetap', async () => {

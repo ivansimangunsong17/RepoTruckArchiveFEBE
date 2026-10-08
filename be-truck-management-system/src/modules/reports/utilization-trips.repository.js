@@ -1,7 +1,10 @@
 import { query } from '../../db/client.js';
 
-// One row is one physical trip. The original leg belongs to the assignment released
-// at storage; each pickup movement is a separate leg regardless of item count.
+// One row is one utilization trip: the original transport leg of an internal Container Job,
+// attributed to the assignment released at Repo storage (not the later Repo assignment).
+// Repo pickup movements (single or combo 2x20) deliberately add NO truck/driver utilization;
+// their truck/driver stay on container_pickup_movements for history, Repo UJ, Repo revenue
+// and lifecycle.
 export async function getUtilizationTripRows(options = {}, db = { query }) {
   const params = [];
   const dateClauses = [];
@@ -52,37 +55,6 @@ export async function getUtilizationTripRows(options = {}, db = { query }) {
         and (cj.repo_stored_at is not null or cj.status = 'completed')
         and coalesce(cj.execution_source, 'internal') = 'internal'
         and so.status <> 'cancelled' ${sourceSql}
-
-      union all
-
-      select
-        'repo:' || cpm.id::text, null::uuid, 'repo_pickup', cpm.id, cpm.status,
-        cpm.started_at, (cpm.started_at at time zone 'Asia/Jakarta')::date,
-        cpm.vehicle_id, cpm.driver_id,
-        coalesce(nullif(cpm.assignment_snapshot->>'plateNumber', ''), v.plate_number),
-        coalesce(nullif(cpm.assignment_snapshot->>'driver', ''), d.name),
-        coalesce(nullif(cpm.assignment_snapshot->>'unitCode', ''), v.unit_code),
-        v.chassis_size,
-        items.container_numbers, items.container_size, items.destination,
-        cpm.started_at, null::timestamptz, null::timestamptz, null::text,
-        items.customer, items.so_number, items.origin, items.entry_source
-      from container_pickup_movements cpm
-      left join vehicles v on v.id = cpm.vehicle_id
-      left join drivers d on d.id = cpm.driver_id
-      join lateral (
-        select string_agg(cj.container_number, ', ' order by cpi.sequence_no) as container_numbers,
-          case when count(*) = 2 then '2x20FT' else max(cj.container_size) end as container_size,
-          min(cj.destination) as destination, min(so.customer_name) as customer,
-          min(so.so_number) as so_number, min(so.origin) as origin,
-          min(coalesce(cj.entry_source, 'realtime')) as entry_source
-        from container_pickup_items cpi
-        join container_jobs cj on cj.id = cpi.container_job_id
-        join sales_orders so on so.id = cj.sales_order_id
-        where cpi.movement_id = cpm.id
-          and coalesce(cj.execution_source, 'internal') = 'internal'
-          and so.status <> 'cancelled' ${sourceSql}
-      ) items on items.container_size is not null
-      where cpm.status <> 'cancelled' and cpm.started_at is not null
     )
     select * from physical_trips ${dateSql}
     order by trip_at desc, id

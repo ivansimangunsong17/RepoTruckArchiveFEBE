@@ -186,36 +186,36 @@ test('monthly comparison menghitung combo pickup 2x20 sebagai 1 trip internal ta
   assert.equal(rows[0].utilizationPercent, (1 / 31) * 100);
 });
 
-test('monthly comparison counts original legs and a combo movement, while volume stays two jobs', () => {
+test('monthly comparison counts only original legs; a combo Repo movement adds no trips', () => {
   const completed = [
     { completed_date: '2026-10-05', price: 1000000, container_size: '20FT', customer_name: 'A' },
     { completed_date: '2026-10-05', price: 1000000, container_size: '20FT', customer_name: 'A' },
   ];
+  // The utilization source returns only the two original legs; the combo Repo truck C is absent.
   const utilizationTrips = [
     { id: 'job:a', completedDate: '2026-10-01', vehicleId: 'truck-a' },
     { id: 'job:b', completedDate: '2026-10-01', vehicleId: 'truck-b' },
-    { id: 'repo:combo', completedDate: '2026-10-02', vehicleId: 'truck-c' },
   ];
   const rows = buildMonthlyComparisonRows(completed, [], {
     year: 2026, activeTruckCount: 3, utilizationTrips,
   }, new Date('2026-11-01'));
-  assert.equal(rows[9].totalTrips, 3);
+  assert.equal(rows[9].totalTrips, 2);
   assert.equal(rows[9].totalVolume, 2);
   assert.equal(rows[9].totalRevenue, 2000000);
-  assert.equal(rows[9].usedTruckDays, 3);
+  assert.equal(rows[9].usedTruckDays, 2);
 });
 
-test('driver performance trip counts follow original and Repo driver events without changing financial totals', () => {
+test('driver performance trip counts follow original legs only; Repo driver gets no trip, totals unchanged', () => {
+  // Trip rows come from the utilization source, which no longer emits Repo pickup legs.
   const rows = mergeDriverPerformanceTripCounts([
     { driverId: 'driver-c', driver: 'Repo Driver', totalTrips: 2,
       totalRevenue: 2000000, totalDriverCommission: 100000 },
   ], [
     { id: 'job:a', driverId: 'driver-a', driver: 'Original A' },
     { id: 'job:b', driverId: 'driver-b', driver: 'Original B' },
-    { id: 'repo:combo', driverId: 'driver-c', driver: 'Repo Driver' },
   ]);
   assert.deepEqual(rows.map((row) => [row.driverId, row.totalTrips]).sort(), [
-    ['driver-a', 1], ['driver-b', 1], ['driver-c', 1],
+    ['driver-a', 1], ['driver-b', 1], ['driver-c', 0],
   ]);
   assert.equal(rows.reduce((total, row) => total + row.totalRevenue, 0), 2000000);
   assert.equal(rows.reduce((total, row) => total + row.totalDriverCommission, 0), 100000);

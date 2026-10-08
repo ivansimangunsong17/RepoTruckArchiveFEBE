@@ -131,16 +131,20 @@ if (!databaseUrl) {
     await closePool();
   });
 
-  test('CASE B: single Repo = 1 trip asli (A) + 1 trip Repo (B), satu job, satu UJ Repo, Rp300.000', async () => {
+  test('CASE B: single Repo = 1 trip asli (A), Repo B +0 utilisasi, satu job, satu UJ Repo, Rp300.000', async () => {
     const trips = await getUtilizationTripRows({ dateFrom: jakartaToday, dateTo: jakartaToday });
     const original = trips.filter((row) => row.jobId === single.job.id);
-    const repo = trips.filter((row) => row.movementId === single.movement.id);
     assert.equal(original.length, 1);
     assert.equal(original[0].vehicleId, single.truckA.id);
     assert.equal(original[0].driverId, single.driverA.id);
-    assert.equal(repo.length, 1);
-    assert.equal(repo[0].vehicleId, single.truckB.id);
-    assert.equal(repo[0].driverId, single.driverB.id);
+    // Repo pickup tidak menambah utilisasi truck/sopir Repo.
+    assert.equal(trips.filter((row) => row.movementId === single.movement.id).length, 0);
+    assert.equal(trips.filter((row) => row.vehicleId === single.truckB.id || row.driverId === single.driverB.id).length, 0);
+    // Truck/sopir Repo tetap tersimpan di movement (riwayat, UJ, revenue, lifecycle).
+    const movement = await query('select vehicle_id, driver_id, status, started_at from container_pickup_movements where id = $1', [single.movement.id]);
+    assert.equal(movement.rows[0].vehicle_id, single.truckB.id);
+    assert.equal(movement.rows[0].driver_id, single.driverB.id);
+    assert.ok(movement.rows[0].started_at);
 
     const jobs = await query('select count(*)::int as n from container_jobs where sales_order_id = $1', [single.so.id]);
     assert.equal(jobs.rows[0].n, 1);
@@ -162,14 +166,16 @@ if (!databaseUrl) {
     assert.notEqual(transport[0].plateNumber, repoRows[0].plateNumber);
   });
 
-  test('CASE C: combo = 2 trip asli + 1 trip Repo (C), satu UJ Repo, Rp600.000 ke SO masing-masing', async () => {
+  test('CASE C: combo = 2 trip asli, Repo C +0 utilisasi, satu UJ Repo, Rp600.000 ke SO masing-masing', async () => {
     const trips = await getUtilizationTripRows({ dateFrom: jakartaToday, dateTo: jakartaToday });
     const originals = trips.filter((row) => [combo.jobX.id, combo.jobY.id].includes(row.jobId));
     assert.deepEqual(originals.map((row) => row.vehicleId).sort(), [combo.truckX.id, combo.truckY.id].sort());
-    const repo = trips.filter((row) => row.movementId === combo.movement.id);
-    assert.equal(repo.length, 1, 'combo = satu trip fisik truck/sopir');
-    assert.equal(repo[0].vehicleId, combo.truckC.id);
-    assert.equal(repo[0].driverId, combo.driverC.id);
+    assert.deepEqual(originals.map((row) => row.driverId).sort(), [combo.driverX.id, combo.driverY.id].sort());
+    // Combo Repo pickup tidak menambah utilisasi truck/sopir C.
+    assert.equal(trips.filter((row) => row.vehicleId === combo.truckC.id || row.driverId === combo.driverC.id).length, 0);
+    const movement = await query('select vehicle_id, driver_id from container_pickup_movements where id = $1', [combo.movement.id]);
+    assert.equal(movement.rows[0].vehicle_id, combo.truckC.id);
+    assert.equal(movement.rows[0].driver_id, combo.driverC.id);
 
     const uj = await query("select amount from operational_fund_transactions where source = 'repo_uj' and source_ref_id = $1 and status = 'posted'", [combo.movement.id]);
     assert.equal(uj.rows.length, 1);
