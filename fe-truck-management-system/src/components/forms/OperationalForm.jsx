@@ -138,9 +138,12 @@ function normalizeTruck(truck, fallbackRows = []) {
   };
 }
 
+// Kapasitas truck hierarkis (sama dengan backend): 20FT hanya untuk 20FT; 40FT untuk 20FT dan 40FT;
+// COMBO untuk semua.
 function isTruckCompatibleWithContainer(truck, containerSize) {
   const truckCapacity = getTruckCapacity(truck);
-  return !containerSize || !truckCapacity || truckCapacity === 'COMBO' || truckCapacity === containerSize;
+  return !containerSize || !truckCapacity || truckCapacity === 'COMBO' || truckCapacity === containerSize
+    || (truckCapacity === '40FT' && normalizeSize(containerSize) === '20FT');
 }
 
 function isTruckCompatibleForRepoPickup(truck, containerSize, isComboPickup = false) {

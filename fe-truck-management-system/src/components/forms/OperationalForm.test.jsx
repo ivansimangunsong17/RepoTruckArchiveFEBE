@@ -958,21 +958,34 @@ describe('OperationalForm', () => {
     });
   });
 
-  it('menyaring truck yang kapasitasnya tidak sesuai dengan ukuran container', () => {
-    render(
-      <OperationalForm
-        container={container}
-        masterTrucks={[
-          { id: 'truck-20', plateNumber: 'B 2020 OK', unitCode: 'TRK-020', capacity: '20FT', status: 'Aktif', defaultDriver: 'Driver 20' },
-          { id: 'truck-40', plateNumber: 'B 4040 NO', unitCode: 'TRK-040', capacity: '40FT', status: 'Aktif', defaultDriver: 'Driver 40' },
-        ]}
-        onClose={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    );
+  describe('pilihan truck mengikuti kapasitas hierarkis', () => {
+    const matrixTrucks = [
+      { id: 'truck-20', plateNumber: 'B 2020 T20', unitCode: 'TRK-020', capacity: '20FT', status: 'Aktif', defaultDriver: 'Driver 20' },
+      { id: 'truck-40', plateNumber: 'B 4040 T40', unitCode: 'TRK-040', capacity: '40FT', status: 'Aktif', defaultDriver: 'Driver 40' },
+      { id: 'truck-combo', plateNumber: 'B 5050 TCB', unitCode: 'TRK-CB', capacity: 'COMBO', status: 'Aktif', defaultDriver: 'Driver CB' },
+    ];
+    const visiblePlates = (props) => {
+      const { unmount } = render(
+        <OperationalForm container={props} masterTrucks={matrixTrucks} onClose={vi.fn()} onSubmit={vi.fn()} />,
+      );
+      const plates = matrixTrucks
+        .filter((truck) => screen.queryByRole('option', { name: new RegExp(truck.plateNumber, 'i') }))
+        .map((truck) => truck.capacity);
+      unmount();
+      return plates;
+    };
 
-    expect(screen.getByRole('option', { name: /B 2020 OK/i })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /B 4040 NO/i })).not.toBeInTheDocument();
+    it('job biasa: 20FT menerima 20FT/40FT/COMBO, 40FT menolak truck 20FT', () => {
+      expect(visiblePlates({ ...container, size: '20FT' })).toEqual(['20FT', '40FT', 'COMBO']);
+      expect(visiblePlates({ ...container, size: '40FT' })).toEqual(['40FT', 'COMBO']);
+    });
+
+    it('pickup Repo single 20FT menampilkan truck 40FT; single 40FT tanpa 20FT; combo hanya 40FT/COMBO', () => {
+      const repo = { ...container, status: 'received', repoPickupMode: true, plateNumber: '', driver: '', repoLocation: 'Repo Cakung' };
+      expect(visiblePlates({ ...repo, size: '20FT' })).toEqual(['20FT', '40FT', 'COMBO']);
+      expect(visiblePlates({ ...repo, size: '40FT' })).toEqual(['40FT', 'COMBO']);
+      expect(visiblePlates({ ...repo, size: '20FT', repoComboPickupMode: true })).toEqual(['40FT', 'COMBO']);
+    });
   });
 
   it('menampilkan uang jalan tanpa biaya lainnya di preview SPK', async () => {

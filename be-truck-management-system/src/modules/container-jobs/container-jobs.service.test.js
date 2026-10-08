@@ -44,17 +44,48 @@ const {
   resolveCompletedCommissionDriverCorrection,
   resolveJourneyMoneyAmountForSize,
   assertVehicleCanPickupRepo,
+  isVehicleSizeAllowedForContainer,
   shouldValidateVehicleContainerSize,
   shouldRequireAssignmentAfterVendorRevert,
   syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
 
-test('pickup container titip memperbolehkan 20FT diambil truck 40FT', () => {
+test('pickup single container 20FT memperbolehkan truck 40FT (kapasitas hierarkis)', () => {
   assert.doesNotThrow(() => assertVehicleCanPickupRepo(
     { chassis_size: '40FT', container_size: '40FT', plate_number: 'B 9001 TEST' },
     [{ container_size: '20FT' }],
     'single',
   ));
+});
+
+test('matriks kapasitas truck untuk job biasa (A-F)', () => {
+  assert.equal(isVehicleSizeAllowedForContainer('20FT', '20FT'), true); // A
+  assert.equal(isVehicleSizeAllowedForContainer('40FT', '20FT'), true); // B
+  assert.equal(isVehicleSizeAllowedForContainer('COMBO', '20FT'), true); // C
+  assert.equal(isVehicleSizeAllowedForContainer('20FT', '40FT'), false); // D
+  assert.equal(isVehicleSizeAllowedForContainer('40FT', '40FT'), true); // E
+  assert.equal(isVehicleSizeAllowedForContainer('COMBO', '40FT'), true); // F
+});
+
+test('matriks ukuran truck pickup Repo single dan combo', () => {
+  const truck = (size) => ({ chassis_size: null, container_size: size, plate_number: `B ${size}` });
+  const allowed = (vehicle, sizes, type) => {
+    try { assertVehicleCanPickupRepo(vehicle, sizes.map((size) => ({ container_size: size })), type); return true; } catch { return false; }
+  };
+  // Single 20FT: 20FT/40FT/COMBO boleh (G-I).
+  assert.equal(allowed(truck('20FT'), ['20FT'], 'single'), true);
+  assert.equal(allowed(truck('40FT'), ['20FT'], 'single'), true);
+  assert.equal(allowed(truck('COMBO'), ['20FT'], 'single'), true);
+  // Single 40FT: 40FT/COMBO boleh, 20FT ditolak.
+  assert.equal(allowed(truck('40FT'), ['40FT'], 'single'), true);
+  assert.equal(allowed(truck('COMBO'), ['40FT'], 'single'), true);
+  assert.equal(allowed(truck('20FT'), ['40FT'], 'single'), false);
+  // Combo 2x20: 40FT/COMBO boleh, 20FT ditolak.
+  assert.equal(allowed(truck('40FT'), ['20FT', '20FT'], 'combo_2x20'), true);
+  assert.equal(allowed(truck('COMBO'), ['20FT', '20FT'], 'combo_2x20'), true);
+  assert.equal(allowed(truck('20FT'), ['20FT', '20FT'], 'combo_2x20'), false);
+  // Ukuran chassis terpasang lebih diutamakan dari kapasitas truck.
+  assert.equal(allowed({ chassis_size: '20FT', container_size: '40FT' }, ['40FT'], 'single'), false);
 });
 
 test('pickup container titip menolak container 40FT diambil truck 20FT', () => {

@@ -589,11 +589,17 @@ function normalizeContainerSize(value) {
   return normalized === '40FT' ? '40FT' : '20FT';
 }
 
+// Kapasitas truck hierarkis: 20FT hanya untuk container 20FT; 40FT untuk 20FT maupun 40FT;
+// COMBO untuk semua. Satu-satunya kombinasi yang ditolak: container 40FT dengan truck 20FT.
+export function isVehicleSizeAllowedForContainer(vehicleSize, containerSize) {
+  return vehicleSize === 'COMBO' || vehicleSize === containerSize || (vehicleSize === '40FT' && containerSize === '20FT');
+}
+
 function assertVehicleMatchesContainer(vehicle, containerSize) {
   if (!vehicle) return;
   const vehicleSize = normalizeContainerSize(vehicle.container_size);
   const jobSize = normalizeContainerSize(containerSize);
-  if (vehicleSize !== 'COMBO' && vehicleSize !== jobSize) {
+  if (!isVehicleSizeAllowedForContainer(vehicleSize, jobSize)) {
     const error = new Error(`Truck ${vehicle.plate_number} kapasitas ${vehicleSize} tidak sesuai untuk container ${jobSize}.`);
     error.statusCode = 400;
     error.code = 'VEHICLE_SIZE_MISMATCH';
@@ -640,6 +646,8 @@ export function assertVehicleCanPickupRepo(vehicle, jobs = [], pickupType = 'sin
     }
     return;
   }
+  // Single mengikuti kapasitas hierarkis yang sama dengan update biasa: container 20FT boleh
+  // truck 20FT/40FT/COMBO; container 40FT wajib truck 40FT/COMBO.
   const has40ftJob = jobSizes.includes('40FT');
   if (has40ftJob && vehicleSize !== '40FT' && vehicleSize !== 'COMBO') {
     throw validationError('Container 40FT wajib memakai truck/chassis 40FT.', 'REPO_PICKUP_REQUIRES_40FT', 400);

@@ -368,6 +368,8 @@ function truckSizeMismatchForJob(truck, job) {
   const truckCapacity = getTruckCapacity(truck);
   const jobSize = getContainerJobSize(job);
   if (!truck || !jobSize || !truckCapacity || truckCapacity === 'COMBO') return false;
+  // Kapasitas hierarkis: truck 40FT juga sah untuk container 20FT.
+  if (truckCapacity === '40FT' && jobSize === '20FT') return false;
   return truckCapacity !== jobSize;
 }
 
