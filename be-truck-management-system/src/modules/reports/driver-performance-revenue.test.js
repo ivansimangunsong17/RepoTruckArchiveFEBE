@@ -41,7 +41,7 @@ test('normal completed transport revenue keeps its current driver and completed 
     result.rows[0].totalDriverCommission], ['driver-a', 1, 1000000, 50000]);
 });
 
-test('Repo transport stays with original drivers in storage month; Repo trip has no inherited revenue', async () => {
+test('Repo transport stays with original drivers in storage month; Repo pickup adds no trips', async () => {
   const db = reportDb({
     revenue: { '2026-09': [
       revenueJob('single', 'driver-a', 'Driver A', 1000000),
@@ -55,8 +55,8 @@ test('Repo transport stays with original drivers in storage month; Repo trip has
       '2026-09': [trip('job:single', 'driver-a', 'Driver A', '2026-09-30'),
         trip('job:combo-1', 'driver-x', 'Driver X', '2026-09-30'),
         trip('job:combo-2', 'driver-y', 'Driver Y', '2026-09-30')],
-      '2026-10': [trip('repo:single', 'driver-b', 'Driver B', '2026-10-02', 'repo_pickup'),
-        trip('repo:combo', 'driver-c', 'Driver C', '2026-10-02', 'repo_pickup')],
+      // The utilization source no longer emits Repo pickup legs.
+      '2026-10': [],
     },
   });
   const september = await getDriverPerformanceReport({ month: '2026-09' }, db);
@@ -66,22 +66,23 @@ test('Repo transport stays with original drivers in storage month; Repo trip has
   ]);
   assert.equal(september.summary.totalRevenue, 3500000);
   assert.equal(october.summary.totalRevenue, 0);
+  // Repo driver B only appears for the commission of the job they completed, with 0 trips;
+  // Repo driver C does not appear at all.
   assert.deepEqual(october.rows.map((row) => [row.driverId, row.totalTrips, row.totalRevenue]).sort(), [
-    ['driver-b', 1, 0], ['driver-c', 1, 0],
+    ['driver-b', 0, 0],
   ]);
   assert.equal(october.rows.find((row) => row.driverId === 'driver-b').totalDriverCommission, 50000);
   // Rp300,000/container Repo revenue is never part of this transport-only result.
   assert.equal(september.summary.totalRevenue + october.summary.totalRevenue, 3500000);
 });
 
-test('one driver doing original and Repo legs receives transport revenue once and two trips', async () => {
+test('one driver doing original and Repo legs receives transport revenue once and one trip', async () => {
   const db = reportDb({
     revenue: { '2026-09': [revenueJob('same', 'driver-a', 'Driver A', 1000000)] },
-    trips: { '2026-09': [trip('job:same', 'driver-a', 'Driver A', '2026-09-30'),
-      trip('repo:same', 'driver-a', 'Driver A', '2026-09-30', 'repo_pickup')] },
+    trips: { '2026-09': [trip('job:same', 'driver-a', 'Driver A', '2026-09-30')] },
   });
   const result = await getDriverPerformanceReport({ month: '2026-09' }, db);
-  assert.deepEqual([result.rows[0].totalTrips, result.rows[0].totalRevenue], [2, 1000000]);
+  assert.deepEqual([result.rows[0].totalTrips, result.rows[0].totalRevenue], [1, 1000000]);
 });
 
 test('Driver Performance revenue query reuses transport eligibility, date and released-driver priority', async () => {
@@ -97,6 +98,8 @@ test('Driver Performance revenue query reuses transport eligibility, date and re
   assert.match(revenueSql, /so\.status <> 'cancelled'/);
   assert.match(revenueSql, /to_char\(completed_date, 'YYYY-MM'\)/);
   assert.doesNotMatch(revenueSql, /repo_revenue|300000/i);
+  const tripSql = db.statements.find((sql) => sql.includes('with physical_trips as'));
+  assert.doesNotMatch(tripSql, /container_pickup_movements/);
   const commissionSql = db.statements.find((sql) => sql.includes('from completed_jobs cj'));
   assert.match(commissionSql, /where cj\.status = 'completed'/);
   assert.match(commissionSql, /dcp\.status as commission_payment_status/);
