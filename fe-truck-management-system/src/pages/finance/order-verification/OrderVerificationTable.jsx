@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock3 } from '
 import MonthFilterControl from '../shared/MonthFilterControl';
 import SearchBar from '../shared/SearchBar';
 import StatusPill from '../shared/StatusPill';
-import { ORDER_TABLE_PAGE_SIZE, isCancelledFinanceOrder, isVerifiedFinanceOrder } from './orderVerificationUtils';
+import { ORDER_TABLE_PAGE_SIZE, getOrderPartyLabel, isCancelledFinanceOrder, isVerifiedFinanceOrder } from './orderVerificationUtils';
 
 function OrderVerificationTable({
   rows,
@@ -150,10 +150,10 @@ function OrderVerificationTable({
       </div>
 
       <div className="table-wrap">
-        <table className="data-table master-table finance-master-table finance-order-table min-w-[1240px]">
+        <table className="data-table master-table finance-master-table finance-order-table min-w-[1320px]">
           <thead>
             <tr>
-              {['Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Customer', 'Alasan Batal', 'Nomor Order', 'Nomor SO Finance', 'Aksi'].map((column) => (
+              {['Party', 'Order Dibuat', 'Tujuan', 'Jenis Order', 'Payment Terms', 'Tanggal Jalan', 'Customer', 'Alasan Batal', 'Nomor Order', 'Nomor SO Finance', 'Aksi'].map((column) => (
                 <th key={column}>{column}</th>
               ))}
             </tr>
@@ -162,7 +162,7 @@ function OrderVerificationTable({
             {Object.entries(groupedRows).map(([salesName, salesRows]) => (
               <Fragment key={salesName}>
                 <tr className="finance-group-row">
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Sales</span>
@@ -173,7 +173,7 @@ function OrderVerificationTable({
                   </td>
                 </tr>
                 <tr aria-hidden="true">
-                  <td className="h-px bg-slate-200 p-0" colSpan={10} />
+                  <td className="h-px bg-slate-200 p-0" colSpan={11} />
                 </tr>
                 {salesRows.map((row) => (
                   <Fragment key={row.id}>
@@ -181,6 +181,9 @@ function OrderVerificationTable({
                       const isCancelled = isCancelledFinanceOrder(row);
                       return (
                     <tr className={`align-middle ${isCancelled ? 'bg-rose-100/80 hover:bg-rose-200/70' : 'hover:bg-slate-50'}`}>
+                      <td className="px-2 py-1" data-label="Party">
+                        <span className="inline-block whitespace-nowrap rounded-md border border-sky-100 bg-sky-50 px-1.5 py-0.5 text-[10px] font-black text-sky-800">{getOrderPartyLabel(row)}</span>
+                      </td>
                       <td className="px-2 py-1 font-semibold text-slate-700" data-label="Order Dibuat">{row.orderDate}</td>
                       <td className="px-2 py-1 font-black text-slate-900" data-label="Tujuan">{row.destination}</td>
                       <td className="px-2 py-1 text-slate-700" data-label="Jenis Order">{row.orderType}</td>
@@ -236,7 +239,7 @@ function OrderVerificationTable({
                       );
                     })()}
                     <tr aria-hidden="true">
-                      <td className="h-px bg-slate-200 p-0" colSpan={10} />
+                      <td className="h-px bg-slate-200 p-0" colSpan={11} />
                     </tr>
                   </Fragment>
                 ))}
@@ -244,7 +247,7 @@ function OrderVerificationTable({
             ))}
             {!filteredRows.length ? (
               <tr>
-                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={10}>Tidak ada order pada klasifikasi ini.</td>
+                <td className="px-3 py-2.5 text-center text-xs font-semibold text-slate-400" colSpan={11}>Tidak ada order pada klasifikasi ini.</td>
               </tr>
             ) : null}
           </tbody>
