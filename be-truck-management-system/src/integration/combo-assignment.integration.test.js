@@ -36,7 +36,7 @@ if (!databaseUrl) {
     return result.rows[0];
   }
 
-  async function createJob(status = 'repo_stored') {
+  async function createJob(status = 'repo_stored', overrides = {}) {
     return cloneRow('container_jobs', `
       select * from container_jobs
       where coalesce(execution_source, 'internal') = 'internal'
@@ -58,6 +58,7 @@ if (!databaseUrl) {
       repo_picked_up_at: null,
       rpuj_status: 'pending',
       uj_amount_snapshot: 123000,
+      ...overrides,
     });
   }
 
@@ -155,10 +156,16 @@ if (!databaseUrl) {
     await assert.rejects(assignActive(unrelated.id, { driverId: driver.id }), isActiveConflict('ex_container_jobs_driver_active'));
     await assert.rejects(assignActive(unrelated.id, { vehicleId: vehicle.id }), isActiveConflict('ex_container_jobs_vehicle_active'));
 
-    const otherRepo = await createJob();
-    await assert.rejects(pickupSingleRepoContainerJob(otherRepo.id, {
-      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
+    // Movement Repo lain dengan truck combo 40FT yang sama (ukuran sah: combo 2x20) tetap ditolak.
+    const otherRepo = [await createJob(), await createJob()];
+    await assert.rejects(pickupComboRepoContainerJobs({
+      pickupConfirmed: true, containerJobIds: otherRepo.map((job) => job.id), driverId: driver.id, vehicleId: vehicle.id,
+      updatedBy: 'Integration Test', repoUjAmount: 0,
     }), { code: 'ASSIGNMENT_ALREADY_ACTIVE' });
+    // Pickup single 20FT dengan truck 40FT itu sudah ditolak oleh aturan ukuran lebih dulu.
+    await assert.rejects(pickupSingleRepoContainerJob(otherRepo[0].id, {
+      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
+    }), { code: 'VEHICLE_SIZE_MISMATCH' });
   });
 
   test('5. driver/truck baru bebas setelah SEMUA job combo terminal', async () => {
@@ -273,14 +280,65 @@ if (!databaseUrl) {
     await assert.rejects(updateContainerJob(job.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
   });
 
-  test('10. Repo single 20FT dengan truck 40FT: aturan lama tetap (update biasa ditolak)', async () => {
-    const job = await createJob();
+  test('10. Repo single 20FT dengan truck 40FT ditolak sebelum movement/item/UJ/revenue dibuat', async () => {
+    const [originalDriver, originalTruck] = [await createDriver(), await createVehicle('20FT')];
+    const storedAt = new Date().toISOString();
+    const job = await createJob('repo_stored', {
+      repo_stored_at: storedAt,
+      repo_released_driver_id: originalDriver.id,
+      repo_released_vehicle_id: originalTruck.id,
+    });
     const driver = await createDriver();
     const vehicle = await createVehicle('40FT');
-    await pickupSingleRepoContainerJob(job.id, {
-      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
+    await assert.rejects(pickupSingleRepoContainerJob(job.id, {
+      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
+    }), (error) => error.code === 'VEHICLE_SIZE_MISMATCH' && error.statusCode === 400);
+
+    const items = await query('select count(*)::int as n from container_pickup_items where container_job_id = $1', [job.id]);
+    assert.equal(items.rows[0].n, 0, 'tidak ada movement/item');
+    const uj = await query("select count(*)::int as n from operational_fund_transactions where source = 'repo_uj' and driver_name = $1", [driver.name]);
+    assert.equal(uj.rows[0].n, 0, 'tidak ada UJ Repo');
+    const revenue = await query("select count(*)::int as n from manual_revenue_lines where charge_type = 'repo' and container_job_id = $1", [job.id]);
+    assert.equal(revenue.rows[0].n, 0, 'tidak ada Revenue Repo');
+    const after = (await query('select * from container_jobs where id = $1', [job.id])).rows[0];
+    assert.equal(after.status, 'repo_stored');
+    assert.equal(after.driver_id, null);
+    assert.equal(after.vehicle_id, null);
+    assert.equal(after.repo_picked_up_at, null);
+    assert.equal(after.repo_released_driver_id, originalDriver.id);
+    assert.equal(after.repo_released_vehicle_id, originalTruck.id);
+    assert.equal(new Date(after.repo_stored_at).toISOString(), storedAt);
+    // Truck yang benar tetap bisa dipakai untuk job yang sama.
+    const ok = await pickupSingleRepoContainerJob(job.id, {
+      pickupConfirmed: true, driverId: driver.id, vehicleId: (await createVehicle('20FT')).id, updatedBy: 'Integration Test', repoUjAmount: 0,
     });
-    await assert.rejects(updateContainerJob(job.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
+    assert.ok(ok.movement.id);
+  });
+
+  test('14. matriks ukuran truck pickup Repo (single 20FT/40FT, combo 2x20)', async () => {
+    const pickupSingle = async (containerSize, truckSize) => {
+      const job = await createJob('repo_stored', { container_size: containerSize });
+      return pickupSingleRepoContainerJob(job.id, {
+        pickupConfirmed: true, driverId: (await createDriver()).id, vehicleId: (await createVehicle(truckSize)).id,
+        updatedBy: 'Integration Test', repoUjAmount: 0,
+      }).then(() => 'allow', (error) => error.code);
+    };
+    const pickupCombo = async (truckSize) => {
+      const jobs = [await createJob(), await createJob()];
+      return pickupComboRepoContainerJobs({
+        pickupConfirmed: true, containerJobIds: jobs.map((job) => job.id), driverId: (await createDriver()).id,
+        vehicleId: (await createVehicle(truckSize)).id, updatedBy: 'Integration Test', repoUjAmount: 0,
+      }).then(() => 'allow', (error) => error.code);
+    };
+    assert.equal(await pickupSingle('20FT', '20FT'), 'allow');
+    assert.equal(await pickupSingle('20FT', 'COMBO'), 'allow');
+    assert.equal(await pickupSingle('20FT', '40FT'), 'VEHICLE_SIZE_MISMATCH');
+    assert.equal(await pickupSingle('40FT', '40FT'), 'allow');
+    assert.equal(await pickupSingle('40FT', 'COMBO'), 'allow');
+    assert.equal(await pickupSingle('40FT', '20FT'), 'REPO_PICKUP_REQUIRES_40FT');
+    assert.equal(await pickupCombo('40FT'), 'allow');
+    assert.equal(await pickupCombo('COMBO'), 'allow');
+    assert.equal(await pickupCombo('20FT'), 'REPO_PICKUP_COMBO_REQUIRES_40FT');
   });
 
   test('11. combo 2x20 dengan truck 40FT: kedua job bisa di-update dan diselesaikan normal', async () => {
