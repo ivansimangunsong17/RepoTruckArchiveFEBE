@@ -49,12 +49,36 @@ const {
   syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
 
-test('pickup container titip memperbolehkan 20FT diambil truck 40FT', () => {
-  assert.doesNotThrow(() => assertVehicleCanPickupRepo(
-    { chassis_size: '40FT', container_size: '40FT', plate_number: 'B 9001 TEST' },
-    [{ container_size: '20FT' }],
-    'single',
-  ));
+test('pickup single container 20FT menolak truck 40FT (40FT hanya lewat combo 2x20)', () => {
+  assert.throws(
+    () => assertVehicleCanPickupRepo(
+      { chassis_size: '40FT', container_size: '40FT', plate_number: 'B 9001 TEST' },
+      [{ container_size: '20FT' }],
+      'single',
+    ),
+    (error) => error.code === 'VEHICLE_SIZE_MISMATCH' && error.statusCode === 400,
+  );
+});
+
+test('matriks ukuran truck pickup Repo single dan combo', () => {
+  const truck = (size) => ({ chassis_size: null, container_size: size, plate_number: `B ${size}` });
+  const allowed = (vehicle, sizes, type) => {
+    try { assertVehicleCanPickupRepo(vehicle, sizes.map((size) => ({ container_size: size })), type); return true; } catch { return false; }
+  };
+  // Single 20FT: 20FT/COMBO boleh, 40FT ditolak.
+  assert.equal(allowed(truck('20FT'), ['20FT'], 'single'), true);
+  assert.equal(allowed(truck('COMBO'), ['20FT'], 'single'), true);
+  assert.equal(allowed(truck('40FT'), ['20FT'], 'single'), false);
+  // Single 40FT: 40FT/COMBO boleh, 20FT ditolak.
+  assert.equal(allowed(truck('40FT'), ['40FT'], 'single'), true);
+  assert.equal(allowed(truck('COMBO'), ['40FT'], 'single'), true);
+  assert.equal(allowed(truck('20FT'), ['40FT'], 'single'), false);
+  // Combo 2x20: 40FT/COMBO boleh, 20FT ditolak.
+  assert.equal(allowed(truck('40FT'), ['20FT', '20FT'], 'combo_2x20'), true);
+  assert.equal(allowed(truck('COMBO'), ['20FT', '20FT'], 'combo_2x20'), true);
+  assert.equal(allowed(truck('20FT'), ['20FT', '20FT'], 'combo_2x20'), false);
+  // Ukuran chassis terpasang lebih diutamakan dari kapasitas truck.
+  assert.equal(allowed({ chassis_size: '40FT', container_size: '20FT' }, ['20FT'], 'single'), false);
 });
 
 test('pickup container titip menolak container 40FT diambil truck 20FT', () => {

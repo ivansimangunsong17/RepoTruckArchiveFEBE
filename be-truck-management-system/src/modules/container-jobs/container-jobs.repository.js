@@ -640,9 +640,18 @@ export function assertVehicleCanPickupRepo(vehicle, jobs = [], pickupType = 'sin
     }
     return;
   }
+  // Single: ukuran truck harus cocok dengan container (COMBO cocok untuk keduanya), sama dengan
+  // validasi update biasa -- truck 40FT untuk container 20FT hanya sah dalam pickup combo 2x20.
   const has40ftJob = jobSizes.includes('40FT');
   if (has40ftJob && vehicleSize !== '40FT' && vehicleSize !== 'COMBO') {
     throw validationError('Container 40FT wajib memakai truck/chassis 40FT.', 'REPO_PICKUP_REQUIRES_40FT', 400);
+  }
+  if (!has40ftJob && vehicleSize !== '20FT' && vehicleSize !== 'COMBO') {
+    throw validationError(
+      `Truck ${vehicle.plate_number || ''} kapasitas ${vehicleSize} tidak sesuai untuk container 20FT. Gunakan pickup combo 2x20 untuk truck 40FT.`.replace(/\s+/g, ' '),
+      'VEHICLE_SIZE_MISMATCH',
+      400,
+    );
   }
 }
 
