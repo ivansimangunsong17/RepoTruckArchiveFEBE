@@ -72,6 +72,13 @@ function buildContainerQuantityComparison(order = {}) {
   };
 }
 
+// Party order untuk tabel & input SO: qty dari line item Sales, fallback ke ringkasan container backend.
+function getOrderPartyLabel(order = {}) {
+  const { orderLabel } = buildContainerQuantityComparison(order);
+  if (orderLabel && orderLabel !== '0') return orderLabel;
+  return order.container && order.container !== '-' ? order.container : '-';
+}
+
 function normalizeFinanceOrderRow(row = {}) {
   const isCancelled = isCancelledFinanceOrder(row);
   const accurateSoNumber = row.accurateSoNumber || row.soNumber || '';
@@ -124,6 +131,7 @@ function normalizeFinanceOrderRow(row = {}) {
 export {
   ORDER_TABLE_PAGE_SIZE,
   buildContainerQuantityComparison,
+  getOrderPartyLabel,
   isCancelledFinanceOrder,
   isVerifiedFinanceOrder,
   normalizeFinanceOrderRow,

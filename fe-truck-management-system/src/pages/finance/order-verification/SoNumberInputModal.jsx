@@ -1,4 +1,5 @@
 import FinanceActionModal from '../shared/FinanceActionModal';
+import { getOrderPartyLabel } from './orderVerificationUtils';
 
 function SoNumberInputModal({ order, value, error, busy, onChange, onClose, onConfirm }) {
   if (!order) return null;
@@ -16,6 +17,7 @@ function SoNumberInputModal({ order, value, error, busy, onChange, onClose, onCo
         <div><span className="block text-[10px] font-bold uppercase text-slate-400">Tujuan</span><strong className="mt-0.5 block text-xs text-slate-900">{order.destination || '-'}</strong></div>
         <div><span className="block text-[10px] font-bold uppercase text-slate-400">Sales</span><strong className="mt-0.5 block text-xs text-slate-900">{order.salesName || '-'}</strong></div>
         <div><span className="block text-[10px] font-bold uppercase text-slate-400">Tanggal Jalan</span><strong className="mt-0.5 block text-xs text-slate-900">{order.runningDate || '-'}</strong></div>
+        <div className="col-span-2 border-t border-slate-200 pt-2"><span className="block text-[10px] font-bold uppercase text-slate-400">Party</span><strong className="mt-0.5 block text-sm font-black text-sky-800">{getOrderPartyLabel(order)}</strong></div>
       </div>
       <label className="grid gap-1.5 text-xs font-bold text-slate-700">
         Nomor SO Finance
