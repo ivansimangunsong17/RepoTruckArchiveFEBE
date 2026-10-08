@@ -206,9 +206,94 @@
   line-height: 1.45;
 }
 .operational-form-repo-pickup {
+  display: grid;
+  gap: 12px;
   border-color: #bfdbfe;
   color: #1e40af;
   background: #eff6ff;
+}
+.operational-form-repo-pickup .repo-pickup-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0;
+  line-height: 1.45;
+}
+.operational-form-repo-pickup .repo-pickup-note svg {
+  flex: none;
+  margin-top: 1px;
+}
+.operational-form-repo-pickup .repo-pickup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.operational-form-repo-pickup .repo-pickup-field,
+.operational-form-repo-pickup .repo-pickup-revenue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #fff;
+}
+.operational-form-repo-pickup .repo-pickup-label {
+  color: #475569;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+.operational-form-repo-pickup .repo-pickup-input {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+}
+.operational-form-repo-pickup .repo-pickup-input:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .18);
+}
+.operational-form-repo-pickup .repo-pickup-input > span {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid #e2e8f0;
+  color: #64748b;
+  background: #f8fafc;
+  font-weight: 700;
+}
+.operational-form-repo-pickup .repo-pickup-input input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  color: #0f172a;
+  background: transparent;
+  font-weight: 600;
+}
+.operational-form-repo-pickup .repo-pickup-revenue strong {
+  color: #1d4ed8;
+  font-size: 1.1rem;
+  line-height: 1.3;
+}
+.operational-form-repo-pickup small {
+  color: #64748b;
+  font-size: .7rem;
+  font-weight: 500;
+}
+@media (max-width: 640px) {
+  .operational-form-repo-pickup .repo-pickup-grid { grid-template-columns: 1fr; }
 }
 .operational-validation-alert {
   display: grid;

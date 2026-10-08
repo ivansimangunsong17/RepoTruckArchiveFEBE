@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Building2, FileUp, Plus, ShieldCheck, Trash2, Truck, X } from 'lucide-react';
+import { AlertTriangle, Building2, FileUp, Info, Plus, ShieldCheck, Trash2, Truck, X } from 'lucide-react';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { hasPermission } from '../../constants/roles';
 import AssignmentHistorySection from './AssignmentHistorySection';
@@ -628,7 +628,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [expenseProofSaving, setExpenseProofSaving] = useState('');
   const [expenseDescriptionManualMode, setExpenseDescriptionManualMode] = useState(false);
   const submitInFlightRef = useRef(false);
-  const [repoPickupConfirmed, setRepoPickupConfirmed] = useState(false);
+  // Payload pickup Repo yang sudah lolos validasi, menunggu konfirmasi fisik lewat dialog.
+  const [pendingRepoPickupSubmit, setPendingRepoPickupSubmit] = useState(null);
   // Satu Total UJ Repo per pergerakan fisik (single maupun combo), diisi manual oleh Operational.
   const [repoUjAmount, setRepoUjAmount] = useState('');
   const driverCommissionEditedRef = useRef(false);
@@ -1535,10 +1536,6 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       showSubmitNotification('Ambil container titip wajib melengkapi truck dan sopir perjalanan lanjutan terlebih dahulu.');
       return;
     }
-    if (isRepoPickupMode && !repoPickupConfirmed) {
-      showSubmitNotification('Konfirmasi bahwa container sudah diambil secara fisik sebelum memulai perjalanan Repo.');
-      return;
-    }
     const repoUjText = String(repoUjAmount).trim();
     if (isRepoPickupMode && !repoUjText) {
       showSubmitNotification('Total UJ Repo wajib diisi (boleh 0).');
@@ -1616,7 +1613,22 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       }
     }
     setError('');
+    if (isRepoPickupMode) {
+      setPendingRepoPickupSubmit(submitForm);
+      return;
+    }
     await submitOnce(submitForm);
+  }
+
+  async function confirmRepoPickupSubmit() {
+    const submitForm = pendingRepoPickupSubmit;
+    setPendingRepoPickupSubmit(null);
+    if (!submitForm) return;
+    try {
+      await submitOnce(submitForm);
+    } catch {
+      // Error sudah ditampilkan di form oleh submitOnce.
+    }
   }
 
   const availableTrucks = trucks.filter((truck) => (
@@ -1667,32 +1679,43 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
           ) : null}
           {isRepoPickupMode ? (
             <div className="alert operational-form-repo-pickup">
-              {isRepoComboPickupMode
-                ? `Combo pickup ${comboContainerLabel} dari depo penitipan. Gunakan truck/chassis 40FT; UJ dicatat satu kali untuk perjalanan combo.`
-                : 'Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.'}
-              <label className="mt-3 flex items-start gap-2 font-semibold">
-                <input type="checkbox" checked={repoPickupConfirmed} onChange={(event) => setRepoPickupConfirmed(event.target.checked)} />
-                <span>Container sudah diambil secara fisik; mulai perjalanan Repo sekarang.</span>
-              </label>
-              <label className="mt-3 block font-semibold">
-                Total UJ Repo (Rp){isRepoComboPickupMode ? ' untuk 1 perjalanan combo' : ''}
-                <input
-                  aria-label="Total UJ Repo"
-                  inputMode="numeric"
-                  min="0"
-                  step="1"
-                  type="number"
-                  value={repoUjAmount}
-                  onChange={(event) => setRepoUjAmount(event.target.value)}
-                  placeholder="Contoh: 175000"
-                />
-              </label>
-              <p className="mt-2 text-sm font-semibold" aria-label="Revenue Repo">
-                Revenue Repo: {formatCurrency(REPO_REVENUE_PER_CONTAINER * (isRepoComboPickupMode ? 2 : 1))}
-                <span className="block text-xs font-normal">
-                  {isRepoComboPickupMode ? '2 container' : '1 container'} x {formatCurrency(REPO_REVENUE_PER_CONTAINER)}, dihitung otomatis.
+              <p className="repo-pickup-note">
+                <Info size={16} aria-hidden="true" />
+                <span>
+                  {isRepoComboPickupMode
+                    ? `Combo pickup ${comboContainerLabel} dari depo penitipan. Gunakan truck/chassis 40FT; UJ dicatat satu kali untuk perjalanan combo.`
+                    : 'Container sedang diambil dari depo penitipan. Pastikan truck dan sopir perjalanan lanjutan sudah sesuai.'}
                 </span>
               </p>
+              <div className="repo-pickup-grid">
+                <label className="repo-pickup-field">
+                  <span className="repo-pickup-label">
+                    Total UJ Repo{isRepoComboPickupMode ? ' untuk 1 perjalanan combo' : ''}
+                  </span>
+                  <span className="repo-pickup-input">
+                    <span aria-hidden="true">Rp</span>
+                    <input
+                      aria-label="Total UJ Repo"
+                      inputMode="numeric"
+                      min="0"
+                      step="1"
+                      type="number"
+                      value={repoUjAmount}
+                      onWheel={(event) => event.currentTarget.blur()}
+                      onChange={(event) => setRepoUjAmount(event.target.value)}
+                      placeholder="Contoh: 175000"
+                    />
+                  </span>
+                  <small>Isi manual, boleh 0.</small>
+                </label>
+                <div className="repo-pickup-revenue" aria-label="Revenue Repo">
+                  <span className="repo-pickup-label">Revenue Repo</span>
+                  <strong>{formatCurrency(REPO_REVENUE_PER_CONTAINER * (isRepoComboPickupMode ? 2 : 1))}</strong>
+                  <small>
+                    {isRepoComboPickupMode ? '2 container' : '1 container'} x {formatCurrency(REPO_REVENUE_PER_CONTAINER)}, dihitung otomatis.
+                  </small>
+                </div>
+              </div>
             </div>
           ) : null}
           {isRepoComboPickupMode ? (
@@ -2442,6 +2465,33 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         </form>
       </section>
 
+      {pendingRepoPickupSubmit ? (
+        <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setPendingRepoPickupSubmit(null)}>
+          <section
+            className="feedback-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="repo-pickup-confirmation-title"
+            aria-describedby="repo-pickup-confirmation-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span><Truck size={21} /></span>
+              <div>
+                <h2 id="repo-pickup-confirmation-title">Container sudah diambil fisik?</h2>
+                <p id="repo-pickup-confirmation-description">
+                  {isRepoComboPickupMode ? `Combo ${comboContainerLabel}` : `Container ${form.containerNumber || container.containerNumber || ''}`.trim()} akan
+                  {' '}langsung berstatus Sedang Jalan dengan waktu mulai saat ini. Pastikan container benar-benar sudah keluar dari depo penitipan.
+                </p>
+              </div>
+            </header>
+            <footer>
+              <button className="secondary-button" type="button" autoFocus onClick={() => setPendingRepoPickupSubmit(null)}>Batal</button>
+              <button className="primary-button" type="button" onClick={confirmRepoPickupSubmit}>Ya, mulai perjalanan</button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
       {executionSourceConfirmation ? (
         <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setExecutionSourceConfirmation(null)}>
           <section

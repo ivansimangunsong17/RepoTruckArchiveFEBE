@@ -838,7 +838,6 @@ describe('OperationalForm', () => {
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
     expect(onSubmit).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('checkbox', { name: /sudah diambil secara fisik/i }));
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText('Total UJ Repo wajib diisi (boleh 0).')).toBeInTheDocument();
@@ -852,6 +851,13 @@ describe('OperationalForm', () => {
     await user.clear(screen.getByLabelText('Total UJ Repo'));
     await user.type(screen.getByLabelText('Total UJ Repo'), '150000');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+
+    // Pickup fisik dikonfirmasi lewat dialog; Batal tidak mengirim apa pun.
+    const pickupDialog = screen.getByRole('alertdialog', { name: /sudah diambil fisik/i });
+    await user.click(within(pickupDialog).getByRole('button', { name: 'Batal' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+    await user.click(screen.getByRole('button', { name: /ya, mulai perjalanan/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       status: 'running',
@@ -910,10 +916,10 @@ describe('OperationalForm', () => {
       />,
     );
 
-    await user.click(screen.getByRole('checkbox', { name: /sudah diambil secara fisik/i }));
     // UJ 0 sah (tidak ada debit rekening dropping) dan dikirim eksplisit sebagai 0.
     await user.type(screen.getByLabelText('Total UJ Repo'), '0');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
+    await user.click(screen.getByRole('button', { name: /ya, mulai perjalanan/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       status: 'running',
