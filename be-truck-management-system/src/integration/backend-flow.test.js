@@ -1233,20 +1233,8 @@ if (!hasDatabase) {
         [`TRK-${String(runId).slice(-4)}-20`, plate20, `TRK-${String(runId).slice(-4)}-40`, plate40],
       );
 
-      const mismatchedJob = await api(`/api/container-jobs/${created.jobId}/assignment`, {
-        method: 'PATCH',
-        token: adminToken,
-        body: {
-          containerNumber: `${created.orderSoNumber.replace(/[^A-Z0-9]/g, '')}CNTR1`,
-          driver: driverName,
-          plateNumber: plate40,
-          status: 'running',
-          runningAt: '2026-07-11T07:00:00.000Z',
-          updatedBy: 'Sprint2C Operational',
-        },
-      });
-      assert.equal(mismatchedJob.status, 400);
-      assert.equal(mismatchedJob.body.error.code, 'VEHICLE_SIZE_MISMATCH');
+      // Kapasitas truck hierarkis: truck 40FT sah untuk container 20FT, jadi job 20FT ini tidak lagi
+      // punya kombinasi truck yang salah ukuran. Matriks lengkap diuji di combo-assignment.integration.
 
       const submittedRpujJob = await api(`/api/container-jobs/${created.jobId}/status`, {
         method: 'PATCH',

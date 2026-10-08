@@ -18,6 +18,7 @@ if (!databaseUrl) {
     pickupSingleRepoContainerJob,
     updateContainerJob,
   } = await import('../modules/container-jobs/container-jobs.repository.js');
+  const { getUtilizationTripRows } = await import('../modules/reports/utilization-trips.repository.js');
 
   const tag = crypto.randomBytes(3).toString('hex').toUpperCase();
   let seq = 0;
@@ -162,10 +163,10 @@ if (!databaseUrl) {
       pickupConfirmed: true, containerJobIds: otherRepo.map((job) => job.id), driverId: driver.id, vehicleId: vehicle.id,
       updatedBy: 'Integration Test', repoUjAmount: 0,
     }), { code: 'ASSIGNMENT_ALREADY_ACTIVE' });
-    // Pickup single 20FT dengan truck 40FT itu sudah ditolak oleh aturan ukuran lebih dulu.
+    // Pickup single 20FT dengan truck combo 40FT yang sama: ukuran sah, tapi truck masih aktif.
     await assert.rejects(pickupSingleRepoContainerJob(otherRepo[0].id, {
       pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
-    }), { code: 'VEHICLE_SIZE_MISMATCH' });
+    }), { code: 'ASSIGNMENT_ALREADY_ACTIVE' });
   });
 
   test('5. driver/truck baru bebas setelah SEMUA job combo terminal', async () => {
@@ -273,46 +274,51 @@ if (!databaseUrl) {
     }
   }
 
-  test('9. job biasa 20FT dengan truck 40FT tetap ditolak', async () => {
-    const job = await createJob('received');
-    const driver = await createDriver();
-    const vehicle = await createVehicle('40FT');
-    await assert.rejects(updateContainerJob(job.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
+  test('9. matriks kapasitas truck job biasa (A-F)', async () => {
+    const assign = async (containerSize, truckSize) => {
+      const job = await createJob('received', { container_size: containerSize });
+      return updateContainerJob(job.id, routineForm(await createDriver(), await createVehicle(truckSize), { status: 'received' }))
+        .then(() => 'allow', (error) => error.code);
+    };
+    assert.equal(await assign('20FT', '20FT'), 'allow'); // A
+    assert.equal(await assign('20FT', '40FT'), 'allow'); // B
+    assert.equal(await assign('20FT', 'COMBO'), 'allow'); // C
+    assert.equal(await assign('40FT', '20FT'), 'VEHICLE_SIZE_MISMATCH'); // D
+    assert.equal(await assign('40FT', '40FT'), 'allow'); // E
+    assert.equal(await assign('40FT', 'COMBO'), 'allow'); // F
   });
 
-  test('10. Repo single 20FT dengan truck 40FT ditolak sebelum movement/item/UJ/revenue dibuat', async () => {
+  test('10. Repo single 20FT dengan truck 40FT: pickup, update, selesai normal; UJ/revenue satu; utilisasi +0', async () => {
     const [originalDriver, originalTruck] = [await createDriver(), await createVehicle('20FT')];
-    const storedAt = new Date().toISOString();
     const job = await createJob('repo_stored', {
-      repo_stored_at: storedAt,
+      repo_stored_at: new Date().toISOString(),
       repo_released_driver_id: originalDriver.id,
       repo_released_vehicle_id: originalTruck.id,
     });
     const driver = await createDriver();
     const vehicle = await createVehicle('40FT');
-    await assert.rejects(pickupSingleRepoContainerJob(job.id, {
+    const picked = await pickupSingleRepoContainerJob(job.id, {
       pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
-    }), (error) => error.code === 'VEHICLE_SIZE_MISMATCH' && error.statusCode === 400);
-
-    const items = await query('select count(*)::int as n from container_pickup_items where container_job_id = $1', [job.id]);
-    assert.equal(items.rows[0].n, 0, 'tidak ada movement/item');
-    const uj = await query("select count(*)::int as n from operational_fund_transactions where source = 'repo_uj' and driver_name = $1", [driver.name]);
-    assert.equal(uj.rows[0].n, 0, 'tidak ada UJ Repo');
-    const revenue = await query("select count(*)::int as n from manual_revenue_lines where charge_type = 'repo' and container_job_id = $1", [job.id]);
-    assert.equal(revenue.rows[0].n, 0, 'tidak ada Revenue Repo');
-    const after = (await query('select * from container_jobs where id = $1', [job.id])).rows[0];
-    assert.equal(after.status, 'repo_stored');
-    assert.equal(after.driver_id, null);
-    assert.equal(after.vehicle_id, null);
-    assert.equal(after.repo_picked_up_at, null);
-    assert.equal(after.repo_released_driver_id, originalDriver.id);
-    assert.equal(after.repo_released_vehicle_id, originalTruck.id);
-    assert.equal(new Date(after.repo_stored_at).toISOString(), storedAt);
-    // Truck yang benar tetap bisa dipakai untuk job yang sama.
-    const ok = await pickupSingleRepoContainerJob(job.id, {
-      pickupConfirmed: true, driverId: driver.id, vehicleId: (await createVehicle('20FT')).id, updatedBy: 'Integration Test', repoUjAmount: 0,
     });
-    assert.ok(ok.movement.id);
+    assert.equal(picked.movement.status, 'running');
+    assert.equal(picked.movement.vehicle_id, vehicle.id);
+
+    await updateContainerJob(job.id, routineForm(driver, vehicle));
+    await attachCompletionDocuments(job.id);
+    await updateContainerJob(job.id, routineForm(driver, vehicle, { status: 'completed', completedAt: new Date().toISOString() }));
+    assert.equal((await query('select status from container_jobs where id = $1', [job.id])).rows[0].status, 'completed');
+    assert.equal((await query('select status from container_pickup_movements where id = $1', [picked.movement.id])).rows[0].status, 'completed');
+
+    const uj = await query("select amount from operational_fund_transactions where source = 'repo_uj' and source_ref_id = $1 and status = 'posted'", [picked.movement.id]);
+    assert.equal(uj.rows.length, 1);
+    assert.equal(Number(uj.rows[0].amount), 150000);
+    const revenue = await query("select total_amount from manual_revenue_lines where charge_type = 'repo' and container_job_id = $1 and status <> 'void'", [job.id]);
+    assert.equal(revenue.rows.length, 1);
+    assert.equal(Number(revenue.rows[0].total_amount), 300000);
+
+    const trips = await getUtilizationTripRows({});
+    assert.equal(trips.filter((row) => row.vehicleId === vehicle.id || row.driverId === driver.id).length, 0, 'Repo +0 truck/sopir');
+    assert.equal(trips.filter((row) => row.jobId === job.id && row.vehicleId === originalTruck.id).length, 1, 'leg asli tetap 1');
   });
 
   test('14. matriks ukuran truck pickup Repo (single 20FT/40FT, combo 2x20)', async () => {
@@ -332,7 +338,7 @@ if (!databaseUrl) {
     };
     assert.equal(await pickupSingle('20FT', '20FT'), 'allow');
     assert.equal(await pickupSingle('20FT', 'COMBO'), 'allow');
-    assert.equal(await pickupSingle('20FT', '40FT'), 'VEHICLE_SIZE_MISMATCH');
+    assert.equal(await pickupSingle('20FT', '40FT'), 'allow');
     assert.equal(await pickupSingle('40FT', '40FT'), 'allow');
     assert.equal(await pickupSingle('40FT', 'COMBO'), 'allow');
     assert.equal(await pickupSingle('40FT', '20FT'), 'REPO_PICKUP_REQUIRES_40FT');
@@ -359,23 +365,29 @@ if (!databaseUrl) {
     assert.equal(movementRow.rows[0].status, 'completed');
   });
 
-  test('12. job combo yang dipindah ke truck 40FT lain (di luar combo) kembali divalidasi normal', async () => {
+  test('12. job combo yang dipindah ke truck 40FT lain (di luar combo) sah secara ukuran dan keluar dari grup', async () => {
     const { jobs, driver } = await startCombo();
     const otherTruck = await createVehicle('40FT');
-    await assert.rejects(updateContainerJob(jobs[0].id, routineForm(driver, otherTruck, {
-      assignmentChangeReason: 'Truck combo diganti',
-    })), { code: 'VEHICLE_SIZE_MISMATCH' });
+    // Sopir combo masih aktif di job pasangan; job yang keluar grup tidak boleh ikut memakainya.
+    await assert.rejects(
+      updateContainerJob(jobs[0].id, routineForm(driver, otherTruck, { assignmentChangeReason: 'Truck combo diganti' })),
+      { code: 'ASSIGNMENT_ALREADY_ACTIVE' },
+    );
+    await updateContainerJob(jobs[0].id, routineForm(await createDriver(), otherTruck, { assignmentChangeReason: 'Truck dan sopir combo diganti' }));
+    const moved = (await query('select vehicle_id, assignment_group_id from container_jobs where id = $1', [jobs[0].id])).rows[0];
+    assert.equal(moved.vehicle_id, otherTruck.id);
+    assert.equal(moved.assignment_group_id, null);
   });
 
-  test('13. job lain tidak bisa memakai assignment_group_id combo untuk lolos validasi ukuran', async () => {
+  test('13. API tidak bisa mengisi assignment_group_id untuk menumpang truck combo', async () => {
     const { driver, vehicle, movement } = await startCombo();
     const intruder = await createJob('received');
-    // Disisipkan langsung di DB ke grup combo (API tidak pernah melakukan ini): exclusion constraint
-    // percaya pada grup, tetapi validasi ukuran memeriksa keanggotaan movement yang sebenarnya.
-    await query(
-      "update container_jobs set status = 'running', driver_id = $2, vehicle_id = $3, assignment_group_id = $4 where id = $1",
-      [intruder.id, driver.id, vehicle.id, movement.id],
+    await assert.rejects(
+      updateContainerJob(intruder.id, routineForm(driver, vehicle, { status: 'received', assignmentGroupId: movement.id, assignment_group_id: movement.id })),
+      { code: 'ASSIGNMENT_ALREADY_ACTIVE' },
     );
-    await assert.rejects(updateContainerJob(intruder.id, routineForm(driver, vehicle)), { code: 'VEHICLE_SIZE_MISMATCH' });
+    const row = (await query('select assignment_group_id from container_jobs where id = $1', [intruder.id])).rows[0];
+    assert.equal(row.assignment_group_id, null);
   });
+
 }
