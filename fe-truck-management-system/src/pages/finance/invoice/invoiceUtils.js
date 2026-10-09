@@ -1,4 +1,4 @@
-import { validateArchiveFile } from '../../../utils/fileValidation';
+import { FINANCE_DOCUMENT_MAX_SIZE, validateArchiveFile } from '../../../utils/fileValidation';
 
 const INVOICE_TABLE_PAGE_SIZE = 20;
 
@@ -183,16 +183,20 @@ function mergeInvoiceDocument(documents = [], nextDocument) {
   return [nextDocument, ...withoutSameCategory];
 }
 
+const INVOICE_DOCUMENT_UPLOAD_HINT = 'PDF, maksimal 20 MB';
+
 function validateInvoicePdfFile(file, label) {
   return validateArchiveFile(file, {
     label,
     allowedTypes: ['application/pdf'],
     allowedExtensions: ['pdf'],
     allowedLabel: 'PDF',
+    maxSize: FINANCE_DOCUMENT_MAX_SIZE,
   });
 }
 
 export {
+  INVOICE_DOCUMENT_UPLOAD_HINT,
   INVOICE_TABLE_PAGE_SIZE,
   agingToneClass,
   defaultInvoiceSummary,

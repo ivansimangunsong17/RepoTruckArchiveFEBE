@@ -149,7 +149,7 @@ received/running → cancelled
 
 ## Attachments / Documents
 
-- Upload as base64 JSON; allowed mime/extension from env (pdf/jpg/jpeg/png), file signature checked, size ≤ `MAX_UPLOAD_SIZE_MB` (default 5).
+- Upload as base64 JSON; allowed mime/extension from env (pdf/jpg/jpeg/png), file signature checked, size ≤ `MAX_UPLOAD_SIZE_MB` (default 5). Exception: Finance billing documents (Invoice, Faktur Pajak, Debit Note via `POST /api/finance/invoices/:id/documents/:documentType`) are PDF-only, ≤ `FINANCE_DOCUMENT_MAX_UPLOAD_SIZE_MB` (default 20), and stored uncompressed.
 - Stored under `UPLOAD_DIR` in folders by entity (`Sales Order/<…>/01 - Dokumen Sales | 02 - Dokumen Container | 03 - Dokumen Finance`, `Master Data/…`) — see `attachments/attachment-storage.js`.
 - Delete moves file + record to `storage_trash` (retention `FILE_TRASH_RETENTION_DAYS`, default 30); admin can restore/purge (`storage.manage`).
 - Vehicle documents types: `KIR_HEAD, KIR_BUNTUT, STNK, PAJAK, ASURANSI, OTHER` (extended in migration `202607200001`).

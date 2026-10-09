@@ -121,7 +121,7 @@ Defined in `be-truck-management-system/src/modules/users/users.mapper.js` (`ROLE
 ## Important Technical Constraints
 
 - Windows production host; PowerShell scripts for backup/compress; paths like `D:\ARMADA_SYSTEM\storage`.
-- File uploads are base64 inside JSON bodies (no multipart). Allowed: pdf/jpg/jpeg/png, default 5 MB (`MAX_UPLOAD_SIZE_MB`).
+- File uploads are base64 inside JSON bodies (no multipart). Allowed: pdf/jpg/jpeg/png, default 5 MB (`MAX_UPLOAD_SIZE_MB`). Finance billing documents (Invoice, Faktur Pajak, Debit Note) are PDF-only up to 20 MB (`FINANCE_DOCUMENT_MAX_UPLOAD_SIZE_MB`); base64 makes a 20 MB file a ~27 MB request body, so any reverse proxy must allow ~30 MB on the API.
 - All mutating requests return `503 BACKUP_IN_PROGRESS` while a storage backup lock file exists.
 - `AUTH_TOKEN_SECRET` is required (≥32 chars; placeholder values rejected in production) — server won't start without it.
 - Dates/periods are computed in `Asia/Jakarta` time (WIB).

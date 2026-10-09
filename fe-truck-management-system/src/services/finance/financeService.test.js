@@ -25,6 +25,7 @@ import {
   requestFinanceInvoiceCorrection,
   requestFinanceOrderSoCorrection,
   updateExpenseTransferProof,
+  uploadFinanceInvoiceDocument,
 } from './financeService';
 
 vi.mock('../api/httpClient', () => ({
@@ -180,5 +181,49 @@ describe('financeService correction endpoints', () => {
     expect(httpClient.get).toHaveBeenCalledWith('/finance/corrections?status=pending&query=SO');
     expect(httpClient.patch).toHaveBeenCalledWith('/finance/corrections/correction-1/approve', { reviewNote: 'ok' });
     expect(httpClient.patch).toHaveBeenCalledWith('/finance/corrections/correction-1/reject', { reviewNote: 'salah' });
+  });
+});
+
+describe('financeService upload dokumen billing Finance', () => {
+  const MB = 1024 * 1024;
+  function pdf(name, size) {
+    const file = new File(['%PDF-1.4 dokumen asli'], name, { type: 'application/pdf' });
+    Object.defineProperty(file, 'size', { value: size });
+    return file;
+  }
+
+  it.each([
+    ['invoice', 4 * MB],
+    ['taxInvoice', 12 * MB],
+    ['debitNote', 19 * MB],
+    ['invoice', 20 * MB],
+  ])('mengirim PDF %s %d byte apa adanya tanpa kompresi', async (documentType, size) => {
+    await uploadFinanceInvoiceDocument('so-1', documentType, pdf('dokumen.pdf', size));
+
+    expect(httpClient.post).toHaveBeenCalledTimes(1);
+    const [url, payload] = httpClient.post.mock.calls[0];
+    expect(url).toBe(`/finance/invoices/so-1/documents/${documentType}`);
+    expect(payload).toMatchObject({ fileName: 'dokumen.pdf', mimeType: 'application/pdf', fileSize: size });
+    expect(atob(payload.fileBase64.split(',')[1])).toBe('%PDF-1.4 dokumen asli');
+  });
+
+  it('menolak PDF di atas 20 MB sebelum upload', async () => {
+    await expect(uploadFinanceInvoiceDocument('so-1', 'invoice', pdf('besar.pdf', 20 * MB + 1)))
+      .rejects.toThrow('Invoice melebihi batas maksimal 20 MB.');
+    await expect(uploadFinanceInvoiceDocument('so-1', 'taxInvoice', pdf('besar.pdf', 25 * MB)))
+      .rejects.toThrow('Faktur Pajak melebihi batas maksimal 20 MB.');
+    expect(httpClient.post).not.toHaveBeenCalled();
+  });
+
+  it('tetap hanya menerima PDF untuk dokumen billing', async () => {
+    const png = new File(['png'], 'invoice.png', { type: 'image/png' });
+    await expect(uploadFinanceInvoiceDocument('so-1', 'invoice', png)).rejects.toThrow('Invoice hanya boleh berupa PDF.');
+    expect(httpClient.post).not.toHaveBeenCalled();
+  });
+
+  it('batas 20 MB tidak berlaku untuk bukti transfer pembayaran invoice (tetap 5 MB)', async () => {
+    await expect(recordFinanceInvoicePayment('so-1', { amount: 1 }, pdf('bukti.pdf', 6 * MB)))
+      .rejects.toThrow('Bukti transfer melebihi batas maksimal 5 MB.');
+    expect(httpClient.post).not.toHaveBeenCalled();
   });
 });

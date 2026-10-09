@@ -410,3 +410,38 @@ test('nomor invoice dan upload dokumen invoice ditolak untuk role Sales', async 
     (error) => error.code === 'FINANCE_INVOICE_UPLOAD_FORBIDDEN' && error.statusCode === 403,
   );
 });
+
+test('upload dokumen invoice memakai batas ukuran dokumen Finance, bukan dari body request', async () => {
+  const { env } = await import('../../config/env.js');
+  const finance = { name: 'Finance Test', role: 'finance' };
+  const calls = [];
+  const dependencies = (existing = []) => ({
+    getInvoiceOrderDetail: async () => ({ id: 'order-1' }),
+    listAttachments: async () => existing,
+    createAttachment: async (payload, options) => { calls.push({ kind: 'create', payload, options }); return { id: 'att-new' }; },
+    updateAttachment: async (id, payload, options) => { calls.push({ kind: 'update', id, payload, options }); return { id }; },
+    markInvoiceDocumentUploaded: async (id, { category }) => ({ id, category }),
+  });
+  const payload = { mimeType: 'application/pdf', fileName: 'faktur.pdf', fileBase64: 'JVBERi0=', maxUploadBytes: 999 * 1024 * 1024 };
+
+  await uploadInvoiceDocument('order-1', { ...payload, documentType: 'invoice' }, finance, dependencies());
+  await uploadInvoiceDocument('order-1', { ...payload, documentType: 'taxInvoice' }, finance, dependencies());
+  await uploadInvoiceDocument('order-1', { ...payload, documentType: 'debitNote' }, finance, dependencies([{ id: 'att-old', category: 'debitNotePdf', uploadedAt: '2026-10-01' }]));
+
+  assert.deepEqual(calls.map((call) => [call.kind, call.payload.category]), [
+    ['create', 'invoicePdf'],
+    ['create', 'taxInvoicePdf'],
+    ['update', 'debitNotePdf'],
+  ]);
+  for (const call of calls) {
+    assert.deepEqual(call.options, { maxUploadBytes: env.financeDocumentMaxUploadBytes });
+  }
+  assert.ok(env.financeDocumentMaxUploadBytes > env.maxUploadBytes);
+});
+
+test('upload dokumen invoice tetap hanya menerima PDF', async () => {
+  await assert.rejects(
+    () => uploadInvoiceDocument('order-1', { documentType: 'invoice', mimeType: 'image/png' }, { name: 'Finance Test', role: 'finance' }),
+    (error) => error.code === 'INVOICE_DOCUMENT_PDF_REQUIRED' && error.statusCode === 400,
+  );
+});
