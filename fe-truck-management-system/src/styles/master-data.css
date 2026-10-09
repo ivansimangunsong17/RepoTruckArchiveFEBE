@@ -326,6 +326,34 @@
   color: #9a1319;
   background: #fef1f1;
 }
+.document-upload.drag-drop .document-upload-dropzone {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-height: 84px;
+  padding: 10px 12px;
+  border: 1.5px dashed #e8a5a8;
+  border-radius: 8px;
+  color: #b91c1c;
+  background: #fafafa;
+  text-align: center;
+}
+.document-upload.drag-drop .document-upload-dropzone:hover { border-color: #dc171f; background: #fef7f7; }
+.document-upload.drag-drop.is-dragging .document-upload-dropzone {
+  border-style: solid;
+  border-color: #dc171f;
+  background: #fef1f1;
+  box-shadow: 0 0 0 3px rgba(220, 23, 31, .12);
+}
+.document-upload.drag-drop .document-upload-dropzone > span { display: grid; gap: 2px; }
+.document-upload.drag-drop .document-upload-dropzone strong { color: #334155; font-size: .7rem; }
+.document-upload.drag-drop .document-upload-browse { display: block; color: #64748b; font-size: .62rem; font-weight: 500; }
+.document-upload.drag-drop .document-upload-browse u { color: #b91c1c; font-weight: 700; text-underline-offset: 2px; }
+.document-upload.drag-drop .document-upload-dropzone small { display: block; margin-top: 2px; color: #94a3b8; font-size: .56rem; }
+.document-upload.drag-drop .selected-document { grid-template-columns: 36px minmax(0, 1fr) auto; min-height: 46px; padding: 6px 8px; }
+.document-upload.drag-drop.is-dragging .selected-document { border-color: #dc171f; border-style: dashed; background: #fef7f7; }
+.selected-document .selected-document-actions { display: flex; align-items: center; gap: 4px; }
+.selected-document .selected-document-change { width: auto; padding: 0 8px; color: #334155; background: #f1f5f9; font-size: .6rem; font-weight: 700; }
 .document-upload.compact .document-upload-dropzone > svg {
   width: 15px;
   height: 15px;

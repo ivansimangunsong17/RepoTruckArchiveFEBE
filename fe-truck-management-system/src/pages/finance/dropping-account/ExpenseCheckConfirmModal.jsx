@@ -91,6 +91,12 @@ function ExpenseCheckConfirmModal({ row, batchDate, error, busy, adminFeeError, 
     setProofError('');
   }
 
+  // File dari picker maupun drag & drop masuk lewat sini; file tidak valid tidak mengubah isian form.
+  function selectProofFile(file, validationError) {
+    if (validationError) return setProofError(validationError);
+    return change('proofFile', file);
+  }
+
   function edit(proof) {
     setEditingId(proof.id);
     setShowProofForm(true);
@@ -197,7 +203,7 @@ function ExpenseCheckConfirmModal({ row, batchDate, error, busy, adminFeeError, 
             <label className="master-field span-quarter"><span>Tanggal Transfer <em>Wajib</em></span><input aria-label="Tanggal bukti transfer" type="date" value={form.transferDate} onChange={(event) => change('transferDate', event.target.value)} /></label>
             <label className="master-field"><span>Catatan Bukti</span><input aria-label="Catatan bukti transfer" maxLength={500} placeholder="Opsional" value={form.note} onChange={(event) => change('note', event.target.value)} /></label>
           </div>
-          <div className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_auto]"><div className="neutral-document-upload"><AttachmentUploadField compact helper={editingId ? 'Opsional jika file tidak diganti' : 'Wajib. PDF, JPG, atau PNG'} id="finance-expense-transfer-proof" label="File Bukti Transfer" onClear={() => change('proofFile', null)} onSelect={(file) => change('proofFile', file)} title={editingId ? 'Ganti File Bukti' : 'Pilih File Bukti'} value={form.proofFile} /></div><button className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-[7px] bg-slate-900 px-4 text-[13px] font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" disabled={!proofReadyToSave || proofBusy} onClick={saveProof} type="button"><Plus size={16} /> {editingId ? 'Simpan Perubahan' : 'Simpan Bukti'}</button></div>
+          <div className="mt-3 grid items-end gap-3 sm:grid-cols-[1fr_auto]"><div className="neutral-document-upload"><AttachmentUploadField dragAndDrop disabled={locked || proofBusy} dropTitle="Tarik bukti transfer ke sini" helper={`${editingId ? 'Opsional jika file tidak diganti' : 'Wajib'} · PDF maks. 5 MB, JPG/PNG maks. 10 MB`} id="finance-expense-transfer-proof" label="File Bukti Transfer" onClear={() => change('proofFile', null)} onSelect={selectProofFile} title={editingId ? 'Ganti File Bukti' : 'Pilih File Bukti'} validationOptions={{ label: 'Bukti transfer' }} value={form.proofFile} /></div><button className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-[7px] bg-slate-900 px-4 text-[13px] font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40" disabled={!proofReadyToSave || proofBusy} onClick={saveProof} type="button"><Plus size={16} /> {editingId ? 'Simpan Perubahan' : 'Simpan Bukti'}</button></div>
           {proofError ? <p className="mt-2 text-xs font-semibold text-rose-700" role="alert">{proofError}</p> : null}
         </section> : null}
 
