@@ -58,6 +58,7 @@ import {
   listAttachments,
   updateAttachment,
 } from '../attachments/attachments.service.js';
+import { env } from '../../config/env.js';
 
 function normalizeFinanceQuery(query = {}) {
   return {
@@ -601,7 +602,7 @@ function normalizeInvoiceUploadType(value) {
   return '';
 }
 
-export async function uploadInvoiceDocument(id, payload = {}, actor) {
+export async function uploadInvoiceDocument(id, payload = {}, actor, dependencies = {}) {
   if (!actor || !['finance', 'admin'].includes(actor.role)) {
     const error = new Error('Upload dokumen invoice hanya dapat dilakukan oleh Finance atau Admin.');
     error.statusCode = 403;
@@ -626,7 +627,12 @@ export async function uploadInvoiceDocument(id, payload = {}, actor) {
   }
 
   const actorName = actor?.name || actor?.email || 'Finance';
-  const invoiceOrder = await getInvoiceOrderDetail(id);
+  const getInvoiceOrderDetailFn = dependencies.getInvoiceOrderDetail || getInvoiceOrderDetail;
+  const listAttachmentsFn = dependencies.listAttachments || listAttachments;
+  const createAttachmentFn = dependencies.createAttachment || createAttachment;
+  const updateAttachmentFn = dependencies.updateAttachment || updateAttachment;
+  const markInvoiceDocumentUploadedFn = dependencies.markInvoiceDocumentUploaded || markInvoiceDocumentUploaded;
+  const invoiceOrder = await getInvoiceOrderDetailFn(id);
   if (!invoiceOrder) {
     const error = new Error('Sales Order selesai untuk invoice tidak ditemukan.');
     error.statusCode = 404;
@@ -634,7 +640,7 @@ export async function uploadInvoiceDocument(id, payload = {}, actor) {
     throw error;
   }
 
-  const existingAttachments = await listAttachments('sales_order', id);
+  const existingAttachments = await listAttachmentsFn('sales_order', id);
   const existing = existingAttachments
     .filter((attachment) => attachment.category === category)
     .sort((left, right) => new Date(right.uploadedAt || right.createdAt || 0) - new Date(left.uploadedAt || left.createdAt || 0))[0];
@@ -652,10 +658,12 @@ export async function uploadInvoiceDocument(id, payload = {}, actor) {
           : 'Faktur Pajak dari Accurate'
     ),
   };
+  // Dokumen billing Finance memakai batas ukurannya sendiri; PDF disimpan apa adanya tanpa kompresi.
+  const uploadOptions = { maxUploadBytes: env.financeDocumentMaxUploadBytes };
   const attachment = existing
-    ? await updateAttachment(existing.id, attachmentPayload)
-    : await createAttachment(attachmentPayload);
-  const invoice = await markInvoiceDocumentUploaded(id, { category, actorName });
+    ? await updateAttachmentFn(existing.id, attachmentPayload, uploadOptions)
+    : await createAttachmentFn(attachmentPayload, uploadOptions);
+  const invoice = await markInvoiceDocumentUploadedFn(id, { category, actorName });
   return { ...invoice, uploadedDocument: attachment };
 }
 

@@ -38,6 +38,16 @@ function readMaxUploadBytes() {
   return bytes;
 }
 
+// Dokumen billing Finance (Invoice, Faktur Pajak, Debit Note) sering berupa PDF hasil scan yang
+// lebih besar dari batas umum, jadi punya batas sendiri tanpa menaikkan batas upload lain.
+function readFinanceDocumentMaxUploadBytes() {
+  const megabytes = Number(process.env.FINANCE_DOCUMENT_MAX_UPLOAD_SIZE_MB || 20);
+  if (!Number.isFinite(megabytes) || megabytes <= 0) {
+    throw new Error('FINANCE_DOCUMENT_MAX_UPLOAD_SIZE_MB harus berupa angka positif.');
+  }
+  return megabytes * 1024 * 1024;
+}
+
 function readPositiveInteger(name, fallback) {
   const value = Number(process.env[name] || fallback);
   if (!Number.isInteger(value) || value <= 0) {
@@ -80,6 +90,7 @@ export const env = {
   authTokenSecret: readAuthTokenSecret(),
   passwordHashCost: readPasswordHashCost(),
   maxUploadBytes: readMaxUploadBytes(),
+  financeDocumentMaxUploadBytes: readFinanceDocumentMaxUploadBytes(),
   fileTrashRetentionDays: readPositiveInteger('FILE_TRASH_RETENTION_DAYS', 30),
   storageTemporaryMaxHours: readPositiveInteger('STORAGE_TEMP_MAX_HOURS', 24),
   allowedUploadMimeTypes: (process.env.ALLOWED_UPLOAD_MIME_TYPES || 'application/pdf,image/jpeg,image/png')

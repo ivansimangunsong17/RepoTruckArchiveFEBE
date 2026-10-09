@@ -1547,6 +1547,38 @@ describe('FinanceWorkflowPage validation modals', () => {
     expect(screen.getByText('Invoice: Upload PDF gagal.')).toBeInTheDocument();
   });
 
+  it('menolak PDF invoice di atas 20 MB saat dipilih tanpa mengubah dokumen lain yang sudah dipilih', async () => {
+    const user = userEvent.setup();
+    fetchFinanceInvoiceDetail.mockResolvedValueOnce({
+      ...invoiceRow,
+      invoiceDocumentStatus: 'belum_upload',
+      invoiceDocumentStatusLabel: 'Belum Upload',
+      documents: [],
+    });
+    render(<FinanceWorkflowPage initialTabId="invoice-number" />);
+
+    await user.click(await screen.findByRole('tab', { name: /Menunggu Pembayaran/i }));
+    await user.click(await screen.findByRole('button', { name: /(Upload|Detail) Dokumen SO-TEST-001/i }));
+    expect((await screen.findAllByText('PDF, maksimal 20 MB')).length).toBeGreaterThan(0);
+
+    const taxInvoice = new File(['%PDF-1.4'], 'faktur-12mb.pdf', { type: 'application/pdf' });
+    Object.defineProperty(taxInvoice, 'size', { value: 12 * 1024 * 1024 });
+    await user.upload(screen.getByLabelText('Upload Faktur Pajak PDF'), taxInvoice);
+    expect(await screen.findByText('Siap disimpan: faktur-12mb.pdf')).toBeInTheDocument();
+
+    const oversized = new File(['%PDF-1.4'], 'invoice-25mb.pdf', { type: 'application/pdf' });
+    Object.defineProperty(oversized, 'size', { value: 25 * 1024 * 1024 });
+    await user.upload(screen.getByLabelText('Upload Invoice PDF'), oversized);
+
+    expect(await screen.findByText('File tidak dapat dipilih')).toBeInTheDocument();
+    const rejection = screen.getByRole('alertdialog');
+    expect(within(rejection).getByText('Invoice melebihi batas maksimal 20 MB.')).toBeInTheDocument();
+    await user.click(within(rejection).getByRole('button', { name: 'Tutup' }));
+    expect(screen.queryByText('Siap disimpan: invoice-25mb.pdf')).not.toBeInTheDocument();
+    expect(screen.getByText('Siap disimpan: faktur-12mb.pdf')).toBeInTheDocument();
+    expect(uploadFinanceInvoiceDocument).not.toHaveBeenCalled();
+  });
+
   it('mengajukan koreksi nomor invoice dari detail invoice', async () => {
     const user = userEvent.setup();
     render(<FinanceWorkflowPage initialTabId="invoice-number" />);

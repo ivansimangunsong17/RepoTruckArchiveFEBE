@@ -47,7 +47,7 @@ function decodeBase64Payload(fileBase64) {
   return { buffer: Buffer.from(fileBase64, 'base64') };
 }
 
-function validateAttachmentFile({ fileName, mimeType, buffer }) {
+export function validateAttachmentFile({ fileName, mimeType, buffer }, { maxUploadBytes = env.maxUploadBytes } = {}) {
   const normalizedMimeType = mimeType || 'application/octet-stream';
   const extension = extname(String(fileName || '')).toLowerCase();
   const allowedExtensions = allowedExtensionsByMimeType[normalizedMimeType] || [];
@@ -79,8 +79,8 @@ function validateAttachmentFile({ fileName, mimeType, buffer }) {
     throw error;
   }
 
-  if (buffer.length > env.maxUploadBytes) {
-    const maxMb = Math.round(env.maxUploadBytes / (1024 * 1024));
+  if (buffer.length > maxUploadBytes) {
+    const maxMb = Math.round(maxUploadBytes / (1024 * 1024));
     const error = new Error(`Ukuran file melebihi batas ${maxMb} MB.`);
     error.statusCode = 400;
     error.code = 'FILE_TOO_LARGE';
@@ -305,7 +305,9 @@ export function mapAttachmentRow(row) {
   };
 }
 
-export async function createAttachment(payload) {
+// `options.maxUploadBytes` hanya diisi oleh service (tidak pernah dari body request) untuk alur
+// yang punya batas ukuran sendiri, mis. dokumen billing Finance.
+export async function createAttachment(payload, options = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     const error = new Error('Payload attachment harus berupa object.');
     error.statusCode = 400;
@@ -325,7 +327,7 @@ export async function createAttachment(payload) {
   const { buffer, mimeType: derivedMimeType } = decodeBase64Payload(payload.fileBase64);
   const mimeType = payload.mimeType || derivedMimeType || 'application/octet-stream';
   const sanitizedFileName = sanitizeFileName(payload.fileName);
-  validateAttachmentFile({ fileName: sanitizedFileName, mimeType, buffer });
+  validateAttachmentFile({ fileName: sanitizedFileName, mimeType, buffer }, options);
   const context = await readAttachmentContext(payload.entityType, payload.entityId);
   const storagePath = buildAttachmentStoragePath({ ...payload, fileName: sanitizedFileName }, context);
   await writeStorageBufferAtomic(storagePath, buffer);
@@ -356,7 +358,7 @@ export async function createAttachment(payload) {
   return mapAttachmentRow(result.rows[0]);
 }
 
-export async function updateAttachment(id, payload) {
+export async function updateAttachment(id, payload, options = {}) {
   if (!id) {
     const error = new Error('ID attachment wajib diisi.');
     error.statusCode = 400;
@@ -393,7 +395,7 @@ export async function updateAttachment(id, payload) {
       ? buffer.length
       : Number(payload.fileSize);
     const sanitizedFileName = sanitizeFileName(nextFileName);
-    validateAttachmentFile({ fileName: sanitizedFileName, mimeType: resolvedMimeType, buffer });
+    validateAttachmentFile({ fileName: sanitizedFileName, mimeType: resolvedMimeType, buffer }, options);
     const context = await readAttachmentContext(existing.entity_type, existing.entity_id);
     nextStoragePath = buildAttachmentStoragePath({
       entityType: existing.entity_type,

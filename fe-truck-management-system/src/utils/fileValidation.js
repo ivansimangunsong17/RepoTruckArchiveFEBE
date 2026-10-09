@@ -2,6 +2,9 @@ const DEFAULT_ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 const DEFAULT_ALLOWED_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png'];
 const DEFAULT_MAX_SIZE = 5 * 1024 * 1024;
 const DEFAULT_IMAGE_MAX_SIZE = 10 * 1024 * 1024;
+// Dokumen billing Finance (Invoice, Faktur Pajak, Debit Note); harus sama dengan
+// FINANCE_DOCUMENT_MAX_UPLOAD_SIZE_MB di backend.
+export const FINANCE_DOCUMENT_MAX_SIZE = 20 * 1024 * 1024;
 
 function fileExtension(name = '') {
   return String(name).split('.').pop()?.toLowerCase() || '';

@@ -1,6 +1,6 @@
 import { httpClient } from '../api/httpClient';
 import { compressImageFile } from '../../utils/imageCompression';
-import { validateArchiveFile, validateFinalUploadFile } from '../../utils/fileValidation';
+import { FINANCE_DOCUMENT_MAX_SIZE, validateArchiveFile, validateFinalUploadFile } from '../../utils/fileValidation';
 
 function buildQuery(params = {}) {
   const searchParams = new URLSearchParams();
@@ -277,9 +277,11 @@ export async function uploadFinanceInvoiceDocument(id, documentType, file) {
     allowedTypes: ['application/pdf'],
     allowedExtensions: ['pdf'],
     allowedLabel: 'PDF',
-  }) || validateFinalUploadFile(file, { label });
+    maxSize: FINANCE_DOCUMENT_MAX_SIZE,
+  }) || validateFinalUploadFile(file, { label, maxSize: FINANCE_DOCUMENT_MAX_SIZE });
   if (validationError) throw new Error(validationError);
 
+  // PDF dikirim apa adanya (tanpa kompresi) supaya file asli dari Accurate tetap utuh.
   const fileBase64 = await readFileAsDataUrl(file);
   return httpClient.post(`/finance/invoices/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentType)}`, {
     fileName: file.name,

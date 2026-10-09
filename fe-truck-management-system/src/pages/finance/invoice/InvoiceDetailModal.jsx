@@ -8,6 +8,7 @@ import CorrectionHistoryList from '../shared/CorrectionHistoryList';
 import StatusPill from '../shared/StatusPill';
 import { expenseCategoryLabels, expensePaymentStatusLabels, readableLabel } from '../dropping-account/operationalFundUtils';
 import {
+  INVOICE_DOCUMENT_UPLOAD_HINT,
   financeInvoiceUploadSlots,
   findInvoiceFinanceDocument,
   formatAgingDays,
@@ -542,6 +543,19 @@ function InvoiceDetailModal({
 
   function setPendingInvoiceFile(slotType, file) {
     if (!file || isSavingInvoiceDocuments) return;
+    // Tolak sejak dipilih (tipe/ukuran) supaya file yang tidak valid tidak ikut antre;
+    // file lain yang sudah dipilih tetap utuh.
+    const slot = financeInvoiceUploadSlots.find((item) => item.type === slotType);
+    const message = validateInvoicePdfFile(file, slot?.label || 'Dokumen');
+    if (message) {
+      setUploadResultModal({
+        status: 'error',
+        title: 'File tidak dapat dipilih',
+        message: `${file.name} tidak ditambahkan. Gunakan ${INVOICE_DOCUMENT_UPLOAD_HINT}.`,
+        items: [message],
+      });
+      return;
+    }
     setPendingInvoiceFiles((current) => ({ ...current, [slotType]: file }));
   }
 
@@ -1284,6 +1298,7 @@ function InvoiceDetailModal({
                             <Upload size={13} className={isDragActive ? 'text-sky-600' : 'text-slate-400'} />
                             <span>{isDragActive ? 'Lepaskan file PDF di sini.' : 'Drag & drop PDF ke area ini, lalu klik Simpan Dokumen.'}</span>
                           </div>
+                          <p className="mt-1 pl-[21px] text-[10px] font-bold text-slate-600">{INVOICE_DOCUMENT_UPLOAD_HINT}</p>
                         </div>
                       ) : null}
                       {canUploadInvoiceDocument && pendingFile ? (
