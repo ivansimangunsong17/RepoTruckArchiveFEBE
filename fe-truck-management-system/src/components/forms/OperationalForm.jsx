@@ -5,6 +5,7 @@ import { hasPermission } from '../../constants/roles';
 import AssignmentHistorySection from './AssignmentHistorySection';
 import AttachmentUploadField from '../common/AttachmentUploadField';
 import DateTimeWibInput from '../common/DateTimeWibInput';
+import { nowWibInput, toOperationalIso, toWibInput } from '../../utils/operationalDateTime';
 import UjRecommendationCard from '../operations/UjRecommendationCard';
 import WarehouseLocationCard from '../operations/WarehouseLocationCard';
 import { calculateUjRecommendation } from '../../utils/ujRecommendation';
@@ -213,28 +214,15 @@ function getDriverPaymentInfo(driver) {
 }
 
 function nowForDateTimeInput() {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 16);
+  return nowWibInput();
 }
 
 function toDateTimeInputValue(value) {
-  if (!value) return '';
-  const raw = String(value).trim();
-  if (!raw) return '';
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw)) return raw;
-
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return raw.slice(0, 16);
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-  return date.toISOString().slice(0, 16);
+  return toWibInput(value);
 }
 
 function dateTimeInputToIso(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toISOString();
+  return toOperationalIso(value) || '';
 }
 
 function isLongTripOverOneDay(startValue, endValue) {
@@ -592,6 +580,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     status: container.status === 'inap' ? 'running' : container.status || 'received',
     runningAt: toDateTimeInputValue(container.runningAt),
     completedAt: toDateTimeInputValue(container.completedAt),
+    repoPickedUpAt: toDateTimeInputValue(container.repoPickedUpAt) || (container.repoPickupMode ? nowForDateTimeInput() : ''),
     adminCorrectionMode: false,
     adminCorrectionReason: '',
     commissionDriverAction: '',
@@ -1431,6 +1420,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       driverCommissionNote: hasDriverCommission ? form.driverCommissionNote || `Komisi ${ujRecommendation.destinationName || container.destination || 'tujuan'}` : '',
       runningAt: dateTimeInputToIso(form.runningAt),
       completedAt: dateTimeInputToIso(form.completedAt),
+      repoPickedUpAt: dateTimeInputToIso(form.repoPickedUpAt),
     };
     if (isVendorExecution) {
       submitForm.driver = '';
@@ -1552,7 +1542,11 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     if (isRepoPickupMode) {
       submitForm.containerNumber = container.containerNumber || submitForm.containerNumber;
       submitForm.status = 'running';
-      submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
+      if (!submitForm.repoPickedUpAt) {
+        showSubmitNotification('Tanggal dan jam pickup Repo wajib diisi dengan waktu aktual yang valid.');
+        return;
+      }
+      submitForm.runningAt = submitForm.repoPickedUpAt;
       submitForm.pickupConfirmed = true;
       submitForm.repoUjAmount = Number(repoUjText);
     }
@@ -1563,7 +1557,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       && Boolean(submitForm.spkNumber || submitForm.spkDocument);
     if (shouldStartTrip) {
       submitForm.status = 'running';
-      submitForm.runningAt = submitForm.runningAt || nowForDateTimeInput();
+      if (!submitForm.runningAt) {
+        showSubmitNotification('Tanggal dan jam mulai perjalanan wajib diisi dengan waktu aktual yang valid.');
+        return;
+      }
     }
     if (isVendorExecution && !String(submitForm.containerNumber || '').trim()) {
       showSubmitNotification('Nomor container wajib diisi untuk ritasi vendor.');
@@ -2450,7 +2447,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                   ) : null}
                 </label>
                 {isRepoPickupMode ? (
-                  <p className="text-xs font-semibold text-slate-600">Waktu pickup dicatat otomatis saat konfirmasi disimpan.</p>
+                  <label className="operational-date-field operational-date-start">
+                    Waktu Pickup Repo
+                    <DateTimeWibInput value={form.repoPickedUpAt} onChange={(value) => setForm((current) => ({ ...current, repoPickedUpAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal pickup" timeLabel="Jam pickup WIB" />
+                  </label>
                 ) : (
                   <>
                     <label className="operational-date-field operational-date-start">
@@ -2492,7 +2492,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                 <h2 id="repo-pickup-confirmation-title">Container sudah diambil fisik?</h2>
                 <p id="repo-pickup-confirmation-description">
                   {isRepoComboPickupMode ? `Combo ${comboContainerLabel}` : `Container ${form.containerNumber || container.containerNumber || ''}`.trim()} akan
-                  {' '}langsung berstatus Sedang Jalan dengan waktu mulai saat ini. Pastikan container benar-benar sudah keluar dari depo penitipan.
+                  {' '}langsung berstatus Sedang Jalan dengan waktu pickup yang diisi. Pastikan container benar-benar sudah keluar dari depo penitipan.
                 </p>
               </div>
             </header>

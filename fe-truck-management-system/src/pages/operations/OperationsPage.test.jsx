@@ -189,6 +189,35 @@ describe('OperationsPage status inap', () => {
     expect(await screen.findByText('Party 1 x 20FT + 2 x 40FT')).toBeInTheDocument();
   });
 
+  it('mengirim tanggal dan jam titip aktual tanpa mengganti waktu audit', async () => {
+    const job = runningJobRow({ repoEirDocument: { name: 'eir-titip.pdf' } });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true, orders: [], masters: { trucks: [], drivers: [], destinations: [], depots: [{ name: 'Depo Cakung', depotType: 'storage' }] },
+      updateJob, refresh: vi.fn(),
+    });
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [job], total: 1, totalRows: 1,
+      counts: { received: 0, running: 1, inap: 0, repo_stored: 0, completed: 0, cancelled: 0 },
+      rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
+    });
+    updateJob.mockResolvedValue({ ...job, status: 'repo_stored' });
+    const user = userEvent.setup();
+    render(<OperationsPage />);
+    await user.click((await screen.findAllByRole('button', { name: /Titipkan/i }))[0]);
+    expect(screen.getByLabelText('Tanggal dititipkan')).toBeInTheDocument();
+    expect(screen.getByLabelText('Jam dititipkan WIB')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Tanggal dititipkan'), { target: { value: '2026-09-25' } });
+    fireEvent.change(screen.getByLabelText('Jam dititipkan WIB'), { target: { value: '10:00' } });
+    await user.selectOptions(screen.getByLabelText('Depo Penitipan'), 'Depo Cakung');
+    await user.selectOptions(screen.getByLabelText('Kondisi Container'), 'empty');
+    await user.type(screen.getByLabelText('Alasan Penitipan'), 'Menunggu instruksi bongkar');
+    await user.type(screen.getByLabelText('No. EIR Titip'), 'EIR-TITIP-001');
+    await user.click(screen.getByRole('button', { name: /Simpan Titipan/i }));
+    await waitFor(() => expect(updateJob).toHaveBeenCalledWith('job-1', expect.objectContaining({
+      repoStoredAt: '2026-09-25T03:00:00.000Z', status: 'repo_stored', updatedBy: 'Ops Test',
+    })));
+  });
+
 });
 
 describe('OperationsPage timeline Repo', () => {

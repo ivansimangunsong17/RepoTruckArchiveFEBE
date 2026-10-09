@@ -84,7 +84,7 @@ if (!databaseUrl) {
   }
 
   const pickup = (driver, vehicle, extra = {}) => ({
-    pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', ...extra,
+    pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', ...extra,
   });
 
   async function billing(salesOrderId) {
@@ -131,12 +131,10 @@ if (!databaseUrl) {
     await closePool();
   });
 
-  test('CASE B: single Repo = 1 trip asli (A), Repo B +0 utilisasi, satu job, satu UJ Repo, Rp300.000', async () => {
+  test('CASE B: single Repo belum menambah ritasi sebelum selesai final; Repo B +0 utilisasi', async () => {
     const trips = await getUtilizationTripRows({ dateFrom: jakartaToday, dateTo: jakartaToday });
     const original = trips.filter((row) => row.jobId === single.job.id);
-    assert.equal(original.length, 1);
-    assert.equal(original[0].vehicleId, single.truckA.id);
-    assert.equal(original[0].driverId, single.driverA.id);
+    assert.equal(original.length, 0);
     // Repo pickup tidak menambah utilisasi truck/sopir Repo.
     assert.equal(trips.filter((row) => row.movementId === single.movement.id).length, 0);
     assert.equal(trips.filter((row) => row.vehicleId === single.truckB.id || row.driverId === single.driverB.id).length, 0);
@@ -166,11 +164,10 @@ if (!databaseUrl) {
     assert.notEqual(transport[0].plateNumber, repoRows[0].plateNumber);
   });
 
-  test('CASE C: combo = 2 trip asli, Repo C +0 utilisasi, satu UJ Repo, Rp600.000 ke SO masing-masing', async () => {
+  test('CASE C: combo belum menambah ritasi sebelum kedua job selesai; Repo C +0 utilisasi', async () => {
     const trips = await getUtilizationTripRows({ dateFrom: jakartaToday, dateTo: jakartaToday });
     const originals = trips.filter((row) => [combo.jobX.id, combo.jobY.id].includes(row.jobId));
-    assert.deepEqual(originals.map((row) => row.vehicleId).sort(), [combo.truckX.id, combo.truckY.id].sort());
-    assert.deepEqual(originals.map((row) => row.driverId).sort(), [combo.driverX.id, combo.driverY.id].sort());
+    assert.equal(originals.length, 0);
     // Combo Repo pickup tidak menambah utilisasi truck/sopir C.
     assert.equal(trips.filter((row) => row.vehicleId === combo.truckC.id || row.driverId === combo.driverC.id).length, 0);
     const movement = await query('select vehicle_id, driver_id from container_pickup_movements where id = $1', [combo.movement.id]);

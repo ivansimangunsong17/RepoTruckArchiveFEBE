@@ -120,7 +120,7 @@ if (!databaseUrl) {
     const [driverA, truckA, driverB, truckB] = [await createDriver(), await createVehicle('20FT'), await createDriver(), await createVehicle('20FT')];
     const job = await createStoredJob(so.id, driverA, truckA);
     const picked = await pickupSingleRepoContainerJob(job.id, {
-      pickupConfirmed: true, driverId: driverB.id, vehicleId: truckB.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
+      pickupConfirmed: true, repoPickedUpAt: PICKUP_AT, driverId: driverB.id, vehicleId: truckB.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
     });
     await finishRepo([job.id], picked.movement.id);
     single = { so, job, driverA, truckA, driverB, truckB, movement: picked.movement };
@@ -133,7 +133,7 @@ if (!databaseUrl) {
     const jobX = await createStoredJob(soCombo.id, driverX, truckX);
     const jobY = await createStoredJob(soCombo.id, driverY, truckY);
     const pickedCombo = await pickupComboRepoContainerJobs({
-      pickupConfirmed: true, containerJobIds: [jobX.id, jobY.id], driverId: driverC.id, vehicleId: truckC.id,
+      pickupConfirmed: true, repoPickedUpAt: PICKUP_AT, containerJobIds: [jobX.id, jobY.id], driverId: driverC.id, vehicleId: truckC.id,
       updatedBy: 'Integration Test', repoUjAmount: 175000,
     });
     await finishRepo([jobX.id, jobY.id], pickedCombo.movement.id);
@@ -178,7 +178,7 @@ if (!databaseUrl) {
       const row = september.rows.find((item) => item.driverId === driver.id);
       assert.ok(row);
       assert.equal(row.totalRevenue, rowsFor(revenueSeptember, job.id)[0].revenue);
-      assert.equal(row.totalTrips, 1);
+      assert.equal(row.totalTrips, 0);
     }
     // Repo pickup tidak menambah trip sopir Repo B/C (baris boleh ada karena komisi job), revenue 0.
     for (const driver of [single.driverB, combo.driverC]) {
@@ -223,18 +223,22 @@ if (!databaseUrl) {
       const row = october.rows.find((item) => item.driverId === driver.id);
       assert.equal(row ? row.totalTrips : 0, 0);
     }
-    // September: sopir asli A, X, Y masing-masing tepat satu trip dan revenue transportnya sendiri.
+    // Trip final masuk Oktober, sementara revenue transport tetap September.
     const september = await getDriverPerformanceReport({ month: `${YEAR}-09` });
     const monthly = await report(9);
     for (const [driver, job] of [[single.driverA, single.job], [combo.driverX, combo.jobX], [combo.driverY, combo.jobY]]) {
       const row = september.rows.find((item) => item.driverId === driver.id);
-      assert.equal(row.totalTrips, 1);
+      assert.equal(row.totalTrips, 0);
       assert.equal(row.totalRevenue, rowsFor(monthly, job.id)[0].revenue);
     }
-    // Monthly Comparison: +3 trip asli di September, +0 dari dua movement Repo di Oktober.
+    for (const driver of [single.driverA, combo.driverX, combo.driverY]) {
+      const row = october.rows.find((item) => item.driverId === driver.id);
+      assert.equal(row?.totalTrips, 1);
+    }
+    // Monthly Comparison: tiga job final di Oktober, nol trip di September.
     const comparison = await getMonthlyComparisonReport({ year: YEAR });
-    assert.equal(comparison.rows[8].totalTrips - comparisonBefore.rows[8].totalTrips, 3);
-    assert.equal(comparison.rows[9].totalTrips - comparisonBefore.rows[9].totalTrips, 0);
+    assert.equal(comparison.rows[8].totalTrips - comparisonBefore.rows[8].totalTrips, 0);
+    assert.equal(comparison.rows[9].totalTrips - comparisonBefore.rows[9].totalTrips, 3);
   });
 
   test('Sales & Customer Performance: transport job titip masuk September, atribusi sales/customer tetap', async () => {

@@ -22,6 +22,8 @@ import StatusBadge from '../../components/common/StatusBadge';
 import EmptyState from '../../components/common/EmptyState';
 import AttachmentUploadField from '../../components/common/AttachmentUploadField';
 import OperationalForm from '../../components/forms/OperationalForm';
+import DateTimeWibInput from '../../components/common/DateTimeWibInput';
+import { nowWibInput, toOperationalIso } from '../../utils/operationalDateTime';
 import { useAuth } from '../../hooks/useAuth';
 import { useFeedback } from '../../hooks/useFeedback';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
@@ -456,6 +458,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
     repoContainerCondition: '',
     repoEirNumber: '',
     repoEirDocument: null,
+    repoStoredAt: '',
   });
   const [repoSaving, setRepoSaving] = useState(false);
   const [repoComboSelection, setRepoComboSelection] = useState([]);
@@ -479,7 +482,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
   const repoConditionValid = ['empty', 'loaded'].includes(repoForm.repoContainerCondition);
   const repoEirNumberValid = Boolean(repoForm.repoEirNumber.trim());
   const repoEirValid = Boolean(repoForm.repoEirDocument || repoTarget?.repoEirDocument);
-  const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid && repoConditionValid && repoEirNumberValid && repoEirValid);
+  const repoStoredIso = toOperationalIso(repoForm.repoStoredAt);
+  const repoStoredTimelineValid = Boolean(repoStoredIso && (!repoTarget?.runningAt || new Date(repoStoredIso) >= new Date(repoTarget.runningAt)));
+  const repoFormValid = Boolean(repoTarget && !repoMissing.length && repoLocationValid && repoReasonValid && repoConditionValid && repoEirNumberValid && repoEirValid && repoStoredTimelineValid);
   const inapReasonValid = inapForm.inapReason.trim().length >= 8;
   const inapFormValid = Boolean(inapTarget && inapReasonValid);
   const effectiveStatus = repoStorageOnly ? 'repo_stored' : status;
@@ -923,6 +928,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       repoContainerCondition: job.repoContainerCondition || '',
       repoEirNumber: job.repoEirNumber || '',
       repoEirDocument: job.repoEirDocument || null,
+      repoStoredAt: nowWibInput(),
     });
   }
 
@@ -993,7 +999,7 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       repoContainerCondition: repoForm.repoContainerCondition,
       repoEirNumber: repoForm.repoEirNumber.trim(),
       repoEirDocument: repoForm.repoEirDocument || repoTarget.repoEirDocument || null,
-      repoStoredAt: new Date().toISOString(),
+      repoStoredAt: repoStoredIso,
       repoReleasedDriverId: repoTarget.driverId || null,
       repoReleasedVehicleId: repoTarget.vehicleId || null,
       repoCreatedByName: actorName,
@@ -1636,6 +1642,11 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
                   <span>Setelah disimpan, truck dan sopir tidak lagi terkunci oleh container ini.</span>
                 </div>
               )}
+              <label>
+                Waktu Dititipkan
+                <DateTimeWibInput value={repoForm.repoStoredAt} onChange={(value) => setRepoForm((current) => ({ ...current, repoStoredAt: value }))} dateLabel="Tanggal dititipkan" timeLabel="Jam dititipkan WIB" />
+                {!repoStoredTimelineValid && repoForm.repoStoredAt ? <small>Waktu titip harus valid dan tidak lebih awal dari mulai perjalanan.</small> : null}
+              </label>
               <label>
                 Depo Penitipan
                 <select

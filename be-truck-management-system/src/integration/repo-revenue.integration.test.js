@@ -148,7 +148,7 @@ if (!databaseUrl) {
   }
 
   const pickupPayload = (driver, vehicle, extra = {}) => ({
-    pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000, ...extra,
+    pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000, ...extra,
   });
 
   // Setiap test mengembalikan SO-nya ke daftar invoice supaya test berikutnya tetap punya SO.

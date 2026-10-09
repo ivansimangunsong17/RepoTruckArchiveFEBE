@@ -1,13 +1,21 @@
 // Lock the movement before changing a linked job. Concurrent combo completions
 // must serialize on the same row so the last job sees the first one's status.
-export function requirePhysicalRepoPickup(payload = {}, now = new Date()) {
+export function requirePhysicalRepoPickup(payload = {}) {
   if (payload.pickupConfirmed !== true) {
     const error = new Error('Konfirmasi pickup fisik wajib sebelum perjalanan Repo dimulai.');
     error.code = 'REPO_PICKUP_CONFIRMATION_REQUIRED';
     error.statusCode = 400;
     throw error;
   }
-  return now.toISOString();
+  const value = payload.repoPickedUpAt;
+  const pickedUp = toValidDate(value);
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) || !pickedUp) {
+    const error = new Error('Tanggal dan jam pickup Repo aktual wajib diisi.');
+    error.code = 'REPO_PICKUP_ACTUAL_TIME_REQUIRED';
+    error.statusCode = 400;
+    throw error;
+  }
+  return pickedUp.toISOString();
 }
 
 function toValidDate(value) {
@@ -19,15 +27,42 @@ function toValidDate(value) {
 // Batas bawah waktu selesai job: waktu mulai perjalanan awal (running_at), dan untuk job yang
 // sudah di-pickup dari Repo juga waktu pickup (repo_picked_up_at) serta mulai movement
 // (started_at). Yang dipakai adalah batas paling akhir (terkuat).
-export function resolveCompletionLowerBound({ runningAt, repoPickedUpAt, movementStartedAt } = {}) {
+export function resolveCompletionLowerBound({ runningAt, repoStoredAt, repoPickedUpAt, movementStartedAt } = {}) {
   return [
     ['running', runningAt],
+    ['repo_stored', repoStoredAt],
     ['repo_pickup', repoPickedUpAt],
     ['repo_movement', movementStartedAt],
   ]
     .map(([source, value]) => ({ source, at: toValidDate(value) }))
     .filter((bound) => bound.at)
     .reduce((strongest, bound) => (!strongest || bound.at > strongest.at ? bound : strongest), null);
+}
+
+export function assertOperationalTimeline({ runningAt, repoStoredAt, repoPickedUpAt, completedAt } = {}) {
+  const events = [
+    ['mulai perjalanan', runningAt],
+    ['dititipkan', repoStoredAt],
+    ['pickup Repo', repoPickedUpAt],
+    ['selesai', completedAt],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== '');
+  let previous = null;
+  for (const [label, value] of events) {
+    const at = toValidDate(value);
+    if (!at) {
+      const error = new Error(`Tanggal dan jam ${label} tidak valid.`);
+      error.code = 'CONTAINER_JOB_ACTUAL_TIME_INVALID';
+      error.statusCode = 400;
+      throw error;
+    }
+    if (previous && at < previous.at) {
+      const error = new Error(`Waktu ${label} tidak boleh lebih awal dari ${previous.label}.`);
+      error.code = 'CONTAINER_JOB_TIMELINE_INVALID';
+      error.statusCode = 409;
+      throw error;
+    }
+    previous = { label, at };
+  }
 }
 
 function formatWib(date) {
@@ -44,6 +79,8 @@ export function assertCompletionNotBeforeStart(completedAt, bounds = {}) {
   if (!completed || !bound || completed >= bound.at) return;
   const message = bound.source === 'running'
     ? 'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu mulai.'
+    : bound.source === 'repo_stored'
+      ? 'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu titip Repo.'
     : `Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari pickup Repo (${formatWib(bound.at)}).`;
   const error = new Error(message);
   error.code = 'CONTAINER_JOB_COMPLETION_INVALID_TIME';

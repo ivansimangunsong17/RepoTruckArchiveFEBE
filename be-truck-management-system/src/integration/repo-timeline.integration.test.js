@@ -18,13 +18,14 @@ if (!databaseUrl) {
     pickupSingleRepoContainerJob,
     updateContainerJob,
   } = await import('../modules/container-jobs/container-jobs.repository.js');
+  const { getUtilizationTripRows } = await import('../modules/reports/utilization-trips.repository.js');
 
   const tag = crypto.randomBytes(3).toString('hex').toUpperCase();
   let seq = 0;
   const nextTag = () => `${tag}${String(++seq).padStart(2, '0')}`;
-  // Leg awal seperti produksi: jalan 23 Sep, dititip 23 Sep 21:34 WIB.
+  // Event aktual dicatat belakangan: jalan 23 Sep, titip 25 Sep, pickup/selesai 9 Okt.
   const ORIGINAL_RUNNING_AT = '2026-09-23T03:00:00.000Z';
-  const REPO_STORED_AT = '2026-09-23T14:34:00.000Z';
+  const REPO_STORED_AT = '2026-09-25T03:00:00.000Z';
   const BAD_COMPLETED_AT = '2026-09-29T03:00:00.000Z';
 
   async function cloneRow(table, templateSql, overrides) {
@@ -90,7 +91,7 @@ if (!databaseUrl) {
   }
 
   const pickupPayload = (driver, vehicle, extra = {}) => ({
-    pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000, ...extra,
+    pickupConfirmed: true, repoPickedUpAt: '2026-10-09T08:36:00.000Z', driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000, ...extra,
   });
 
   async function jobRow(id) {
@@ -174,6 +175,10 @@ if (!databaseUrl) {
     assert.equal(completedMovement.status, 'completed');
     assert.equal(completedMovement.completed_at.toISOString(), validCompletedAt);
     assert.ok(completedMovement.completed_at >= completedMovement.started_at);
+    const beforeFinal = await getUtilizationTripRows({ dateFrom: '2026-09-25', dateTo: '2026-09-25' });
+    const onFinal = await getUtilizationTripRows({ dateFrom: '2026-10-09', dateTo: '2026-10-09' });
+    assert.equal(beforeFinal.filter((row) => row.jobId === job.id).length, 0);
+    assert.equal(onFinal.filter((row) => row.jobId === job.id).length, 1);
     // H: UJ Repo, UJ job asli, biaya, dan ledger tidak berubah.
     assert.deepEqual(await financialState([job.id], movement.id), before);
   });
@@ -204,6 +209,8 @@ if (!databaseUrl) {
     assert.ok(done.completed_at >= done.started_at);
     for (const job of jobs) {
       assert.equal((await jobRow(job.id)).running_at.toISOString(), ORIGINAL_RUNNING_AT);
+      const trips = await getUtilizationTripRows({ dateFrom: '2026-10-09', dateTo: '2026-10-09' });
+      assert.equal(trips.filter((row) => row.jobId === job.id).length, 1);
     }
     assert.deepEqual(await financialState(jobs.map((job) => job.id), movement.id), before);
   });
@@ -218,10 +225,33 @@ if (!databaseUrl) {
          driver_id = $2, vehicle_id = $3, running_at = $4 where id = $1`,
       [job.id, driver.id, vehicle.id, ORIGINAL_RUNNING_AT],
     );
+    const createdAt = (await jobRow(job.id)).created_at.toISOString();
     const sameDay = '2026-09-23T10:00:00.000Z';
     await updateContainerJob(job.id, completionForm(job, driver, vehicle, sameDay, { runningAt: ORIGINAL_RUNNING_AT }));
     const done = await jobRow(job.id);
     assert.equal(done.status, 'completed');
     assert.equal(done.completed_at.toISOString(), sameDay);
+    assert.equal(done.created_at.toISOString(), createdAt);
+    assert.ok(Math.abs(done.updated_at.getTime() - Date.now()) < 60_000);
+    assert.notEqual(done.updated_at.toISOString(), sameDay);
+  });
+
+  test('penitipan sebelum mulai dan pickup sebelum titip ditolak tanpa persistensi', async () => {
+    const job = await createRepoStoredJob();
+    const before = await jobRow(job.id);
+    await assert.rejects(
+      () => updateContainerJob(job.id, { status: 'repo_stored', repoStoredAt: '2026-09-22T03:00:00.000Z', updatedBy: 'Integration Test' }),
+      { code: 'CONTAINER_JOB_TIMELINE_INVALID' },
+    );
+    assert.equal((await jobRow(job.id)).repo_stored_at.toISOString(), before.repo_stored_at.toISOString());
+    const driver = await createDriver();
+    const vehicle = await createVehicle('20FT');
+    await assert.rejects(
+      () => pickupSingleRepoContainerJob(job.id, pickupPayload(driver, vehicle, { repoPickedUpAt: '2026-09-24T08:36:00.000Z' })),
+      { code: 'CONTAINER_JOB_TIMELINE_INVALID' },
+    );
+    assert.equal((await jobRow(job.id)).status, 'repo_stored');
+    const movements = await query('select count(*)::int as n from container_pickup_items where container_job_id = $1', [job.id]);
+    assert.equal(movements.rows[0].n, 0);
   });
 }

@@ -99,7 +99,7 @@ if (!databaseUrl) {
   }
 
   function pickupPayload(driver, vehicle, extra = {}) {
-    return { pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', ...extra };
+    return { pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', ...extra };
   }
 
   test.after(async () => {

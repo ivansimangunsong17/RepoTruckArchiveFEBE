@@ -1,12 +1,3 @@
-function todayDateKey() {
-  const date = new Date();
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
 function splitDateTime(value) {
   const raw = String(value || '').trim();
   const [date = '', time = ''] = raw.split('T');
@@ -27,16 +18,9 @@ function cleanTimeInput(value) {
   return `${digits.slice(0, 2)}:${digits.slice(2)}`;
 }
 
-function normalizeTime(value) {
-  const digits = String(value || '').replace(/\D/g, '').padEnd(4, '0').slice(0, 4);
-  const hour = Math.min(23, Number(digits.slice(0, 2) || 0));
-  const minute = Math.min(59, Number(digits.slice(2, 4) || 0));
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-}
-
 function composeDateTime(date, time) {
   if (!date && !time) return '';
-  return `${date || todayDateKey()}T${time || '00:00'}`;
+  return `${date}T${time}`;
 }
 
 function DateTimeWibInput({ value, onChange, disabled = false, dateLabel = 'Tanggal', timeLabel = 'Jam' }) {
@@ -48,11 +32,6 @@ function DateTimeWibInput({ value, onChange, disabled = false, dateLabel = 'Tang
 
   function updateTime(nextTime) {
     onChange(composeDateTime(current.date, cleanTimeInput(nextTime)));
-  }
-
-  function normalizeTimeOnBlur() {
-    if (!current.time) return;
-    onChange(composeDateTime(current.date, normalizeTime(current.time)));
   }
 
   return (
@@ -73,7 +52,6 @@ function DateTimeWibInput({ value, onChange, disabled = false, dateLabel = 'Tang
           placeholder="08:30"
           title="Format jam 24 jam, contoh 08:30"
           value={current.time}
-          onBlur={normalizeTimeOnBlur}
           onChange={(event) => updateTime(event.target.value)}
         />
         <span aria-hidden="true">WIB</span>

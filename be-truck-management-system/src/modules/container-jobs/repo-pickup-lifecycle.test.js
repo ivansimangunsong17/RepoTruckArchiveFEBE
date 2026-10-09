@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assertCompletionNotBeforeStart,
+  assertOperationalTimeline,
   lockRepoPickupMovementForJob,
   reconcileRepoPickupMovement,
   requirePhysicalRepoPickup,
@@ -56,12 +57,23 @@ function lifecycleClient(jobStatuses, initialStatus = 'running', { started = tru
   return { client, jobs, movement, get updates() { return updates; } };
 }
 
-test('single pickup requires physical confirmation and uses server time', () => {
+test('single pickup requires physical confirmation and the actual entered time', () => {
   assert.throws(() => requirePhysicalRepoPickup({}), { code: 'REPO_PICKUP_CONFIRMATION_REQUIRED' });
+  assert.throws(() => requirePhysicalRepoPickup({ pickupConfirmed: true }), { code: 'REPO_PICKUP_ACTUAL_TIME_REQUIRED' });
   assert.equal(requirePhysicalRepoPickup({
     pickupConfirmed: true,
-    runningAt: '2099-01-01T00:00:00.000Z',
-  }, new Date('2026-10-07T08:00:00.000Z')), '2026-10-07T08:00:00.000Z');
+    repoPickedUpAt: '2026-10-09T08:36:00.000Z',
+  }), '2026-10-09T08:36:00.000Z');
+});
+
+test('actual timeline accepts backdated events and rejects reversed Repo events', () => {
+  const normal = { runningAt: '2026-09-23T03:00:00.000Z', completedAt: '2026-09-25T03:00:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(normal));
+  const repo = { ...normal, repoStoredAt: '2026-09-25T03:00:00.000Z', repoPickedUpAt: '2026-10-09T08:36:00.000Z', completedAt: '2026-10-09T08:41:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(repo));
+  assert.throws(() => assertOperationalTimeline({ ...repo, completedAt: '2026-09-29T03:00:00.000Z' }), { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+  assert.throws(() => assertOperationalTimeline({ ...repo, runningAt: '2026-09-26T03:00:00.000Z' }), { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+  assert.throws(() => assertOperationalTimeline({ ...repo, repoPickedUpAt: '2026-09-24T08:36:00.000Z' }), { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
 });
 
 test('single Repo stays running until its linked job completes, then completes once', async () => {

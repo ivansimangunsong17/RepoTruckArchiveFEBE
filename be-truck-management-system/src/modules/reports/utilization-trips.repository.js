@@ -1,7 +1,7 @@
 import { query } from '../../db/client.js';
 
-// One row is one utilization trip: the original transport leg of an internal Container Job,
-// attributed to the assignment released at Repo storage (not the later Repo assignment).
+// One row is one FINALLY completed internal Container Job. Repo storage does not yet count
+// as a ritasi. Keep attribution on the original assignment released at Repo storage.
 // Repo pickup movements (single or combo 2x20) deliberately add NO truck/driver utilization;
 // their truck/driver stay on container_pickup_movements for history, Repo UJ, Repo revenue
 // and lifecycle.
@@ -24,8 +24,8 @@ export async function getUtilizationTripRows(options = {}, db = { query }) {
       select
         'job:' || cj.id::text as id, cj.id as job_id, 'container_job'::text as trip_source,
         null::uuid as movement_id, cj.status,
-        coalesce(cj.repo_stored_at, cj.completed_at, so.trip_date::timestamp at time zone 'Asia/Jakarta') as trip_at,
-        coalesce((coalesce(cj.repo_stored_at, cj.completed_at) at time zone 'Asia/Jakarta')::date, so.trip_date) as trip_date,
+        cj.completed_at as trip_at,
+        (cj.completed_at at time zone 'Asia/Jakarta')::date as trip_date,
         coalesce(cj.repo_released_vehicle_id, history.previous_vehicle_id, cj.vehicle_id) as vehicle_id,
         coalesce(cj.repo_released_driver_id, history.previous_driver_id, cj.driver_id) as driver_id,
         coalesce(nullif(history.previous_plate_number, ''),
@@ -51,8 +51,8 @@ export async function getUtilizationTripRows(options = {}, db = { query }) {
       ) history on true
       left join vehicles original_vehicle on original_vehicle.id = coalesce(cj.repo_released_vehicle_id, history.previous_vehicle_id, cj.vehicle_id)
       left join drivers original_driver on original_driver.id = coalesce(cj.repo_released_driver_id, history.previous_driver_id, cj.driver_id)
-      where cj.status in ('completed', 'repo_stored', 'running', 'inap')
-        and (cj.repo_stored_at is not null or cj.status = 'completed')
+      where cj.status = 'completed'
+        and cj.completed_at is not null
         and coalesce(cj.execution_source, 'internal') = 'internal'
         and so.status <> 'cancelled' ${sourceSql}
     )

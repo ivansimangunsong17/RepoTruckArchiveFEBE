@@ -707,11 +707,13 @@ describe('OperationalForm', () => {
 
     await openOperationalPhase(user, /dokumen & closing/i);
     expect(screen.getByRole('button', { name: /mulai jalan/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Tanggal mulai'), { target: { value: '2026-09-23' } });
+    fireEvent.change(screen.getByLabelText('Jam mulai WIB'), { target: { value: '10:00' } });
     await user.click(screen.getByRole('button', { name: /mulai jalan/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       status: 'running',
-      runningAt: expect.any(String),
+      runningAt: '2026-09-23T03:00:00.000Z',
     }));
   });
 
@@ -835,6 +837,12 @@ describe('OperationalForm', () => {
 
     expect(screen.getByLabelText('Revenue Repo')).toHaveTextContent(/300\.000/);
     expect(screen.getByLabelText('Revenue Repo')).toHaveTextContent(/1 container/);
+    await openOperationalPhase(user, /dokumen & closing/i);
+    expect(screen.getByLabelText('Tanggal pickup')).toBeInTheDocument();
+    expect(screen.getByLabelText('Jam pickup WIB')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Tanggal pickup'), { target: { value: '2026-10-09' } });
+    fireEvent.change(screen.getByLabelText('Jam pickup WIB'), { target: { value: '15:36' } });
+    await openOperationalPhase(user, /persiapan job/i);
     await user.selectOptions(screen.getByLabelText('Truck'), 'B 1000 AA');
     await user.click(screen.getByRole('button', { name: /simpan assignment/i }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -863,7 +871,8 @@ describe('OperationalForm', () => {
       status: 'running',
       plateNumber: 'B 1000 AA',
       driver: 'Driver Aktif',
-      runningAt: expect.any(String),
+      runningAt: '2026-10-09T08:36:00.000Z',
+      repoPickedUpAt: '2026-10-09T08:36:00.000Z',
       pickupConfirmed: true,
       repoUjAmount: 150000,
     }));

@@ -99,7 +99,7 @@ if (!databaseUrl) {
     const driver = await createDriver();
     const vehicle = await createVehicle('40FT');
     const result = await pickupComboRepoContainerJobs({
-      pickupConfirmed: true,
+      pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(),
       containerJobIds: jobs.map((job) => job.id),
       driverId: driver.id,
       vehicleId: vehicle.id,
@@ -130,7 +130,7 @@ if (!databaseUrl) {
     await assignActive(other.id, { driverId: driver.id, vehicleId: vehicle.id });
 
     await assert.rejects(pickupSingleRepoContainerJob(job.id, {
-      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
+      pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
     }), (error) => error.code === 'ASSIGNMENT_ALREADY_ACTIVE' && error.statusCode === 409);
     const status = await query('select status from container_jobs where id = $1', [job.id]);
     assert.equal(status.rows[0].status, 'repo_stored');
@@ -160,12 +160,12 @@ if (!databaseUrl) {
     // Movement Repo lain dengan truck combo 40FT yang sama (ukuran sah: combo 2x20) tetap ditolak.
     const otherRepo = [await createJob(), await createJob()];
     await assert.rejects(pickupComboRepoContainerJobs({
-      pickupConfirmed: true, containerJobIds: otherRepo.map((job) => job.id), driverId: driver.id, vehicleId: vehicle.id,
+      pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), containerJobIds: otherRepo.map((job) => job.id), driverId: driver.id, vehicleId: vehicle.id,
       updatedBy: 'Integration Test', repoUjAmount: 0,
     }), { code: 'ASSIGNMENT_ALREADY_ACTIVE' });
     // Pickup single 20FT dengan truck combo 40FT yang sama: ukuran sah, tapi truck masih aktif.
     await assert.rejects(pickupSingleRepoContainerJob(otherRepo[0].id, {
-      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
+      pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 0,
     }), { code: 'ASSIGNMENT_ALREADY_ACTIVE' });
   });
 
@@ -189,8 +189,8 @@ if (!databaseUrl) {
     const driver = await createDriver();
     const [vehicleA, vehicleB] = [await createVehicle('20FT'), await createVehicle('20FT')];
     const outcomes = await Promise.allSettled([
-      pickupSingleRepoContainerJob(jobA.id, { pickupConfirmed: true, driverId: driver.id, vehicleId: vehicleA.id, updatedBy: 'A', repoUjAmount: 0 }),
-      pickupSingleRepoContainerJob(jobB.id, { pickupConfirmed: true, driverId: driver.id, vehicleId: vehicleB.id, updatedBy: 'B', repoUjAmount: 0 }),
+      pickupSingleRepoContainerJob(jobA.id, { pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicleA.id, updatedBy: 'A', repoUjAmount: 0 }),
+      pickupSingleRepoContainerJob(jobB.id, { pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicleB.id, updatedBy: 'B', repoUjAmount: 0 }),
     ]);
     assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
     const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
@@ -231,7 +231,7 @@ if (!databaseUrl) {
     const driver = await createDriver();
     const vehicle = await createVehicle('COMBO');
     await pickupComboRepoContainerJobs({
-      pickupConfirmed: true,
+      pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(),
       containerJobIds: jobs.map((job) => job.id),
       driverId: driver.id,
       vehicleId: vehicle.id,
@@ -290,15 +290,17 @@ if (!databaseUrl) {
 
   test('10. Repo single 20FT dengan truck 40FT: pickup, update, selesai normal; UJ/revenue satu; utilisasi +0', async () => {
     const [originalDriver, originalTruck] = [await createDriver(), await createVehicle('20FT')];
+    const storedAt = new Date();
     const job = await createJob('repo_stored', {
-      repo_stored_at: new Date().toISOString(),
+      repo_stored_at: storedAt.toISOString(),
+      running_at: new Date(storedAt.getTime() - 60 * 60 * 1000).toISOString(),
       repo_released_driver_id: originalDriver.id,
       repo_released_vehicle_id: originalTruck.id,
     });
     const driver = await createDriver();
     const vehicle = await createVehicle('40FT');
     const picked = await pickupSingleRepoContainerJob(job.id, {
-      pickupConfirmed: true, driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
+      pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000,
     });
     assert.equal(picked.movement.status, 'running');
     assert.equal(picked.movement.vehicle_id, vehicle.id);
@@ -325,14 +327,14 @@ if (!databaseUrl) {
     const pickupSingle = async (containerSize, truckSize) => {
       const job = await createJob('repo_stored', { container_size: containerSize });
       return pickupSingleRepoContainerJob(job.id, {
-        pickupConfirmed: true, driverId: (await createDriver()).id, vehicleId: (await createVehicle(truckSize)).id,
+        pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: (await createDriver()).id, vehicleId: (await createVehicle(truckSize)).id,
         updatedBy: 'Integration Test', repoUjAmount: 0,
       }).then(() => 'allow', (error) => error.code);
     };
     const pickupCombo = async (truckSize) => {
       const jobs = [await createJob(), await createJob()];
       return pickupComboRepoContainerJobs({
-        pickupConfirmed: true, containerJobIds: jobs.map((job) => job.id), driverId: (await createDriver()).id,
+        pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), containerJobIds: jobs.map((job) => job.id), driverId: (await createDriver()).id,
         vehicleId: (await createVehicle(truckSize)).id, updatedBy: 'Integration Test', repoUjAmount: 0,
       }).then(() => 'allow', (error) => error.code);
     };

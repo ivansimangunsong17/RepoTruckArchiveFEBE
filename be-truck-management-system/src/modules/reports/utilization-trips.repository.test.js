@@ -26,6 +26,10 @@ test('utilization counts only original legs (released assignment); Repo pickup m
   assert.deepEqual(params, ['2026-10-01', '2026-10-31', 'realtime']);
   assert.match(sql, /coalesce\(cj\.repo_released_vehicle_id, history\.previous_vehicle_id, cj\.vehicle_id\)/);
   assert.match(sql, /coalesce\(cj\.repo_released_driver_id, history\.previous_driver_id, cj\.driver_id\)/);
+  assert.match(sql, /cj\.completed_at as trip_at/);
+  assert.match(sql, /cj\.status = 'completed'/);
+  assert.match(sql, /cj\.completed_at is not null/);
+  assert.doesNotMatch(sql, /coalesce\(cj\.repo_stored_at, cj\.completed_at/);
   // Repo pickup (single atau combo 2x20) tidak menambah utilisasi truck/sopir.
   assert.doesNotMatch(sql, /container_pickup_movements/);
   assert.doesNotMatch(sql, /container_pickup_items/);

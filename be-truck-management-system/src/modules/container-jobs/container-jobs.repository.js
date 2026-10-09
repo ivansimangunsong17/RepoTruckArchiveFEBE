@@ -3,6 +3,7 @@ import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
 import {
   assertCompletionNotBeforeStart,
+  assertOperationalTimeline,
   lockRepoPickupMovementForJob,
   reconcileRepoPickupMovement,
   requirePhysicalRepoPickup,
@@ -782,15 +783,18 @@ export function normalizeCompletedAtForSave(value) {
 export function resolveCompletedAtForSave(form = {}, existing = {}, nextStatus = '') {
   if (nextStatus !== 'completed') return null;
 
-  const requestedCompletedAt = hasOwnInput(form, 'completedAt')
-    ? normalizeCompletedAtForSave(form.completedAt)
-    : null;
-  if (requestedCompletedAt) return requestedCompletedAt;
+  if (hasOwnInput(form, 'completedAt') && form.completedAt !== null && form.completedAt !== '') {
+    const requestedCompletedAt = normalizeCompletedAtForSave(form.completedAt);
+    if (!requestedCompletedAt) {
+      throw validationError('Tanggal dan jam selesai tidak valid.', 'CONTAINER_JOB_COMPLETION_INVALID_TIME', 400);
+    }
+    return requestedCompletedAt;
+  }
 
   const existingCompletedAt = normalizeCompletedAtForSave(existing.completed_at || existing.completedAt);
   if (existingCompletedAt) return existingCompletedAt;
 
-  return new Date().toISOString();
+  return null;
 }
 
 function buildCommissionDriverSnapshot(assignment = {}) {
@@ -1684,6 +1688,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
   // job, movement, atau efek samping penyelesaian apa pun disimpan.
   assertCompletionNotBeforeStart(completedAt, {
     runningAt,
+    repoStoredAt: existing.repo_stored_at,
     repoPickedUpAt: existing.repo_picked_up_at,
     movementStartedAt: options.pickupMovement?.started_at,
   });
@@ -3162,8 +3167,11 @@ async function updateContainerJobTransaction(id, form) {
       : nextStatus === 'repo_stored'
         ? form.runningAt || existing.rows[0].running_at
       : ['running', 'completed'].includes(nextStatus)
-        ? form.runningAt || new Date().toISOString()
+        ? form.runningAt || existing.rows[0].running_at
         : null;
+    if (!documentOnlyUpdate && ['running', 'repo_stored', 'completed'].includes(nextStatus) && !runningAt) {
+      throw validationError('Tanggal dan jam mulai perjalanan wajib diisi.', 'CONTAINER_JOB_RUNNING_TIME_REQUIRED', 400);
+    }
     const cancelledAt = nextStatus === 'cancelled'
       ? form.cancelledAt || existing.rows[0].cancelled_at || new Date().toISOString()
       : null;
@@ -3219,8 +3227,11 @@ async function updateContainerJobTransaction(id, form) {
     };
     const nextRepoLocation = normalizeOptionalText(form.repoLocation ?? existing.rows[0].repo_location);
     const nextRepoStoredAt = nextStatus === 'repo_stored'
-      ? form.repoStoredAt || existing.rows[0].repo_stored_at || new Date().toISOString()
+      ? form.repoStoredAt || existing.rows[0].repo_stored_at
       : form.repoStoredAt || existing.rows[0].repo_stored_at || null;
+    if (!documentOnlyUpdate && nextStatus === 'repo_stored' && !nextRepoStoredAt) {
+      throw validationError('Tanggal dan jam dititipkan wajib diisi.', 'REPO_STORED_ACTUAL_TIME_REQUIRED', 400);
+    }
     const nextRepoEirNumber = normalizeOptionalText(form.repoEirNumber ?? existing.rows[0].repo_eir_number);
     const nextRepoReason = normalizeOptionalText(form.repoReason ?? existing.rows[0].repo_reason);
     const nextRepoNotes = normalizeOptionalText(form.repoNotes ?? existing.rows[0].repo_notes);
@@ -3238,8 +3249,16 @@ async function updateContainerJobTransaction(id, form) {
     );
     const isRepoPickup = existing.rows[0].status === 'repo_stored' && nextStatus !== 'repo_stored';
     const nextRepoPickedUpAt = isRepoPickup
-      ? form.repoPickedUpAt || existing.rows[0].repo_picked_up_at || new Date().toISOString()
+      ? form.repoPickedUpAt || existing.rows[0].repo_picked_up_at
       : existing.rows[0].repo_picked_up_at || null;
+    if (!documentOnlyUpdate) {
+      assertOperationalTimeline({
+        runningAt,
+        repoStoredAt: nextRepoStoredAt,
+        repoPickedUpAt: nextRepoPickedUpAt,
+        completedAt: nextStatus === 'completed' ? validatedCompletedAt : null,
+      });
+    }
     const nextRepoPickedUpByName = isRepoPickup
       ? normalizeOptionalText(form.repoPickedUpByName || form.updatedBy || 'Operational')
       : existing.rows[0].repo_picked_up_by_name || null;
@@ -3774,7 +3793,7 @@ async function mapUpdatedRepoPickupJobs(client, ids = []) {
 }
 
 async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'single') {
-  // A confirmed physical pickup uses server time, never a client-supplied start time.
+  // Physical confirmation is still mandatory; Operational supplies the actual pickup time.
   const runningAt = requirePhysicalRepoPickup(payload);
   const financialRunningAt = payload.runningAt || payload.repoPickedUpAt || runningAt;
   const uniqueIds = [...new Set(ids.map((id) => normalizeOptionalUuid(id, 'Container Job')).filter(Boolean))];
@@ -3792,6 +3811,9 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     const jobsById = new Map(jobs.map((job) => [String(job.id), job]));
     const orderedJobs = uniqueIds.map((id) => jobsById.get(String(id))).filter(Boolean);
     assertRepoPickupJobs(orderedJobs, uniqueIds, pickupType);
+    for (const job of orderedJobs) {
+      assertOperationalTimeline({ runningAt: job.running_at, repoStoredAt: job.repo_stored_at, repoPickedUpAt: runningAt });
+    }
     await ensureNoActiveRepoPickupMovement(client, uniqueIds);
 
     const driver = await findDriver(client, payload);
