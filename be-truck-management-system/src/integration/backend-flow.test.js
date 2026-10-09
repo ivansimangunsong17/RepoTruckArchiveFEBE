@@ -7721,11 +7721,13 @@ if (!hasDatabase) {
     const [groupStatsJob1, groupStatsJob2, groupStatsJob3] = groupStatsOrder.body.data.containers;
 
     // 2 dari 3 container ditandai "sedang jalan", 1 dibiarkan "belum jalan" (received).
+    const groupStatsRunningAt = new Date().toISOString();
     const runningUpdate1 = await api(`/api/container-jobs/${groupStatsJob1.id}`, {
       method: 'PATCH',
       token: groupStatsAdminToken,
       body: {
         status: 'running',
+        runningAt: groupStatsRunningAt,
         driver: `Driver GroupStats 1 ${runId}`,
         plateNumber: `B GS1 ${runId}`,
         updatedBy: 'Sprint2C Admin',
@@ -7737,6 +7739,7 @@ if (!hasDatabase) {
       token: groupStatsAdminToken,
       body: {
         status: 'running',
+        runningAt: groupStatsRunningAt,
         driver: `Driver GroupStats 2 ${runId}`,
         plateNumber: `B GS2 ${runId}`,
         updatedBy: 'Sprint2C Admin',

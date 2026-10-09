@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   assertCompletionNotBeforeStart,
   assertOperationalTimeline,
+  isOperationalTimestampChanged,
   lockRepoPickupMovementForJob,
   reconcileRepoPickupMovement,
   requirePhysicalRepoPickup,
@@ -74,6 +75,71 @@ test('actual timeline accepts backdated events and rejects reversed Repo events'
   assert.throws(() => assertOperationalTimeline({ ...repo, completedAt: '2026-09-29T03:00:00.000Z' }), { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
   assert.throws(() => assertOperationalTimeline({ ...repo, runningAt: '2026-09-26T03:00:00.000Z' }), { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
   assert.throws(() => assertOperationalTimeline({ ...repo, repoPickedUpAt: '2026-09-24T08:36:00.000Z' }), { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+});
+
+test('new inverted running and Repo stored dates are rejected', () => {
+  assert.throws(() => assertOperationalTimeline({
+    runningAt: '2026-09-25T03:00:00.000Z', repoStoredAt: '2026-09-23T03:00:00.000Z',
+  }), { code: 'CONTAINER_JOB_TIMELINE_INVALID', statusCode: 409 });
+});
+
+test('unchanged historical dates survive updates and valid new pickup and completion', () => {
+  const old = { runningAt: '2026-09-25T03:00:00.000Z', repoStoredAt: '2026-09-23T03:00:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(old, old));
+  // Same instant submitted with a different offset is not a semantic change.
+  assert.doesNotThrow(() => assertOperationalTimeline({ ...old, runningAt: '2026-09-25T10:00:00+07:00' }, old));
+  assert.equal(isOperationalTimestampChanged('2026-09-25T10:00:00+07:00', old.runningAt), false);
+  const pickedUp = { ...old, repoPickedUpAt: '2026-10-09T08:36:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(pickedUp, old));
+  assert.doesNotThrow(() => assertOperationalTimeline({ ...pickedUp, completedAt: '2026-10-09T08:41:00.000Z' }, old));
+  assert.doesNotThrow(() => assertCompletionNotBeforeStart('2026-10-09T08:41:00.000Z', {
+    ...pickedUp, movementStartedAt: pickedUp.repoPickedUpAt,
+  }));
+});
+
+test('new normal and Repo timelines remain strict from the beginning', () => {
+  const normal = { runningAt: '2026-09-25T03:00:00.000Z', completedAt: '2026-09-25T04:00:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(normal));
+  assert.throws(() => assertOperationalTimeline({ ...normal, completedAt: '2026-09-25T02:00:00.000Z' }),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+  assert.throws(() => assertOperationalTimeline({ ...normal, repoStoredAt: '2026-09-23T03:00:00.000Z' }),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+});
+
+test('old picked-up and completed dates are tolerated unchanged; new completion uses strongest bound', () => {
+  const old = {
+    runningAt: '2026-09-29T03:00:00.000Z',
+    repoStoredAt: '2026-09-23T03:00:00.000Z',
+    repoPickedUpAt: '2026-09-25T03:00:00.000Z',
+  };
+  assert.doesNotThrow(() => assertOperationalTimeline(old, old));
+  assert.doesNotThrow(() => assertOperationalTimeline({ ...old, completedAt: '2026-10-09T08:41:00.000Z' }, old));
+  assert.throws(() => assertOperationalTimeline({ ...old, completedAt: '2026-09-26T03:00:00.000Z' }, old),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+  const completedOld = { ...old, completedAt: '2026-09-26T03:00:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(completedOld, completedOld));
+  assert.throws(() => assertOperationalTimeline({ ...completedOld, completedAt: '2026-09-27T03:00:00.000Z' }, completedOld),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+});
+
+test('legacy pickup must follow the later of running and stored, including a 1ms inversion', () => {
+  const old = { runningAt: '2026-09-23T11:00:00.000Z', repoStoredAt: '2026-09-23T10:00:00.000Z' };
+  assert.throws(() => assertOperationalTimeline({ ...old, repoPickedUpAt: '2026-09-23T10:30:00.000Z' }, old),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+  const millisecondOld = { runningAt: '2026-09-23T10:00:00.001Z', repoStoredAt: '2026-09-23T10:00:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline(millisecondOld, millisecondOld));
+  assert.doesNotThrow(() => assertOperationalTimeline({ ...millisecondOld, repoPickedUpAt: millisecondOld.runningAt }, millisecondOld));
+  assert.throws(() => assertOperationalTimeline({ ...millisecondOld, repoPickedUpAt: millisecondOld.repoStoredAt }, millisecondOld),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+});
+
+test('changing either date ends the historical inversion exception', () => {
+  const old = { runningAt: '2026-09-25T03:00:00.000Z', repoStoredAt: '2026-09-23T03:00:00.000Z' };
+  assert.doesNotThrow(() => assertOperationalTimeline({ ...old, repoStoredAt: '2026-09-26T03:00:00.000Z' }, old));
+  assert.throws(() => assertOperationalTimeline({ ...old, repoStoredAt: '2026-09-24T03:00:00.000Z' }, old),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
+  assert.throws(() => assertOperationalTimeline({ ...old, runningAt: '2026-09-27T03:00:00.000Z' }, old),
+    { code: 'CONTAINER_JOB_TIMELINE_INVALID' });
 });
 
 test('single Repo stays running until its linked job completes, then completes once', async () => {

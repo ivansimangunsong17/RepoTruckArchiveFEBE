@@ -39,29 +39,43 @@ export function resolveCompletionLowerBound({ runningAt, repoStoredAt, repoPicke
     .reduce((strongest, bound) => (!strongest || bound.at > strongest.at ? bound : strongest), null);
 }
 
-export function assertOperationalTimeline({ runningAt, repoStoredAt, repoPickedUpAt, completedAt } = {}) {
+export function isOperationalTimestampChanged(next, previous) {
+  const nextAt = toValidDate(next);
+  const previousAt = toValidDate(previous);
+  if (nextAt && previousAt) return nextAt.getTime() !== previousAt.getTime();
+  return !([next, previous].every((value) => value === null || value === undefined || value === ''));
+}
+
+export function assertOperationalTimeline({ runningAt, repoStoredAt, repoPickedUpAt, completedAt } = {}, existing = {}, { forceChanged = [] } = {}) {
   const events = [
-    ['mulai perjalanan', runningAt],
-    ['dititipkan', repoStoredAt],
-    ['pickup Repo', repoPickedUpAt],
-    ['selesai', completedAt],
-  ].filter(([, value]) => value !== null && value !== undefined && value !== '');
-  let previous = null;
-  for (const [label, value] of events) {
-    const at = toValidDate(value);
-    if (!at) {
-      const error = new Error(`Tanggal dan jam ${label} tidak valid.`);
+    ['runningAt', 'mulai perjalanan', runningAt],
+    ['repoStoredAt', 'dititipkan', repoStoredAt],
+    ['repoPickedUpAt', 'pickup Repo', repoPickedUpAt],
+    ['completedAt', 'selesai', completedAt],
+  ].map(([key, label, value]) => ({
+    label,
+    value,
+    at: toValidDate(value),
+    changed: forceChanged.includes(key) || isOperationalTimestampChanged(value, existing[key]),
+  }));
+  for (let laterIndex = 0; laterIndex < events.length; laterIndex += 1) {
+    const later = events[laterIndex];
+    if (later.changed && !later.at && later.value != null && later.value !== '') {
+      const error = new Error(`Tanggal dan jam ${later.label} tidak valid.`);
       error.code = 'CONTAINER_JOB_ACTUAL_TIME_INVALID';
       error.statusCode = 400;
       throw error;
     }
-    if (previous && at < previous.at) {
-      const error = new Error(`Waktu ${label} tidak boleh lebih awal dari ${previous.label}.`);
-      error.code = 'CONTAINER_JOB_TIMELINE_INVALID';
-      error.statusCode = 409;
-      throw error;
+    if (!later.at) continue;
+    for (let earlierIndex = 0; earlierIndex < laterIndex; earlierIndex += 1) {
+      const earlier = events[earlierIndex];
+      if (earlier.at && earlier.at > later.at && (earlier.changed || later.changed)) {
+        const error = new Error(`Waktu ${later.label} tidak boleh lebih awal dari ${earlier.label}.`);
+        error.code = 'CONTAINER_JOB_TIMELINE_INVALID';
+        error.statusCode = 409;
+        throw error;
+      }
     }
-    previous = { label, at };
   }
 }
 

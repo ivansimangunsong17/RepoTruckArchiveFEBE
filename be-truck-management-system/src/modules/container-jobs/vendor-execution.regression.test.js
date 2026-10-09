@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { shouldRequireAssignmentAfterVendorRevert } from './container-jobs.repository.js';
+import { buildMonthlyComparisonRows } from '../reports/reports.repository.js';
 
 const read = (relativePath) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 
@@ -74,8 +75,15 @@ test('query komisi, utilisasi, dan ketersediaan armada mengecualikan vendor', ()
 
   assert.match(commissions, /coalesce\(cj\.execution_source, 'internal'\) = 'internal'/i);
   assert.match(reports, /const clauses = \[\.\.\.dateFilter\.clauses, "coalesce\(cj\.execution_source, 'internal'\) = 'internal'"\]/i);
-  assert.match(reports, /const isInternal = \(row\.execution_source \|\| row\.executionSource \|\| 'internal'\) !== 'vendor'/i);
   assert.match(fleet, /coalesce\(execution_source, 'internal'\) = 'internal'/i);
+});
+
+test('monthly comparison counts internal trips while excluding vendor trips', () => {
+  const rows = buildMonthlyComparisonRows([
+    { execution_source: 'internal', completed_at: '2026-09-25T03:00:00.000Z' },
+    { execution_source: 'vendor', completed_at: '2026-09-25T04:00:00.000Z' },
+  ], [], { year: 2026, activeTruckCount: 1 }, new Date('2026-10-09T00:00:00.000Z'));
+  assert.equal(rows[8].totalTrips, 1);
 });
 
 test('container titip dengan komisi valid langsung eligible masuk batch komisi', () => {

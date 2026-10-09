@@ -41,7 +41,7 @@ if (!databaseUrl) {
     return result.rows[0];
   }
 
-  async function createRepoStoredJob() {
+  async function createRepoStoredJob({ runningAt = ORIGINAL_RUNNING_AT, repoStoredAt = REPO_STORED_AT } = {}) {
     const number = `RTL${nextTag()}`.padEnd(11, '0').slice(0, 11);
     const job = await cloneRow('container_jobs', `
       select * from container_jobs
@@ -52,13 +52,13 @@ if (!databaseUrl) {
       container_number: number,
       container_size: '20FT',
       repo_location: `Repo Timeline ${tag}`,
-      repo_stored_at: REPO_STORED_AT,
+      repo_stored_at: repoStoredAt,
       repo_eir_number: `EIR-TITIP-${number}`,
       driver_id: null,
       vehicle_id: null,
       entry_source: 'realtime',
       is_backdate_entry: false,
-      running_at: ORIGINAL_RUNNING_AT,
+      running_at: runningAt,
       completed_at: null,
       cancelled_at: null,
       repo_picked_up_at: null,
@@ -253,5 +253,110 @@ if (!databaseUrl) {
     assert.equal((await jobRow(job.id)).status, 'repo_stored');
     const movements = await query('select count(*)::int as n from container_pickup_items where container_job_id = $1', [job.id]);
     assert.equal(movements.rows[0].n, 0);
+  });
+
+  test('historical inversion allows unchanged updates, valid pickup and final completion', async () => {
+    const runningAt = '2026-09-25T03:00:00.000Z';
+    const repoStoredAt = '2026-09-23T03:00:00.000Z';
+    const job = await createRepoStoredJob({ runningAt, repoStoredAt });
+    await updateContainerJob(job.id, { status: 'repo_stored', repoNotes: 'Legacy record remains usable', updatedBy: 'Integration Test' });
+    assert.equal((await jobRow(job.id)).repo_notes, 'Legacy record remains usable');
+
+    const driver = await createDriver();
+    const vehicle = await createVehicle('20FT');
+    const { movement } = await pickupSingleRepoContainerJob(job.id, pickupPayload(driver, vehicle));
+    const completedAt = '2026-10-09T08:41:00.000Z';
+    await updateContainerJob(job.id, completionForm(job, driver, vehicle, completedAt));
+    const done = await jobRow(job.id);
+    const closedMovement = await movementRow(movement.id);
+    assert.equal(done.running_at.toISOString(), runningAt);
+    assert.equal(done.repo_stored_at.toISOString(), repoStoredAt);
+    assert.equal(done.completed_at.toISOString(), completedAt);
+    assert.equal(closedMovement.status, 'completed');
+    assert.ok(closedMovement.completed_at >= closedMovement.started_at);
+    const beforeFinal = await getUtilizationTripRows({ dateFrom: '2026-09-25', dateTo: '2026-09-25' });
+    const onFinal = await getUtilizationTripRows({ dateFrom: '2026-10-09', dateTo: '2026-10-09' });
+    assert.equal(beforeFinal.filter((row) => row.jobId === job.id).length, 0);
+    assert.equal(onFinal.filter((row) => row.jobId === job.id).length, 1);
+  });
+
+  test('historical picked-up job can finish after strongest old bound without repairing old dates', async () => {
+    const runningAt = '2026-09-29T03:00:00.000Z';
+    const repoStoredAt = '2026-09-23T03:00:00.000Z';
+    const oldPickupAt = '2026-09-25T03:00:00.000Z';
+    const job = await createRepoStoredJob({ runningAt, repoStoredAt });
+    const driver = await createDriver();
+    const vehicle = await createVehicle('20FT');
+    await query(
+      'update container_jobs set status = $2, repo_picked_up_at = $3, driver_id = $4, vehicle_id = $5 where id = $1',
+      [job.id, 'running', oldPickupAt, driver.id, vehicle.id],
+    );
+    await updateContainerJob(job.id, { status: 'running', repoNotes: 'Old pickup retained', updatedBy: 'Integration Test' });
+    await assert.rejects(
+      () => updateContainerJob(job.id, completionForm(job, driver, vehicle, '2026-09-26T03:00:00.000Z')),
+      { code: 'CONTAINER_JOB_COMPLETION_INVALID_TIME' },
+    );
+    const completedAt = '2026-10-09T08:41:00.000Z';
+    await updateContainerJob(job.id, completionForm(job, driver, vehicle, completedAt));
+    const done = await jobRow(job.id);
+    assert.equal(done.repo_picked_up_at.toISOString(), oldPickupAt);
+    assert.equal(done.completed_at.toISOString(), completedAt);
+    const trips = await getUtilizationTripRows({ dateFrom: '2026-10-09', dateTo: '2026-10-09' });
+    assert.equal(trips.filter((row) => row.jobId === job.id).length, 1);
+  });
+
+  test('historical completed job accepts unrelated update without rewriting old completion', async () => {
+    const job = await createRepoStoredJob({ runningAt: '2026-09-29T03:00:00.000Z', repoStoredAt: '2026-09-23T03:00:00.000Z' });
+    const driver = await createDriver();
+    const vehicle = await createVehicle('20FT');
+    const oldPickupAt = '2026-09-25T03:00:00.000Z';
+    const oldCompletedAt = '2026-09-26T03:00:00.000Z';
+    await query(
+      'update container_jobs set status = $2, repo_picked_up_at = $3, completed_at = $4, driver_id = $5, vehicle_id = $6 where id = $1',
+      [job.id, 'completed', oldPickupAt, oldCompletedAt, driver.id, vehicle.id],
+    );
+    await updateContainerJob(job.id, { status: 'completed', repoNotes: 'Old completion retained', updatedBy: 'Integration Test' });
+    const done = await jobRow(job.id);
+    assert.equal(done.repo_notes, 'Old completion retained');
+    assert.equal(done.completed_at.toISOString(), oldCompletedAt);
+  });
+
+  test('historical inversion rejects pickup before running and invalid date corrections', async () => {
+    const runningAt = '2026-09-23T04:00:00.000Z';
+    const repoStoredAt = '2026-09-23T03:00:00.000Z';
+    const job = await createRepoStoredJob({ runningAt, repoStoredAt });
+    const driver = await createDriver();
+    const vehicle = await createVehicle('20FT');
+    await assert.rejects(
+      () => pickupSingleRepoContainerJob(job.id, pickupPayload(driver, vehicle, { repoPickedUpAt: '2026-09-23T03:30:00.000Z' })),
+      { code: 'CONTAINER_JOB_TIMELINE_INVALID' },
+    );
+    await assert.rejects(
+      () => updateContainerJob(job.id, { status: 'repo_stored', repoStoredAt: '2026-09-23T03:30:00.000Z', updatedBy: 'Integration Test' }),
+      { code: 'CONTAINER_JOB_TIMELINE_INVALID' },
+    );
+    await assert.rejects(
+      () => updateContainerJob(job.id, { status: 'repo_stored', runningAt: '2026-09-23T05:00:00.000Z', adminCorrectionMode: true, updatedBy: 'Integration Test' }),
+      { code: 'CONTAINER_JOB_TIMELINE_INVALID' },
+    );
+    await updateContainerJob(job.id, { status: 'repo_stored', repoStoredAt: '2026-09-23T05:00:00.000Z', updatedBy: 'Integration Test' });
+    assert.equal((await jobRow(job.id)).repo_stored_at.toISOString(), '2026-09-23T05:00:00.000Z');
+  });
+
+  test('unchanged one-millisecond historical inversion permits valid lifecycle', async () => {
+    const runningAt = '2026-09-23T03:00:00.001Z';
+    const repoStoredAt = '2026-09-23T03:00:00.000Z';
+    const job = await createRepoStoredJob({ runningAt, repoStoredAt });
+    await updateContainerJob(job.id, { status: 'repo_stored', repoNotes: 'One millisecond legacy', updatedBy: 'Integration Test' });
+    const driver = await createDriver();
+    const vehicle = await createVehicle('20FT');
+    await assert.rejects(
+      () => pickupSingleRepoContainerJob(job.id, pickupPayload(driver, vehicle, { repoPickedUpAt: repoStoredAt })),
+      { code: 'CONTAINER_JOB_TIMELINE_INVALID' },
+    );
+    const { movement } = await pickupSingleRepoContainerJob(job.id, pickupPayload(driver, vehicle));
+    await updateContainerJob(job.id, completionForm(job, driver, vehicle, '2026-10-09T08:41:00.000Z'));
+    assert.equal((await jobRow(job.id)).status, 'completed');
+    assert.ok((await movementRow(movement.id)).completed_at >= (await movementRow(movement.id)).started_at);
   });
 }

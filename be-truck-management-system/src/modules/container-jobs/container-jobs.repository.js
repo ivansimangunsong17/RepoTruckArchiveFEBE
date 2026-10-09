@@ -4,6 +4,7 @@ import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssign
 import {
   assertCompletionNotBeforeStart,
   assertOperationalTimeline,
+  isOperationalTimestampChanged,
   lockRepoPickupMovementForJob,
   reconcileRepoPickupMovement,
   requirePhysicalRepoPickup,
@@ -1686,12 +1687,14 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
   const completedAt = resolveCompletedAtForSave(form, existing, 'completed');
   // Job Repo: selesai juga tidak boleh sebelum pickup Repo / mulai movement. Divalidasi sebelum
   // job, movement, atau efek samping penyelesaian apa pun disimpan.
-  assertCompletionNotBeforeStart(completedAt, {
-    runningAt,
-    repoStoredAt: existing.repo_stored_at,
-    repoPickedUpAt: existing.repo_picked_up_at,
-    movementStartedAt: options.pickupMovement?.started_at,
-  });
+  if (existing.status !== 'completed' || isOperationalTimestampChanged(completedAt, existing.completed_at)) {
+    assertCompletionNotBeforeStart(completedAt, {
+      runningAt,
+      repoStoredAt: existing.repo_stored_at,
+      repoPickedUpAt: existing.repo_picked_up_at,
+      movementStartedAt: options.pickupMovement?.started_at,
+    });
+  }
 
   const requiredValues = [
     ['nomor container', String(form.containerNumber || existing.container_number || '').trim()],
@@ -3257,6 +3260,11 @@ async function updateContainerJobTransaction(id, form) {
         repoStoredAt: nextRepoStoredAt,
         repoPickedUpAt: nextRepoPickedUpAt,
         completedAt: nextStatus === 'completed' ? validatedCompletedAt : null,
+      }, {
+        runningAt: existing.rows[0].running_at,
+        repoStoredAt: existing.rows[0].repo_stored_at,
+        repoPickedUpAt: existing.rows[0].repo_picked_up_at,
+        completedAt: existing.rows[0].completed_at,
       });
     }
     const nextRepoPickedUpByName = isRepoPickup
@@ -3812,7 +3820,11 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     const orderedJobs = uniqueIds.map((id) => jobsById.get(String(id))).filter(Boolean);
     assertRepoPickupJobs(orderedJobs, uniqueIds, pickupType);
     for (const job of orderedJobs) {
-      assertOperationalTimeline({ runningAt: job.running_at, repoStoredAt: job.repo_stored_at, repoPickedUpAt: runningAt });
+      assertOperationalTimeline(
+        { runningAt: job.running_at, repoStoredAt: job.repo_stored_at, repoPickedUpAt: runningAt },
+        { runningAt: job.running_at, repoStoredAt: job.repo_stored_at, repoPickedUpAt: job.repo_picked_up_at },
+        { forceChanged: ['repoPickedUpAt'] },
+      );
     }
     await ensureNoActiveRepoPickupMovement(client, uniqueIds);
 
