@@ -46,6 +46,7 @@ const {
   assertVehicleCanPickupRepo,
   isVehicleSizeAllowedForContainer,
   shouldValidateVehicleContainerSize,
+  shouldPreserveOriginalRunningAt,
   shouldRequireAssignmentAfterVendorRevert,
   syncAutoJourneyMoneyExpense,
 } = await import('./container-jobs.repository.js');
@@ -1162,4 +1163,22 @@ test('upload proof expense wajib membawa bukti pembayaran', () => {
     () => updateContainerJobExpenseProof('job-1', 'expense-1', {}, { name: 'Operational Test' }),
     (error) => error.code === 'CONTAINER_JOB_EXPENSE_PROOF_REQUIRED' && error.statusCode === 400,
   );
+});
+
+test('E/F: running_at leg awal job Repo dipertahankan; pickup Repo tetap terpisah', () => {
+  const repoJob = {
+    running_at: '2026-09-23T03:00:00.000Z',
+    repo_stored_at: '2026-09-23T14:34:00.000Z',
+    repo_picked_up_at: '2026-10-09T08:36:00.000Z',
+  };
+  // Setelah pickup Repo (dan saat penyelesaian), form tidak boleh menimpa waktu mulai leg awal.
+  assert.equal(shouldPreserveOriginalRunningAt(repoJob), true);
+  // Pickup lewat jalur update umum (masih repo_stored, belum ada repo_picked_up_at) juga dipertahankan.
+  assert.equal(shouldPreserveOriginalRunningAt({ ...repoJob, repo_picked_up_at: null }), true);
+  // Koreksi Admin tetap boleh memperbaiki running_at.
+  assert.equal(shouldPreserveOriginalRunningAt(repoJob, { allowAdminCorrection: true }), false);
+  // Job normal (tanpa leg Repo) tetap mengikuti input form seperti sebelumnya.
+  assert.equal(shouldPreserveOriginalRunningAt({ running_at: repoJob.running_at }), false);
+  assert.equal(shouldPreserveOriginalRunningAt({ repo_stored_at: repoJob.repo_stored_at, running_at: null }), false);
+  assert.notEqual(repoJob.running_at, repoJob.repo_picked_up_at);
 });

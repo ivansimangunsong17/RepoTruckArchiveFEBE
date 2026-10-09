@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../../db/client.js';
 import { mapAssignmentHistory, mapContainerJob, mapContainerJobExpense, toAssignmentSnapshot } from './container-jobs.mapper.js';
-import { lockRepoPickupMovementForJob, reconcileRepoPickupMovement, requirePhysicalRepoPickup } from './repo-pickup-lifecycle.js';
+import {
+  assertCompletionNotBeforeStart,
+  lockRepoPickupMovementForJob,
+  reconcileRepoPickupMovement,
+  requirePhysicalRepoPickup,
+} from './repo-pickup-lifecycle.js';
 import { buildRepoUjDescription, normalizeRepoUjAmount, postRepoUjToDroppingAccount } from './repo-pickup-uj.js';
 import { createRepoRevenueLines } from './repo-pickup-revenue.js';
 import { isSalesOrderBillingAdvanced } from '../finance/finance-eligibility.js';
@@ -52,6 +57,24 @@ const joinedJobColumns = `
     order by cpm.created_at desc
     limit 1
   ) as pickup_type,
+  (
+    select cpm.started_at
+    from container_pickup_items cpi
+    join container_pickup_movements cpm on cpm.id = cpi.movement_id
+    where cpi.container_job_id = cj.id
+      and cpm.status <> 'cancelled'
+    order by cpm.created_at desc
+    limit 1
+  ) as pickup_started_at,
+  (
+    select cpm.completed_at
+    from container_pickup_items cpi
+    join container_pickup_movements cpm on cpm.id = cpi.movement_id
+    where cpi.container_job_id = cj.id
+      and cpm.status <> 'cancelled'
+    order by cpm.created_at desc
+    limit 1
+  ) as pickup_completed_at,
   (
     select cpi.sequence_no
     from container_pickup_items cpi
@@ -1639,6 +1662,13 @@ async function syncResourceAssignmentStatus(client, existing, nextAssignment = {
   if (!assignmentActive || nextVehicleId !== previousVehicleId) await releaseVehicleIfIdle(client, nextVehicleId);
 }
 
+// Job yang pernah dititip (repo_stored_at terisi) sudah punya leg awal: running_at miliknya adalah
+// waktu mulai perjalanan awal dan tidak boleh tertimpa waktu pickup/penyelesaian leg Repo.
+// Hanya koreksi Admin yang boleh mengubahnya.
+export function shouldPreserveOriginalRunningAt(existing = {}, { allowAdminCorrection = false } = {}) {
+  return Boolean(existing.repo_stored_at && existing.running_at && !allowAdminCorrection);
+}
+
 async function requireCompletedJobReady(client, id, form, existing, options = {}) {
   // allowRetroactiveEntry mencakup historical backfill DAN ritasi susulan/backdate (Phase 2) --
   // keduanya sama-sama mencatat pekerjaan yang sudah selesai di masa lalu, jadi sama-sama boleh
@@ -1646,15 +1676,17 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
   const allowRetroactiveEntry = Boolean(options.allowRetroactiveEntry);
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
 
-  const runningAt = form.runningAt || existing.running_at;
+  const runningAt = shouldPreserveOriginalRunningAt(existing, { allowAdminCorrection })
+    ? existing.running_at
+    : form.runningAt || existing.running_at;
   const completedAt = resolveCompletedAtForSave(form, existing, 'completed');
-  if (runningAt && completedAt && new Date(completedAt) < new Date(runningAt)) {
-    throw validationError(
-      'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu mulai.',
-      'CONTAINER_JOB_COMPLETION_INVALID_TIME',
-      409,
-    );
-  }
+  // Job Repo: selesai juga tidak boleh sebelum pickup Repo / mulai movement. Divalidasi sebelum
+  // job, movement, atau efek samping penyelesaian apa pun disimpan.
+  assertCompletionNotBeforeStart(completedAt, {
+    runningAt,
+    repoPickedUpAt: existing.repo_picked_up_at,
+    movementStartedAt: options.pickupMovement?.started_at,
+  });
 
   const requiredValues = [
     ['nomor container', String(form.containerNumber || existing.container_number || '').trim()],
@@ -3085,7 +3117,7 @@ async function updateContainerJobTransaction(id, form) {
       await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
     }
     const validatedCompletedAt = !documentOnlyUpdate && nextStatus === 'completed'
-      ? await requireCompletedJobReady(client, id, form, currentJob, { allowRetroactiveEntry, allowAdminCorrection })
+      ? await requireCompletedJobReady(client, id, form, currentJob, { allowRetroactiveEntry, allowAdminCorrection, pickupMovement })
       : null;
     const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
       ? new Date().toISOString()
@@ -3125,6 +3157,8 @@ async function updateContainerJobTransaction(id, form) {
       ? existing.rows[0].running_at
       : nextStatus === 'cancelled'
       ? existing.rows[0].running_at
+      : shouldPreserveOriginalRunningAt(existing.rows[0], { allowAdminCorrection }) && ['running', 'completed', 'repo_stored'].includes(nextStatus)
+        ? existing.rows[0].running_at
       : nextStatus === 'repo_stored'
         ? form.runningAt || existing.rows[0].running_at
       : ['running', 'completed'].includes(nextStatus)

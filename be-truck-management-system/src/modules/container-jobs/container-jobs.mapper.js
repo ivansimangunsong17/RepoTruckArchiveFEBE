@@ -206,6 +206,8 @@ export function mapContainerJob(row, attachments = [], expenses = []) {
       sequenceNo: Number(row.pickup_sequence_no || 1),
       itemCount: Number(row.pickup_item_count || 1),
       containerNumbers: Array.isArray(row.pickup_container_numbers) ? row.pickup_container_numbers : [],
+      startedAt: row.pickup_started_at || null,
+      completedAt: row.pickup_completed_at || null,
     } : null,
     inapStartedAt: row.inap_started_at,
     inapEndedAt: row.inap_ended_at,

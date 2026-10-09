@@ -27,7 +27,8 @@ import { useFeedback } from '../../hooks/useFeedback';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { updateTruckDefaultDriver } from '../../services/master-data/masterDataService';
-import { formatDateTime } from '../../utils/formatDate';
+import { formatDate, formatDateTime } from '../../utils/formatDate';
+import { buildJobTimelinePhases } from './jobTimeline';
 import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import UjRecommendationCard from '../../components/operations/UjRecommendationCard';
@@ -1462,7 +1463,9 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
               </section>
               <section className="container-detail-uj"><h3>Acuan Biaya Perjalanan</h3><UjRecommendationCard job={detail} destinations={archive.masters.destinations} /></section>
               {canViewDocuments ? <section className="container-detail-documents"><h3>Dokumen Operational</h3><div className="detail-documents">{documentFieldsForDetail(detail).map(([label, value]) => <span key={label}><FileText size={15} /> <strong>{label}</strong><DocumentLink file={value} /></span>)}</div></section> : null}
-              <section className="container-detail-timeline"><h3>Timeline</h3><div className="job-timeline-detail"><span className="done"><i />Diterima<strong>{formatDateTime(detail.receivedAt)}</strong></span><span className={detail.runningAt ? 'done' : ''}><i />Mulai<strong>{formatDateTime(detail.runningAt)}</strong></span><span className={detail.completedAt ? 'done' : ''}><i />Selesai<strong>{formatDateTime(detail.completedAt)}</strong></span></div></section>
+              <section className="container-detail-timeline"><h3>Timeline</h3><div className={`job-timeline-detail${detail.repoStoredAt ? ' repo-legs' : ''}`}>{buildJobTimelinePhases(detail).map((phase) => (
+                <span className={phase.done ? 'done' : ''} data-phase={phase.key} key={phase.key}><i />{phase.label}<strong>{phase.format === 'date' ? formatDate(phase.value) : formatDateTime(phase.value)}</strong>{phase.warning ? <small className="job-timeline-warning">{phase.warning}</small> : null}</span>
+              ))}</div></section>
               {isRepoStoredJob(detail) || detail.repoLocation || detail.repoStoredAt ? (
                 <section className="container-repo-summary">
                   <h3>Penitipan Container</h3>

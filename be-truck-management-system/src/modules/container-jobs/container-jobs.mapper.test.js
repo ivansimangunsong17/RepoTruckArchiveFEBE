@@ -57,6 +57,8 @@ test('container job mapper membawa ringkasan pickup movement tanpa menggabungkan
     pickup_sequence_no: 2,
     pickup_item_count: 2,
     pickup_container_numbers: ['MSDU1111111', 'MSDU2222222'],
+    pickup_started_at: '2026-10-09T08:36:00.000Z',
+    pickup_completed_at: null,
   }, [
     {
       entity_id: 'job-combo-1',
@@ -72,6 +74,8 @@ test('container job mapper membawa ringkasan pickup movement tanpa menggabungkan
     sequenceNo: 2,
     itemCount: 2,
     containerNumbers: ['MSDU1111111', 'MSDU2222222'],
+    startedAt: '2026-10-09T08:36:00.000Z',
+    completedAt: null,
   });
   assert.equal(mapped.travelDocumentFile.name, 'surat-jalan-job-1.pdf');
   assert.equal(mapped.loadingVoucherDocument, null);

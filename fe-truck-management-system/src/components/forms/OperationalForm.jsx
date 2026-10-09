@@ -10,7 +10,7 @@ import WarehouseLocationCard from '../operations/WarehouseLocationCard';
 import { calculateUjRecommendation } from '../../utils/ujRecommendation';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
-import { formatDate } from '../../utils/formatDate';
+import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { isApiDataSource } from '../../services/config/dataSource';
 import { createContainerJobExpense, uploadContainerJobExpenseProof } from '../../services/archive/containerJobService';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
@@ -708,6 +708,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const tripStartRequirementMessage = 'Status perjalanan baru bisa Sedang Jalan setelah truck dan driver lengkap.';
   const hasEirDocument = Boolean(form.eirDocument);
   const hasRepoHistory = Boolean(container.repoLocation || container.repoStoredAt || container.repoEirNumber || container.repoPickedUpAt || container.repoEirDocument);
+  // Job Repo: Waktu Mulai = mulai perjalanan awal (dikunci di backend kecuali koreksi Admin) dan
+  // selesai tidak boleh sebelum pickup / mulai movement Repo.
+  const repoLegStartedAt = container.pickupMovement?.startedAt || container.repoPickedUpAt || null;
+  const lockOriginalRunningAt = Boolean(container.repoStoredAt && container.runningAt) && !canReviseLockedFields;
   const hasInapHistory = Boolean(container.inapStartedAt || container.inapReason);
   const longTripNeedsInapReview = !hasInapHistory && isLongTripOverOneDay(form.runningAt, form.completedAt);
   const hasRepoEirReceipt = Boolean(String(container.repoEirNumber || '').trim() && container.repoEirDocument);
@@ -1611,6 +1615,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         showSubmitNotification('Waktu selesai tidak boleh lebih awal dari waktu mulai.');
         return;
       }
+      if (submitForm.completedAt && repoLegStartedAt && new Date(submitForm.completedAt) < new Date(repoLegStartedAt)) {
+        showSubmitNotification(`Waktu selesai tidak boleh lebih awal dari pickup Repo (${formatDateTime(repoLegStartedAt)}).`);
+        return;
+      }
     }
     setError('');
     if (isRepoPickupMode) {
@@ -2446,11 +2454,14 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                 ) : (
                   <>
                     <label className="operational-date-field operational-date-start">
-                      Waktu Mulai
-                      <DateTimeWibInput value={form.runningAt} onChange={(value) => setForm((current) => ({ ...current, runningAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal mulai" timeLabel="Jam mulai WIB" />
+                      {container.repoStoredAt ? 'Mulai Perjalanan Awal' : 'Waktu Mulai'}
+                      <DateTimeWibInput value={form.runningAt} onChange={(value) => setForm((current) => ({ ...current, runningAt: value }))} disabled={!canEditTimeline || lockOriginalRunningAt} dateLabel="Tanggal mulai" timeLabel="Jam mulai WIB" />
+                      {repoLegStartedAt ? (
+                        <small className="text-[11px] font-semibold text-slate-500">Pickup / mulai perjalanan Repo: {formatDateTime(repoLegStartedAt)}</small>
+                      ) : null}
                     </label>
                     <label className="operational-date-field operational-date-end">
-                      Waktu Selesai
+                      {repoLegStartedAt ? 'Perjalanan Lanjutan Selesai' : 'Waktu Selesai'}
                       <DateTimeWibInput value={form.completedAt} onChange={(value) => setForm((current) => ({ ...current, completedAt: value }))} disabled={!canEditTimeline} dateLabel="Tanggal selesai" timeLabel="Jam selesai WIB" />
                     </label>
                   </>

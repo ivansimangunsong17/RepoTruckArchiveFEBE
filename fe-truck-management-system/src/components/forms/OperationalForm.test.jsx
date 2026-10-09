@@ -1979,3 +1979,74 @@ describe('OperationalForm', () => {
     expect(onSetTruckDefaultDriver).not.toHaveBeenCalled();
   });
 });
+
+describe('OperationalForm timeline Repo', () => {
+  const pickedUpRepoJob = {
+    ...container,
+    rpujStatus: 'paid',
+    spkNumber: 'SPK-TEST-001',
+    plateNumber: 'B 1000 AA',
+    driver: 'Driver Aktif',
+    chassis: 'TRK-001 - Hino FG',
+    status: 'running',
+    tripDate: '2026-09-23',
+    runningAt: '2026-09-23T03:00:00.000Z',
+    repoLocation: 'Repo Cakung',
+    repoStoredAt: '2026-09-23T14:34:00.000Z',
+    repoEirNumber: 'EIR-TITIP-001',
+    repoEirDocument: { name: 'eir-titip.pdf' },
+    eirDocument: { name: 'eir.pdf' },
+    repoPickedUpAt: '2026-10-09T08:36:00.000Z',
+    pickupMovement: { id: 'movement-1', type: 'single', startedAt: '2026-10-09T08:36:00.000Z', completedAt: null },
+  };
+
+  function renderRepoForm(overrides = {}) {
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{ ...pickedUpRepoJob, ...overrides }}
+        masterDrivers={[]}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    return onSubmit;
+  }
+
+  it('mengunci Mulai Perjalanan Awal dan menampilkan waktu pickup Repo terpisah', async () => {
+    const user = userEvent.setup();
+    renderRepoForm();
+    await openOperationalPhase(user, /dokumen & closing/i);
+
+    expect(screen.getByText('Mulai Perjalanan Awal')).toBeInTheDocument();
+    expect(screen.getByText('Perjalanan Lanjutan Selesai')).toBeInTheDocument();
+    expect(screen.getByText('Pickup / mulai perjalanan Repo: 09 Oktober 2026 15:36 WIB')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/Tanggal mulai/i).every((input) => input.disabled)).toBe(true);
+  });
+
+  it('menolak waktu selesai sebelum pickup Repo walau setelah waktu mulai awal', async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderRepoForm({ completedAt: '2026-09-29T03:00:00.000Z' });
+    await openOperationalPhase(user, /dokumen & closing/i);
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    expect(screen.getByText('Waktu selesai tidak boleh lebih awal dari pickup Repo (09 Oktober 2026 15:36 WIB).')).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('mengizinkan selesai setelah pickup Repo dan tetap mengirim waktu mulai awal', async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderRepoForm({ completedAt: '2026-10-09T08:41:00.000Z' });
+    await openOperationalPhase(user, /dokumen & closing/i);
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'completed',
+      runningAt: '2026-09-23T03:00:00.000Z',
+      completedAt: '2026-10-09T08:41:00.000Z',
+    })));
+  });
+});

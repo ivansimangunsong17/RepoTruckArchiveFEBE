@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import OperationsPage from './OperationsPage';
@@ -189,4 +189,64 @@ describe('OperationsPage status inap', () => {
     expect(await screen.findByText('Party 1 x 20FT + 2 x 40FT')).toBeInTheDocument();
   });
 
+});
+
+describe('OperationsPage timeline Repo', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useAuth.mockReturnValue({ user: { id: 'user-1', role: 'operational', fullName: 'Ops Test' } });
+    useFeedback.mockReturnValue({ notify: vi.fn(), confirmAction: vi.fn().mockResolvedValue(true) });
+    useArchiveData.mockReturnValue({
+      isDatabaseMode: true,
+      orders: [],
+      masters: { trucks: [], drivers: [], destinations: [], depots: [] },
+      updateJob: vi.fn(),
+      refresh: vi.fn(),
+    });
+  });
+
+  it('menampilkan leg awal dan leg Repo terpisah di timeline detail', async () => {
+    const user = userEvent.setup();
+    const repoJob = runningJobRow({
+      id: 'job-repo',
+      soNumber: '2609/23-00250',
+      containerNumber: 'SKHU8711190',
+      status: 'completed',
+      tripDate: '2026-09-23',
+      runningAt: '2026-09-23T03:00:00.000Z',
+      repoLocation: 'Depo Titip',
+      repoStoredAt: '2026-09-23T14:34:00.000Z',
+      repoPickedUpAt: '2026-10-09T08:36:00.000Z',
+      completedAt: '2026-10-09T08:41:00.000Z',
+      pickupMovement: { id: 'movement-1', type: 'single', startedAt: '2026-10-09T08:36:00.000Z', completedAt: '2026-10-09T08:41:00.000Z' },
+    });
+    fetchContainerJobsPage.mockResolvedValue({
+      rows: [repoJob],
+      total: 1,
+      totalRows: 1,
+      counts: { received: 0, running: 0, inap: 0, repo_stored: 0, completed: 1, cancelled: 0 },
+      rpujCounts: { queue: 0, submitted: 0, approved: 0, paid: 0 },
+    });
+    fetchContainerJob.mockResolvedValue(repoJob);
+
+    render(<OperationsPage />);
+    await user.click(await screen.findByRole('button', { name: /Detail/ }));
+
+    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('section');
+    const phase = (key) => timeline.querySelector(`[data-phase="${key}"]`);
+    expect(Array.from(timeline.querySelectorAll('[data-phase]')).map((node) => node.dataset.phase)).toEqual([
+      'tripDate', 'originalRunning', 'repoStored', 'repoPickup', 'repoCompleted',
+    ]);
+    expect(within(phase('tripDate')).getByText('Tanggal Jalan')).toBeInTheDocument();
+    expect(phase('originalRunning')).toHaveTextContent('Mulai Perjalanan Awal');
+    expect(phase('originalRunning')).toHaveTextContent('23 September 2026 10:00 WIB');
+    expect(phase('originalRunning')).not.toHaveTextContent('Oktober');
+    expect(phase('repoStored')).toHaveTextContent('23 September 2026 21:34 WIB');
+    expect(phase('repoStored')).toHaveTextContent('Container Dititipkan');
+    expect(phase('repoPickup')).toHaveTextContent('Pickup / Mulai Perjalanan Repo');
+    expect(phase('repoPickup')).toHaveTextContent('09 Oktober 2026 15:36 WIB');
+    expect(phase('repoCompleted')).toHaveTextContent('Perjalanan Lanjutan Selesai');
+    expect(phase('repoCompleted')).toHaveTextContent('09 Oktober 2026 15:41 WIB');
+    expect(timeline).not.toHaveTextContent('perlu koreksi');
+  });
 });

@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  assertCompletionNotBeforeStart,
   lockRepoPickupMovementForJob,
   reconcileRepoPickupMovement,
   requirePhysicalRepoPickup,
+  resolveCompletionLowerBound,
 } from './repo-pickup-lifecycle.js';
 
-function lifecycleClient(jobStatuses, initialStatus = 'running', { started = true } = {}) {
+function lifecycleClient(jobStatuses, initialStatus = 'running', { started = true, startedAt = '2026-10-07T08:00:00.000Z', nowIso = '2026-10-07T12:00:00.000Z' } = {}) {
   const movement = {
     id: 'movement-1',
     status: initialStatus,
-    started_at: started ? '2026-10-07T08:00:00.000Z' : null,
+    started_at: started ? startedAt : null,
     completed_at: null,
   };
   const jobs = jobStatuses.map((status, index) => ({ id: `job-${index + 1}`, status }));
@@ -22,22 +24,32 @@ function lifecycleClient(jobStatuses, initialStatus = 'running', { started = tru
         return { rows: [{ ...movement }] };
       }
       if (sql.includes('count(*) filter')) {
+        // Meniru filter SQL: hanya waktu selesai job yang >= started_at movement yang dipakai.
+        assert.match(sql, /cj\.completed_at >= cpm\.started_at/);
+        const validCompletions = jobs
+          .filter((job) => job.status === 'completed')
+          .map((job) => job.completed_at || '2026-10-07T10:00:00.000Z')
+          .filter((value) => !movement.started_at || new Date(value) >= new Date(movement.started_at))
+          .sort();
         return { rows: [{
           total: jobs.length,
           completed: jobs.filter((job) => job.status === 'completed').length,
           cancelled: jobs.filter((job) => job.status === 'cancelled').length,
-          last_completed_at: jobs.some((job) => job.status === 'completed') ? '2026-10-07T10:00:00.000Z' : null,
+          last_completed_at: validCompletions.at(-1) || null,
           started: movement.started_at !== null,
         }] };
       }
       if (sql.includes('update container_pickup_movements')) {
         assert.equal(params[0], movement.id);
         if (movement.status !== 'running') return { rows: [] };
+        const nextCompletedAt = params[2] || nowIso;
+        if (params[1] === 'completed' && movement.started_at && new Date(nextCompletedAt) < new Date(movement.started_at)) return { rows: [] };
         movement.status = params[1];
-        movement.completed_at = movement.status === 'completed' ? (params[2] || 'now()') : null;
+        movement.completed_at = movement.status === 'completed' ? nextCompletedAt : null;
         updates += 1;
         return { rows: [{ ...movement }] };
       }
+      if (sql.includes('select status from container_pickup_movements')) return { rows: [{ status: movement.status }] };
       throw new Error(`Unexpected query: ${sql}`);
     },
   };
@@ -134,4 +146,89 @@ test('completed movement cannot revert to running or cancelled on later reconcil
   const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
   assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'completed');
   assert.equal(state.updates, 0);
+});
+
+// Reproduksi produksi 2609/23-00250 / SKHU8711190 (WIB = UTC+7).
+const repoTimeline = {
+  runningAt: '2026-09-23T03:00:00.000Z', // perjalanan awal 23 Sep
+  repoStoredAt: '2026-09-23T14:34:00.000Z', // dititip 23 Sep 21:34 WIB
+  repoPickedUpAt: '2026-10-09T08:36:00.000Z', // pickup 9 Okt 15:36 WIB
+  movementStartedAt: '2026-10-09T08:36:00.000Z',
+};
+
+test('A: job normal boleh selesai di hari yang sama setelah mulai jalan', () => {
+  assert.doesNotThrow(() => assertCompletionNotBeforeStart('2026-09-23T10:00:00.000Z', { runningAt: '2026-09-23T03:00:00.000Z' }));
+  assert.throws(
+    () => assertCompletionNotBeforeStart('2026-09-23T02:00:00.000Z', { runningAt: '2026-09-23T03:00:00.000Z' }),
+    { code: 'CONTAINER_JOB_COMPLETION_INVALID_TIME', message: 'Pekerjaan belum dapat diselesaikan. Waktu selesai tidak boleh lebih awal dari waktu mulai.' },
+  );
+});
+
+test('B: job Repo yang di-pickup 9 Okt tidak boleh selesai 29 Sep walau setelah running_at awal', () => {
+  assert.throws(
+    () => assertCompletionNotBeforeStart('2026-09-29T03:00:00.000Z', repoTimeline),
+    (error) => error.code === 'CONTAINER_JOB_COMPLETION_INVALID_TIME'
+      && error.statusCode === 409
+      && error.message.includes('pickup Repo')
+      && error.message.includes('15.36 WIB')
+      && error.details.lowerBound === '2026-10-09T08:36:00.000Z',
+  );
+});
+
+test('C: job Repo pickup 9 Okt 15:36 boleh selesai 9 Okt 15:41', () => {
+  assert.doesNotThrow(() => assertCompletionNotBeforeStart('2026-10-09T08:41:00.000Z', repoTimeline));
+  assert.doesNotThrow(() => assertCompletionNotBeforeStart('2026-10-09T08:36:00.000Z', repoTimeline));
+});
+
+test('batas bawah memakai timestamp paling akhir dari running, pickup Repo, dan mulai movement', () => {
+  assert.deepEqual(resolveCompletionLowerBound({ runningAt: repoTimeline.runningAt }), { source: 'running', at: new Date(repoTimeline.runningAt) });
+  assert.equal(resolveCompletionLowerBound(repoTimeline).at.toISOString(), '2026-10-09T08:36:00.000Z');
+  const movementLater = resolveCompletionLowerBound({ ...repoTimeline, movementStartedAt: '2026-10-09T08:40:00.000Z' });
+  assert.deepEqual([movementLater.source, movementLater.at.toISOString()], ['repo_movement', '2026-10-09T08:40:00.000Z']);
+  assert.equal(resolveCompletionLowerBound({}), null);
+});
+
+test('D: completed_at movement tidak pernah lebih awal dari started_at (job lama dengan waktu selesai invalid diabaikan)', async () => {
+  const state = lifecycleClient(['completed', 'cancelled'], 'running', {
+    startedAt: repoTimeline.movementStartedAt,
+    nowIso: '2026-10-09T08:45:00.000Z',
+  });
+  state.jobs[0].completed_at = '2026-09-29T03:00:00.000Z'; // data lama: lebih awal dari pickup
+  const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
+  assert.equal(locked.started_at, repoTimeline.movementStartedAt);
+  assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'completed');
+  assert.ok(new Date(state.movement.completed_at) >= new Date(state.movement.started_at));
+  assert.equal(state.movement.completed_at, '2026-10-09T08:45:00.000Z');
+});
+
+test('D: movement memakai waktu selesai job yang valid', async () => {
+  const state = lifecycleClient(['completed'], 'running', { startedAt: repoTimeline.movementStartedAt });
+  state.jobs[0].completed_at = '2026-10-09T08:41:00.000Z';
+  const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
+  await reconcileRepoPickupMovement(state.client, locked);
+  assert.equal(state.movement.completed_at, '2026-10-09T08:41:00.000Z');
+});
+
+test('D: bila penyelesaian movement tetap jatuh sebelum started_at, transaksi ditolak (tidak diam-diam running)', async () => {
+  const state = lifecycleClient(['cancelled'], 'running', {
+    startedAt: '2026-10-09T08:36:00.000Z',
+    nowIso: '2026-10-09T08:00:00.000Z', // jam server di belakang started_at
+  });
+  const locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
+  await assert.rejects(() => reconcileRepoPickupMovement(state.client, locked), { code: 'REPO_MOVEMENT_COMPLETION_BEFORE_START' });
+  assert.equal(state.movement.status, 'running');
+});
+
+test('G: combo 2x20 selesai sekali setelah kedua job terminal, completed_at >= started_at', async () => {
+  const state = lifecycleClient(['completed', 'running'], 'running', { startedAt: repoTimeline.movementStartedAt });
+  state.jobs[0].completed_at = '2026-10-09T08:41:00.000Z';
+  let locked = await lockRepoPickupMovementForJob(state.client, state.jobs[0].id);
+  assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'running');
+  state.jobs[1].status = 'completed';
+  state.jobs[1].completed_at = '2026-10-09T09:10:00.000Z';
+  locked = await lockRepoPickupMovementForJob(state.client, state.jobs[1].id);
+  assert.equal((await reconcileRepoPickupMovement(state.client, locked)).status, 'completed');
+  assert.equal(state.movement.completed_at, '2026-10-09T09:10:00.000Z');
+  assert.ok(new Date(state.movement.completed_at) >= new Date(state.movement.started_at));
+  assert.equal(state.updates, 1);
 });
