@@ -40,6 +40,7 @@ const FinanceBillingReadinessPage = lazy(() => import('../pages/finance/FinanceB
 const FinanceCorrectionsPage = lazy(() => import('../pages/finance/FinanceCorrectionsPage'));
 const DriverCommissionPage = lazy(() => import('../pages/finance/DriverCommissionPage'));
 const CustomerOutstandingPage = lazy(() => import('../pages/finance/CustomerOutstandingPage'));
+const FinanceContainerJobsPage = lazy(() => import('../pages/finance/FinanceContainerJobsPage'));
 
 function LazyPage({ children }) {
   const location = useLocation();
@@ -135,6 +136,7 @@ export const router = createBrowserRouter([
         { path: 'finance/billing-readiness', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceBillingReadinessPage /></LazyPage>)] },
         { path: 'finance/driver-commissions', children: [guardedPage(financeReadOnlyRoles, <LazyPage><DriverCommissionPage /></LazyPage>)] },
         { path: 'finance/outstanding', children: [guardedPage(financeReadOnlyRoles, <LazyPage><CustomerOutstandingPage /></LazyPage>)] },
+        { path: 'finance/container-jobs', children: [guardedPage(financeReadOnlyRoles, <LazyPage><FinanceContainerJobsPage /></LazyPage>)] },
         { path: 'truck-utilization', element: <Navigate to="/reports?tab=utilization" replace /> },
         { path: 'driver-performance', element: <Navigate to="/reports" replace /> },
         { path: 'unit-performance', element: <Navigate to="/reports?tab=utilization" replace /> },

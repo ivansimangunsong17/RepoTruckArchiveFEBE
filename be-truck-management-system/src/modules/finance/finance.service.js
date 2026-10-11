@@ -548,6 +548,8 @@ export function fetchInvoiceOrders(query = {}) {
 
 export function fetchSalesOrderOutstanding(query = {}) {
   return getSalesOrderOutstandingPage({
+    salesName: query.salesName || '',
+    customerName: query.customerName || '',
     page: query.page,
     pageSize: query.pageSize,
     query: query.query || query.search || '',
@@ -560,6 +562,7 @@ export function fetchSalesOrderOutstanding(query = {}) {
 
 export function fetchCustomerOutstandingRollup(query = {}) {
   return getCustomerOutstandingRollupPage({
+    salesName: query.salesName || '',
     page: query.page,
     pageSize: query.pageSize,
     query: query.query || query.search || '',
@@ -703,6 +706,7 @@ export async function recordInvoicePayment(id, payload = {}, actor) {
 
 export function exportCustomerOutstandingRollup(query = {}) {
   return getCustomerOutstandingRollupExport({
+    salesName: query.salesName || '',
     query: query.query || query.search || '',
     agingBucket: query.agingBucket || '',
     sortBy: query.sortBy || '',

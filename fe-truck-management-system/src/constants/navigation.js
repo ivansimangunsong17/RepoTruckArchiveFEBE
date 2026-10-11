@@ -180,6 +180,7 @@ export const navigationGroups = [
           { to: '/finance/driver-commissions', label: 'Pembayaran Komisi', icon: CircleDollarSign, roles: financeReadOnlyRoles },
           { to: '/finance/invoices', label: 'Input Invoice', icon: ClipboardList, roles: financeReadOnlyRoles },
           { to: '/finance/outstanding', label: 'Customer Outstanding', icon: Wallet, roles: financeReadOnlyRoles },
+          { to: '/finance/container-jobs', label: 'Container Job', icon: ClipboardCheck, roles: financeReadOnlyRoles },
         ],
       },
     ],

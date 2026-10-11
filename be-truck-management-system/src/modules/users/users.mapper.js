@@ -89,6 +89,7 @@ export const ROLE_PERMISSIONS = {
   finance: [
     'sales_order.read',
     'sales_order.customer_outstanding.read',
+    'container_job.read',
     'master_data.read',
     'report.read',
     'finance.read',

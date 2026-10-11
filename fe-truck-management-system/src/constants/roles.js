@@ -126,6 +126,7 @@ export const ROLE_PERMISSIONS = {
     'finance.correction.read',
   ],
   finance: [
+    'operations.read',
     'reports.read',
     'orders.customerOutstanding.read',
     'finance.read',

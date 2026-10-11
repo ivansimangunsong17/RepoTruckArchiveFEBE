@@ -1,5 +1,13 @@
 import { sendSuccess } from '../../utils/apiResponse.js';
 import { actorHasPermission } from '../../utils/permissions.js';
+
+export function rejectFinanceOperationalMutation(actor) {
+  if (String(actor?.role || '').trim().toLowerCase() !== 'finance') return;
+  const error = new Error('Finance hanya dapat melihat Container Job.');
+  error.statusCode = 403;
+  error.code = 'FORBIDDEN';
+  throw error;
+}
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
   correctContainerJobExpense,
@@ -272,6 +280,7 @@ export async function correctContainerJobExpenseController(request, response) {
 }
 
 export async function updateContainerJobExpenseProofController(request, response) {
+  rejectFinanceOperationalMutation(request.user);
   const before = await getContainerJobExpense(request.params.expenseId);
   const result = await updateContainerJobExpenseProof(request.params.id, request.params.expenseId, request.body, request.user);
   await safeRecordActivityLog(request, {
@@ -348,6 +357,7 @@ export async function voidDroppingExpenseController(request, response) {
 }
 
 export async function uploadAutoJourneyMoneyProofController(request, response) {
+  rejectFinanceOperationalMutation(request.user);
   const before = await getContainerJobExpense(request.params.expenseId);
   const result = await uploadAutoJourneyMoneyProof(request.params.id, request.params.expenseId, request.body, request.user);
   await safeRecordActivityLog(request, {
