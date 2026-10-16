@@ -167,6 +167,42 @@ describe('OperationalForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('menyelesaikan ritasi vendor tanpa driver, truck, dan SPK internal', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          executionSource: 'vendor',
+          status: 'running',
+          runningAt: '2026-10-15T08:00:00.000Z',
+          eirDocument: { name: 'eir-vendor.pdf', path: 'attachment-eir-vendor' },
+        }}
+        initialPhase="closing"
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText(/status pekerjaan/i), 'completed');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      executionSource: 'vendor',
+      status: 'completed',
+      containerNumber: 'MSCU-123456-7',
+      driver: '',
+      driverId: null,
+      plateNumber: '',
+      vehicleId: null,
+      runningAt: '2026-10-15T08:00:00.000Z',
+      eirDocument: expect.objectContaining({ path: 'attachment-eir-vendor' }),
+    })));
+    expect(onSubmit.mock.calls[0][0].spkNumber).toBeFalsy();
+  });
+
   it('meminta konfirmasi sebelum assignment internal diubah menjadi vendor', async () => {
     const user = userEvent.setup();
     render(

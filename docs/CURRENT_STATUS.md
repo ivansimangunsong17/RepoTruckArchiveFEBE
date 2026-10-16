@@ -86,7 +86,6 @@ Observable from code/migrations:
 - NEEDS OWNER DECISION: retire the LEGACY RPUJ endpoints, and remove or update the Thursday–Wednesday design docs and the unused `buildCommissionWeekOptions`.
 - NEEDS OWNER DECISION:
   - should cancellation approval re-check that the job is still `received`?
-  - vendor job completion requirements;
   - the `under_review` batch status;
   - the `FinanceWorkflowPage` demo rows (`initialOrderRows`, `initialInvoiceRows`).
 - NEEDS PRODUCTION VERIFICATION:

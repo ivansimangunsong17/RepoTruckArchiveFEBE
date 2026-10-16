@@ -1674,12 +1674,13 @@ export function shouldPreserveOriginalRunningAt(existing = {}, { allowAdminCorre
   return Boolean(existing.repo_stored_at && existing.running_at && !allowAdminCorrection);
 }
 
-async function requireCompletedJobReady(client, id, form, existing, options = {}) {
+export async function requireCompletedJobReady(client, id, form, existing, options = {}) {
   // allowRetroactiveEntry mencakup historical backfill DAN ritasi susulan/backdate (Phase 2) --
   // keduanya sama-sama mencatat pekerjaan yang sudah selesai di masa lalu, jadi sama-sama boleh
   // lewati syarat upload dokumen (SPK/EIR) yang normalnya wajib untuk penyelesaian ritasi realtime.
   const allowRetroactiveEntry = Boolean(options.allowRetroactiveEntry);
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
+  const isVendorExecution = Boolean(options.isVendorExecution);
 
   const runningAt = shouldPreserveOriginalRunningAt(existing, { allowAdminCorrection })
     ? existing.running_at
@@ -1698,8 +1699,10 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
 
   const requiredValues = [
     ['nomor container', String(form.containerNumber || existing.container_number || '').trim()],
-    ['driver', form.driver || form.driverId || existing.driver_id],
-    ['truck', form.plateNumber || form.vehicleId || existing.vehicle_id],
+    ...(!isVendorExecution ? [
+      ['driver', form.driver || form.driverId || existing.driver_id],
+      ['truck', form.plateNumber || form.vehicleId || existing.vehicle_id],
+    ] : []),
     ['waktu mulai', runningAt],
     ['waktu selesai', completedAt],
   ];
@@ -1731,7 +1734,7 @@ async function requireCompletedJobReady(client, id, form, existing, options = {}
       409,
     );
   }
-  if (!(form.spkNumber || existing.spk_number || categories.has('spkDocument'))) {
+  if (!isVendorExecution && !(form.spkNumber || existing.spk_number || categories.has('spkDocument'))) {
     throw validationError(
       'Pekerjaan belum dapat diselesaikan. Lengkapi SPK terlebih dahulu.',
       'CONTAINER_JOB_COMPLETION_INCOMPLETE',
@@ -3125,7 +3128,12 @@ async function updateContainerJobTransaction(id, form) {
       await requireAssignmentAvailable(client, id, form, driver, vehicle, nextStatus, existing.rows[0]);
     }
     const validatedCompletedAt = !documentOnlyUpdate && nextStatus === 'completed'
-      ? await requireCompletedJobReady(client, id, form, currentJob, { allowRetroactiveEntry, allowAdminCorrection, pickupMovement })
+      ? await requireCompletedJobReady(client, id, form, currentJob, {
+          allowRetroactiveEntry,
+          allowAdminCorrection,
+          isVendorExecution,
+          pickupMovement,
+        })
       : null;
     const requestRpujAt = nextRpujStatus === 'submitted' && currentJob.rpuj_status !== 'submitted'
       ? new Date().toISOString()
