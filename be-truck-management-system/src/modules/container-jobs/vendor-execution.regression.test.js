@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { shouldRequireAssignmentAfterVendorRevert } from './container-jobs.repository.js';
+import {
+  requireCompletedJobReady,
+  shouldRequireAssignmentAfterVendorRevert,
+} from './container-jobs.repository.js';
 import { buildMonthlyComparisonRows } from '../reports/reports.repository.js';
 
 const read = (relativePath) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
@@ -35,6 +38,75 @@ test('backend menjadi pengaman vendor dari UJ, dropping, SPK, dan histori assign
   assert.match(source, /ensureInternalExecution\(client, id, 'SPK internal'\)/i);
   assert.match(source, /if \(!isVendorExecution && \(driverIdentityChanging \|\| vehicleIdentityChanging\)\)/i);
   assert.match(source, /const nextHasDriverCommission = isVendorExecution \|\| isRepoJob \? false/i);
+});
+
+test('ritasi vendor dapat diselesaikan tanpa driver, truck, atau SPK internal', async () => {
+  const client = {
+    async query(sql) {
+      assert.match(sql, /from attachments/i);
+      return { rows: [{ category: 'eirDocument' }] };
+    },
+  };
+
+  const completedAt = await requireCompletedJobReady(client, 'job-vendor-1', {
+    containerNumber: 'MSCU-123456-7',
+    completedAt: '2026-10-16T10:00:00.000Z',
+  }, {
+    status: 'running',
+    execution_source: 'vendor',
+    running_at: '2026-10-16T08:00:00.000Z',
+    driver_id: null,
+    vehicle_id: null,
+    spk_number: null,
+  }, {
+    isVendorExecution: true,
+  });
+
+  assert.equal(completedAt, '2026-10-16T10:00:00.000Z');
+});
+
+test('ritasi vendor tetap wajib memiliki lampiran EIR saat diselesaikan', async () => {
+  const client = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    requireCompletedJobReady(client, 'job-vendor-2', {
+      containerNumber: 'MSCU-765432-1',
+      completedAt: '2026-10-16T10:00:00.000Z',
+    }, {
+      status: 'running',
+      execution_source: 'vendor',
+      running_at: '2026-10-16T08:00:00.000Z',
+    }, {
+      isVendorExecution: true,
+    }),
+    (error) => error.code === 'CONTAINER_JOB_COMPLETION_INCOMPLETE'
+      && /lampiran EIR/i.test(error.message),
+  );
+});
+
+test('ritasi internal tetap wajib memiliki driver dan truck saat diselesaikan', async () => {
+  const client = {
+    async query() {
+      throw new Error('Query lampiran tidak boleh dijalankan sebelum assignment valid.');
+    },
+  };
+
+  await assert.rejects(
+    requireCompletedJobReady(client, 'job-internal-1', {
+      containerNumber: 'MSCU-111111-1',
+      completedAt: '2026-10-16T10:00:00.000Z',
+    }, {
+      status: 'running',
+      execution_source: 'internal',
+      running_at: '2026-10-16T08:00:00.000Z',
+    }),
+    (error) => error.code === 'CONTAINER_JOB_COMPLETION_INCOMPLETE'
+      && /driver/i.test(error.message),
+  );
 });
 
 test('status pemenuhan SO tetap menghitung job internal dan vendor bersama-sama', () => {
