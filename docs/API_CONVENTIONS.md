@@ -52,6 +52,7 @@ Backend: `be-truck-management-system/src/`. Frontend client: `fe-truck-managemen
 - FE `httpClient` unwraps `payload.data` and throws `Error(message)` with `.status` and `.payload`.
 - File downloads (`GET /api/attachments/:id`, `/api/vehicles/:vehicleId/documents/:documentId/download`) stream the file (`?download=1` → `attachment` disposition).
 - CSV export (`/api/finance/outstanding/by-customer/export`) returns JSON data; CSV is built client-side (`fe/src/utils/csvExport.js`).
+- Finance Outstanding endpoints (`/api/finance/outstanding`, `/by-customer`, `/by-customer/export`) accept optional `salesName`, matched case-insensitively against Customer Master `customers.sales_name`. The flat endpoint also accepts `customerName` for exact customer detail pagination. Omitted `salesName` keeps existing global behavior.
 
 ## Error Handling
 

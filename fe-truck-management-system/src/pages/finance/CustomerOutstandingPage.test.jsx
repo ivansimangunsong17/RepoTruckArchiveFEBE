@@ -11,6 +11,7 @@ import {
   recordFinanceInvoicePayment,
 } from '../../services/finance/financeService';
 import { downloadCsv } from '../../utils/csvExport';
+import { fetchMaster } from '../../services/master-data/masterDataService';
 
 const notify = vi.fn();
 
@@ -34,6 +35,8 @@ vi.mock('../../services/finance/financeService', () => ({
 vi.mock('../../utils/csvExport', () => ({
   downloadCsv: vi.fn(),
 }));
+
+vi.mock('../../services/master-data/masterDataService', () => ({ fetchMaster: vi.fn() }));
 
 const rollupResult = {
   rows: [
@@ -107,6 +110,7 @@ const customerInvoiceRows = {
 
 describe('CustomerOutstandingPage finance', () => {
   beforeEach(() => {
+    fetchMaster.mockResolvedValue([{ name: 'PT Mitra Kimia', salesName: 'Sales A' }, { name: 'PT Global Makmur', salesName: 'Sales B' }]);
     vi.clearAllMocks();
     fetchFinanceOutstandingByCustomer.mockResolvedValue(rollupResult);
     exportFinanceOutstandingByCustomer.mockResolvedValue({ rows: rollupResult.rows });
@@ -148,6 +152,20 @@ describe('CustomerOutstandingPage finance', () => {
         expect.objectContaining({ page: 1, sortBy: 'oldest_overdue_desc' }),
       );
     });
+  });
+
+  it('meneruskan Sales customer master ke ringkasan, detail, dan export', async () => {
+    const user = userEvent.setup();
+    exportFinanceOutstandingByCustomer.mockResolvedValue({ rows: rollupResult.rows });
+    render(<CustomerOutstandingPage />);
+    await screen.findByText('PT Mitra Kimia');
+    await user.selectOptions(screen.getByLabelText('Sales'), 'Sales A');
+    await waitFor(() => expect(fetchFinanceOutstandingByCustomer).toHaveBeenLastCalledWith(expect.objectContaining({ salesName: 'Sales A', page: 1 })));
+    await user.click(screen.getAllByRole('button', { name: 'Detail' })[0]);
+    await waitFor(() => expect(fetchFinanceOutstanding).toHaveBeenCalledWith(expect.objectContaining({ salesName: 'Sales A', customerName: 'PT Mitra Kimia' })));
+    await user.click(screen.getByRole('button', { name: 'Tutup detail piutang' }));
+    await user.click(screen.getByRole('button', { name: /export csv/i }));
+    await waitFor(() => expect(exportFinanceOutstandingByCustomer).toHaveBeenCalledWith(expect.objectContaining({ salesName: 'Sales A' })));
   });
 
   it('mengirim agingBucket=overdue_all saat opsi Semua Overdue dipilih di dropdown Umur Piutang', async () => {
@@ -227,6 +245,7 @@ describe('CustomerOutstandingPage finance', () => {
 
     expect(exportFinanceOutstandingByCustomer).toHaveBeenCalledWith({
       query: 'Customer',
+      salesName: '',
       agingBucket: 'overdue_all',
       sortBy: 'customer_asc',
       dateFrom: '2026-09-01',

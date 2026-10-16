@@ -4555,6 +4555,7 @@ export function outstandingOrdersCte() {
       select
         io.*,
         coalesce(customer_master.name, io.customer_name) as customer_rollup_name,
+        customer_sales_master.sales_name as customer_sales_name,
         so.ots_data_review_status,
         coalesce(pt.total_paid, 0)::numeric as total_paid,
         greatest(io.billing_amount - coalesce(pt.total_paid, 0), 0)::numeric as outstanding_amount,
@@ -4573,6 +4574,7 @@ export function outstandingOrdersCte() {
       from invoice_orders io
       join sales_orders so on so.id = io.id
       left join customers customer_master on customer_master.id = so.customer_id and customer_master.archived_at is null
+      left join customers customer_sales_master on customer_sales_master.id = so.customer_id
       left join payment_totals pt on pt.sales_order_id = io.id
     ),
     -- Data historis sebelum Agustus 2026 hanya menjadi piutang jika memiliki nomor invoice.
@@ -4592,6 +4594,15 @@ export function outstandingOrdersCte() {
 export function buildOutstandingFilters(options = {}) {
   const clauses = [];
   const params = [];
+
+  if (String(options.salesName || '').trim()) {
+    params.push(String(options.salesName).trim());
+    clauses.push(`lower(btrim(customer_sales_name)) = lower(btrim($${params.length}))`);
+  }
+  if (options.customerName) {
+    params.push(String(options.customerName).trim());
+    clauses.push(`lower(btrim(customer_rollup_name)) = lower(btrim($${params.length}))`);
+  }
 
   if (options.agingBucket) {
     appendOutstandingAgingBucketFilter(clauses, params, options.agingBucket);
@@ -4671,6 +4682,7 @@ function mapOutstandingOrderRow(row) {
 export async function getSalesOrderOutstandingPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildOutstandingFilters(options);
+  const salesSummaryFilter = buildOutstandingFilters(String(options.salesName || '').trim() ? options : {});
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
 
@@ -4703,8 +4715,9 @@ export async function getSalesOrderOutstandingPage(options = {}) {
           count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count,
           count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
         from outstanding_orders
+        ${salesSummaryFilter.whereSql}
       `,
-      [],
+      salesSummaryFilter.params,
     ),
   ]);
 
@@ -4736,6 +4749,11 @@ export async function getSalesOrderOutstandingPage(options = {}) {
 export function buildCustomerOutstandingFilters(options = {}) {
   const clauses = [];
   const params = [];
+
+  if (String(options.salesName || '').trim()) {
+    params.push(String(options.salesName).trim());
+    clauses.push(`lower(btrim(customer_sales_name)) = lower(btrim($${params.length}))`);
+  }
 
   appendOutstandingAgingBucketFilter(clauses, params, options.agingBucket);
   if (options.dateFrom) {
@@ -4790,6 +4808,7 @@ function mapCustomerOutstandingRollupRow(row) {
 export async function getCustomerOutstandingRollupPage(options = {}) {
   const { page, pageSize, offset } = parsePage(options);
   const { whereSql, params } = buildCustomerOutstandingFilters(options);
+  const salesSummaryFilter = buildCustomerOutstandingFilters(String(options.salesName || '').trim() ? options : {});
   const orderBySql = resolveCustomerOutstandingSort(options.sortBy);
   const limitIndex = params.length + 1;
   const offsetIndex = params.length + 2;
@@ -4832,10 +4851,7 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
       `,
       params,
     ),
-    // Sama seperti summary di getSalesOrderOutstandingPage: dihitung dari SELURUH outstanding_orders
-    // (tidak ikut whereSql) supaya kartu ringkasan tetap menggambarkan kondisi global, bukan hasil
-    // filter tabel. Digabung ke endpoint rollup ini supaya CustomerOutstandingPage.jsx cukup satu
-    // kali fetch untuk data tabel + ringkasan, bukan dua kali menjalankan outstandingOrdersCte().
+    // Tanpa Sales, kartu tetap global seperti sebelumnya. Dengan Sales, semua filter ikut berlaku.
     query(
       `
         ${outstandingOrdersCte()}
@@ -4852,8 +4868,9 @@ export async function getCustomerOutstandingRollupPage(options = {}) {
           count(*) filter (where aging_bucket = 'unknown')::int as unknown_due_date_count,
           count(*) filter (where ots_data_review_status = 'perlu_dicek')::int as needs_review_count
         from outstanding_orders
+        ${salesSummaryFilter.whereSql}
       `,
-      [],
+      salesSummaryFilter.params,
     ),
   ]);
 

@@ -55,6 +55,36 @@ test('customer outstanding CTE tidak lagi membatasi trip_date ke Juni-Agustus 20
   assert.match(sql, /where\s+outstanding_amount\s*>\s*0/i);
 });
 
+test('Sales OTS berasal dari Customer Master dan dikombinasikan dengan pencarian, tanggal, dan aging', () => {
+  const cte = outstandingOrdersCte();
+  assert.match(cte, /customer_sales_master\.sales_name as customer_sales_name/i);
+  assert.match(cte, /customer_sales_master\.id\s*=\s*so\.customer_id/i);
+  assert.match(cte, /left join customers customer_sales_master on customer_sales_master\.id = so\.customer_id/i);
+  const all = buildCustomerOutstandingFilters({});
+  assert.equal(all.whereSql, '');
+  assert.equal(buildCustomerOutstandingFilters({ salesName: '  ' }).whereSql, '');
+  const selected = buildCustomerOutstandingFilters({
+    salesName: ' Sales A ', query: 'ABC', dateFrom: '2026-09-01', agingBucket: 'overdue_all',
+  });
+  assert.match(selected.whereSql, /lower\(btrim\(customer_sales_name\)\)\s*=\s*lower\(btrim\(\$1\)\)/i);
+  assert.match(selected.whereSql, /customer_rollup_name ilike \$3/i);
+  assert.deepEqual(selected.params, ['Sales A', '2026-09-01', '%ABC%']);
+  const detail = buildOutstandingFilters({ salesName: 'Sales A', customerName: 'Customer ABC' });
+  assert.match(detail.whereSql, /customer_rollup_name\)\) = lower\(btrim\(\$2\)\)/i);
+  assert.deepEqual(detail.params, ['Sales A', 'Customer ABC']);
+  assert.deepEqual(buildCustomerOutstandingFilters({ salesName: 'Unknown Sales' }).params, ['Unknown Sales']);
+});
+
+test('export OTS mempertahankan filter Sales di SQL sebelum agregasi', async () => {
+  const calls = [];
+  await getCustomerOutstandingRollupExport({ salesName: 'Sales A', query: 'ABC' }, {
+    query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; },
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /from outstanding_orders\s+where lower\(btrim\(customer_sales_name\)\)/i);
+  assert.deepEqual(calls[0].params, ['Sales A', '%ABC%']);
+});
+
 test('outstanding CTE mengecualikan data historis sebelum Agustus tanpa nomor invoice', () => {
   const sql = outstandingOrdersCte();
 

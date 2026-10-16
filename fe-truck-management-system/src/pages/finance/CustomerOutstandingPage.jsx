@@ -8,6 +8,7 @@ import PageHeader from '../../components/common/PageHeader';
 import EmptyState from '../../components/common/EmptyState';
 import AttachmentUploadField from '../../components/common/AttachmentUploadField';
 import DocumentLink from '../../components/common/DocumentLink';
+import { fetchMaster } from '../../services/master-data/masterDataService';
 import SearchBar from './shared/SearchBar';
 import {
   fetchFinanceInvoicePayments,
@@ -665,6 +666,8 @@ function CustomerOutstandingPage() {
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [query, setQuery] = useState('');
+  const [salesName, setSalesName] = useState('');
+  const [salesOptions, setSalesOptions] = useState([]);
   const [agingBucket, setAgingBucket] = useState('');
   const [sortBy, setSortBy] = useState('outstanding_desc');
   const [dateFrom, setDateFrom] = useState('');
@@ -673,6 +676,7 @@ function CustomerOutstandingPage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
   const exportInFlightRef = useRef(false);
+  const detailRequestRef = useRef(0);
 
   const [detailCustomer, setDetailCustomer] = useState(null);
   const [detailRows, setDetailRows] = useState([]);
@@ -699,7 +703,7 @@ function CustomerOutstandingPage() {
       // Satu fetch saja: /finance/outstanding/by-customer sudah mengembalikan data tabel rollup
       // DAN summary sekaligus, supaya query outstanding yang berat tidak dijalankan dua kali
       // (dulu ada panggilan kedua ke fetchFinanceOutstanding({ pageSize: 1 }) hanya untuk summary).
-      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, agingBucket, sortBy, dateFrom, dateTo });
+      const rollup = await fetchFinanceOutstandingByCustomer({ page, pageSize: PAGE_SIZE, query, salesName, agingBucket, sortBy, dateFrom, dateTo });
       setCustomerRows(rollup?.rows || []);
       setTotal(Number(rollup?.total || 0));
       setTotalPages(Math.max(1, Number(rollup?.totalPages || 1)));
@@ -709,14 +713,26 @@ function CustomerOutstandingPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, query, agingBucket, sortBy, dateFrom, dateTo]);
+  }, [page, query, salesName, agingBucket, sortBy, dateFrom, dateTo]);
+
+  useEffect(() => {
+    let active = true;
+    fetchMaster('customers')
+      .then((customers) => {
+        if (active) setSalesOptions([...new Set((customers || []).map((customer) => customer.salesName?.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'id')));
+      })
+      .catch(() => {
+        if (active) setSalesOptions([]);
+      });
+    return () => { active = false; };
+  }, []);
 
   async function exportCustomerRows() {
     if (exportInFlightRef.current) return;
     exportInFlightRef.current = true;
     setExporting(true);
     try {
-      const result = await exportFinanceOutstandingByCustomer({ query, agingBucket, sortBy, dateFrom, dateTo });
+      const result = await exportFinanceOutstandingByCustomer({ query, salesName, agingBucket, sortBy, dateFrom, dateTo });
       const uniqueRows = Array.from(new Map((result?.rows || []).map((row) => [row.customer, row])).values());
       downloadCsv(
         'customer-outstanding',
@@ -735,15 +751,27 @@ function CustomerOutstandingPage() {
     loadData();
   }, [loadData]);
 
-  function loadDetailRows(customerName) {
+  async function loadDetailRows(customerName) {
+    const requestId = ++detailRequestRef.current;
     setDetailLoading(true);
     setDetailError('');
-    fetchFinanceOutstanding({ query: customerName, pageSize: DETAIL_PAGE_SIZE, dateFrom, dateTo })
-      .then((result) => setDetailRows((result?.rows || []).filter((row) => (
-        (row.customerRollupName || row.customer) === customerName
-      ))))
-      .catch((err) => setDetailError(err.message || 'Rincian invoice gagal dimuat.'))
-      .finally(() => setDetailLoading(false));
+    try {
+      const allRows = [];
+      let detailPage = 1;
+      let totalDetailPages = 1;
+      do {
+        const result = await fetchFinanceOutstanding({ query: customerName, customerName, salesName, page: detailPage, pageSize: DETAIL_PAGE_SIZE, dateFrom, dateTo });
+        if (requestId !== detailRequestRef.current) return;
+        allRows.push(...(result?.rows || []));
+        totalDetailPages = Number(result?.totalPages || 1);
+        detailPage += 1;
+      } while (detailPage <= totalDetailPages);
+      setDetailRows(allRows);
+    } catch (err) {
+      if (requestId === detailRequestRef.current) setDetailError(err.message || 'Rincian invoice gagal dimuat.');
+    } finally {
+      if (requestId === detailRequestRef.current) setDetailLoading(false);
+    }
   }
 
   function openDetailModal(row) {
@@ -753,6 +781,7 @@ function CustomerOutstandingPage() {
   }
 
   function closeDetailModal() {
+    detailRequestRef.current += 1;
     setDetailCustomer(null);
     setDetailRows([]);
     setDetailError('');
@@ -971,6 +1000,13 @@ function CustomerOutstandingPage() {
                 placeholder="Nama customer"
                 value={query}
               />
+            </label>
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+              Sales
+              <select className="master-filter-select" value={salesName} onChange={(event) => { setPage(1); setSalesName(event.target.value); closeDetailModal(); }}>
+                <option value="">Semua Sales</option>
+                {salesOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
             </label>
             <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
               Trip Date Dari
