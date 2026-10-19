@@ -1,6 +1,6 @@
 # Alur kerja branch
 
-Repo ini memakai `sync-production-development` sebagai branch kerja bersama. `main` masih menjadi default GitHub dan berisi baseline lama; jangan memakainya sebagai dasar fitur baru sampai riwayat rilis dan development diselaraskan. Branch `release/*` dan `production/*` dapat menjadi acuan deployment, sehingga penghapusannya perlu pemeriksaan server terlebih dahulu.
+Repo ini memakai `sync-production-development` sebagai branch kerja bersama dan default GitHub. `main` tetap disimpan sebagai baseline lama; jangan memakainya sebagai dasar fitur baru sampai riwayat rilis dan development diselaraskan. Branch rilis lama dan hash asalnya tercatat di [arsip branch](docs/BRANCH_ARCHIVE_2026-10-19.md).
 
 ## Memulai pekerjaan
 
