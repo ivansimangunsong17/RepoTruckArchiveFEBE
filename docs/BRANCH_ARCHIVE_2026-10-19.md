@@ -2,7 +2,7 @@
 
 Repo ini memakai `sync-production-development` sebagai branch kerja dan default GitHub. `main` tetap disimpan. Pemilik menyatakan server produksi memakai `sync-production-development` pada 19 Oktober 2026; konfigurasi server belum diperiksa langsung.
 
-Sebelum branch lama dihapus, 14 tag `archive/2026-10-19/*` dibuat untuk menjaga ujung riwayat yang belum dijangkau `main`, `sync-production-development`, atau tag produksi yang sudah ada. Pemeriksaan `git rev-list` menunjukkan **0 commit yang tidak terjangkau** setelah tag arsip dibuat. Dua hotfix yang sudah menjadi leluhur branch kerja dihapus lebih dulu.
+Sebelum branch lama dihapus, 15 tag `archive/2026-10-19/*` dibuat untuk menjaga ujung riwayat yang belum dijangkau `main`, `sync-production-development`, atau tag produksi yang sudah ada. Pemeriksaan `git rev-list` menunjukkan **0 commit yang tidak terjangkau** setelah tag arsip dibuat. Dua hotfix yang sudah menjadi leluhur branch kerja dihapus lebih dulu. Branch WIP lokal juga diarsipkan karena memiliki 11 commit tersendiri.
 
 Untuk memulihkan branch lama, ambil tag dan commit terbaru dengan `git fetch --tags origin`, lalu jalankan `git switch -c nama-branch <SHA>` dan `git push -u origin nama-branch`. Nama branch dan SHA aslinya tercatat di bawah.
 
@@ -47,6 +47,7 @@ Untuk memulihkan branch lama, ambil tag dan commit terbaru dengan `git fetch --t
 | `release/repo-flow-vehicle-size-20261008` | `2fd966af3dff0043a2cd049e8f92a03f1ed81e71` |
 | `release/repo-pickup-confirm-dialog-20261008` | `ba7b1bbc7d09589d2da42544e6ac99fcfd6647bb` |
 | `release/vendor-sales-outstanding-filter-20261016` | `6bdbd65e05f12d8bd2c3de8f402c9b8ed00b0b4d` |
+| `wip/group-i-local-20261003` (lokal) | `0c74ded37d694637cd2eb4ed0a6c89e4d42e9bb3` |
 
 ## Tag arsip
 
@@ -64,3 +65,4 @@ Untuk memulihkan branch lama, ambil tag dan commit terbaru dengan `git fetch --t
 - `archive/2026-10-19/release/finance-document-20mb-20261009`
 - `archive/2026-10-19/release/repo-flow-vehicle-size-20261008`
 - `archive/2026-10-19/release/vendor-sales-outstanding-filter-20261016`
+- `archive/2026-10-19/wip/group-i-local-20261003`
