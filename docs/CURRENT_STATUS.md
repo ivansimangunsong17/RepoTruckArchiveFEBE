@@ -1,12 +1,19 @@
 # Current Project Status
 
+## Pemeriksaan production (19 Oktober 2026; laporan pemeriksaan server read-only)
+
+- Backend production online dari folder rilis `operational-date-final-ritasi-20261010-aebb256b`. File backend yang diperiksa cocok dengan commit `aebb256b261619d9878c85f9131a7267c7435e2c`; API merespons HTTP 200.
+- `aebb256` adalah leluhur branch kerja/default GitHub `sync-production-development`. Perubahan setelah commit tersebut belum otomatis menjadi versi production dan memerlukan proses deployment.
+- Versi frontend yang sedang disajikan belum terverifikasi melalui pemeriksaan ini. Tidak ada perubahan konfigurasi atau file server dalam pemeriksaan tersebut.
+- Catatan produksi tertanggal 5 Oktober di bawah adalah riwayat, bukan status server saat ini.
+
 ## Development update (2026-10-12, `sync-production-development`)
 
 - Finance Customer Outstanding now filters by the Customer Master `customers.sales_name` (not SO creator). The selected Sales scopes rollup, KPI totals and aging, invoice detail, search/date combinations, pagination, and CSV export. “Semua Sales” retains the prior global KPI behavior. Customers without a Sales assignment remain visible only under “Semua Sales”; no live database was queried to count them.
 - Finance has read access to existing Container Job list/detail, expense summary, assignment history, documents under existing document authorization, and lifecycle timeline through a read-only page. Container Job execution mutations remain denied; the two legacy proof upload handlers explicitly reject Finance with 403.
 - No migration or deployment was performed. Database integration tests were withheld because a dedicated scratch database was not confirmed.
 
-Last Updated: 2026-10-12 — development branch `sync-production-development`; see the development update above. Production status in older sections is a historical snapshot.
+Development snapshot last updated: 2026-10-12 — branch `sync-production-development`. Production status in older sections is a historical snapshot.
 
 ## Stable / Implemented
 

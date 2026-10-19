@@ -16,7 +16,7 @@ Hindari push langsung dan force push ke `main` atau `sync-production-development
 
 ## Rilis dan pembersihan branch
 
-Catat tanggal deployment, hash commit, dan sumber kode backend serta frontend setiap kali merilis. Backend dijalankan melalui PM2, sedangkan frontend disajikan dari hasil build `dist`; hash checkout backend saja tidak membuktikan versi frontend yang sedang aktif. Lihat [dokumentasi PM2](docs/PM2.md).
+Catat tanggal deployment, hash commit, dan sumber kode backend serta frontend setiap kali merilis. Branch default GitHub adalah branch kerja, bukan versi yang otomatis berjalan di server. Pada pemeriksaan read-only yang dilaporkan 19 Oktober 2026, backend production masih berjalan dari folder rilis `operational-date-final-ritasi-20261010-aebb256b` dan cocok dengan commit `aebb256`; perubahan setelah commit itu perlu deployment tersendiri. Backend dijalankan melalui PM2, sedangkan frontend disajikan dari hasil build `dist`; hash backend saja tidak membuktikan versi frontend yang sedang aktif. Lihat [dokumentasi PM2](docs/PM2.md).
 
 Sebelum menghapus branch lama:
 

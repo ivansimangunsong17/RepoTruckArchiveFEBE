@@ -1,6 +1,6 @@
 # Arsip branch 19 Oktober 2026
 
-Repo ini memakai `sync-production-development` sebagai branch kerja dan default GitHub. `main` tetap disimpan. Pemilik menyatakan server produksi memakai `sync-production-development` pada 19 Oktober 2026; konfigurasi server belum diperiksa langsung.
+Repo ini memakai `sync-production-development` sebagai branch kerja dan default GitHub. `main` tetap disimpan. Saat penataan branch, produksi diasumsikan memakai `sync-production-development`. Pemeriksaan server secara read-only yang kemudian disampaikan pemilik pada 19 Oktober 2026 menunjukkan backend sebenarnya berjalan dari folder rilis `operational-date-final-ritasi-20261010-aebb256b`, dengan file backend cocok dengan commit `aebb256` dan API merespons 200. Server tidak menjalankan branch GitHub secara langsung; versi frontend yang aktif belum terverifikasi. Perubahan default branch dan penghapusan branch lama tidak melakukan deployment. Jika proses rilis eksternal memerlukan nama branch lama, pulihkan dari SHA di bawah atau tag arsip.
 
 Sebelum branch lama dihapus, 15 tag `archive/2026-10-19/*` dibuat untuk menjaga ujung riwayat yang belum dijangkau `main`, `sync-production-development`, atau tag produksi yang sudah ada. Pemeriksaan `git rev-list` menunjukkan **0 commit yang tidak terjangkau** setelah tag arsip dibuat. Dua hotfix yang sudah menjadi leluhur branch kerja dihapus lebih dulu. Branch WIP lokal juga diarsipkan karena memiliki 11 commit tersendiri.
 
