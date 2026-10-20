@@ -98,6 +98,9 @@ const DEFAULT_LOCATION_PERFORMANCE_SUMMARY = {
   totalLocations: 0,
   locationsWithTrips: 0,
   unmappedTrips: 0,
+  unmappedOrders: 0,
+  unmappedCustomers: 0,
+  unmappedDestinations: 0,
   totalTrips: 0,
   totalVolume: 0,
   totalRevenue: 0,
@@ -3100,6 +3103,9 @@ function ReportsPage() {
           totalLocations: Number(result?.summary?.totalLocations || 0),
           locationsWithTrips: Number(result?.summary?.locationsWithTrips || 0),
           unmappedTrips: Number(result?.summary?.unmappedTrips || 0),
+          unmappedOrders: Number(result?.summary?.unmappedOrders || 0),
+          unmappedCustomers: Number(result?.summary?.unmappedCustomers || 0),
+          unmappedDestinations: Number(result?.summary?.unmappedDestinations || 0),
           totalTrips: Number(result?.summary?.totalTrips || 0),
           totalVolume: Number(result?.summary?.totalVolume || 0),
           totalRevenue: Number(result?.summary?.totalRevenue || 0),
@@ -3619,11 +3625,22 @@ function ReportsPage() {
             <h2 className="text-sm font-bold text-slate-950">Detail Location Performance</h2>
             <p className="text-xs text-slate-500">
               Trip dan revenue jasa angkut berdasarkan lokasi/gudang pada Master Lokasi untuk {activeMonthLabel} {year}.
+              {' '}Kontribusi dihitung dari jumlah trip lokasi dibandingkan total trip periode.
             </p>
           </div>
 
           {locationPerformanceLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan performa lokasi...</div> : null}
           {!locationPerformanceLoading && locationPerformanceError ? <div className="p-4 text-sm text-red-600">{locationPerformanceError}</div> : null}
+          {!locationPerformanceLoading && !locationPerformanceError && locationPerformanceSummary.unmappedTrips > 0 ? (
+            <div className="mx-3 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <strong className="block">Data belum terpetakan</strong>
+              <span>
+                {locationPerformanceSummary.unmappedTrips} trip, {locationPerformanceSummary.unmappedOrders} order unik,
+                {' '}{locationPerformanceSummary.unmappedCustomers} customer unik, dan {locationPerformanceSummary.unmappedDestinations} tujuan
+                {' '}belum terhubung ke Master Lokasi. Data tetap dihitung dalam total dan tidak diubah otomatis.
+              </span>
+            </div>
+          ) : null}
 
           {!locationPerformanceLoading && !locationPerformanceError && locationPerformanceRows.length ? (
             <DetailTable
@@ -3631,7 +3648,7 @@ function ReportsPage() {
                 { label: 'No' }, { label: 'Lokasi / Gudang' }, { label: 'Tujuan' },
                 { label: 'Customer', align: 'right' }, { label: 'Trip', align: 'right' },
                 { label: '20FT', align: 'right' }, { label: '40FT', align: 'right' },
-                { label: 'Kontribusi', align: 'right' }, { label: 'Revenue', align: 'right' },
+                { label: 'Kontribusi Trip', align: 'right' }, { label: 'Revenue', align: 'right' },
                 { label: 'AVG Revenue/Trip', align: 'right' },
               ]}
               rows={locationPerformanceRows}
@@ -3641,13 +3658,38 @@ function ReportsPage() {
                   <td className="px-3 py-2" data-label="Lokasi / Gudang">
                     <strong className="block text-slate-950">{location.locationName || 'Tanpa Lokasi'}</strong>
                     <span className="text-[11px] text-slate-500">{location.completedOrders || 0} order selesai</span>
+                    {!location.locationId ? (
+                      <span className="mt-1 block w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                        {location.mappingLabel || 'Data belum terpetakan'}
+                      </span>
+                    ) : null}
                   </td>
-                  <td className="px-3 py-2" data-label="Tujuan">{location.destinationName || '-'}</td>
+                  <td className="px-3 py-2 align-top" data-label="Tujuan">
+                    <strong className="text-slate-800">{location.destinationName || '-'}</strong>
+                    {Array.isArray(location.destinations) && location.destinations.length > 1 ? (
+                      <details className="mt-1 min-w-52">
+                        <summary className="cursor-pointer text-[11px] font-semibold text-emerald-700">Lihat rincian trip per tujuan</summary>
+                        <div className="mt-1 overflow-hidden rounded-md border border-slate-200 bg-white">
+                          {location.destinations.map((destination) => (
+                            <div className="grid grid-cols-[minmax(7rem,1fr)_auto] gap-2 border-b border-slate-100 px-2 py-1.5 text-[11px] last:border-b-0" key={destination.destinationId || destination.destinationName}>
+                              <div>
+                                <strong className="block text-slate-800">{destination.destinationName || 'Tanpa Tujuan'}</strong>
+                                <span className="text-slate-500">
+                                  {destination.container20ft || 0}x20FT | {destination.container40ft || 0}x40FT | {formatCurrency(destination.totalRevenue)}
+                                </span>
+                              </div>
+                              <strong className="whitespace-nowrap text-emerald-700">{destination.totalTrips || 0} trip</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2 text-right font-semibold" data-label="Customer">{location.customerCount || 0}</td>
                   <td className="px-3 py-2 text-right" data-label="Trip"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{location.totalTrips || 0}</span></td>
                   <td className="px-3 py-2 text-right font-semibold" data-label="20FT">{location.container20ft || 0}</td>
                   <td className="px-3 py-2 text-right font-semibold" data-label="40FT">{location.container40ft || 0}</td>
-                  <td className="px-3 py-2 text-right font-semibold" data-label="Kontribusi">{Number(location.contributionPercent || 0).toFixed(1)}%</td>
+                  <td className="px-3 py-2 text-right font-semibold" data-label="Kontribusi Trip">{Number(location.contributionPercent || 0).toFixed(1)}%</td>
                   <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(location.totalRevenue)}</td>
                   <td className="px-3 py-2 text-right font-semibold" data-label="AVG Revenue/Trip">{formatCurrency(location.averageRevenuePerTrip)}</td>
                 </tr>

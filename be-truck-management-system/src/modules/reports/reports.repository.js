@@ -526,21 +526,42 @@ function normalizeLocationName(row = {}) {
   ).trim() || 'Tanpa Lokasi';
 }
 
+function normalizeDestinationName(row = {}) {
+  return String(
+    row.destination_name
+    || row.destinationName
+    || row.destination
+    || 'Tanpa Tujuan',
+  ).trim() || 'Tanpa Tujuan';
+}
+
+function createDestinationPerformanceSummary(row = {}) {
+  const destinationId = String(row.destination_id || row.destinationId || '').trim();
+  return {
+    destinationId: destinationId || null,
+    destinationName: normalizeDestinationName(row),
+    totalTrips: 0,
+    totalRevenue: 0,
+    container20ft: 0,
+    container40ft: 0,
+  };
+}
+
 export function buildLocationPerformanceRows(rows = []) {
   const locationMap = new Map();
 
   rows.forEach((row) => {
     const locationId = String(row.location_id || row.locationId || '').trim();
-    const locationName = normalizeLocationName(row);
-    const locationKey = locationId || `name:${locationName.toLowerCase()}`;
+    const locationName = locationId ? normalizeLocationName(row) : 'Tanpa Lokasi';
+    const locationKey = locationId ? `id:${locationId}` : 'unmapped';
     if (!locationMap.has(locationKey)) {
       locationMap.set(locationKey, {
         locationId: locationId || null,
         locationName,
-        destinationName: String(row.destination_name || row.destinationName || '').trim(),
         operationalStatus: String(row.operational_status || row.operationalStatus || '').trim(),
         customerKeys: new Set(),
         orderKeys: new Set(),
+        destinationMap: new Map(),
         totalTrips: 0,
         totalRevenue: 0,
         container20ft: 0,
@@ -553,32 +574,71 @@ export function buildLocationPerformanceRows(rows = []) {
     const orderKey = normalizeSalesOrderId(row);
     const revenue = calculateCompletedJobRevenue(row);
     const size = String(row.container_size || row.containerSize || row.size || '').trim().toUpperCase().replace(/\s/g, '');
+    const destinationId = String(row.destination_id || row.destinationId || '').trim();
+    const destinationName = normalizeDestinationName(row);
+    const destinationKey = destinationId ? `id:${destinationId}` : `name:${destinationName.toLowerCase()}`;
+
+    if (!location.destinationMap.has(destinationKey)) {
+      location.destinationMap.set(destinationKey, createDestinationPerformanceSummary(row));
+    }
+    const destination = location.destinationMap.get(destinationKey);
 
     if (customer) location.customerKeys.add(customer.toLowerCase());
     if (orderKey) location.orderKeys.add(orderKey);
     location.totalTrips += 1;
     location.totalRevenue += revenue;
-    if (size === '20FT') location.container20ft += 1;
-    if (size === '40FT') location.container40ft += 1;
+    destination.totalTrips += 1;
+    destination.totalRevenue += revenue;
+    if (size === '20FT') {
+      location.container20ft += 1;
+      destination.container20ft += 1;
+    }
+    if (size === '40FT') {
+      location.container40ft += 1;
+      destination.container40ft += 1;
+    }
   });
 
   const totalTrips = rows.length;
   return Array.from(locationMap.values())
-    .map((location) => ({
-      locationId: location.locationId,
-      locationName: location.locationName,
-      destinationName: location.destinationName,
-      operationalStatus: location.operationalStatus,
-      customerCount: location.customerKeys.size,
-      completedOrders: location.orderKeys.size,
-      totalTrips: location.totalTrips,
-      totalVolume: location.totalTrips,
-      totalRevenue: location.totalRevenue,
-      averageRevenuePerTrip: location.totalTrips ? location.totalRevenue / location.totalTrips : 0,
-      contributionPercent: totalTrips ? (location.totalTrips / totalTrips) * 100 : 0,
-      container20ft: location.container20ft,
-      container40ft: location.container40ft,
-    }))
+    .map((location) => {
+      const destinations = Array.from(location.destinationMap.values())
+        .map((destination) => ({
+          ...destination,
+          averageRevenuePerTrip: destination.totalTrips
+            ? destination.totalRevenue / destination.totalTrips
+            : 0,
+        }))
+        .sort((left, right) => {
+          if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+          if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+          return left.destinationName.localeCompare(right.destinationName, 'id');
+        });
+      const destinationCount = destinations.length;
+
+      return {
+        locationId: location.locationId,
+        locationName: location.locationName,
+        mappingStatus: location.locationId ? 'mapped' : 'unmapped',
+        mappingLabel: location.locationId ? '' : 'Data belum terpetakan',
+        destinationName: destinationCount === 1
+          ? destinations[0].destinationName
+          : `Beragam (${destinationCount} tujuan)`,
+        destinationCount,
+        destinations,
+        operationalStatus: location.operationalStatus,
+        customerCount: location.customerKeys.size,
+        completedOrders: location.orderKeys.size,
+        totalTrips: location.totalTrips,
+        totalVolume: location.totalTrips,
+        totalRevenue: location.totalRevenue,
+        averageRevenuePerTrip: location.totalTrips ? location.totalRevenue / location.totalTrips : 0,
+        contributionPercent: totalTrips ? (location.totalTrips / totalTrips) * 100 : 0,
+        contributionBasis: 'trip',
+        container20ft: location.container20ft,
+        container40ft: location.container40ft,
+      };
+    })
     .sort((left, right) => {
       if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
       if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
@@ -588,6 +648,7 @@ export function buildLocationPerformanceRows(rows = []) {
 
 export function summarizeLocationPerformanceRows(rows = []) {
   const mappedRows = rows.filter((row) => row.locationId);
+  const unmappedRow = rows.find((row) => !row.locationId);
   const totalTrips = rows.reduce((total, row) => total + Number(row.totalTrips || 0), 0);
   const totalRevenue = rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
   const mappedRevenue = mappedRows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
@@ -597,6 +658,9 @@ export function summarizeLocationPerformanceRows(rows = []) {
     totalLocations: mappedRows.length,
     locationsWithTrips: mappedRows.filter((row) => Number(row.totalTrips || 0) > 0).length,
     unmappedTrips: rows.filter((row) => !row.locationId).reduce((total, row) => total + Number(row.totalTrips || 0), 0),
+    unmappedOrders: Number(unmappedRow?.completedOrders || 0),
+    unmappedCustomers: Number(unmappedRow?.customerCount || 0),
+    unmappedDestinations: Number(unmappedRow?.destinationCount || 0),
     totalTrips,
     totalVolume: totalTrips,
     totalRevenue,
@@ -1492,7 +1556,8 @@ export async function getLocationPerformanceReport(options = {}) {
           coalesce(cj.warehouse_location_id, so.warehouse_location_id) as location_id,
           coalesce(eu.name, cj.warehouse_location_name_snapshot, so.warehouse_location_name_snapshot, 'Tanpa Lokasi') as location_name,
           eu.operational_status,
-          dl.name as destination_name,
+          coalesce(cj.destination_id, so.destination_id, eu.destination_id) as destination_id,
+          coalesce(dl.name, nullif(trim(cj.destination), ''), nullif(trim(so.destination), ''), 'Tanpa Tujuan') as destination_name,
           so.price,
           so.total_amount,
           to_jsonb(so)->'line_items' as line_items,

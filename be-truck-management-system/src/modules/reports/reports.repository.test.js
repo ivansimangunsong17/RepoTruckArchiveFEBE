@@ -432,7 +432,7 @@ test('sales performance memakai sales dari master customer sebagai prioritas', (
   assert.equal(rows[1].totalRevenue, 1500000);
 });
 
-test('location performance menggabungkan trip berdasarkan Master Lokasi dan mempertahankan data tanpa lokasi', () => {
+test('location performance menampilkan nama tujuan saat satu lokasi hanya memiliki satu tujuan', () => {
   const rows = buildLocationPerformanceRows([
     {
       id: 'so-1', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_name: 'Cikarang',
@@ -442,30 +442,91 @@ test('location performance menggabungkan trip berdasarkan Master Lokasi dan memp
       id: 'so-2', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_name: 'Cikarang',
       operational_status: 'Aktif', customer_name: 'Customer B', price: 2500000, container_size: '40FT',
     },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].destinationName, 'Cikarang');
+  assert.equal(rows[0].destinationCount, 1);
+  assert.equal(rows[0].mappingStatus, 'mapped');
+  assert.equal(rows[0].contributionBasis, 'trip');
+  assert.deepEqual(rows[0].destinations, [{
+    destinationId: null,
+    destinationName: 'Cikarang',
+    totalTrips: 2,
+    totalRevenue: 4000000,
+    container20ft: 1,
+    container40ft: 1,
+    averageRevenuePerTrip: 2000000,
+  }]);
+});
+
+test('location performance menampilkan Beragam dan rincian tujuan tanpa mengubah total utama', () => {
+  const rows = buildLocationPerformanceRows([
     {
-      id: 'so-3', location_id: null, location_name: 'Tanpa Lokasi', customer_name: 'Customer C',
-      price: 1000000, container_size: '20FT',
+      id: 'so-1', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_id: 'dest-a',
+      destination_name: 'Cikarang', customer_name: 'Customer A', price: 1500000, container_size: '20FT',
+    },
+    {
+      id: 'so-1', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_id: 'dest-a',
+      destination_name: 'Cikarang', customer_name: 'Customer A', price: 1500000, container_size: '20FT',
+    },
+    {
+      id: 'so-2', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_id: 'dest-b',
+      destination_name: 'Brebes', customer_name: 'Customer A', price: 2500000, container_size: '40FT',
     },
   ]);
 
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows[0], {
-    locationId: 'loc-1', locationName: 'Gudang Alpha', destinationName: 'Cikarang', operationalStatus: 'Aktif',
-    customerCount: 2, completedOrders: 2, totalTrips: 2, totalVolume: 2, totalRevenue: 4000000,
-    averageRevenuePerTrip: 2000000, contributionPercent: (2 / 3) * 100, container20ft: 1, container40ft: 1,
-  });
-  assert.equal(rows[1].locationId, null);
-  assert.equal(rows[1].totalTrips, 1);
+  const [location] = rows;
+  assert.equal(location.destinationName, 'Beragam (2 tujuan)');
+  assert.equal(location.destinationCount, 2);
+  assert.equal(location.totalTrips, 3);
+  assert.equal(location.completedOrders, 2);
+  assert.equal(location.customerCount, 1);
+  assert.equal(location.container20ft, 2);
+  assert.equal(location.container40ft, 1);
+  assert.equal(location.totalRevenue, 5500000);
+  assert.equal(location.destinations.reduce((total, row) => total + row.totalTrips, 0), location.totalTrips);
+  assert.equal(location.destinations.reduce((total, row) => total + row.container20ft, 0), location.container20ft);
+  assert.equal(location.destinations.reduce((total, row) => total + row.container40ft, 0), location.container40ft);
+  assert.equal(location.destinations.reduce((total, row) => total + row.totalRevenue, 0), location.totalRevenue);
+  assert.deepEqual(location.destinations.map((row) => [row.destinationName, row.totalTrips]), [
+    ['Cikarang', 2],
+    ['Brebes', 1],
+  ]);
+});
+
+test('location performance menyatukan transaksi tanpa lokasi dan menandainya sebagai data belum terpetakan', () => {
+  const rows = buildLocationPerformanceRows([
+    {
+      id: 'so-1', location_id: null, location_name: 'Snapshot Lama A', destination_name: 'Cikarang',
+      customer_name: 'Customer A', price: 1500000, container_size: '20FT',
+    },
+    {
+      id: 'so-2', location_id: null, location_name: 'Snapshot Lama B', destination_name: 'Brebes',
+      customer_name: 'Customer B', price: 2500000, container_size: '40FT',
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].locationId, null);
+  assert.equal(rows[0].locationName, 'Tanpa Lokasi');
+  assert.equal(rows[0].mappingStatus, 'unmapped');
+  assert.equal(rows[0].mappingLabel, 'Data belum terpetakan');
+  assert.equal(rows[0].destinationName, 'Beragam (2 tujuan)');
+  assert.equal(rows[0].totalTrips, 2);
   assert.deepEqual(summarizeLocationPerformanceRows(rows), {
-    totalLocations: 1,
-    locationsWithTrips: 1,
-    unmappedTrips: 1,
-    totalTrips: 3,
-    totalVolume: 3,
-    totalRevenue: 5000000,
-    averageRevenuePerLocation: 4000000,
-    topLocation: 'Gudang Alpha',
-    topLocationTrips: 2,
+    totalLocations: 0,
+    locationsWithTrips: 0,
+    unmappedTrips: 2,
+    unmappedOrders: 2,
+    unmappedCustomers: 2,
+    unmappedDestinations: 2,
+    totalTrips: 2,
+    totalVolume: 2,
+    totalRevenue: 4000000,
+    averageRevenuePerLocation: 0,
+    topLocation: '',
+    topLocationTrips: 0,
   });
 });
 
