@@ -34,6 +34,10 @@ export function fetchCustomerPerformanceReport(params = {}) {
   return httpClient.get(`/reports/customer-performance${buildQuery(params)}`);
 }
 
+export function fetchLocationPerformanceReport(params = {}) {
+  return httpClient.get(`/reports/location-performance${buildQuery(params)}`);
+}
+
 export function fetchOperationReport(params = {}) {
   return httpClient.get(`/reports/operations${buildQuery(params)}`);
 }

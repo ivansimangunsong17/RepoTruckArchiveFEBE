@@ -11,7 +11,7 @@ describe('navigationGroups', () => {
   it('menampilkan menu finance untuk admin, finance, dan viewer', () => {
     const financeItems = groupItems('Finance').filter((item) => item.to.startsWith('/finance'));
 
-    expect(financeItems).toHaveLength(5);
+    expect(financeItems).toHaveLength(6);
     financeItems.forEach((item) => {
       expect(item.roles).toEqual([USER_ROLES.ADMIN, USER_ROLES.OBSERVER, USER_ROLES.FINANCE]);
     });
@@ -108,6 +108,7 @@ describe('navigationGroups', () => {
       '/finance/driver-commissions',
       '/finance/invoices',
       '/finance/outstanding',
+      '/finance/container-jobs',
     ]);
     expect(viewerItems.map((item) => item.to)).not.toContain('/document-monitoring');
   });

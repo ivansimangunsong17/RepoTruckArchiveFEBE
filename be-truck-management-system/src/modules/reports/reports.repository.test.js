@@ -8,11 +8,13 @@ const {
   buildMonthlyComparisonRows,
   applyUtilizationChassisCorrectionsToRows,
   buildDriverPerformanceRows,
+  buildLocationPerformanceRows,
   mergeDriverPerformanceTripCounts,
   buildSalesPerformanceRows,
   calculateCompletedJobRevenue,
   calculateDriverCommissionAmount,
   summarizeCustomerPerformanceRows,
+  summarizeLocationPerformanceRows,
   summarizeSalesPerformanceRows,
   splitDriverCommissionPaymentAmount,
   DASHBOARD_SO_NUMBER_SQL,
@@ -428,6 +430,43 @@ test('sales performance memakai sales dari master customer sebagai prioritas', (
   assert.equal(rows[0].salesName, 'Sales Pembuat SO');
   assert.equal(rows[1].salesName, 'Sales Master Customer');
   assert.equal(rows[1].totalRevenue, 1500000);
+});
+
+test('location performance menggabungkan trip berdasarkan Master Lokasi dan mempertahankan data tanpa lokasi', () => {
+  const rows = buildLocationPerformanceRows([
+    {
+      id: 'so-1', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_name: 'Cikarang',
+      operational_status: 'Aktif', customer_name: 'Customer A', price: 1500000, container_size: '20FT',
+    },
+    {
+      id: 'so-2', location_id: 'loc-1', location_name: 'Gudang Alpha', destination_name: 'Cikarang',
+      operational_status: 'Aktif', customer_name: 'Customer B', price: 2500000, container_size: '40FT',
+    },
+    {
+      id: 'so-3', location_id: null, location_name: 'Tanpa Lokasi', customer_name: 'Customer C',
+      price: 1000000, container_size: '20FT',
+    },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], {
+    locationId: 'loc-1', locationName: 'Gudang Alpha', destinationName: 'Cikarang', operationalStatus: 'Aktif',
+    customerCount: 2, completedOrders: 2, totalTrips: 2, totalVolume: 2, totalRevenue: 4000000,
+    averageRevenuePerTrip: 2000000, contributionPercent: (2 / 3) * 100, container20ft: 1, container40ft: 1,
+  });
+  assert.equal(rows[1].locationId, null);
+  assert.equal(rows[1].totalTrips, 1);
+  assert.deepEqual(summarizeLocationPerformanceRows(rows), {
+    totalLocations: 1,
+    locationsWithTrips: 1,
+    unmappedTrips: 1,
+    totalTrips: 3,
+    totalVolume: 3,
+    totalRevenue: 5000000,
+    averageRevenuePerLocation: 4000000,
+    topLocation: 'Gudang Alpha',
+    topLocationTrips: 2,
+  });
 });
 
 test('customer performance menggabungkan revenue periode dan outstanding aktif', () => {
