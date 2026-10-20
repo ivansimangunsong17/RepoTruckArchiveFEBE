@@ -516,6 +516,96 @@ export function summarizeSalesPerformanceRows(rows = []) {
   };
 }
 
+function normalizeLocationName(row = {}) {
+  return String(
+    row.location_name
+    || row.locationName
+    || row.warehouse_location_name_snapshot
+    || row.warehouseLocationNameSnapshot
+    || 'Tanpa Lokasi',
+  ).trim() || 'Tanpa Lokasi';
+}
+
+export function buildLocationPerformanceRows(rows = []) {
+  const locationMap = new Map();
+
+  rows.forEach((row) => {
+    const locationId = String(row.location_id || row.locationId || '').trim();
+    const locationName = normalizeLocationName(row);
+    const locationKey = locationId || `name:${locationName.toLowerCase()}`;
+    if (!locationMap.has(locationKey)) {
+      locationMap.set(locationKey, {
+        locationId: locationId || null,
+        locationName,
+        destinationName: String(row.destination_name || row.destinationName || '').trim(),
+        operationalStatus: String(row.operational_status || row.operationalStatus || '').trim(),
+        customerKeys: new Set(),
+        orderKeys: new Set(),
+        totalTrips: 0,
+        totalRevenue: 0,
+        container20ft: 0,
+        container40ft: 0,
+      });
+    }
+
+    const location = locationMap.get(locationKey);
+    const customer = normalizeCustomerName(row);
+    const orderKey = normalizeSalesOrderId(row);
+    const revenue = calculateCompletedJobRevenue(row);
+    const size = String(row.container_size || row.containerSize || row.size || '').trim().toUpperCase().replace(/\s/g, '');
+
+    if (customer) location.customerKeys.add(customer.toLowerCase());
+    if (orderKey) location.orderKeys.add(orderKey);
+    location.totalTrips += 1;
+    location.totalRevenue += revenue;
+    if (size === '20FT') location.container20ft += 1;
+    if (size === '40FT') location.container40ft += 1;
+  });
+
+  const totalTrips = rows.length;
+  return Array.from(locationMap.values())
+    .map((location) => ({
+      locationId: location.locationId,
+      locationName: location.locationName,
+      destinationName: location.destinationName,
+      operationalStatus: location.operationalStatus,
+      customerCount: location.customerKeys.size,
+      completedOrders: location.orderKeys.size,
+      totalTrips: location.totalTrips,
+      totalVolume: location.totalTrips,
+      totalRevenue: location.totalRevenue,
+      averageRevenuePerTrip: location.totalTrips ? location.totalRevenue / location.totalTrips : 0,
+      contributionPercent: totalTrips ? (location.totalTrips / totalTrips) * 100 : 0,
+      container20ft: location.container20ft,
+      container40ft: location.container40ft,
+    }))
+    .sort((left, right) => {
+      if (right.totalTrips !== left.totalTrips) return right.totalTrips - left.totalTrips;
+      if (right.totalRevenue !== left.totalRevenue) return right.totalRevenue - left.totalRevenue;
+      return left.locationName.localeCompare(right.locationName, 'id');
+    });
+}
+
+export function summarizeLocationPerformanceRows(rows = []) {
+  const mappedRows = rows.filter((row) => row.locationId);
+  const totalTrips = rows.reduce((total, row) => total + Number(row.totalTrips || 0), 0);
+  const totalRevenue = rows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
+  const mappedRevenue = mappedRows.reduce((total, row) => total + Number(row.totalRevenue || 0), 0);
+  const topLocation = mappedRows[0];
+
+  return {
+    totalLocations: mappedRows.length,
+    locationsWithTrips: mappedRows.filter((row) => Number(row.totalTrips || 0) > 0).length,
+    unmappedTrips: rows.filter((row) => !row.locationId).reduce((total, row) => total + Number(row.totalTrips || 0), 0),
+    totalTrips,
+    totalVolume: totalTrips,
+    totalRevenue,
+    averageRevenuePerLocation: mappedRows.length ? mappedRevenue / mappedRows.length : 0,
+    topLocation: topLocation?.locationName || '',
+    topLocationTrips: Number(topLocation?.totalTrips || 0),
+  };
+}
+
 function normalizeCustomerKey(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -1377,6 +1467,62 @@ export async function getCustomerPerformanceReport(options = {}) {
     rows,
     total: rows.length,
     summary: summarizeCustomerPerformanceRows(rows),
+  };
+}
+
+export async function getLocationPerformanceReport(options = {}) {
+  const period = parseRevenuePeriod(options);
+  const clauses = [];
+  const params = [period.dateFrom, period.dateToExclusive];
+  appendEntrySourceFilters(clauses, params, options, 'cj');
+  const sourceWhereSql = clauses.length ? `and ${clauses.join(' and ')}` : '';
+  const result = await query(
+    `
+      with order_job_totals as (
+        select sales_order_id, count(*)::int as total_jobs
+        from container_jobs
+        group by sales_order_id
+      ),
+      completed_jobs as (
+        select
+          cj.id as job_id,
+          so.id,
+          so.so_number,
+          so.customer_name,
+          coalesce(cj.warehouse_location_id, so.warehouse_location_id) as location_id,
+          coalesce(eu.name, cj.warehouse_location_name_snapshot, so.warehouse_location_name_snapshot, 'Tanpa Lokasi') as location_name,
+          eu.operational_status,
+          dl.name as destination_name,
+          so.price,
+          so.total_amount,
+          to_jsonb(so)->'line_items' as line_items,
+          cj.container_size,
+          ${transportRevenueDateSql} as completed_date,
+          greatest(1, coalesce(nullif(so.quantity, 0), nullif(ojt.total_jobs, 0), 1))::int as total_containers
+        from sales_orders so
+        join container_jobs cj on cj.sales_order_id = so.id
+        left join end_users eu on eu.id = coalesce(cj.warehouse_location_id, so.warehouse_location_id)
+        left join destination_locations dl on dl.id = coalesce(cj.destination_id, so.destination_id, eu.destination_id)
+        left join order_job_totals ojt on ojt.sales_order_id = so.id
+        where so.status <> 'cancelled'
+          and ${transportRevenueJobFilterSql}
+          ${sourceWhereSql}
+      )
+      select *
+      from completed_jobs
+      where completed_date >= $1::date
+        and completed_date < $2::date
+      order by completed_date desc, location_name asc, so_number asc, job_id asc
+    `,
+    params,
+  );
+
+  const rows = buildLocationPerformanceRows(result.rows);
+  return {
+    period: { month: period.month, year: period.year },
+    rows,
+    total: rows.length,
+    summary: summarizeLocationPerformanceRows(rows),
   };
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, Eye, Maximize2, Save, Search, Trash2, Truck, Users, X } from 'lucide-react';
+import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, Eye, MapPin, Maximize2, Save, Search, Trash2, Truck, Users, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { USER_ROLES, hasPermission } from '../../constants/roles';
@@ -12,6 +12,7 @@ import { buildHolidayMap, fetchIndonesiaPublicHolidays } from '../../services/re
 import {
   fetchCustomerPerformanceReport,
   fetchDriverPerformanceReport,
+  fetchLocationPerformanceReport,
   fetchMonthlyComparisonReport,
   fetchMonthlyRevenueReport,
   fetchOperationReport,
@@ -91,6 +92,18 @@ const DEFAULT_CUSTOMER_PERFORMANCE_SUMMARY = {
   averageRevenuePerCustomer: 0,
   averageRevenuePerVolume: 0,
   collectionRate: 0,
+};
+
+const DEFAULT_LOCATION_PERFORMANCE_SUMMARY = {
+  totalLocations: 0,
+  locationsWithTrips: 0,
+  unmappedTrips: 0,
+  totalTrips: 0,
+  totalVolume: 0,
+  totalRevenue: 0,
+  averageRevenuePerLocation: 0,
+  topLocation: '',
+  topLocationTrips: 0,
 };
 
 const DATA_SOURCE_OPTIONS = [
@@ -1389,14 +1402,14 @@ function OutstandingBucketDetailModal({ detail, rows, loading, error, onClose })
 
 function normalizeReportTab(tab, { revenueOnly = false } = {}) {
   if (revenueOnly) return 'revenue';
-  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'sales' || tab === 'customer' || tab === 'repo' || tab === 'master') return tab;
+  if (tab === 'utilization' || tab === 'driver' || tab === 'revenue' || tab === 'sales' || tab === 'customer' || tab === 'location' || tab === 'repo' || tab === 'master') return tab;
   return 'revenue';
 }
 
 function getReportHeader(selectedReport) {
   if (selectedReport === 'utilization') {
     return {
-      title: 'Utilisasi Bulanan',
+      title: 'Utilisasi Performance',
       description: 'Rekap harian per unit truck dalam format pivot bulanan.',
     };
   }
@@ -1419,6 +1432,13 @@ function getReportHeader(selectedReport) {
     return {
       title: 'Customer Performance',
       description: 'Ringkasan volume, revenue, outstanding, dan kesehatan pembayaran per customer.',
+    };
+  }
+
+  if (selectedReport === 'location') {
+    return {
+      title: 'Location Performance',
+      description: 'Ringkasan trip, volume, dan revenue berdasarkan Master Lokasi pada periode yang dipilih.',
     };
   }
 
@@ -2170,7 +2190,7 @@ export function MonthlyUtilizationModal({
               onChange={(event) => onReportModeChange?.(event.target.value)}
               aria-label="Basis laporan utilisasi"
             >
-              <option value="active">Utilisasi Unit Aktif</option>
+              <option value="active">Utilisasi Performance</option>
               <option value="fleet">Utilisasi Seluruh Armada</option>
             </select>
             <span className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700">
@@ -2816,6 +2836,10 @@ function ReportsPage() {
   const [customerPerformanceSummary, setCustomerPerformanceSummary] = useState(DEFAULT_CUSTOMER_PERFORMANCE_SUMMARY);
   const [customerPerformanceLoading, setCustomerPerformanceLoading] = useState(true);
   const [customerPerformanceError, setCustomerPerformanceError] = useState('');
+  const [locationPerformanceRows, setLocationPerformanceRows] = useState([]);
+  const [locationPerformanceSummary, setLocationPerformanceSummary] = useState(DEFAULT_LOCATION_PERFORMANCE_SUMMARY);
+  const [locationPerformanceLoading, setLocationPerformanceLoading] = useState(true);
+  const [locationPerformanceError, setLocationPerformanceError] = useState('');
   const [monthlyComparisonRows, setMonthlyComparisonRows] = useState([]);
   const [monthlyComparisonLoading, setMonthlyComparisonLoading] = useState(true);
   const [monthlyComparisonError, setMonthlyComparisonError] = useState('');
@@ -2963,12 +2987,14 @@ function ReportsPage() {
     setRevenueLoading(true);
     setSalesPerformanceLoading(true);
     setCustomerPerformanceLoading(true);
+    setLocationPerformanceLoading(true);
     setUtilizationLoading(true);
     setDriverPerformanceLoading(true);
     setRepoLoading(true);
     setRevenueError('');
     setSalesPerformanceError('');
     setCustomerPerformanceError('');
+    setLocationPerformanceError('');
     setUtilizationError('');
     setDriverPerformanceError('');
     setRepoError('');
@@ -2986,6 +3012,7 @@ function ReportsPage() {
       fetchMonthlyRevenueReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve(null) : fetchSalesPerformanceReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve(null) : fetchCustomerPerformanceReport({ month, year, ...reportSourceParams }),
+      isFinanceOnly ? Promise.resolve(null) : fetchLocationPerformanceReport({ month, year, ...reportSourceParams }),
       isFinanceOnly ? Promise.resolve([]) : loadUtilizationRows(),
       isFinanceOnly ? Promise.resolve(null) : fetchDriverPerformanceReport({
         month: activePeriodKey,
@@ -2997,7 +3024,7 @@ function ReportsPage() {
         status: 'repo_stored',
         ...reportSourceParams,
       }),
-    ]).then(([revenueResult, salesPerformanceResult, customerPerformanceResult, utilizationResult, driverPerformanceResult, repoResult]) => {
+    ]).then(([revenueResult, salesPerformanceResult, customerPerformanceResult, locationPerformanceResult, utilizationResult, driverPerformanceResult, repoResult]) => {
       if (!active) return;
 
       if (revenueResult.status === 'fulfilled') {
@@ -3066,6 +3093,26 @@ function ReportsPage() {
         setCustomerPerformanceError(customerPerformanceResult.reason?.message || 'Laporan performa customer gagal dimuat.');
       }
 
+      if (locationPerformanceResult.status === 'fulfilled') {
+        const result = locationPerformanceResult.value;
+        setLocationPerformanceRows(Array.isArray(result?.rows) ? result.rows : []);
+        setLocationPerformanceSummary({
+          totalLocations: Number(result?.summary?.totalLocations || 0),
+          locationsWithTrips: Number(result?.summary?.locationsWithTrips || 0),
+          unmappedTrips: Number(result?.summary?.unmappedTrips || 0),
+          totalTrips: Number(result?.summary?.totalTrips || 0),
+          totalVolume: Number(result?.summary?.totalVolume || 0),
+          totalRevenue: Number(result?.summary?.totalRevenue || 0),
+          averageRevenuePerLocation: Number(result?.summary?.averageRevenuePerLocation || 0),
+          topLocation: String(result?.summary?.topLocation || ''),
+          topLocationTrips: Number(result?.summary?.topLocationTrips || 0),
+        });
+      } else {
+        setLocationPerformanceRows([]);
+        setLocationPerformanceSummary(DEFAULT_LOCATION_PERFORMANCE_SUMMARY);
+        setLocationPerformanceError(locationPerformanceResult.reason?.message || 'Laporan performa lokasi gagal dimuat.');
+      }
+
       if (utilizationResult.status === 'fulfilled') {
         setUtilizationRows(Array.isArray(utilizationResult.value) ? utilizationResult.value : []);
       } else {
@@ -3091,6 +3138,7 @@ function ReportsPage() {
       setRevenueLoading(false);
       setSalesPerformanceLoading(false);
       setCustomerPerformanceLoading(false);
+      setLocationPerformanceLoading(false);
       setUtilizationLoading(false);
       setDriverPerformanceLoading(false);
       setRepoLoading(false);
@@ -3321,7 +3369,7 @@ function ReportsPage() {
       </section>
       )}
 
-      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-5'}`}>
+      <section className={`mb-4 grid gap-3 ${isFinanceOnly ? '' : 'md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6'}`}>
         <SummaryToggleCard
           icon={BarChart3}
           label="Revenue Performance"
@@ -3340,7 +3388,7 @@ function ReportsPage() {
           <>
             <SummaryToggleCard
               icon={Truck}
-              label="Utilisasi Unit Aktif"
+              label="Utilisasi Performance"
               value={`${utilizationSummary.utilizationPercent.toFixed(1)}%`}
               helper={utilizationSummary.period.days ? `Periode ${utilizationPeriodLabel}` : utilizationPeriodLabel}
               secondaryLabel="AVG Truck Terpakai/Hari"
@@ -3392,6 +3440,22 @@ function ReportsPage() {
               expanded={selectedReport === 'sales'}
               onClick={() => selectReport('sales')}
               onOpenStatistics={() => setStatisticsModalReport('sales')}
+            />
+            <SummaryToggleCard
+              icon={MapPin}
+              label="Location Performance"
+              value={`${locationPerformanceSummary.totalTrips} Trip`}
+              helper={`${locationPerformanceSummary.locationsWithTrips} lokasi melayani trip${locationPerformanceSummary.unmappedTrips ? ` / ${locationPerformanceSummary.unmappedTrips} tanpa lokasi` : ''}`}
+              secondaryLabel="AVG Revenue/Lokasi"
+              secondaryValue={formatCurrency(locationPerformanceSummary.averageRevenuePerLocation)}
+              tertiaryLabel="Lokasi Teratas"
+              tertiaryValue={locationPerformanceSummary.topLocation
+                ? `${locationPerformanceSummary.topLocation} (${locationPerformanceSummary.topLocationTrips} trip)`
+                : '-'}
+              tone="emerald"
+              expanded={selectedReport === 'location'}
+              onClick={() => selectReport('location')}
+              onOpenStatistics={() => selectReport('location')}
             />
           </>
         ) : null}
@@ -3544,6 +3608,57 @@ function ReportsPage() {
             <div className="p-6 text-center">
               <h3 className="text-sm font-bold text-slate-900">Belum ada data sales</h3>
               <p className="mt-1 text-xs text-slate-500">Belum ada completed container untuk Sales Performance pada {activeMonthLabel} {year}.</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {selectedReport === 'location' ? (
+        <section className="rounded-md border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-3 py-2.5">
+            <h2 className="text-sm font-bold text-slate-950">Detail Location Performance</h2>
+            <p className="text-xs text-slate-500">
+              Trip dan revenue jasa angkut berdasarkan lokasi/gudang pada Master Lokasi untuk {activeMonthLabel} {year}.
+            </p>
+          </div>
+
+          {locationPerformanceLoading ? <div className="p-4 text-sm text-slate-500">Memuat laporan performa lokasi...</div> : null}
+          {!locationPerformanceLoading && locationPerformanceError ? <div className="p-4 text-sm text-red-600">{locationPerformanceError}</div> : null}
+
+          {!locationPerformanceLoading && !locationPerformanceError && locationPerformanceRows.length ? (
+            <DetailTable
+              columns={[
+                { label: 'No' }, { label: 'Lokasi / Gudang' }, { label: 'Tujuan' },
+                { label: 'Customer', align: 'right' }, { label: 'Trip', align: 'right' },
+                { label: '20FT', align: 'right' }, { label: '40FT', align: 'right' },
+                { label: 'Kontribusi', align: 'right' }, { label: 'Revenue', align: 'right' },
+                { label: 'AVG Revenue/Trip', align: 'right' },
+              ]}
+              rows={locationPerformanceRows}
+              rowRenderer={(location, index) => (
+                <tr key={location.locationId || `unmapped-${location.locationName}-${index}`} className="text-slate-700 odd:bg-white even:bg-slate-50/70">
+                  <td className="w-16 px-3 py-2 font-semibold text-slate-500" data-label="No">{index + 1}</td>
+                  <td className="px-3 py-2" data-label="Lokasi / Gudang">
+                    <strong className="block text-slate-950">{location.locationName || 'Tanpa Lokasi'}</strong>
+                    <span className="text-[11px] text-slate-500">{location.completedOrders || 0} order selesai</span>
+                  </td>
+                  <td className="px-3 py-2" data-label="Tujuan">{location.destinationName || '-'}</td>
+                  <td className="px-3 py-2 text-right font-semibold" data-label="Customer">{location.customerCount || 0}</td>
+                  <td className="px-3 py-2 text-right" data-label="Trip"><span className="inline-flex min-w-8 justify-center rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700">{location.totalTrips || 0}</span></td>
+                  <td className="px-3 py-2 text-right font-semibold" data-label="20FT">{location.container20ft || 0}</td>
+                  <td className="px-3 py-2 text-right font-semibold" data-label="40FT">{location.container40ft || 0}</td>
+                  <td className="px-3 py-2 text-right font-semibold" data-label="Kontribusi">{Number(location.contributionPercent || 0).toFixed(1)}%</td>
+                  <td className="px-3 py-2 text-right font-bold text-slate-950" data-label="Revenue">{formatCurrency(location.totalRevenue)}</td>
+                  <td className="px-3 py-2 text-right font-semibold" data-label="AVG Revenue/Trip">{formatCurrency(location.averageRevenuePerTrip)}</td>
+                </tr>
+              )}
+            />
+          ) : null}
+
+          {!locationPerformanceLoading && !locationPerformanceError && !locationPerformanceRows.length ? (
+            <div className="p-6 text-center">
+              <h3 className="text-sm font-bold text-slate-900">Belum ada data lokasi</h3>
+              <p className="mt-1 text-xs text-slate-500">Belum ada completed container untuk Location Performance pada {activeMonthLabel} {year}.</p>
             </div>
           ) : null}
         </section>
@@ -3823,7 +3938,7 @@ function ReportsPage() {
 
           <div className="grid border-b border-slate-200 bg-white sm:grid-cols-2">
             <div className="border-b border-slate-200 px-4 py-3 sm:border-b-0 sm:border-r">
-              <p className="text-[11px] font-bold uppercase text-sky-700">Utilisasi Unit Aktif</p>
+              <p className="text-[11px] font-bold uppercase text-sky-700">Utilisasi Performance</p>
               <div className="mt-1 flex items-baseline gap-2">
                 <strong className="text-xl text-slate-950">{utilizationSummary.utilizationPercent.toFixed(1)}%</strong>
                 <span className="text-xs text-slate-500">{utilizationSummary.activeTruckCount} unit aktif</span>
@@ -3888,7 +4003,7 @@ function ReportsPage() {
         pivot={utilizationPivotMode === 'fleet' ? fleetUtilizationPivot : activeUtilizationPivot}
         activeMonthLabel={activeMonthLabel}
         year={year}
-        reportLabel={utilizationPivotMode === 'fleet' ? 'Utilisasi Seluruh Armada' : 'Utilisasi Unit Aktif'}
+        reportLabel={utilizationPivotMode === 'fleet' ? 'Utilisasi Seluruh Armada' : 'Utilisasi Performance'}
         reportMode={utilizationPivotMode || 'active'}
         onReportModeChange={setUtilizationPivotMode}
         utilizationNotesByKey={utilizationNotesByKey}

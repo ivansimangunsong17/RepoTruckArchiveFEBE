@@ -4,6 +4,7 @@ import {
   getDocumentReport,
   getDriverPerformanceReport,
   getInputMonitoringReport,
+  getLocationPerformanceReport,
   getMonthlyComparisonReport,
   getMonthlyRevenueReport,
   getOperationReport,
@@ -65,6 +66,15 @@ export function fetchSalesPerformanceReport(query) {
 
 export function fetchCustomerPerformanceReport(query) {
   return getCustomerPerformanceReport({
+    month: query.month,
+    year: query.year,
+    entrySource: query.entrySource || '',
+    historicalPeriod: query.historicalPeriod || '',
+  });
+}
+
+export function fetchLocationPerformanceReport(query) {
+  return getLocationPerformanceReport({
     month: query.month,
     year: query.year,
     entrySource: query.entrySource || '',
