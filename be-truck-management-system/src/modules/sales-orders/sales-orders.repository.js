@@ -397,7 +397,7 @@ async function fetchOrdersWithJobs(rows) {
   ));
 }
 
-async function refreshOrderStatus(client, salesOrderId) {
+export async function refreshOrderStatus(client, salesOrderId) {
   const result = await client.query(
     `
       select status, count(*)::int as total
@@ -414,7 +414,9 @@ async function refreshOrderStatus(client, salesOrderId) {
     ? 'cancelled'
     : activeTotal > 0 && counts.completed === activeTotal
     ? 'completed'
-    : counts.running || counts.repo_stored || counts.completed
+    // Selaras dengan refreshOrderStatus di container-jobs.repository.js: job inap tetap aktif
+    // di lapangan, jadi edit SO tidak boleh menurunkan order kembali ke waiting_operational.
+    : counts.running || counts.inap || counts.repo_stored || counts.completed
       ? 'running'
       : 'waiting_operational';
 
