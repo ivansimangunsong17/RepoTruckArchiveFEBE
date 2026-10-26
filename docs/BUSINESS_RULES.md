@@ -46,7 +46,7 @@ Cross-cutting rules:
 waiting_operational → running → completed
                  ↘ cancelled (when all container jobs are cancelled)
 ```
-Derived from container jobs: all active jobs `completed` → `completed`; any `running`/`repo_stored`/`completed` → `running`; otherwise `waiting_operational`.
+Derived from container jobs: all active jobs `completed` → `completed`; any `running`/`inap`/`repo_stored`/`completed` → `running`; otherwise `waiting_operational`.
 
 ### Finance verification
 `pending_so → verified` (Finance enters `accurate_so_number`; unique case-insensitive; cannot be re-entered — changes go through Finance Corrections).
@@ -62,7 +62,8 @@ belum_invoice → belum_dikirim → belum_diterima / belum_dikonfirmasi → menu
 - Invoice document status: `belum_upload → siap_dikirim → terkirim`.
 
 ### Cancellation
-- Direct cancel (`PATCH /:id/cancel`, `DELETE /:id`): only when all jobs are `received` and no active (non-`batal`) expenses. Cascades `received` jobs to `cancelled` and releases idle drivers/trucks.
+- Direct cancel (`PATCH /:id/cancel`, `DELETE /:id`): only when every job is `received` or already `cancelled` and there are no active (non-`batal`) expenses. Cascades `received` jobs to `cancelled` (already-cancelled jobs keep their reason/source/time) and releases idle drivers/trucks.
+- Sales on a Finance-locked SO: cancel rights (`canCancel`, jobs `received`/`cancelled`) are separate from revise rights (`canRevise`, all jobs `received`). Invoice/billing, RPUJ sent, and owner checks still lock both.
 - Request/review: `cancel_request_status: none → submitted → approved|rejected`. Request by SO owner; review by `operational` or `admin`.
 
 ### Permissions
@@ -92,6 +93,10 @@ received/running → cancelled
 - After a job is `running`, changing driver/truck requires `assignmentChangeReason`; after `completed`/`cancelled` or RPUJ `paid` it is locked. Changes are recorded in `container_job_assignment_history` with `change_source` `operational`, `admin_correction`, `repo_pickup` or `repo_combo_pickup` (the last two added by migration `202609290001` for container pickups).
 - Operations page: the "Sedang Jalan" tab requests `status=active_journey` (backend returns `running` + `inap`), and its count includes inap jobs. The separate "Inap" tab remains. "Selesai Inap" resumes the job directly.
 - Container number is locked once running/completed/cancelled/stored (first-time fill is allowed while active).
+- Duplicate container guard (`container-number-guard.js`, Container Job update and SO create/update): a number still on another job that is `received`/`running`/`inap`/`repo_stored` is rejected without override (`409 CONTAINER_NUMBER_IN_ACTIVE_JOB`; a stored container must continue through Ambil Titip). A number on a job completed within 7 days, or completed in the same SO, needs explicit confirmation (`CONTAINER_NUMBER_POSSIBLE_DUPLICATE` → `confirmPossibleDuplicateContainer`). Checked under a per-number advisory lock; saving without changing the number is never blocked.
+- Titip → Ambil Titip is one Container Job and one ritasi. The storing driver (A) owns the ritasi and commission (recipient locked no later than `repo_stored`); the pickup driver (B) only receives UJ Repo on the pickup movement. Ambil Titip creates no revenue line.
+- Biaya Titip/Repo Rp300.000 (`repo-storage-fee.js`): recorded once per job on its first `repo_stored` as a `reimbursement` expense (`source = 'repo_storage_fee'`, idempotency key per job, `belum_dibayar`, no dropping ledger debit), so it is billed through the SO Debit Note, never the main invoice. Not created for historical entries, jobs stored before, jobs with a legacy Revenue Repo line, or jobs with a manually recorded titip/repo reimbursement. If the SO Debit Note is already issued, the Debit Note is not changed: the fee is stored as a `batal` row with `finance_check_status = 'perlu_klarifikasi'` for a Finance decision. Operational cannot edit, move or void it.
+- Operational form: the driver follows the selected truck's default driver only while it was auto-filled or empty (including Admin correction after an explicit truck change); a manually chosen driver is kept, and a manual driver different from the truck default only shows a note.
 - Documents locked after completion; timeline (`runningAt`/`completedAt`) editable only by Admin correction after completion.
 - Driver commission on a job is locked after completion/cancel or RPUJ approved/paid.
 - Document-only actors can update documents without touching status/assignment/UJ. Sales is always treated as document-only when it has `container_job.document.update` (explicit role check in `isDocumentOnlyActor`, service and controller).
@@ -134,6 +139,7 @@ received/running → cancelled
 - Payments (`sales_order_payments`): Finance/Admin; requires completed SO with invoice number; cannot exceed recomputed outstanding; idempotency key checked before balance validation. Void keeps the row (`voided_at`, reason required) — permission held by Finance and Admin.
 - Customer bulk payment (`POST /api/finance/customer-payments`): one transfer allocated across invoices; allocations cannot exceed transfer total.
 - Manual revenue lines: types `inap, waiting_charge, extra_trip, storage, other`; status `draft|active|void`; Finance/Admin; cannot change once invoice is paid; void needs reason.
+- LEGACY Revenue Repo lines (`charge_type = 'repo'`, created at pickup before 2026-10-26) are no longer created. Existing lines keep their Finance activate/void flow and still appear in the Revenue Repo report sections; new Biaya Titip is billed as a Debit Note reimbursement instead.
 - Debit Notes: one per SO, from reimbursement expenses; separate from trucking OTS; own number (unique) and payments with same rules as invoice payments.
 - Finance Corrections (`finance_correction_requests`): types `so_number`, `invoice_number`; `pending → approved|rejected` (`applied` also allowed by constraint); only one pending request per SO/type; approval permission is admin-only.
 
@@ -146,6 +152,8 @@ received/running → cancelled
 - LEGACY — Thursday–Wednesday references remain in `be-truck-management-system/docs/DRIVER_COMMISSION_WEEKLY_WORKFLOW_PHASE1.md` and `DRIVER_COMMISSION_PERIOD_REPORT_AUDIT.md`, and in `buildCommissionWeekOptions` (`fe/src/pages/reports/ReportsPage.jsx`, `getDay() !== 4`). That function is called only by `ReportsPage.test.js`, not by any page. Phase-1 operating days (Operational submits Thursday, Finance pays Friday) are not enforced in code; the Finance page text says "pembayaran mingguan target Rabu".
 - Batch: `draft → submitted → approved | rejected → paid`; one active batch per period; revisions tracked (`revision_count`). Submit: admin/operational/sales; approve/reject: finance/admin; pay & proof: finance/admin; void payment: admin only (reason required).
 - Commission recipient and payout account come from the job's commission snapshot (`commission_driver_id/name/snapshot`), falling back to the assignment snapshot and then the driver master. If a job has no driver ID, the recipient is matched by name to an active driver's `name`, `nickname` or `bank_account_holder`.
+- Picked-up (Ambil Titip) jobs: fallbacks and the exported plate use the pre-pickup assignment (first `repo_pickup` history, then `repo_released_*`), never the pickup driver's account or truck. If the storing driver cannot be verified, or the recipient is the pickup driver, the row is held in review (`reviewRows`) and cannot enter a batch. Existing data is not changed automatically.
+- Admin recipient correction (`PATCH /api/container-jobs/:id/commission-recipient`, reason ≥8): changes only `commission_driver_*` (account from the driver master; pickup driver rejected; master account required), keeps the job's actual assignment, and keeps batch/payment locks. The completed-job driver correction ("move" commission) also rejects the pickup driver.
 - Payments per driver per batch (`bank | emoney`, `pending | paid`). Deductions (`hutang_sopir, kasbon, penalti, lainnya`) cannot exceed gross and are locked once paid.
 - Job commission status: `pending, with_commission, without_commission, needs_review`; late jobs into already-paid periods are added to the current batch flagged `is_backdate_commission`.
 
@@ -160,9 +168,11 @@ received/running → cancelled
 
 - **Master data**: soft delete via `archived_at`; unique names/codes enforced by partial indexes (active rows only). For Sales, `end-users` responses omit address, Google Maps URL and coordinates (`sanitizeMasterResultForActor`). Destinations hold UJ rates and driver commission by size.
 - **Fleet assignment**: truck default driver and current chassis; changes logged in `vehicle_assignment_history` (`source: fleet_assignment | master_truck`).
+- **Truck default driver**: `vehicles.default_driver_id` is the source of truth; `default_driver_name` is synced from it (the truck form no longer writes the name directly). Master Truck and Master Sopir saves are transactional and keep one truck per default driver (other trucks are released and the change is logged). Trucks in Maintenance (or otherwise not eligible) can still be edited; their chassis is kept instead of being detached.
 - **Users**: statuses `Aktif` / non-active; inactive users are rejected on every request (fresh status check per request, short cache). Default role on create: `pengamat`.
 - **Backups**: while a storage backup lock exists, all mutations return 503.
 
 ## Open Items
 - NEEDS OWNER DECISION: Sales SO visibility (all vs. own). Whether cancellation approval should re-check job status. Retiring the RPUJ endpoints. Updating or removing the Thursday–Wednesday design docs and `buildCommissionWeekOptions`.
 - NEEDS OWNER DECISION: `operational_fund_batches.status = 'under_review'` is allowed by the constraint but no code sets it.
+- NEEDS FINANCE DECISION: Biaya Titip for a SO whose Debit Note was already issued (recorded as `perlu_klarifikasi`, not billed); and containers already `repo_stored` before the Biaya Titip rule is deployed (no automatic Biaya Titip and, after the rule, no Revenue Repo at pickup).

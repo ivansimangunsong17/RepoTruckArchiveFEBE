@@ -7,6 +7,21 @@
 - Versi frontend yang sedang disajikan belum terverifikasi melalui pemeriksaan ini. Tidak ada perubahan konfigurasi atau file server dalam pemeriksaan tersebut.
 - Catatan produksi tertanggal 5 Oktober di bawah adalah riwayat, bukan status server saat ini.
 
+## Release candidate `release/atms-20261027` (2026-10-27, belum di-deploy)
+
+Dibangun dari `sync-production-development` (`4feadff`) + `18292b4` (Location Performance destinations) + perbaikan di bawah. Tidak ada migration baru sejak baseline production `aebb256`. Prosedur deploy: `docs/DEPLOY_RELEASE_20261027.md`.
+
+- Sales Order: status SO ikut job `inap` (`refreshOrderStatus`); SO berisi job `cancelled` + `received` bisa dibatalkan; hak batal Sales dipisah dari hak revisi pada SO terkunci Finance (`canCancel`).
+- Dashboard/armada: endpoint `GET /api/sales-orders/active-operational` (maks 1.000 SO, flag `truncated`) dipakai Dashboard Admin/Operational, Daftar Truck dan Sopir; peringatan bila terpotong.
+- Container Job inap: `running_at` tidak hilang saat inap/edit inap; status Inap tersedia di form; log INAP hanya saat masuk inap.
+- Master Truck/Sopir: sinkron default driver berbasis `default_driver_id`, transaksional; truck Maintenance tetap bisa diedit.
+- Titip → Ambil Titip: satu job/ritasi; komisi milik sopir penitip (A), sopir pickup (B) hanya UJ Repo; export komisi memakai sopir/rekening/plat A; baris yang identitas A-nya tidak terverifikasi atau penerimanya B ditahan untuk review; koreksi penerima komisi oleh Admin tanpa mengubah assignment; riwayat A → B berlabel "Ambil Titip".
+- Pencegahan container ganda: nomor container yang masih aktif/dititip di job lain ditolak; pemakaian ulang setelah selesai butuh konfirmasi.
+- Biaya Titip/Repo Rp300.000: Reimbursement SO (Debit Note) saat titip pertama, sekali per job; Ambil Titip tidak lagi membuat Revenue Repo. Pengecualian Debit Note terbit dicatat `perlu_klarifikasi`.
+- Form Operational: sopir mengikuti default truck saat truck diganti (termasuk koreksi Admin) kecuali dipilih manual; pilihan dampak komisi di-reset saat sopir berganti.
+- Test: suite integrasi scratch memakai `scratch-db-guard` (`scripts/run-truck-default-driver-scratch.ps1`, 15 suite); suite Repo lama diperbarui ke aturan baru.
+- NEEDS FINANCE DECISION sebelum GO-LIVE: Biaya Titip untuk SO yang Debit Note-nya sudah terbit, dan container yang sudah dititip sebelum deploy (lihat prosedur deploy).
+
 ## Development update (2026-10-12, `sync-production-development`)
 
 - Finance Customer Outstanding now filters by the Customer Master `customers.sales_name` (not SO creator). The selected Sales scopes rollup, KPI totals and aging, invoice detail, search/date combinations, pagination, and CSV export. “Semua Sales” retains the prior global KPI behavior. Customers without a Sales assignment remain visible only under “Semua Sales”; no live database was queried to count them.

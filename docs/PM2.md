@@ -152,6 +152,8 @@ pm2.cmd save
 
 ## Urutan Deploy Umum
 
+Catatan 2026-10-27: pemeriksaan 19 Oktober menemukan backend production berjalan dari folder rilis (`D:\ARMADA_SYSTEM\apps\backend\<rilis>`), bukan dari path repo di bawah. Untuk release `release/atms-20261027` dan sesudahnya, gunakan `deploy/scripts/deploy-release.ps1` (preflight, backup, folder rilis baru, rollback) sesuai `docs/DEPLOY_RELEASE_20261027.md`. Langkah di bawah adalah riwayat cara lama.
+
 Backend berubah:
 
 ```powershell
