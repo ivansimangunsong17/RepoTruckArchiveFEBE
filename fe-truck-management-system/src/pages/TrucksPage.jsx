@@ -19,6 +19,14 @@ import {
 } from '../services/master-data/vehicleDocumentService';
 import { hasPermission } from '../constants/roles';
 import { formatMasterExpiryDate, getMasterExpiryState } from '../utils/masterExpiry';
+import {
+  CLEAR_LEGACY_DEFAULT_DRIVER,
+  findDriverDefaultTruck,
+  findTrucksHoldingDriver,
+  getTruckDefaultDriverName,
+  isLegacyDefaultDriver,
+  resolveTruckDefaultDriverPayload,
+} from '../utils/truckDefaultDriver';
 
 const DOCUMENT_TYPES = [
   { value: 'STNK', label: 'STNK' },
@@ -57,20 +65,14 @@ function sortDriversByName(rows) {
   return [...rows].sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'id'));
 }
 
-function getDriverAssignedTruck(driverName, trucks = []) {
-  const selectedDriver = normalizeName(driverName);
-  if (!selectedDriver) return null;
-  return trucks.find((truck) => normalizeName(truck.defaultDriver) === selectedDriver) || null;
-}
-
 function getDriverOptions(sourceDrivers, activeJobs = [], trucks = []) {
   const drivers = Array.isArray(sourceDrivers) && sourceDrivers.length ? sourceDrivers : fallbackDrivers;
   return sortDriversByName(drivers).map((driver) => {
     const status = getDriverStatus(driver, activeJobs);
-    const assignedTruck = getDriverAssignedTruck(driver.name, trucks);
+    const assignedTruck = findDriverDefaultTruck(driver, trucks);
     const isAvailable = status === 'Aktif' && !assignedTruck;
     return {
-      value: driver.name,
+      value: driver.id,
       label: isAvailable
         ? `${driver.name} - Aktif / Belum assign`
         : `${driver.name} - ${status}${assignedTruck ? ` / ${assignedTruck.unitCode || assignedTruck.plateNumber}` : ''}`,
@@ -206,7 +208,30 @@ function createFields(driverOptions, chassisRows = [], truckRows = []) {
     { key: 'insurancePolicyNumber', section: 'Asuransi Kendaraan', label: 'Nomor Asuransi', placeholder: 'Contoh: POL-TRK-001', className: 'span-quarter' },
     { key: 'insuranceExpiryDate', section: 'Asuransi Kendaraan', label: 'Tanggal Berakhir', type: 'date', className: 'span-quarter', expiryAlert: { label: 'Asuransi Truck' } },
     { key: 'insuranceDocument', section: 'Asuransi Kendaraan', label: 'Upload Dokumen', type: 'file', className: 'span-quarter', compactUpload: true },
-    { key: 'defaultDriver', section: 'Assignment Default', label: 'Driver Tetap', type: 'select', defaultValue: '', options: [{ value: '', label: 'Belum di-assign' }, ...driverOptions], hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.' },
+    {
+      key: 'defaultDriverId',
+      section: 'Assignment Default',
+      label: 'Driver Tetap',
+      type: 'select',
+      defaultValue: '',
+      options: (form) => (form?.legacyDefaultDriver
+        ? [
+            { value: '', label: `${form.legacyDefaultDriver} (data lama, belum terhubung ID sopir)` },
+            { value: CLEAR_LEGACY_DEFAULT_DRIVER, label: 'Belum di-assign (lepas sopir data lama)' },
+            ...driverOptions,
+          ]
+        : [{ value: '', label: 'Belum di-assign' }, ...driverOptions]),
+      hint: 'Opsional. Jika kosong, truck tetap berdiri sendiri sampai admin memilih sopir.',
+    },
+    // Field tersembunyi: nama sopir untuk pencarian, dan penanda unit legacy (nama tanpa ID sopir).
+    { key: 'defaultDriver', label: 'Sopir', showIf: () => false, persist: false },
+    {
+      key: 'legacyDefaultDriver',
+      label: 'Sopir data lama',
+      showIf: () => false,
+      persist: false,
+      normalize: (value, row) => (row?.id ? (isLegacyDefaultDriver(row) ? String(row.defaultDriver).trim() : '') : value || ''),
+    },
   ];
 }
 
@@ -615,13 +640,6 @@ function sortTrucksByUnit(rows) {
   });
 }
 
-function findDriverAssignedTrucks(rows, driverName, currentTruckId) {
-  const selectedDriver = normalizeName(driverName);
-  if (!selectedDriver) return [];
-  return (rows || []).filter((truck) =>
-    truck.id !== currentTruckId && normalizeName(truck.defaultDriver) === selectedDriver);
-}
-
 function findChassisAssignedTrucks(rows, chassisNumber, currentTruckId, chassisRows = []) {
   const chassis = getChassisRow(chassisRows, chassisNumber);
   const candidates = chassis ? getChassisCandidates(chassis) : [normalizeName(chassisNumber)].filter(Boolean);
@@ -642,13 +660,31 @@ function mergeRelatedRows(...groups) {
   return [...rowsById.values()];
 }
 
-async function prepareTruckSave({ payload, editingId, rows, confirmAction, chassisRows = [] }) {
+export async function prepareTruckSave({
+  payload,
+  editingId,
+  rows,
+  form = {},
+  confirmAction,
+  chassisRows = [],
+  driverRows = [],
+  masterDatabaseMode = true,
+}) {
   const chassisCapacity = getChassisCapacity(chassisRows, payload.kirChassisNumber);
-  const normalizedPayload = chassisCapacity ? { ...payload, capacity: chassisCapacity } : payload;
-  const assignedTrucks = findDriverAssignedTrucks(rows, normalizedPayload.defaultDriver, editingId);
+  const normalizedPayload = resolveTruckDefaultDriverPayload(
+    chassisCapacity ? { ...payload, capacity: chassisCapacity } : payload,
+    { drivers: driverRows, legacyDefaultDriver: form.legacyDefaultDriver || '' },
+  );
+  const selectedDriver = normalizedPayload.defaultDriverId
+    ? driverRows.find((driver) => driver.id === normalizedPayload.defaultDriverId) || null
+    : null;
+  const assignedTrucks = selectedDriver ? findTrucksHoldingDriver(rows, selectedDriver, editingId) : [];
   const chassisAssignedTrucks = findChassisAssignedTrucks(rows, normalizedPayload.kirChassisNumber, editingId, chassisRows);
   let driverRelatedRows = [];
 
+  // Backend (updateVehicleDefaultDriver, dipakai bareng Assignment Armada) yang melepas sopir dari
+  // truck lama secara atomic di transaksi yang sama -- dialog ini informasional. Frontend tidak lagi
+  // mem-PATCH truck lama di mode database (jalur lama non-atomic dan hanya menyentuh nama).
   if (assignedTrucks.length) {
     const truckList = assignedTrucks
       .map((truck) => `${truck.unitCode || '-'} (${truck.plateNumber || '-'})`)
@@ -660,10 +696,12 @@ async function prepareTruckSave({ payload, editingId, rows, confirmAction, chass
     });
 
     if (!approved) return null;
-    driverRelatedRows = assignedTrucks.map((truck) => ({
-      id: truck.id,
-      row: { ...truck, defaultDriver: '' },
-    }));
+    if (!masterDatabaseMode) {
+      driverRelatedRows = assignedTrucks.map((truck) => ({
+        id: truck.id,
+        row: { ...truck, defaultDriver: '', defaultDriverId: null },
+      }));
+    }
   }
 
   // Backend (updateVehicleChassis, dipakai bareng dengan Assignment Armada) yang sekarang
@@ -720,6 +758,7 @@ function TrucksPage({ readOnly = false }) {
     ? archive.masters?.trucks || []
     : archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
   const chassisRows = archive.masters?.['kir-chassis'] || [];
+  const driverRows = archive.masters?.drivers?.length ? archive.masters.drivers : archive.isMasterDatabaseMode ? [] : fallbackDrivers;
   const driverOptions = archive.masters?.drivers?.length
     ? getDriverOptions(archive.masters.drivers, activeJobs, truckRows)
     : archive.isMasterDatabaseMode ? [] : getLocalDriverOptions(activeJobs, truckRows);
@@ -728,6 +767,12 @@ function TrucksPage({ readOnly = false }) {
     ...fields
       .filter((field) => !TRUCK_DOCUMENT_FIELD_KEYS.has(field.key))
       .map((field) => {
+        if (field.key === 'defaultDriverId') {
+          return {
+            ...field,
+            renderDetail: (_, row) => getTruckDefaultDriverName(row, driverRows) || '-',
+          };
+        }
         if (field.key === 'receivedDate') {
           return {
             ...field,
@@ -770,7 +815,18 @@ function TrucksPage({ readOnly = false }) {
       columns={[
         { key: 'unitCode', label: 'No Lambung', render: (_, row) => <TruckNumber row={row} /> },
         { key: 'plateNumber', label: 'Plat', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
-        { key: 'defaultDriver', label: 'Sopir', render: (value) => <span className="master-plain-cell strong">{value || '-'}</span> },
+        {
+          key: 'defaultDriver',
+          label: 'Sopir',
+          render: (_, row) => (
+            <span
+              className="master-plain-cell strong"
+              title={isLegacyDefaultDriver(row) ? 'Data lama: belum terhubung ke ID sopir' : undefined}
+            >
+              {getTruckDefaultDriverName(row, driverRows) || '-'}
+            </span>
+          ),
+        },
         { key: 'capacity', label: 'Chassis / Size', render: (_, row) => <TruckChassisSize row={row} chassisRows={chassisRows} /> },
         { key: 'kirExpiryDate', label: 'KIR OFF', render: (_, row) => <TruckKirExpiry row={row} /> },
         { key: 'stidExpiryDate', label: 'STID OFF', render: (_, row) => <TruckStidExpiry row={row} /> },
@@ -789,7 +845,12 @@ function TrucksPage({ readOnly = false }) {
       toolbarTitle="Daftar Truck"
       toolbarDescription="Cari unit, plat, sopir, chassis, dokumen, asuransi, dan kondisi truck."
       sortRows={sortTrucksByUnit}
-      beforeSave={(args) => prepareTruckSave({ ...args, chassisRows })}
+      beforeSave={(args) => prepareTruckSave({
+        ...args,
+        chassisRows,
+        driverRows,
+        masterDatabaseMode: archive.isMasterDatabaseMode,
+      })}
       extraDetailContent={(row) => <VehicleDocumentsPanel vehicle={row} />}
       stats={(data) => [
         { label: 'Total Truck', value: data.length, detail: 'Unit terdaftar' },

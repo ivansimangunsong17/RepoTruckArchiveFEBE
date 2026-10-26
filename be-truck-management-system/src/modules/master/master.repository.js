@@ -133,26 +133,125 @@ export async function upsertMasterRow(resource, payload, id, client = null) {
   return config.toApi(result.rows[0]);
 }
 
-export async function clearVehicleDefaultDriverByNames(names = []) {
-  const normalizedNames = Array.from(new Set(
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function normalizeIdentityNames(names = []) {
+  return Array.from(new Set(
     names
       .map((name) => String(name || '').trim().toLowerCase())
       .filter(Boolean),
   ));
-  if (!normalizedNames.length) return 0;
+}
 
-  const result = await query(
+// Melepas hubungan sopir default dari semua truck yang memegang sopir ini: berdasarkan
+// default_driver_id, ditambah fallback nama HANYA untuk baris legacy yang belum punya id (supaya
+// truck milik sopir lain yang kebetulan bernama sama tidak ikut terlepas). ID dan nama selalu
+// dibersihkan bersamaan; container_jobs/histori ritasi tidak disentuh.
+export async function releaseDriverDefaultAssignments(driverId, names = [], client = null) {
+  const execute = client ? client.query.bind(client) : query;
+  const normalizedNames = normalizeIdentityNames(names);
+  if (!driverId && !normalizedNames.length) return [];
+
+  const held = await execute(
+    `
+      select id, default_driver_id, default_driver_name
+      from vehicles
+      where ($1::uuid is not null and default_driver_id = $1::uuid)
+         or (
+           default_driver_id is null
+           and default_driver_name is not null
+           and lower(trim(default_driver_name)) = any($2::text[])
+         )
+      for update
+    `,
+    [driverId || null, normalizedNames],
+  );
+  if (!held.rows.length) return [];
+
+  await execute(
     `
       update vehicles
-      set default_driver_name = null,
+      set default_driver_id = null,
+          default_driver_name = null,
           updated_at = now()
-      where default_driver_name is not null
-        and lower(trim(default_driver_name)) = any($1::text[])
-      returning id
+      where id = any($1::uuid[])
     `,
-    [normalizedNames],
+    [held.rows.map((row) => row.id)],
+  );
+  return held.rows.map((row) => ({
+    id: row.id,
+    previousDriverId: row.default_driver_id || null,
+    previousDriverName: row.default_driver_name || null,
+  }));
+}
+
+// Jejak vehicle_assignment_history untuk perubahan sopir default dari Master Truck/Master Sopir,
+// ditulis di transaksi yang sama dengan perubahannya (pola yang sama dengan chassis).
+export async function recordDefaultDriverHistory(changes = [], context = {}, client = null) {
+  const { source = 'master_truck', reason = null, note = null, actorName = null, actorRole = null } = context;
+  for (const change of changes) {
+    if ((change.previousDriverId || null) === (change.nextDriverId || null)
+      && (change.previousDriverName || null) === (change.nextDriverName || null)) continue;
+    await recordVehicleAssignmentHistory({
+      vehicleId: change.vehicleId,
+      changeType: 'default_driver',
+      source,
+      previousDriverId: change.previousDriverId || null,
+      previousDriverName: change.previousDriverName || null,
+      nextDriverId: change.nextDriverId || null,
+      nextDriverName: change.nextDriverName || null,
+      reason: change.reason || reason,
+      note,
+      actorName,
+      actorRole,
+    }, client);
+  }
+}
+
+// Nama tampilan mengikuti data sopir dari default_driver_id -- dipanggil saat nama sopir di Master
+// Sopir berubah supaya Master Truck tidak menampilkan nama basi.
+export async function syncVehicleDefaultDriverName(driverId, driverName, client = null) {
+  if (!driverId || !String(driverName || '').trim()) return 0;
+  const execute = client ? client.query.bind(client) : query;
+  const result = await execute(
+    `
+      update vehicles
+      set default_driver_name = $2,
+          updated_at = now()
+      where default_driver_id = $1
+        and default_driver_name is distinct from $2
+    `,
+    [driverId, driverName],
   );
   return result.rowCount || 0;
+}
+
+// Mengosongkan sopir default satu truck (pilihan "Belum di-assign" di Master Truck).
+export async function clearVehicleDefaultDriver(vehicleId, client = null) {
+  const execute = client ? client.query.bind(client) : query;
+  const before = await execute('select * from vehicles where id = $1 and archived_at is null for update', [vehicleId]);
+  if (!before.rows[0]) {
+    const error = new Error('Truck tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'TRUCK_NOT_FOUND';
+    throw error;
+  }
+  const updated = await execute(
+    `
+      update vehicles
+      set default_driver_id = null,
+          default_driver_name = null,
+          updated_at = now()
+      where id = $1
+      returning *
+    `,
+    [vehicleId],
+  );
+  return {
+    before: getResourceConfig('trucks').toApi(before.rows[0]),
+    after: getResourceConfig('trucks').toApi(updated.rows[0]),
+    detached: [],
+  };
 }
 
 // Endpoint khusus, terpisah dari upsertMasterRow generik -- default sopir truck sengaja punya
@@ -160,8 +259,16 @@ export async function clearVehicleDefaultDriverByNames(names = []) {
 // jadi tidak lewat jalur PATCH /api/master/trucks/:id biasa. Menulis default_driver_id (akurat,
 // FK) SEKALIGUS default_driver_name (dipertahankan untuk kompatibilitas tampilan/halaman Truck
 // Admin yang masih pakai teks nama saja) -- tidak pernah menyentuh container_jobs sama sekali.
-export async function updateVehicleDefaultDriver(vehicleId, driverId) {
-  return withTransaction(async (client) => {
+// Dipakai juga oleh penyimpanan Master Truck (transactionClient) supaya update field truck lain dan
+// pergantian sopir default berada di SATU transaksi.
+export async function updateVehicleDefaultDriver(vehicleId, driverId, transactionClient = null) {
+  if (!UUID_PATTERN.test(String(driverId || '').trim())) {
+    const error = new Error('Sopir default tidak valid.');
+    error.statusCode = 400;
+    error.code = 'TRUCK_DEFAULT_DRIVER_DRIVER_INVALID';
+    throw error;
+  }
+  const update = async (client) => {
     const vehicleResult = await client.query(
       'select * from vehicles where id = $1 and archived_at is null for update',
       [vehicleId],
@@ -204,17 +311,33 @@ export async function updateVehicleDefaultDriver(vehicleId, driverId) {
 
     // Satu sopir cuma boleh jadi default di satu truck -- kalau sopir ini sebelumnya default di
     // truck lain, lepas dulu dari sana supaya tidak ada dua truck menganggap sopir yang sama
-    // sebagai default-nya masing-masing.
-    await client.query(
+    // sebagai default-nya masing-masing. Baris legacy (nama tanpa id) dengan nama sopir yang sama
+    // ikut dilepas agar tidak tetap tampil sebagai pasangan ganda.
+    const detached = await client.query(
       `
-        update vehicles
-        set default_driver_id = null,
-            default_driver_name = null,
-            updated_at = now()
-        where default_driver_id = $1 and id <> $2
+        select id, unit_code, plate_number, default_driver_id, default_driver_name
+        from vehicles
+        where id <> $2
+          and (
+            default_driver_id = $1
+            or (default_driver_id is null and lower(trim(default_driver_name)) = lower(trim($3)))
+          )
+        for update
       `,
-      [driver.id, vehicleId],
+      [driver.id, vehicleId, driver.name],
     );
+    if (detached.rows.length) {
+      await client.query(
+        `
+          update vehicles
+          set default_driver_id = null,
+              default_driver_name = null,
+              updated_at = now()
+          where id = any($1::uuid[])
+        `,
+        [detached.rows.map((row) => row.id)],
+      );
+    }
 
     const updated = await client.query(
       `
@@ -231,8 +354,16 @@ export async function updateVehicleDefaultDriver(vehicleId, driverId) {
     return {
       before: getResourceConfig('trucks').toApi(vehicle),
       after: getResourceConfig('trucks').toApi(updated.rows[0]),
+      detached: detached.rows.map((row) => ({
+        id: row.id,
+        unitCode: row.unit_code,
+        plateNumber: row.plate_number,
+        previousDriverId: row.default_driver_id || null,
+        previousDriverName: row.default_driver_name || null,
+      })),
     };
-  });
+  };
+  return transactionClient ? update(transactionClient) : withTransaction(update);
 }
 
 // Dipakai BERSAMA oleh Master Truck (form Admin, chassisIdentifier berupa teks chassis_code/kir_number

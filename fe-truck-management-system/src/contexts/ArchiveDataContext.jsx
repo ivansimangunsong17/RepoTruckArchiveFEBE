@@ -283,6 +283,16 @@ export function ArchiveDataProvider({ children }) {
           : [saved, ...currentRows];
         return { ...current, [resource]: nextRows };
       });
+      // Backend bisa ikut melepas sopir default di truck LAIN (sopir dipindah unit, atau sopir
+      // Cuti/Tidak Aktif), jadi daftar truck dimuat ulang agar Master Truck/Sopir tidak basi.
+      if (resource === 'trucks' || resource === 'drivers') {
+        try {
+          const trucks = await fetchMaster('trucks');
+          setMasters((current) => ({ ...current, trucks }));
+        } catch {
+          // Data tersimpan; daftar truck akan tersinkron pada refresh berikutnya.
+        }
+      }
       return saved;
     }
 

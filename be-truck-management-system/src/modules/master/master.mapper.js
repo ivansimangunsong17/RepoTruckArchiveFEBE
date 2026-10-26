@@ -240,7 +240,8 @@ export const resourceConfig = {
       stid_expiry_date: row.stidExpiryDate || null,
       solar_barcode_number: row.solarBarcodeNumber || null,
       solar_barcode_date: row.solarBarcodeDate || null,
-      default_driver_name: row.defaultDriver || null,
+      // default_driver_id/default_driver_name sengaja tidak ditulis di sini: keduanya hanya diubah
+      // bersamaan lewat updateVehicleDefaultDriver/clearVehicleDefaultDriver (lihat saveTruckRow).
       operational_status: row.status || 'Aktif',
       stnk_document: row.stnkDocument || null,
       kir_document: row.kirDocument || null,

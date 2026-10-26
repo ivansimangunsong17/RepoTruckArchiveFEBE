@@ -1,17 +1,21 @@
 import { withTransaction } from '../../db/client.js';
 import {
   archiveMasterRow,
-  clearVehicleDefaultDriverByNames,
+  clearVehicleDefaultDriver,
   findAllMasterRows,
   findMasterRowById,
   findMasterRows,
   findMasterViewerNotes,
   findVehicleChassisSizeMismatches,
+  recordDefaultDriverHistory,
+  releaseDriverDefaultAssignments,
+  syncVehicleDefaultDriverName,
   updateVehicleChassis,
   updateVehicleDefaultDriver,
   upsertMasterRow,
   upsertMasterViewerNote,
 } from './master.repository.js';
+import { getResourceConfig } from './master.mapper.js';
 
 const TRUCK_DEFAULT_DRIVER_REASON_MIN_LENGTH = 8;
 
@@ -77,8 +81,21 @@ function isSameChassis(chassis, value) {
   ].some((candidate) => normalizeLookupValue(candidate) === normalizedValue);
 }
 
+const TRUCK_CHASSIS_LOCKED_STATUSES = ['Maintenance', 'Tidak Aktif'];
+
 export function isSameTruckChassis(currentTruck = {}, nextChassis = '') {
   return normalizeLookupValue(currentTruck.kirChassisNumber) === normalizeLookupValue(nextChassis);
+}
+
+// Truck Maintenance/Tidak Aktif tetap boleh diedit (termasuk diaktifkan kembali) selama chassis tidak
+// diganti -- updateVehicleChassis menolak unit tidak eligible, jadi sinkron chassis hanya dilewati
+// untuk kasus "chassis sama". Penggantian chassis pada status itu tetap ditolak di updateVehicleChassis.
+export function shouldKeepChassisOfIneligibleTruck(currentTruck = null, payload = {}) {
+  return Boolean(
+    currentTruck
+    && TRUCK_CHASSIS_LOCKED_STATUSES.includes(currentTruck.status)
+    && isSameTruckChassis(currentTruck, payload.kirChassisNumber),
+  );
 }
 
 async function normalizeTruckPayload(payload) {
@@ -121,32 +138,107 @@ function driverIdentityNames(...drivers) {
   ]);
 }
 
+function hasOwnField(payload, key) {
+  return Object.prototype.hasOwnProperty.call(payload || {}, key);
+}
+
+// Sopir default Master Truck ditentukan oleh defaultDriverId (bukan teks nama). Mengembalikan null
+// bila tidak ada perubahan. Unit legacy (nama tanpa id) tetap dipertahankan kecuali Admin
+// mengosongkan sopir secara eksplisit (defaultDriverId dan defaultDriver sama-sama kosong).
+export function resolveDefaultDriverChange(payload = {}, current = null) {
+  if (!hasOwnField(payload, 'defaultDriverId')) return null;
+  const nextId = String(payload.defaultDriverId || '').trim() || null;
+  const currentId = current?.defaultDriverId || null;
+  if (nextId) return nextId === currentId ? null : { type: 'set', driverId: nextId };
+  if (currentId) return { type: 'clear' };
+  const legacyName = String(current?.defaultDriver || '').trim();
+  const explicitlyCleared = hasOwnField(payload, 'defaultDriver') && !String(payload.defaultDriver || '').trim();
+  return legacyName && explicitlyCleared ? { type: 'clear' } : null;
+}
+
 // Chassis truck sengaja DIPISAH dari generic upsertMasterRow -- kir_chassis_number (teks lama)
 // harus disinkronkan lewat updateVehicleChassis (fungsi yang sama dipakai Assignment Armada) supaya
 // validasi eligibility & exclusivity (lepas dari truck lain) selalu jalan, bukan cuma tulis teks
 // bebas seperti sebelumnya. Setelah sinkron, kirChassisNumber di payload diisi ulang dengan nilai
 // yang SUDAH benar supaya generic update field lain (plat, status, dokumen, dst) tidak menimpanya
-// balik dengan nilai basi.
+// balik dengan nilai basi. Sopir default juga diproses lewat updateVehicleDefaultDriver (validasi
+// eligibility + lepas dari truck lain) di transaksi yang sama, sehingga ID dan nama selalu
+// tersimpan bersamaan dan tidak ada data parsial bila salah satu langkah gagal.
 async function saveTruckRow(payload, id, actor = {}) {
-  const hasChassisField = Object.prototype.hasOwnProperty.call(payload, 'kirChassisNumber');
-  if (!hasChassisField || (!id && !String(payload.kirChassisNumber || '').trim())) {
-    return upsertMasterRow('trucks', payload, id);
-  }
-
+  const hasChassisField = hasOwnField(payload, 'kirChassisNumber');
+  const syncChassis = hasChassisField && Boolean(id || String(payload.kirChassisNumber || '').trim());
   const context = {
     source: 'master_truck',
     actorName: actor.name || null,
     actorRole: actor.role || null,
   };
+
   return withTransaction(async (client) => {
+    const currentResult = id
+      ? await client.query('select * from vehicles where id = $1 and archived_at is null for update', [id])
+      : { rows: [] };
+    const current = currentResult.rows[0] ? getResourceConfig('trucks').toApi(currentResult.rows[0]) : null;
+    const keepChassisOfIneligibleTruck = shouldKeepChassisOfIneligibleTruck(current, payload);
+
+    let saved;
     if (!id) {
       const { kirChassisNumber, ...restPayload } = payload;
-      const created = await upsertMasterRow('trucks', restPayload, id, client);
-      const { after } = await updateVehicleChassis(created.id, kirChassisNumber, context, client);
-      return after;
+      saved = await upsertMasterRow('trucks', syncChassis ? restPayload : payload, id, client);
+      if (syncChassis) saved = (await updateVehicleChassis(saved.id, kirChassisNumber, context, client)).after;
+    } else if (syncChassis && !keepChassisOfIneligibleTruck) {
+      const { after } = await updateVehicleChassis(id, payload.kirChassisNumber, context, client);
+      saved = await upsertMasterRow('trucks', { ...payload, kirChassisNumber: after.kirChassisNumber }, id, client);
+    } else {
+      saved = await upsertMasterRow('trucks', payload, id, client);
     }
-    const { after } = await updateVehicleChassis(id, payload.kirChassisNumber, context, client);
-    return upsertMasterRow('trucks', { ...payload, kirChassisNumber: after.kirChassisNumber }, id, client);
+
+    const change = resolveDefaultDriverChange(payload, current);
+    if (!change) return saved;
+
+    const result = change.type === 'set'
+      ? await updateVehicleDefaultDriver(saved.id, change.driverId, client)
+      : await clearVehicleDefaultDriver(saved.id, client);
+    await recordDefaultDriverHistory([
+      {
+        vehicleId: result.after.id,
+        previousDriverId: result.before.defaultDriverId,
+        previousDriverName: result.before.defaultDriver,
+        nextDriverId: result.after.defaultDriverId,
+        nextDriverName: result.after.defaultDriver,
+      },
+      ...result.detached.map((detached) => ({
+        vehicleId: detached.id,
+        previousDriverId: detached.previousDriverId,
+        previousDriverName: detached.previousDriverName,
+        reason: `Sopir dipindahkan ke ${result.after.unitCode || result.after.plateNumber}`,
+      })),
+    ], context, client);
+    return result.after;
+  });
+}
+
+// Status sopir dan pelepasan hubungan sopir default disimpan di satu transaksi. Hanya kolom
+// default_driver_* di vehicles yang disentuh -- container_jobs dan histori ritasi tidak berubah.
+async function saveDriverRow(payload, id, actor = {}) {
+  const currentDriver = id ? await findMasterRowById('drivers', id) : null;
+  return withTransaction(async (client) => {
+    const saved = await upsertMasterRow('drivers', payload, id, client);
+    if (shouldDetachDriverFromUnit(saved.status)) {
+      const released = await releaseDriverDefaultAssignments(saved.id, driverIdentityNames(currentDriver, saved), client);
+      await recordDefaultDriverHistory(released.map((vehicle) => ({
+        vehicleId: vehicle.id,
+        previousDriverId: vehicle.previousDriverId,
+        previousDriverName: vehicle.previousDriverName,
+      })), {
+        source: 'master_truck',
+        reason: `Sopir berstatus ${saved.status}`,
+        actorName: actor.name || null,
+        actorRole: actor.role || null,
+      }, client);
+    } else {
+      await syncVehicleDefaultDriverName(saved.id, saved.name, client);
+    }
+    return saved;
   });
 }
 
@@ -157,17 +249,10 @@ export async function saveMasterRow(resource, payload, id, actor = {}) {
     error.code = 'VALIDATION_ERROR';
     throw error;
   }
-  const currentDriver = resource === 'drivers' && id ? await findMasterRowById(resource, id) : null;
   const normalizedPayload = await normalizePayloadForResource(resource, payload);
-  const saved = resource === 'trucks'
-    ? await saveTruckRow(normalizedPayload, id, actor)
-    : await upsertMasterRow(resource, normalizedPayload, id);
-
-  if (resource === 'drivers' && shouldDetachDriverFromUnit(saved.status)) {
-    await clearVehicleDefaultDriverByNames(driverIdentityNames(currentDriver, saved));
-  }
-
-  return saved;
+  if (resource === 'trucks') return saveTruckRow(normalizedPayload, id, actor);
+  if (resource === 'drivers') return saveDriverRow(normalizedPayload, id, actor);
+  return upsertMasterRow(resource, normalizedPayload, id);
 }
 
 export function removeMasterRow(resource, id) {

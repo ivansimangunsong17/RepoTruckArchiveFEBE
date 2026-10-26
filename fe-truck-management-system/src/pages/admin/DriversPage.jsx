@@ -6,6 +6,7 @@ import OperationalDataTruncatedNotice from '../../components/common/OperationalD
 import { buildOperationalJobs, getActiveOperationalJobs } from '../../data/operationalDashboard';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { findDriverDefaultTruck } from '../../utils/truckDefaultDriver';
 
 function formatTruckNumber(unitCode) {
   const value = String(unitCode || '-').trim();
@@ -30,18 +31,9 @@ function getDriverIdentityNames(row = {}) {
   return [row.name, row.nickname].map(normalizeName).filter(Boolean);
 }
 
+// Aturan pasangan sama persis dengan Master Truck (ID dulu, nama hanya untuk unit legacy tanpa ID).
 function getDriverTruck(row, trucks) {
-  const driverId = String(row?.id || '').trim();
-  if (driverId) {
-    const truckById = (trucks || []).find((item) => String(item.defaultDriverId || '').trim() === driverId);
-    if (truckById) return truckById;
-  }
-
-  const driverNames = getDriverIdentityNames(row);
-  return (trucks || []).find((item) => {
-    if (String(item.defaultDriverId || '').trim()) return false;
-    return driverNames.includes(normalizeName(item.defaultDriver));
-  });
+  return findDriverDefaultTruck(row, trucks) || undefined;
 }
 
 function getUnitSequence(unitCode) {
