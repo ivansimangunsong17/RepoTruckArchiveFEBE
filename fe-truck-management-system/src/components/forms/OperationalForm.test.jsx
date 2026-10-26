@@ -2119,4 +2119,53 @@ describe('OperationalForm timeline Repo', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     expect(onSubmit.mock.calls[0][0].status).toBe('inap');
   });
+
+  it('nomor container berpotensi ganda: dialog konfirmasi, lalu kirim ulang dengan konfirmasi pemakaian ulang', async () => {
+    const user = userEvent.setup();
+    const duplicateError = Object.assign(new Error('Container MSCU-123456-7 sedang dititip pada SO-LAIN.'), {
+      status: 409,
+      payload: {
+        error: {
+          code: 'CONTAINER_NUMBER_POSSIBLE_DUPLICATE',
+          message: 'Container MSCU-123456-7 sedang dititip pada SO-LAIN. Lanjutkan lewat Ambil Titip.',
+          details: { containerNumber: 'MSCU-123456-7', matches: [{ containerJobId: 'job-9', soNumber: 'SO-LAIN', customerName: 'PT Lain', status: 'repo_stored', driverName: 'Setyadi' }] },
+        },
+      },
+    });
+    const onSubmit = vi.fn().mockRejectedValueOnce(duplicateError).mockResolvedValueOnce({});
+    render(
+      <OperationalForm
+        container={container}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    const dialog = await screen.findByRole('alertdialog', { name: /nomor container sudah tercatat di job lain/i });
+    expect(within(dialog).getByText(/Lanjutkan lewat Ambil Titip/)).toBeInTheDocument();
+    expect(within(dialog).getByText('SO-LAIN · PT Lain · Dititip · Sopir Setyadi')).toBeInTheDocument();
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('confirmPossibleDuplicateContainer');
+
+    await user.click(within(dialog).getByRole('button', { name: /ya, container dipakai ulang/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1][0]).toEqual(expect.objectContaining({ confirmPossibleDuplicateContainer: true }));
+    expect(screen.queryByRole('alertdialog', { name: /nomor container sudah tercatat/i })).not.toBeInTheDocument();
+  });
+
+  it('nomor container berpotensi ganda: Batal tidak mengirim ulang', async () => {
+    const user = userEvent.setup();
+    const duplicateError = Object.assign(new Error('dup'), {
+      payload: { error: { code: 'CONTAINER_NUMBER_POSSIBLE_DUPLICATE', message: 'Nomor container sudah tercatat pada SO-1.', details: { matches: [] } } },
+    });
+    const onSubmit = vi.fn().mockRejectedValueOnce(duplicateError);
+    render(<OperationalForm container={container} masterTrucks={[]} onClose={vi.fn()} onSubmit={onSubmit} />);
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    const dialog = await screen.findByRole('alertdialog', { name: /nomor container sudah tercatat di job lain/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Batal' }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alertdialog', { name: /nomor container sudah tercatat/i })).not.toBeInTheDocument();
+  });
 });

@@ -25,6 +25,7 @@ import { useFeedback } from '../../hooks/useFeedback';
 import { useArchiveData } from '../../hooks/useArchiveData';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { getPossibleDuplicateContainer } from '../../utils/possibleDuplicateContainer';
 import DocumentLink from '../../components/common/DocumentLink';
 import FilterStatus from '../../components/common/FilterStatus';
 import { fetchSalesOrdersPage } from '../../services/archive/salesOrderService';
@@ -1070,7 +1071,10 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
         message: `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(savedStatus)}.`,
       });
     } catch (requestError) {
-      notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
+      // Potensi nomor container ganda dikonfirmasi lewat dialog di OperationalForm, bukan toast error.
+      if (!getPossibleDuplicateContainer(requestError)) {
+        notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
+      }
       throw requestError;
     }
   }

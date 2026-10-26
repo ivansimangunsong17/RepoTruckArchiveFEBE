@@ -397,6 +397,26 @@ export async function uploadAutoJourneyMoneyProofController(request, response) {
   sendSuccess(response, result, 'Bukti transfer UJ berhasil diupload.');
 }
 
+// Jejak audit saat user tetap menyimpan nomor container yang terdeteksi berpotensi duplikat.
+async function recordConfirmedContainerNumberReuse(request, before, saved) {
+  const confirmed = request.body?.confirmPossibleDuplicateContainer === true
+    || String(request.body?.confirmPossibleDuplicateContainer || '').toLowerCase() === 'true';
+  if (!confirmed || !saved?.containerNumber || saved.containerNumber === before?.containerNumber) return;
+  await safeRecordActivityLog(request, {
+    action: 'CONFIRM_CONTAINER_NUMBER_REUSE',
+    module: 'container_jobs',
+    entityType: 'container_job',
+    entityId: saved.id,
+    beforeData: { containerNumber: before?.containerNumber || '' },
+    afterData: { containerNumber: saved.containerNumber },
+    metadata: {
+      salesOrderId: saved.orderId,
+      soNumber: saved.soNumber,
+      containerNumber: saved.containerNumber,
+    },
+  });
+}
+
 export async function updateContainerJobController(request, response) {
   const before = await getContainerJob(request.params.id);
   assertDocumentOnlyPayload(request.user, request.body);
@@ -413,6 +433,7 @@ export async function updateContainerJobController(request, response) {
       ...documentOnlyMetadata(request.body, saved),
     },
   });
+  await recordConfirmedContainerNumberReuse(request, before, saved);
   if (isAdminCorrectionPayload(request.body)) {
     const changes = adminCorrectionChanges(before, saved);
     await safeRecordActivityLog(request, {

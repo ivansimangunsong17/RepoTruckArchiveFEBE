@@ -1,6 +1,7 @@
 import { query, withTransaction } from '../../db/client.js';
 import { mapContainerJob, mapSalesOrder, toContainerJobDb, toSalesOrderDb } from './sales-orders.mapper.js';
 import { reconcileSalesOrderContainers } from './sales-orders.container-sync.js';
+import { assertContainerNumberAllowed } from '../container-jobs/container-number-guard.js';
 
 const salesOrderColumnCandidates = [
   'id',
@@ -702,6 +703,13 @@ export async function createSalesOrder(form) {
 
     for (const container of form.containers || []) {
       const jobPayload = toContainerJobDb(container, order, payload.created_by_name);
+      // Request langsung juga dijaga: container yang masih aktif/dititip di job lain ditolak; container
+      // sebelumnya dalam request ini sudah ter-insert di transaksi yang sama sehingga ikut terdeteksi.
+      await assertContainerNumberAllowed(client, {
+        containerNumber: jobPayload.container_number,
+        salesOrderId: order.id,
+        confirmed: container.confirmPossibleDuplicateContainer,
+      });
       const jobEntries = Object.entries(jobPayload);
       await client.query(
         `
@@ -889,6 +897,13 @@ export async function updateSalesOrder(id, form) {
             [...jobEntries.map(([, value]) => value), currentJob.id],
           );
       } else {
+        // Request langsung juga dijaga: container yang masih aktif/dititip di job lain ditolak; container
+        // sebelumnya dalam request ini sudah ter-insert di transaksi yang sama sehingga ikut terdeteksi.
+        await assertContainerNumberAllowed(client, {
+          containerNumber: jobPayload.container_number,
+          salesOrderId: id,
+          confirmed: container.confirmPossibleDuplicateContainer,
+        });
         const jobEntries = Object.entries(jobPayload);
         await client.query(
           `

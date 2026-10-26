@@ -11,6 +11,7 @@ import {
 } from './repo-pickup-lifecycle.js';
 import { buildRepoUjDescription, normalizeRepoUjAmount, postRepoUjToDroppingAccount } from './repo-pickup-uj.js';
 import { createRepoRevenueLines } from './repo-pickup-revenue.js';
+import { assertContainerNumberAllowed } from './container-number-guard.js';
 import { isSalesOrderBillingAdvanced } from '../finance/finance-eligibility.js';
 
 const joinedJobColumns = `
@@ -3319,6 +3320,15 @@ async function updateContainerJobTransaction(id, form) {
         'CONTAINER_JOB_VENDOR_CONTAINER_NUMBER_REQUIRED',
         400,
       );
+    }
+    if (nextStatus !== 'cancelled') {
+      await assertContainerNumberAllowed(client, {
+        containerNumber: nextContainerNumber,
+        previousContainerNumber: existing.rows[0].container_number,
+        jobId: existing.rows[0].id,
+        salesOrderId: existing.rows[0].sales_order_id,
+        confirmed: form.confirmPossibleDuplicateContainer,
+      });
     }
     // Tujuan (destination) sengaja dibekukan begitu container dibuat -- hanya boleh dikoreksi lewat
     // mode koreksi admin (sudah divalidasi di service layer via ensureAdminCorrectionContract), bukan

@@ -17,6 +17,7 @@ import {
   formatCsvDateTime,
   formatCsvStatus,
 } from '../../utils/reportCsv';
+import { describeDuplicateContainerMatch, getPossibleDuplicateContainer } from '../../utils/possibleDuplicateContainer';
 
 const PAGE_SIZE = 8;
 const FETCH_PAGE_SIZE = 100;
@@ -785,7 +786,19 @@ function HistoricalEntryPage() {
 
     try {
       setJobSaving(true);
-      const saved = await archive.updateJob(editingJob.id, payload);
+      let saved;
+      try {
+        saved = await archive.updateJob(editingJob.id, payload);
+      } catch (requestError) {
+        const duplicate = getPossibleDuplicateContainer(requestError);
+        const confirmed = duplicate && window.confirm([
+          duplicate.message,
+          ...duplicate.matches.map((match) => `- ${describeDuplicateContainerMatch(match)}`),
+          'Simpan hanya bila container ini memang dipakai ulang untuk pekerjaan lain.',
+        ].join('\n'));
+        if (!confirmed) throw requestError;
+        saved = await archive.updateJob(editingJob.id, { ...payload, confirmPossibleDuplicateContainer: true });
+      }
       if (archive.isDatabaseMode) {
         if (targetPeriod && targetPeriod !== period) setPeriod(targetPeriod);
         setListVersion((value) => value + 1);

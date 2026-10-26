@@ -35,6 +35,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import DocumentLink from '../../components/common/DocumentLink';
 import UjRecommendationCard from '../../components/operations/UjRecommendationCard';
 import { parseOtherCost } from '../../utils/otherCost';
+import { getPossibleDuplicateContainer } from '../../utils/possibleDuplicateContainer';
 import {
   cancelContainerJob,
   fetchContainerJob,
@@ -780,7 +781,10 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
           : updateWarning?.message || `${containerNumber} berhasil disimpan dengan status ${getJobStatusLabel(form.status)}.`,
       });
     } catch (requestError) {
-      notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
+      // Potensi nomor container ganda dikonfirmasi lewat dialog di OperationalForm, bukan toast error.
+      if (!getPossibleDuplicateContainer(requestError)) {
+        notify({ type: 'error', title: 'Proses gagal disimpan', message: requestError.message });
+      }
       throw requestError;
     }
   }

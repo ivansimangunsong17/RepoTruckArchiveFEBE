@@ -13,6 +13,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 import { validateArchiveFile } from '../../utils/fileValidation';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import { isApiDataSource } from '../../services/config/dataSource';
+import { describeDuplicateContainerMatch, getPossibleDuplicateContainer } from '../../utils/possibleDuplicateContainer';
 import { createContainerJobExpense, uploadContainerJobExpenseProof } from '../../services/archive/containerJobService';
 import armadaLogo from '../../Assets/BGLogoArmada.png';
 
@@ -627,6 +628,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const submitInFlightRef = useRef(false);
   // Payload pickup Repo yang sudah lolos validasi, menunggu konfirmasi fisik lewat dialog.
   const [pendingRepoPickupSubmit, setPendingRepoPickupSubmit] = useState(null);
+  const [pendingDuplicateContainer, setPendingDuplicateContainer] = useState(null);
   // Satu Total UJ Repo per pergerakan fisik (single maupun combo), diisi manual oleh Operational.
   const [repoUjAmount, setRepoUjAmount] = useState('');
   const driverCommissionEditedRef = useRef(false);
@@ -1512,11 +1514,27 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         ...submitForm,
       });
     } catch (requestError) {
+      const duplicate = getPossibleDuplicateContainer(requestError);
+      if (duplicate) {
+        setPendingDuplicateContainer({ ...duplicate, submitForm });
+        return;
+      }
       setError(requestError?.message || 'Proses gagal disimpan.');
       throw requestError;
     } finally {
       submitInFlightRef.current = false;
       setIsSaving(false);
+    }
+  }
+
+  async function confirmDuplicateContainerSubmit() {
+    const submitForm = pendingDuplicateContainer?.submitForm;
+    setPendingDuplicateContainer(null);
+    if (!submitForm) return;
+    try {
+      await submitOnce({ ...submitForm, confirmPossibleDuplicateContainer: true });
+    } catch {
+      // Error sudah ditampilkan di form oleh submitOnce.
     }
   }
 
@@ -2485,6 +2503,36 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
         </form>
       </section>
 
+      {pendingDuplicateContainer ? (
+        <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setPendingDuplicateContainer(null)}>
+          <section
+            className="feedback-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="duplicate-container-confirmation-title"
+            aria-describedby="duplicate-container-confirmation-description"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span><AlertTriangle size={21} /></span>
+              <div>
+                <h2 id="duplicate-container-confirmation-title">Nomor container sudah tercatat di job lain</h2>
+                <p id="duplicate-container-confirmation-description">{pendingDuplicateContainer.message}</p>
+                <ul>
+                  {pendingDuplicateContainer.matches.map((match) => (
+                    <li key={match.containerJobId}>{describeDuplicateContainerMatch(match)}</li>
+                  ))}
+                </ul>
+                <p>Simpan hanya bila container ini memang dipakai ulang untuk pekerjaan lain.</p>
+              </div>
+            </header>
+            <footer>
+              <button className="secondary-button" type="button" autoFocus onClick={() => setPendingDuplicateContainer(null)}>Batal</button>
+              <button className="primary-button" type="button" onClick={confirmDuplicateContainerSubmit}>Ya, container dipakai ulang</button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
       {pendingRepoPickupSubmit ? (
         <div className="feedback-dialog-backdrop" role="presentation" onMouseDown={() => setPendingRepoPickupSubmit(null)}>
           <section
