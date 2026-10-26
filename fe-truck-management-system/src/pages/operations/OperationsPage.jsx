@@ -1020,9 +1020,11 @@ function OperationsPage({ documentFollowUp = false, repoStorageOnly = false }) {
       }
       setDetail(null);
       setRepoTarget(null);
+      // Mis. Biaya Titip/Repo tidak ditambahkan otomatis karena Debit Note SO sudah terbit.
+      const updateWarning = Array.isArray(saved?.updateWarnings) ? saved.updateWarnings[0] : null;
       notify({
-        title: 'Container dititipkan',
-        message: `${containerLabel(repoTarget)} dititipkan di ${repoForm.repoLocation.trim()}. Truck dan sopir bisa dipakai untuk job lain.`,
+        title: updateWarning ? 'Container dititipkan dengan catatan' : 'Container dititipkan',
+        message: updateWarning?.message || `${containerLabel(repoTarget)} dititipkan di ${repoForm.repoLocation.trim()}. Truck dan sopir bisa dipakai untuk job lain.`,
       });
     } catch (requestError) {
       notify({ type: 'error', title: 'Penitipan container gagal', message: requestError.message });

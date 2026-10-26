@@ -1,24 +1,29 @@
-// Integrasi Revenue Repo (Phase 4) terhadap PostgreSQL sungguhan.
-// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
-// (salinan dev), bukan database dev/production, karena test ini menulis data.
+// Integrasi aturan tagihan Repo terhadap PostgreSQL sungguhan (aturan 2026-10-26): Biaya Titip/Repo
+// Rp300.000 ditagihkan sebagai item Reimbursement SO saat job pertama kali dititip, sehingga Ambil
+// Titip (single maupun combo 2x20) TIDAK membuat Revenue Repo maupun tagihan baru. Revenue Repo lama
+// (manual_revenue_lines 'repo') tetap dikelola Finance apa adanya dan tidak dihitung ganda.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi DAN lolos scratch-db-guard.
+// Fixture dikenali dari prefix (SO-RV-*, truck RVN-*, sopir bank 'BANK RV') dan dihapus sebelum dan
+// sesudah suite.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import { prepareScratchDatabase } from '../test-support/scratch-db-guard.js';
 
-const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+const scratch = await prepareScratchDatabase();
 
-if (!databaseUrl) {
-  test('repo revenue integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+if (scratch.skip) {
+  test('repo revenue integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: scratch.skip }, () => {});
 } else {
-  process.env.DATABASE_URL = databaseUrl;
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
-  const { query, withTransaction, closePool } = await import('../db/client.js');
+  const { query, closePool } = await import('../db/client.js');
   const {
     pickupComboRepoContainerJobs,
     pickupSingleRepoContainerJob,
+    updateContainerJob,
   } = await import('../modules/container-jobs/container-jobs.repository.js');
-  const { lockRepoPickupMovementForJob, reconcileRepoPickupMovement } = await import('../modules/container-jobs/repo-pickup-lifecycle.js');
   const {
+    activateManualRevenueLine,
     createManualRevenueLine,
     invoiceOrdersCte,
     updateManualRevenueLine,
@@ -27,183 +32,165 @@ if (!databaseUrl) {
 
   const tag = crypto.randomBytes(3).toString('hex').toUpperCase();
   let seq = 0;
-  const nextTag = () => `${tag}${String(++seq).padStart(2, '0')}`;
+  const nextTag = () => `${tag}${String(++seq).padStart(3, '0')}`;
+  const nextContainerNumber = () => `V${tag}${String(++seq).padStart(4, '0')}`;
+  const hoursAgo = (hours) => new Date(Date.now() - hours * 3600 * 1000).toISOString();
 
-  async function cloneRow(table, templateSql, templateParams, overrides) {
+  async function cloneRow(table, templateSql, overrides) {
     const result = await query(
-      `
-        insert into ${table}
-        select (jsonb_populate_record(null::${table}, to_jsonb(t) || $${templateParams.length + 1}::jsonb)).*
-        from (${templateSql}) t
-        returning *
-      `,
-      [...templateParams, JSON.stringify({ id: crypto.randomUUID(), ...overrides })],
+      `insert into ${table}
+       select (jsonb_populate_record(null::${table}, to_jsonb(t) || $1::jsonb)).*
+       from (${templateSql}) t returning *`,
+      [JSON.stringify({ id: crypto.randomUUID(), ...overrides })],
     );
+    assert.ok(result.rows[0], `Template ${table} tidak ditemukan -- jalankan seed sintetis di database scratch.`);
     return result.rows[0];
   }
 
-  // Sales Order yang masuk daftar invoice Finance, supaya billing_amount bisa dihitung.
-  // SO invoice milik test ini sendiri (clone SO terverifikasi + satu job selesai), supaya file
-  // integrasi lain yang berjalan paralel tidak saling mengubah billing SO yang sama.
-  async function invoiceSalesOrders(limit = 2) {
-    const ids = [];
-    for (let index = 0; index < limit; index += 1) {
-      const code = nextTag();
-      const so = await cloneRow('sales_orders', `
-        select * from sales_orders
-        where status = 'completed' and finance_verification_status = 'verified'
-          and nullif(btrim(accurate_so_number), '') is not null
-        order by created_at limit 1
-      `, [], {
-        so_number: `SO-RV-${code}`, accurate_so_number: `ACC-RV-${code}`, customer_name: `Customer RV ${code}`,
-        invoice_number: null, billing_status: 'belum_invoice', debit_note_document_uploaded_at: null, status: 'completed',
-      });
-      await cloneRow('container_jobs', `
-        select * from container_jobs
-        where coalesce(execution_source, 'internal') = 'internal' and status = 'completed'
-        order by created_at limit 1
-      `, [], {
-        sales_order_id: so.id, container_number: `RVB${nextTag()}`.padEnd(11, '0').slice(0, 11), container_size: '20FT',
-        status: 'completed', completed_at: new Date().toISOString(), repo_stored_at: null,
-        driver_id: null, vehicle_id: null, assignment_group_id: null, entry_source: 'realtime', is_backdate_entry: false,
-      });
-      ids.push(so.id);
-    }
-    const listed = await query(`${invoiceOrdersCte()} select id from invoice_orders where id = any($1::uuid[])`, [ids]);
-    assert.equal(listed.rows.length, limit, 'SO test harus masuk daftar invoice');
-    return ids;
+  async function createSalesOrder(extra = {}) {
+    const code = nextTag();
+    return cloneRow('sales_orders', `
+      select * from sales_orders
+      where status <> 'cancelled' and coalesce(is_vendor_order, false) = false
+      order by created_at limit 1
+    `, {
+      so_number: `SO-RV-${code}`, accurate_so_number: `ACC-RV-${code}`, finance_verification_status: 'verified',
+      customer_name: `Customer RV ${code}`, status: 'running', is_vendor_order: false, entry_source: 'realtime',
+      historical_period: null, invoice_number: null, billing_status: 'belum_invoice', debit_note_number: null,
+      debit_note_document_uploaded_at: null, cancel_request_status: 'none', cancelled_at: null, ...extra,
+    });
   }
 
+  const jobTemplate = `
+    select * from container_jobs
+    where coalesce(execution_source, 'internal') = 'internal'
+    order by created_at limit 1
+  `;
+
+  function createJob(salesOrderId, overrides = {}) {
+    return cloneRow('container_jobs', jobTemplate, {
+      sales_order_id: salesOrderId, container_number: nextContainerNumber(), container_size: '20FT',
+      execution_source: 'internal', status: 'received', running_at: null, completed_at: null, cancelled_at: null,
+      repo_stored_at: null, repo_picked_up_at: null, repo_released_driver_id: null, repo_released_vehicle_id: null,
+      driver_id: null, vehicle_id: null, assignment_group_id: null, assignment_snapshot: {},
+      has_driver_commission: false, driver_commission_amount: 0, commission_status: 'without_commission',
+      commission_driver_id: null, commission_driver_name: null, commission_driver_snapshot: {},
+      entry_source: 'realtime', historical_period: null, is_backdate_entry: false, rpuj_status: 'pending',
+      cancel_request_status: 'none', cancel_reason: null, cancel_source: null, uj_amount_snapshot: 123000,
+      ...overrides,
+    });
+  }
+
+  // Job yang sudah dititip (data dibuat langsung, tanpa transisi titip -> tanpa Biaya Titip otomatis).
+  function createRepoStoredJob(salesOrderId, overrides = {}) {
+    return createJob(salesOrderId, {
+      status: 'repo_stored', running_at: hoursAgo(72), repo_stored_at: hoursAgo(70),
+      repo_location: `Repo Revenue ${tag}`, repo_eir_number: `EIR-${tag}`, ...overrides,
+    });
+  }
+
+  async function createDriver() {
+    const code = nextTag();
+    return cloneRow('drivers', 'select * from drivers where archived_at is null order by created_at limit 1', {
+      name: `SOPIR RV ${code}`, nickname: null, nik: null, operational_status: 'Aktif', archived_at: null,
+      bank_name: 'BANK RV', bank_account_number: `ACC-RV-${code}`,
+    });
+  }
+
+  async function createVehicle(size) {
+    const code = nextTag();
+    return cloneRow('vehicles', 'select * from vehicles where archived_at is null order by created_at limit 1', {
+      plate_number: `B ${code} RVN`, unit_code: `RVN-${code}`, engine_number: null, kir_number: null, vin: null,
+      container_size: size, current_chassis_id: null, operational_status: 'Aktif', archived_at: null,
+      default_driver_id: null, default_driver_name: null,
+    });
+  }
+
+  const pickupPayload = (driver, vehicle, extra = {}) => ({
+    pickupConfirmed: true, repoPickedUpAt: hoursAgo(30), driverId: driver.id, vehicleId: vehicle.id,
+    updatedBy: 'Integration Test', repoUjAmount: 150000, ...extra,
+  });
+
+  const repoRevenueRows = async (jobIds) => (await query(
+    "select * from manual_revenue_lines where charge_type = 'repo' and container_job_id = any($1::uuid[])",
+    [jobIds],
+  )).rows;
+  const storageFees = async (jobIds) => (await query(
+    "select * from container_job_expenses where source = 'repo_storage_fee' and container_job_id = any($1::uuid[])",
+    [jobIds],
+  )).rows;
   async function billingAmount(salesOrderId) {
     const result = await query(`${invoiceOrdersCte()} select billing_amount from invoice_orders where id = $1`, [salesOrderId]);
     assert.ok(result.rows[0], 'Sales Order harus ada di daftar invoice saat billing diukur');
     return Number(result.rows[0].billing_amount);
   }
 
-  // Pickup menjalankan job lagi sehingga SO keluar dari daftar invoice (perilaku lama
-  // refreshOrderStatus). Untuk mengukur billing murni, job test dibatalkan (keluar dari
-  // finance_rows) dan status SO dikembalikan; yang tersisa hanya efek revenue line-nya.
-  async function isolateBillingAfterPickup(jobId, salesOrderId) {
-    await query("update container_jobs set status = 'cancelled', cancelled_at = now() where id = $1", [jobId]);
-    await query("update sales_orders set status = 'completed' where id = $1", [salesOrderId]);
+  async function cleanupFixtures() {
+    const salesOrders = (await query("select id from sales_orders where so_number like 'SO-RV-%'")).rows.map((row) => row.id);
+    const jobs = (await query('select id from container_jobs where sales_order_id = any($1::uuid[])', [salesOrders])).rows.map((row) => row.id);
+    const movements = (await query(
+      'select distinct movement_id from container_pickup_items where container_job_id = any($1::uuid[])',
+      [jobs],
+    )).rows.map((row) => row.movement_id);
+    if (movements.length) {
+      const fundBatches = await query(
+        "select distinct batch_id from operational_fund_transactions where source = 'repo_uj' and source_ref_id = any($1::text[])",
+        [movements],
+      );
+      await query("delete from operational_fund_transactions where source = 'repo_uj' and source_ref_id = any($1::text[])", [movements]);
+      await query(
+        `delete from operational_fund_batches b
+         where b.id = any($1::uuid[]) and b.created_at > now() - interval '1 day'
+           and not exists (select 1 from operational_fund_transactions t where t.batch_id = b.id)`,
+        [fundBatches.rows.map((row) => row.batch_id)],
+      );
+    }
+    await query('delete from operational_fund_transactions where container_job_id = any($1::uuid[])', [jobs]);
+    await query('delete from manual_revenue_lines where sales_order_id = any($1::uuid[])', [salesOrders]);
+    await query('delete from container_pickup_movements where id = any($1::uuid[])', [movements]);
+    await query('delete from sales_orders where id = any($1::uuid[])', [salesOrders]);
+    await query("delete from vehicles where unit_code like 'RVN-%'");
+    await query("delete from drivers where bank_name = 'BANK RV' and name like 'SOPIR RV %'");
   }
 
-  const createdJobs = [];
-
-  async function createRepoStoredJob(salesOrderId) {
-    const job = await createRepoStoredJobRow(salesOrderId);
-    createdJobs.push(job);
-    return job;
-  }
-
-  async function createRepoStoredJobRow(salesOrderId) {
-    return cloneRow('container_jobs', `
-      select * from container_jobs
-      where coalesce(execution_source, 'internal') = 'internal' and sales_order_id = $1
-      order by created_at limit 1
-    `, [salesOrderId], {
-      status: 'repo_stored',
-      container_number: `RVN${nextTag()}`.padEnd(11, '0').slice(0, 11),
-      container_size: '20FT',
-      repo_location: `Repo Revenue ${tag}`,
-      repo_eir_number: `EIR-${tag}`,
-      driver_id: null,
-      vehicle_id: null,
-      assignment_group_id: null,
-      entry_source: 'realtime',
-      is_backdate_entry: false,
-      running_at: null,
-      completed_at: null,
-      cancelled_at: null,
-      repo_picked_up_at: null,
-      rpuj_status: 'pending',
-      uj_amount_snapshot: 123000,
-    });
-  }
-
-  async function createDriver() {
-    return cloneRow('drivers', 'select * from drivers where archived_at is null order by created_at limit 1', [], {
-      name: `SOPIR REVENUE ${nextTag()}`, nik: null, operational_status: 'Aktif', archived_at: null,
-    });
-  }
-
-  async function createVehicle(size) {
-    const code = nextTag();
-    return cloneRow('vehicles', 'select * from vehicles where archived_at is null order by created_at limit 1', [], {
-      plate_number: `B ${code} RVN`, unit_code: `RVN-${code}`, engine_number: null, kir_number: null, vin: null,
-      container_size: size, current_chassis_id: null, operational_status: 'Aktif', archived_at: null,
-    });
-  }
-
-  async function repoRevenueRows(where, params) {
-    const result = await query(`
-      select mrl.*, cpi.movement_id, so.customer_name
-      from manual_revenue_lines mrl
-      left join container_pickup_items cpi on cpi.id = mrl.container_pickup_item_id
-      join sales_orders so on so.id = mrl.sales_order_id
-      where mrl.charge_type = 'repo' and ${where}
-      order by cpi.sequence_no
-    `, params);
-    return result.rows;
-  }
-
-  const pickupPayload = (driver, vehicle, extra = {}) => ({
-    pickupConfirmed: true, repoPickedUpAt: new Date().toISOString(), driverId: driver.id, vehicleId: vehicle.id, updatedBy: 'Integration Test', repoUjAmount: 150000, ...extra,
-  });
-
-  // Setiap test mengembalikan SO-nya ke daftar invoice supaya test berikutnya tetap punya SO.
-  test.afterEach(async () => {
-    const jobs = createdJobs.splice(0);
-    if (!jobs.length) return;
-    await query("update container_jobs set status = 'cancelled', cancelled_at = coalesce(cancelled_at, now()) where id = any($1::uuid[])", [jobs.map((job) => job.id)]);
-    await query("update sales_orders set status = 'completed' where id = any($1::uuid[])", [[...new Set(jobs.map((job) => job.sales_order_id))]]);
-  });
-
+  test.before(cleanupFixtures);
   test.after(async () => {
-    await closePool();
+    try {
+      await cleanupFixtures();
+    } finally {
+      await closePool();
+    }
   });
 
-  test('1. single Repo: satu revenue Rp300.000 ter-link ke movement, item, job, dan SO', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const job = await createRepoStoredJob(salesOrderId);
+  test('single Ambil Titip: tidak ada Revenue Repo maupun Biaya Titip baru; UJ Repo tetap satu debit', async () => {
+    const so = await createSalesOrder();
+    const job = await createRepoStoredJob(so.id);
     const result = await pickupSingleRepoContainerJob(job.id, pickupPayload(await createDriver(), await createVehicle('20FT')));
 
-    const rows = await repoRevenueRows('mrl.container_job_id = $1', [job.id]);
-    assert.equal(rows.length, 1);
-    assert.equal(Number(rows[0].total_amount), 300000);
-    assert.equal(Number(rows[0].unit_price), 300000);
-    assert.equal(Number(rows[0].quantity), 1);
-    assert.equal(rows[0].status, 'draft');
-    assert.equal(rows[0].movement_id, result.movement.id);
-    assert.equal(rows[0].sales_order_id, salesOrderId);
-    assert.equal(result.repoRevenueLines.length, 1);
+    assert.equal(result.repoRevenueLines, undefined);
+    assert.deepEqual(await repoRevenueRows([job.id]), []);
+    assert.deepEqual(await storageFees([job.id]), []);
+    const uj = await query("select amount from operational_fund_transactions where source = 'repo_uj' and source_ref_id = $1 and status = 'posted'", [result.movement.id]);
+    assert.deepEqual(uj.rows.map((row) => Number(row.amount)), [150000]);
   });
 
-  test('2+3. combo 2x20 dari dua SO berbeda: dua revenue Rp300.000, masing-masing ke SO/customer-nya', async () => {
-    const [soA, soB] = await invoiceSalesOrders(2);
-    const jobs = [await createRepoStoredJob(soA), await createRepoStoredJob(soB)];
+  test('combo 2x20 dari dua SO: tidak ada tagihan Repo baru di kedua SO; UJ Repo satu nilai per movement', async () => {
+    const [soA, soB] = [await createSalesOrder(), await createSalesOrder()];
+    const jobs = [await createRepoStoredJob(soA.id), await createRepoStoredJob(soB.id)];
     const result = await pickupComboRepoContainerJobs(pickupPayload(await createDriver(), await createVehicle('40FT'), {
       containerJobIds: jobs.map((job) => job.id),
       repoUjAmount: 175000,
     }));
 
-    const rows = await repoRevenueRows('cpi.movement_id = $1', [result.movement.id]);
-    assert.equal(rows.length, 2);
-    assert.equal(rows.reduce((sum, row) => sum + Number(row.total_amount), 0), 600000);
-    assert.deepEqual(rows.map((row) => [row.container_job_id, row.sales_order_id]), [[jobs[0].id, soA], [jobs[1].id, soB]]);
-    const customers = await query('select id, customer_name from sales_orders where id = any($1::uuid[])', [[soA, soB]]);
-    const customerBySo = new Map(customers.rows.map((row) => [row.id, row.customer_name]));
-    assert.deepEqual(rows.map((row) => row.customer_name), [customerBySo.get(soA), customerBySo.get(soB)]);
-
-    // 7. UJ Repo tetap satu nilai per movement.
+    assert.deepEqual(await repoRevenueRows(jobs.map((job) => job.id)), []);
+    assert.deepEqual(await storageFees(jobs.map((job) => job.id)), []);
     const uj = await query("select amount from operational_fund_transactions where source = 'repo_uj' and source_ref_id = $1 and status = 'posted'", [result.movement.id]);
-    assert.equal(uj.rows.length, 1);
-    assert.equal(Number(uj.rows[0].amount), 175000);
+    assert.deepEqual(uj.rows.map((row) => Number(row.amount)), [175000]);
   });
 
-  test('4+5. retry dan submit bersamaan tidak menggandakan revenue', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const job = await createRepoStoredJob(salesOrderId);
+  test('retry dan Ambil Titip bersamaan: satu pickup, tanpa tagihan Repo', async () => {
+    const so = await createSalesOrder();
+    const job = await createRepoStoredJob(so.id);
     const payload = pickupPayload(await createDriver(), await createVehicle('20FT'));
     const outcomes = await Promise.allSettled([
       pickupSingleRepoContainerJob(job.id, payload),
@@ -211,99 +198,91 @@ if (!databaseUrl) {
     ]);
     assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
     await assert.rejects(pickupSingleRepoContainerJob(job.id, payload), (error) => error.statusCode === 409);
-    assert.equal((await repoRevenueRows('mrl.container_job_id = $1', [job.id])).length, 1);
-
-    // Database sendiri menolak revenue kedua untuk item yang sama.
-    const [line] = await repoRevenueRows('mrl.container_job_id = $1', [job.id]);
-    await assert.rejects(query(
-      `insert into manual_revenue_lines (sales_order_id, container_job_id, container_pickup_item_id, charge_type, description, unit_price, total_amount, status)
-       values ($1, $2, $3, 'repo', 'duplikat', 300000, 300000, 'draft')`,
-      [line.sales_order_id, line.container_job_id, line.container_pickup_item_id],
-    ), (error) => error.code === '23505');
+    assert.deepEqual(await repoRevenueRows([job.id]), []);
+    assert.deepEqual(await storageFees([job.id]), []);
   });
 
-  test('6. revenue transport SO dan billing invoice tidak berubah oleh revenue Repo draft', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const before = await query('select total_amount from sales_orders where id = $1', [salesOrderId]);
-    const billingBefore = await billingAmount(salesOrderId);
-    const job = await createRepoStoredJob(salesOrderId);
+  test('data lama dengan Revenue Repo: dititip ulang tidak menambah Reimbursement; Revenue Repo lama tetap dikelola Finance', async () => {
+    const so = await createSalesOrder();
+    const [driverA, truckA, driverB, truckB] = [await createDriver(), await createVehicle('20FT'), await createDriver(), await createVehicle('20FT')];
+    const job = await createRepoStoredJob(so.id, { repo_released_driver_id: driverA.id, repo_released_vehicle_id: truckA.id });
+    const picked = await pickupSingleRepoContainerJob(job.id, pickupPayload(driverB, truckB));
+    // Revenue Repo lama dari aturan sebelumnya (dibuat saat pickup, draft).
+    const item = (await query('select id from container_pickup_items where movement_id = $1', [picked.movement.id])).rows[0];
+    const legacy = (await query(
+      `insert into manual_revenue_lines (sales_order_id, container_job_id, container_pickup_item_id, charge_type, description,
+         quantity, unit, unit_price, total_amount, note, status, created_by_name, updated_by_name)
+       values ($1, $2, $3, 'repo', $4, 1, 'container', 300000, 300000, $5, 'draft', 'Legacy', 'Legacy') returning id`,
+      [so.id, job.id, item.id, `Revenue Repo ${job.container_number}`, `movement:${picked.movement.id}`],
+    )).rows[0];
 
-    await pickupSingleRepoContainerJob(job.id, pickupPayload(await createDriver(), await createVehicle('20FT')));
-    assert.equal((await repoRevenueRows('mrl.container_job_id = $1', [job.id])).length, 1);
+    // Container dititip lagi oleh sopir B: bukan titip pertama, dan sudah punya Revenue Repo lama. Timeline
+    // existing menyimpan waktu titip awal (titip ulang tidak boleh lebih akhir dari pickup).
+    await updateContainerJob(job.id, {
+      status: 'repo_stored', repoLocation: `Depo ulang ${tag}`, repoEirNumber: `EIR-ULANG-${tag}`,
+      updatedBy: 'Integration Test',
+    });
+    assert.equal((await query('select status from container_jobs where id = $1', [job.id])).rows[0].status, 'repo_stored');
+    assert.deepEqual(await storageFees([job.id]), [], 'tidak ada tagihan Repo ganda');
 
-    await isolateBillingAfterPickup(job.id, salesOrderId);
-    const after = await query('select total_amount from sales_orders where id = $1', [salesOrderId]);
-    assert.equal(Number(after.rows[0].total_amount), Number(before.rows[0].total_amount));
-    assert.equal(await billingAmount(salesOrderId), billingBefore);
-
-    // Kontrol: kalau baris yang sama berstatus active, billing naik tepat Rp300.000 -- jadi
-    // status draft-lah yang menahannya di luar invoice.
-    const [line] = await repoRevenueRows('mrl.container_job_id = $1', [job.id]);
-    await query("update manual_revenue_lines set status = 'active' where id = $1", [line.id]);
-    assert.equal(await billingAmount(salesOrderId), billingBefore + 300000);
-    await query("update manual_revenue_lines set status = 'draft' where id = $1", [line.id]);
-  });
-
-  test('8. job batal setelah pickup fisik: revenue Repo tetap ada', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const job = await createRepoStoredJob(salesOrderId);
-    await pickupSingleRepoContainerJob(job.id, pickupPayload(await createDriver(), await createVehicle('20FT')));
-    await query("update container_jobs set status = 'cancelled', cancelled_at = now() where id = $1", [job.id]);
-    await withTransaction(async (client) => reconcileRepoPickupMovement(client, await lockRepoPickupMovementForJob(client, job.id)));
-
-    const rows = await repoRevenueRows('mrl.container_job_id = $1', [job.id]);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].status, 'draft');
-    assert.equal(Number(rows[0].total_amount), 300000);
-  });
-
-  test('9. movement lama (belum mulai/cancelled) tidak mendapat revenue Repo otomatis', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const job = await createRepoStoredJob(salesOrderId);
-    const legacy = await query(
-      "insert into container_pickup_movements (pickup_type, status, started_at) values ('single', 'running', null) returning id",
-    );
-    await query('insert into container_pickup_items (movement_id, container_job_id) values ($1, $2)', [legacy.rows[0].id, job.id]);
-    await query("update container_jobs set status = 'cancelled' where id = $1", [job.id]);
-    const reconciled = await withTransaction(async (client) => reconcileRepoPickupMovement(client, { id: legacy.rows[0].id, status: 'running' }));
-    assert.equal(reconciled.status, 'cancelled');
-    assert.equal((await repoRevenueRows('cpi.movement_id = $1', [legacy.rows[0].id])).length, 0);
-
-    // Tidak ada backfill: movement yang dibuat sebelum Phase 4 tidak punya revenue Repo.
-    const backfilled = await query(`
-      select count(*)::int as n from manual_revenue_lines mrl
-      join container_pickup_items cpi on cpi.id = mrl.container_pickup_item_id
-      join container_pickup_movements cpm on cpm.id = cpi.movement_id
-      where cpm.created_at < (select min(applied_at) from schema_migrations where version = '202610070003_repo_revenue_lines')
-    `);
-    assert.equal(backfilled.rows[0].n, 0);
-  });
-
-  test('Finance: revenue Repo terkunci dari edit/aktivasi, koreksi lewat void yang sudah ada', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const billingBefore = await billingAmount(salesOrderId);
-    const job = await createRepoStoredJob(salesOrderId);
-    await pickupSingleRepoContainerJob(job.id, pickupPayload(await createDriver(), await createVehicle('20FT')));
-    const [line] = await repoRevenueRows('mrl.container_job_id = $1', [job.id]);
-    await isolateBillingAfterPickup(job.id, salesOrderId);
-
-    await assert.rejects(updateManualRevenueLine(salesOrderId, line.id, { status: 'active', actorName: 'Finance' }), { code: 'REPO_REVENUE_LINE_LOCKED' });
-    await assert.rejects(updateManualRevenueLine(salesOrderId, line.id, { unitPrice: 1, actorName: 'Finance' }), { code: 'REPO_REVENUE_LINE_LOCKED' });
-    assert.equal(await billingAmount(salesOrderId), billingBefore);
-
-    const voided = await voidManualRevenueLine(salesOrderId, line.id, { reason: 'Koreksi test', actorName: 'Finance' });
+    // Finance tetap memakai mekanisme lama untuk baris lama: terkunci dari edit, bisa dibatalkan.
+    await assert.rejects(updateManualRevenueLine(so.id, legacy.id, { unitPrice: 1, actorName: 'Finance' }), { code: 'REPO_REVENUE_LINE_LOCKED' });
+    const voided = await voidManualRevenueLine(so.id, legacy.id, { reason: 'Bersihkan test', actorName: 'Finance' });
     assert.equal(voided.line.status, 'void');
+    await assert.rejects(activateManualRevenueLine(so.id, legacy.id, { actorName: 'Finance' }), { code: 'REVENUE_LINE_ACTIVATION_INVALID' });
   });
 
-  test('10. revenue manual non-Repo (inap) tetap masuk billing seperti sebelumnya', async () => {
-    const [salesOrderId] = await invoiceSalesOrders(1);
-    const before = await billingAmount(salesOrderId);
-    const created = await createManualRevenueLine(salesOrderId, {
+  test('input historis: dititip tidak membuat Reimbursement Repo otomatis', async () => {
+    const so = await createSalesOrder({ entry_source: 'historical' });
+    const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
+    const job = await createJob(so.id, {
+      status: 'running', running_at: hoursAgo(72), entry_source: 'historical',
+      historical_period: new Date(hoursAgo(72)).toISOString().slice(0, 7),
+      driver_id: driver.id, vehicle_id: truck.id, assignment_snapshot: { driver: driver.name, plateNumber: truck.plate_number },
+    });
+    await updateContainerJob(job.id, {
+      status: 'repo_stored', repoStoredAt: hoursAgo(70), repoLocation: `Depo historis ${tag}`, repoEirNumber: `EIR-H-${tag}`,
+      updatedBy: 'Admin Test',
+    });
+    assert.equal((await query('select status from container_jobs where id = $1', [job.id])).rows[0].status, 'repo_stored');
+    assert.deepEqual(await storageFees([job.id]), []);
+  });
+
+  test('reimbursement titip yang sudah dicatat manual: penitipan tidak menambah Biaya Titip otomatis', async () => {
+    const so = await createSalesOrder();
+    const [driver, truck] = [await createDriver(), await createVehicle('20FT')];
+    const job = await createJob(so.id, {
+      status: 'running', running_at: hoursAgo(72), driver_id: driver.id, vehicle_id: truck.id,
+      assignment_snapshot: { driver: driver.name, plateNumber: truck.plate_number },
+    });
+    await query(
+      `insert into container_job_expenses (sales_order_id, container_job_id, category, expense_group, amount, description,
+         recipient_type, payment_status, source, created_by_name, updated_by_name)
+       values ($1, $2, 'reimbursement', 'reimbursement', 300000, 'Biaya titip depo (manual)', 'customer', 'belum_dibayar', 'manual', 'Ops', 'Ops')`,
+      [so.id, job.id],
+    );
+    await updateContainerJob(job.id, {
+      status: 'repo_stored', repoStoredAt: hoursAgo(70), repoLocation: `Depo manual ${tag}`, repoEirNumber: `EIR-M-${tag}`,
+      updatedBy: 'Integration Test',
+    });
+    assert.deepEqual(await storageFees([job.id]), []);
+    const reimbursements = await query(
+      "select amount from container_job_expenses where container_job_id = $1 and expense_group = 'reimbursement' and payment_status <> 'batal'",
+      [job.id],
+    );
+    assert.deepEqual(reimbursements.rows.map((row) => Number(row.amount)), [300000]);
+  });
+
+  test('revenue manual non-Repo (inap) tetap masuk billing invoice seperti sebelumnya', async () => {
+    const so = await createSalesOrder({ status: 'completed' });
+    await createJob(so.id, { status: 'completed', running_at: hoursAgo(30), completed_at: hoursAgo(24) });
+    const before = await billingAmount(so.id);
+    const created = await createManualRevenueLine(so.id, {
       chargeType: 'inap', description: 'Inap test', quantity: 2, unit: 'malam', unitPrice: 50000, actorName: 'Finance',
     });
     assert.equal(created.line.status, 'active');
     assert.equal(created.billingAmount, before + 100000);
-    await voidManualRevenueLine(salesOrderId, created.line.id, { reason: 'Bersihkan test', actorName: 'Finance' });
-    assert.equal(await billingAmount(salesOrderId), before);
+    await voidManualRevenueLine(so.id, created.line.id, { reason: 'Bersihkan test', actorName: 'Finance' });
+    assert.equal(await billingAmount(so.id), before);
   });
 }

@@ -10,7 +10,7 @@ import {
   requirePhysicalRepoPickup,
 } from './repo-pickup-lifecycle.js';
 import { buildRepoUjDescription, normalizeRepoUjAmount, postRepoUjToDroppingAccount } from './repo-pickup-uj.js';
-import { createRepoRevenueLines } from './repo-pickup-revenue.js';
+import { recordRepoStorageFee, REPO_STORAGE_FEE_SOURCE } from './repo-storage-fee.js';
 import { assertContainerNumberAllowed } from './container-number-guard.js';
 import { isSalesOrderBillingAdvanced } from '../finance/finance-eligibility.js';
 
@@ -329,6 +329,12 @@ function ensureExpenseNotVoid(existing) {
 }
 
 function ensureManualOperationalExpense(existing) {
+  if (existing.source === REPO_STORAGE_FEE_SOURCE) {
+    const error = new Error('Biaya Titip/Repo otomatis tidak bisa diedit, dipindahkan, atau dibatalkan oleh Operational. Koreksi lewat verifikasi Finance.');
+    error.statusCode = 409;
+    error.code = 'CONTAINER_JOB_EXPENSE_REPO_STORAGE_FEE_LOCKED';
+    throw error;
+  }
   if (existing.source !== 'auto_uj_order') return;
   const error = new Error('UJ otomatis tidak bisa diedit, dipindahkan, atau dibatalkan oleh Operational. Jika ada kesalahan, ajukan klarifikasi ke Finance/Admin.');
   error.statusCode = 409;
@@ -3790,6 +3796,16 @@ async function updateContainerJobTransaction(id, form) {
       });
       if (autoUjWarning) updateWarnings.push(autoUjWarning);
     }
+    // Pertama kali dititip: Biaya Titip/Repo Rp300.000 sebagai item Reimbursement SO (sekali per job).
+    // Input historis dan transaksi lama tidak ditagihkan otomatis (lihat repo-storage-fee.js).
+    if (!documentOnlyUpdate && nextStatus === 'repo_stored' && existing.rows[0].status !== 'repo_stored') {
+      const storageFee = await recordRepoStorageFee(client, {
+        job: { ...existing.rows[0], container_number: nextContainerNumber },
+        actorName,
+        entrySource: nextEntrySource,
+      });
+      if (storageFee.warning) updateWarnings.push(storageFee.warning);
+    }
 
     if (!documentOnlyUpdate) {
       await syncResourceAssignmentStatus(client, existing.rows[0], {
@@ -4051,7 +4067,7 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
     assertVehicleCanPickupRepo(vehicle, orderedJobs, pickupType);
 
     const assignment = toAssignmentSnapshot(payload, driver, vehicle, {});
-    const { movement, items: pickupItems } = await insertRepoPickupMovement(client, {
+    const { movement } = await insertRepoPickupMovement(client, {
       pickupType,
       jobs: orderedJobs,
       driver,
@@ -4096,16 +4112,10 @@ async function pickupRepoContainerJobs(ids = [], payload = {}, pickupType = 'sin
       actorName,
     });
 
-    // Revenue Repo per container (draft, belum masuk invoice) -- satu baris per pickup item.
-    const repoRevenueLines = await createRepoRevenueLines(client, {
-      movementId: movement.id,
-      pickupType,
-      items: pickupItems,
-      actorName,
-    });
-
+    // Biaya Titip/Repo Rp300.000 sudah ditagihkan sebagai Reimbursement SO saat job dititip
+    // (repo-storage-fee.js); Ambil Titip tidak membuat tagihan lagi.
     const updatedJobs = await mapUpdatedRepoPickupJobs(client, uniqueIds);
-    return { movement, jobs: updatedJobs, repoUjTransaction, repoRevenueLines };
+    return { movement, jobs: updatedJobs, repoUjTransaction };
   });
 }
 
