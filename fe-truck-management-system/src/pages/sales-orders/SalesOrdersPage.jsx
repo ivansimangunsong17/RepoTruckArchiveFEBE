@@ -636,10 +636,23 @@ function hasReadyAccurateDocuments(order) {
   return Boolean(getAccurateDocument(order, 'invoicePdf'));
 }
 
-function canCancelOrderBeforeOperational(order) {
+// Container yang sudah dibatalkan tidak mengunci pembatalan SO; sisanya harus masih menunggu Operational.
+export function canCancelOrderBeforeOperational(order) {
   if (order?.isVendorOrder) return order.status !== 'cancelled';
   if (!order || ['completed', 'cancelled'].includes(order.status)) return false;
-  return getOrderContainers(order).every((container) => isWaitingStatus(container.status));
+  return getOrderContainers(order).every((container) => container.status === 'cancelled' || isWaitingStatus(container.status));
+}
+
+// Hak batal dipisah dari hak revisi (canRevise): Sales pemilik boleh membatalkan SO terkunci Finance
+// yang container-nya hanya received/cancelled (flag canCancel dari backend), walau tidak boleh
+// merevisinya. Keputusan final tetap di backend.
+export function canUserCancelSalesOrder(user, order) {
+  if (!order || !hasPermission(user, 'orders.update') || !hasPermission(user, 'orders.cancel')) return false;
+  if (!canCancelOrderBeforeOperational(order)) return false;
+  if (user?.role === USER_ROLES.ADMIN) return true;
+  if (user?.role === USER_ROLES.SALES && order.isVendorOrder) return isSalesOrderOwner(user, order);
+  if (user?.role === USER_ROLES.SALES) return isSalesOrderOwner(user, order) && Boolean(order.canCancel ?? order.canRevise);
+  return false;
 }
 
 function matchesOrderStatus(order, selectedStatus, invoiceNumber = order?.invoiceNumber || '', customerDocumentsOnly = false) {
@@ -813,9 +826,7 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
     return false;
   };
   const canModifySelectedOrder = canModifyOrder(selectedOrder);
-  const canCancelSelectedOrder = canModifySelectedOrder
-    && hasPermission(user, 'orders.cancel')
-    && canCancelOrderBeforeOperational(selectedOrder);
+  const canCancelSelectedOrder = canUserCancelSalesOrder(user, selectedOrder);
   const cancelContainerReasonValid = cancelContainerReason.trim().length >= 8;
 
   useEffect(() => {
@@ -1527,9 +1538,9 @@ function SalesOrdersPage({ customerDocumentsOnly = false }) {
                 </div>
               ) : null}
 
-              {canModifySelectedOrder ? (
+              {canModifySelectedOrder || canCancelSelectedOrder ? (
                 <div className="order-management-actions">
-                  {selectedOrder.status !== 'cancelled' && (selectedOrder.status !== 'completed' || selectedOrder.isVendorOrder) ? (
+                  {canModifySelectedOrder && selectedOrder.status !== 'cancelled' && (selectedOrder.status !== 'completed' || selectedOrder.isVendorOrder) ? (
                     <button className="secondary-button" type="button" onClick={() => { setEditingOrder(selectedOrder); setFormOpen(true); setSelectedOrder(null); }}>
                       <Edit3 size={16} /> Edit Sales Order
                     </button>

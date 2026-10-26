@@ -161,9 +161,9 @@ export function deriveOrderStatus(containers) {
   return allCancelled ? 'cancelled' : allCompleted ? 'completed' : hasProgress ? 'running' : 'waiting_operational';
 }
 
-function hasProcessedContainers(order) {
+export function hasProcessedContainers(order) {
   return Array.isArray(order?.containers)
-    && order.containers.some((container) => !['received', 'waiting_operational'].includes(container.status || 'received'));
+    && order.containers.some((container) => !['received', 'waiting_operational', 'cancelled'].includes(container.status || 'received'));
 }
 
 function normalizeAssignedJobForm(form) {

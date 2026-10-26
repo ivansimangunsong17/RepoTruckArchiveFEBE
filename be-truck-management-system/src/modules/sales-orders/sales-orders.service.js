@@ -340,10 +340,15 @@ function ensureCanAccessSalesOrder(actor, order) {
   throw error;
 }
 
-async function canSalesReviseAfterFinanceSo(order) {
+// purpose 'revise' (default) mempertahankan aturan revisi lama: semua container harus masih received.
+// purpose 'cancel' hanya untuk pembatalan SO: container yang sudah dibatalkan tidak dihitung sebagai
+// proses Operational. Pengaman Finance (RPUJ, invoice, dokumen, biaya, debit note, pembayaran,
+// komisi) berlaku sama untuk keduanya.
+async function canSalesReviseAfterFinanceSo(order, { purpose = 'revise' } = {}) {
   if (!isSalesOrderLockedByFinanceNumber(order) && !isSalesOrderLockedByRpuj(order)) return true;
   const containers = order.containers || [];
-  if (containers.some((container) => container.status !== 'received')) return false;
+  const allowedContainerStatuses = purpose === 'cancel' ? ['received', 'cancelled'] : ['received'];
+  if (containers.some((container) => !allowedContainerStatuses.includes(container.status))) return false;
   if (isSalesOrderLockedByRpuj(order)) return false;
   if (String(order.invoiceNumber || '').trim()) return false;
   if (hasSalesOrderAttachment(order, 'invoicePdf') || hasSalesOrderAttachment(order, 'taxInvoicePdf')) return false;
@@ -358,20 +363,20 @@ async function canSalesReviseAfterFinanceSo(order) {
   return true;
 }
 
-export async function ensureSalesOrderStillSafeForSalesRevision(order) {
-  if (await canSalesReviseAfterFinanceSo(order)) return;
+export async function ensureSalesOrderStillSafeForSalesRevision(order, options = {}) {
+  if (await canSalesReviseAfterFinanceSo(order, options)) return;
   const error = new Error('Order ini sudah diproses Operational/Finance lanjutan. Revisi atau pembatalan hanya bisa dilakukan oleh Admin/Koreksi.');
   error.statusCode = 403;
   error.code = 'SALES_ORDER_ADVANCED_PROCESSING_LOCKED';
   throw error;
 }
 
-async function ensureSalesOrderUnlockedForSales(actor, order) {
+async function ensureSalesOrderUnlockedForSales(actor, order, options = {}) {
   if (actor?.role !== 'sales') return;
   // Order vendor tidak punya ritasi internal/biaya operasional yang perlu dikunci oleh flow
   // Operational/Finance, jadi sales pemilik tetap boleh koreksi status vendor termasuk batal.
   if (order?.isVendorOrder) return;
-  await ensureSalesOrderStillSafeForSalesRevision(order);
+  await ensureSalesOrderStillSafeForSalesRevision(order, options);
 }
 
 function isHistoricalOrderContext(order = {}, payload = {}) {
@@ -713,7 +718,7 @@ export async function removeSalesOrder(id, actor) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
-  await ensureSalesOrderUnlockedForSales(actor, order);
+  await ensureSalesOrderUnlockedForSales(actor, order, { purpose: 'cancel' });
   return cancelSalesOrder(id);
 }
 
@@ -726,7 +731,7 @@ export async function requestSalesOrderCancellation(id, actor, payload = {}) {
     throw error;
   }
   ensureCanAccessSalesOrder(actor, order);
-  await ensureSalesOrderUnlockedForSales(actor, order);
+  await ensureSalesOrderUnlockedForSales(actor, order, { purpose: 'cancel' });
   return requestSalesOrderCancellationRepository(id, {
     cancelRequestNote: payload.cancelRequestNote || '',
     cancelRequestedByName: getActorName(actor),

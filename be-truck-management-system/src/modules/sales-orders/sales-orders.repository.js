@@ -451,9 +451,10 @@ export async function hasSalesOrderDebitNoteDocument(id) {
   return Boolean(result.rows[0].exists);
 }
 
-async function ensureSalesOrderCanBeCancelled(client, id) {
+export async function ensureSalesOrderCanBeCancelled(client, id) {
   const jobs = await client.query('select status from container_jobs where sales_order_id = $1', [id]);
-  if (jobs.rows.some((job) => job.status !== 'received')) {
+  // Job yang sudah dibatalkan bukan job yang diproses Operational -- tidak boleh mengunci pembatalan SO.
+  if (jobs.rows.some((job) => !['received', 'cancelled'].includes(job.status))) {
     const error = new Error('Sales Order tidak bisa dibatalkan karena sudah ada container yang diproses Operational.');
     error.statusCode = 409;
     error.code = 'SALES_ORDER_LOCKED';
@@ -509,7 +510,7 @@ async function releaseVehicleIfIdle(client, vehicleId) {
   );
 }
 
-// Guard `ensureSalesOrderCanBeCancelled` already memastikan hanya job 'received' yang boleh lolos,
+// Guard `ensureSalesOrderCanBeCancelled` already memastikan hanya job 'received'/'cancelled' yang boleh lolos,
 // tapi filter status di sini tetap dipertahankan sebagai safety net agar job yang levelnya sudah
 // lebih maju (running/completed/dll) tidak pernah ikut ter-cancel meski guard di atasnya berubah.
 async function cascadeCancelReceivedContainerJobs(client, salesOrderId, { cancelReason, cancelledByName } = {}) {

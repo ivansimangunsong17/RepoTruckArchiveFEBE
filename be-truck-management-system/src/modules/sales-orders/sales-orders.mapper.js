@@ -359,6 +359,13 @@ export function mapSalesOrder(row, containers = [], attachments = []) {
       : !isSalesOrderLockedByRpuj({ containers })
         && containers.every((container) => container.status === 'received')
         && !String(row.invoice_number || '').trim(),
+    // Sama dengan canRevise, kecuali container yang sudah dibatalkan tidak mengunci pembatalan SO
+    // (keputusan final tetap di ensureSalesOrderStillSafeForSalesRevision dengan purpose 'cancel').
+    canCancel: !isSalesOrderLockedByFinanceNumber(row) && !isSalesOrderLockedByRpuj({ containers })
+      ? true
+      : !isSalesOrderLockedByRpuj({ containers })
+        && containers.every((container) => ['received', 'cancelled'].includes(container.status))
+        && !String(row.invoice_number || '').trim(),
     referenceDocuments,
   };
 }
