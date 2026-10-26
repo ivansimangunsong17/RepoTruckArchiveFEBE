@@ -294,6 +294,11 @@ export function resetContainerJobAssignment(id, payload = {}) {
   return httpClient.patch(`/container-jobs/${id}/reset-assignment`, payload);
 }
 
+// Admin: koreksi penerima komisi tanpa mengganti assignment aktual job (sopir Ambil Titip tetap).
+export function correctContainerJobCommissionRecipient(id, payload = {}) {
+  return httpClient.patch(`/container-jobs/${id}/commission-recipient`, payload);
+}
+
 export function pickupRepoContainerJob(id, payload = {}) {
   return httpClient.post(`/container-jobs/repo-pickups/single/${id}`, payload);
 }

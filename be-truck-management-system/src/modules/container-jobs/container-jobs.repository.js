@@ -808,6 +808,8 @@ function buildCommissionDriverSnapshot(assignment = {}) {
     driverBankAccountHolder: assignment.driverBankAccountHolder || null,
     driverEmoneyProvider: assignment.driverEmoneyProvider || null,
     driverEmoneyNumber: assignment.driverEmoneyNumber || null,
+    // Plat truck pekerjaan berkomisi; export komisi tidak boleh membaca truck pickup titip.
+    plateNumber: assignment.plateNumber || null,
   };
 }
 
@@ -856,6 +858,16 @@ export async function resolveCompletedCommissionDriverCorrection(client, {
       'Sopir baru wajib lengkap untuk memindahkan komisi.',
       'CONTAINER_JOB_COMMISSION_DRIVER_REQUIRED',
     );
+  }
+  // Job Ambil Titip: sopir pickup (B) hanya menerima UJ Repo, komisi tidak boleh dipindahkan kepadanya.
+  if (job.repo_picked_up_at) {
+    const origin = await findRepoPickupOrigin(client, job);
+    if (origin.pickupDriverIds.includes(String(driverId)) && String(driverId) !== String(origin.driverId || '')) {
+      throw commissionCorrectionError(
+        'Sopir Ambil Titip hanya menerima UJ Repo, komisi tidak dapat dipindahkan kepadanya.',
+        'COMMISSION_RECIPIENT_IS_REPO_PICKUP_DRIVER',
+      );
+    }
   }
 
   const itemResult = await client.query(
@@ -1036,6 +1048,154 @@ export async function resolveCompletedCommissionDriverCorrection(client, {
     batchId: item.batch_id,
     batchStatus: item.batch_status,
   };
+}
+
+// Asal titip (sopir/truck A) dan sopir Ambil Titip (B) dari data yang benar-benar tercatat:
+// repo_released_* dan riwayat repo_pickup pertama untuk A, movement pickup aktif untuk B.
+// Tidak mengarang: field yang tidak tercatat dibiarkan null.
+async function findRepoPickupOrigin(client, job) {
+  const history = await client.query(
+    `
+      select h.previous_driver_id, h.previous_plate_number, h.next_driver_id
+      from container_job_assignment_history h
+      where h.container_job_id = $1
+        and h.change_source in ('repo_pickup', 'repo_combo_pickup')
+      order by h.created_at asc, h.id asc
+      limit 1
+    `,
+    [job.id],
+  );
+  const movements = await client.query(
+    `
+      select distinct cpm.driver_id
+      from container_pickup_items cpi
+      join container_pickup_movements cpm on cpm.id = cpi.movement_id
+      where cpi.container_job_id = $1 and cpm.status <> 'cancelled' and cpm.driver_id is not null
+    `,
+    [job.id],
+  );
+  const releasedVehicle = job.repo_released_vehicle_id
+    ? await client.query('select plate_number from vehicles where id = $1', [job.repo_released_vehicle_id])
+    : { rows: [] };
+  const first = history.rows[0] || {};
+  return {
+    driverId: job.repo_released_driver_id || first.previous_driver_id || null,
+    plateNumber: normalizeOptionalText(first.previous_plate_number) || normalizeOptionalText(releasedVehicle.rows[0]?.plate_number),
+    pickupDriverIds: [
+      first.next_driver_id,
+      ...movements.rows.map((row) => row.driver_id),
+    ].filter(Boolean).map(String),
+  };
+}
+
+// Koreksi Admin atas penerima komisi TANPA mengubah assignment aktual job (sopir/truck Ambil
+// Titip B tetap tercatat apa adanya). Rekening diambil dari master sopir penerima; plat dari truck
+// asal titip yang tercatat. Batch approved/paid, pembayaran yang sudah diproses, dan potongan
+// Finance tetap terkunci lewat resolveCompletedCommissionDriverCorrection.
+export async function correctContainerJobCommissionRecipient(id, { driverId, reason, actorName } = {}) {
+  return withTransaction(async (client) => {
+    const existing = await client.query(
+      `
+        select ${joinedJobColumns}
+        from container_jobs cj
+        join sales_orders so on so.id = cj.sales_order_id
+        where cj.id = $1
+        for update of cj
+      `,
+      [id],
+    );
+    const job = existing.rows[0];
+    if (!job) throw validationError('Container Job tidak ditemukan.', 'CONTAINER_JOB_NOT_FOUND', 404);
+    if (job.execution_source === 'vendor') {
+      throw validationError('Ritasi vendor tidak memiliki komisi sopir.', 'COMMISSION_RECIPIENT_VENDOR', 409);
+    }
+    if (!job.has_driver_commission || !['completed', 'repo_stored'].includes(job.status)) {
+      throw validationError('Penerima komisi hanya bisa dikoreksi untuk ritasi berkomisi yang sudah dititip/selesai.', 'COMMISSION_RECIPIENT_NOT_CORRECTABLE', 409);
+    }
+    const normalizedDriverId = normalizeOptionalUuid(driverId, 'Sopir');
+    const driverResult = normalizedDriverId
+      ? await client.query('select * from drivers where id = $1 and archived_at is null', [normalizedDriverId])
+      : { rows: [] };
+    const driver = driverResult.rows[0];
+    if (!driver) throw validationError('Sopir penerima komisi tidak ditemukan atau sudah diarsipkan.', 'COMMISSION_RECIPIENT_DRIVER_NOT_FOUND', 404);
+
+    const pickedUp = Boolean(job.repo_picked_up_at);
+    const origin = pickedUp ? await findRepoPickupOrigin(client, job) : null;
+    if (origin && origin.pickupDriverIds.includes(String(driver.id)) && String(driver.id) !== String(origin.driverId || '')) {
+      throw validationError(
+        'Sopir Ambil Titip hanya menerima UJ Repo, tidak bisa menjadi penerima komisi ritasi ini.',
+        'COMMISSION_RECIPIENT_IS_REPO_PICKUP_DRIVER',
+        409,
+      );
+    }
+    const paymentMethod = driver.payment_method === 'emoney' ? 'emoney' : 'bank';
+    const accountNumber = paymentMethod === 'emoney' ? driver.emoney_number : driver.bank_account_number;
+    if (!normalizeOptionalText(accountNumber)) {
+      throw validationError(
+        'Data rekening/e-money sopir penerima belum lengkap di Master Sopir. Lengkapi dulu sebelum komisi dialihkan.',
+        'COMMISSION_RECIPIENT_PAYMENT_INFO_MISSING',
+        409,
+      );
+    }
+
+    const assignment = {
+      driver: driver.name,
+      driverPaymentMethod: paymentMethod,
+      driverBankName: driver.bank_name || null,
+      driverBankAccountNumber: driver.bank_account_number || null,
+      driverBankAccountHolder: driver.bank_account_holder || null,
+      driverEmoneyProvider: driver.emoney_provider || null,
+      driverEmoneyNumber: driver.emoney_number || null,
+      // Job Ambil Titip: assignment_snapshot sudah milik B, jadi plat hanya dari asal titip yang tercatat.
+      plateNumber: pickedUp ? origin.plateNumber : normalizeOptionalText(job.assignment_snapshot?.plateNumber),
+    };
+    const before = {
+      driverId: job.commission_driver_id || null,
+      driverName: job.commission_driver_name || job.commission_driver_snapshot?.driver || '',
+    };
+    const correction = await resolveCompletedCommissionDriverCorrection(client, {
+      job,
+      action: 'move',
+      driverId: driver.id,
+      assignment,
+      actorName,
+      reason,
+    });
+    await client.query(
+      `
+        update container_jobs
+        set commission_driver_id = $2,
+            commission_driver_name = $3,
+            commission_driver_snapshot = $4::jsonb,
+            commission_status = $6,
+            updated_by_name = $5,
+            updated_at = now()
+        where id = $1
+      `,
+      [
+        job.id,
+        correction.driverId,
+        correction.driverName,
+        JSON.stringify(correction.snapshot),
+        actorName || 'Admin',
+        resolveCommissionStatus({
+          currentStatus: job.commission_status,
+          jobStatus: job.status,
+          hasCommission: true,
+          amount: job.commission_locked_amount ?? job.driver_commission_amount,
+          driverId: correction.driverId,
+          driverName: correction.driverName,
+        }),
+      ],
+    );
+    return {
+      before,
+      after: { driverId: correction.driverId, driverName: correction.driverName },
+      batchId: correction.batchId,
+      batchStatus: correction.batchStatus,
+      job: await findMappedContainerJob(client, job.id),
+    };
+  });
 }
 
 function resolveCommissionStatus({
@@ -3342,18 +3502,34 @@ async function updateContainerJobTransaction(id, form) {
         vehicleIdentityChanging ? vehicle : null,
         vehicleIdentityChanging ? {} : existingAssignment,
       );
-    const shouldCaptureCommissionDriver = ['running', 'completed'].includes(nextStatus)
+    const commissionDriverMissing = !existing.rows[0].commission_driver_id
+      && !normalizeOptionalText(existing.rows[0].commission_driver_name);
+    // Ambil Titip: sopir pickup (B) hanya mendapat UJ Repo, tidak pernah menjadi penerima komisi.
+    // Komisi milik sopir yang menitipkan (A): dikunci paling lambat saat dititip, dan kalau belum
+    // terkunci (data lama) dikunci dari assignment titip sebelum diganti sopir pickup.
+    const isRepoPickupLeg = existing.rows[0].status === 'repo_stored' || Boolean(existing.rows[0].repo_picked_up_at);
+    const shouldCaptureCommissionDriver = ['running', 'completed', 'repo_stored'].includes(nextStatus)
       && (commissionValuesChanged || nextStatus !== currentJob.status)
-      && !existing.rows[0].commission_driver_id
-      && !normalizeOptionalText(existing.rows[0].commission_driver_name)
+      && commissionDriverMissing
+      && !isRepoPickupLeg
       && (nextDriverId || nextAssignmentSnapshot.driver);
-    let nextCommissionDriverId = isVendorExecution ? null : existing.rows[0].commission_driver_id || (shouldCaptureCommissionDriver ? nextDriverId : null);
+    const shouldCaptureStoredCommissionDriver = commissionDriverMissing
+      && existing.rows[0].status === 'repo_stored'
+      && nextStatus !== 'cancelled'
+      && Boolean(normalizeOptionalText(existingAssignment.driver));
+    let nextCommissionDriverId = isVendorExecution ? null : existing.rows[0].commission_driver_id
+      || (shouldCaptureCommissionDriver ? nextDriverId : null)
+      || (shouldCaptureStoredCommissionDriver ? existing.rows[0].repo_released_driver_id || existing.rows[0].driver_id || null : null);
     let nextCommissionDriverName = isVendorExecution ? null : normalizeOptionalText(
-      existing.rows[0].commission_driver_name || (shouldCaptureCommissionDriver ? nextAssignmentSnapshot.driver : null),
+      existing.rows[0].commission_driver_name
+        || (shouldCaptureCommissionDriver ? nextAssignmentSnapshot.driver : null)
+        || (shouldCaptureStoredCommissionDriver ? existingAssignment.driver : null),
     );
     let nextCommissionDriverSnapshot = isVendorExecution ? {} : existing.rows[0].commission_driver_snapshot && Object.keys(existing.rows[0].commission_driver_snapshot).length
       ? existing.rows[0].commission_driver_snapshot
-      : (shouldCaptureCommissionDriver ? buildCommissionDriverSnapshot(nextAssignmentSnapshot) : {});
+      : (shouldCaptureCommissionDriver
+        ? buildCommissionDriverSnapshot(nextAssignmentSnapshot)
+        : (shouldCaptureStoredCommissionDriver ? buildCommissionDriverSnapshot(existingAssignment) : {}));
     const completedCommissionDriverCorrection = currentJob.status === 'completed'
       && nextStatus === 'completed'
       && driverIdentityChanging
@@ -3370,7 +3546,12 @@ async function updateContainerJobTransaction(id, form) {
     if (completedCommissionDriverCorrection) {
       nextCommissionDriverId = completedCommissionDriverCorrection.driverId;
       nextCommissionDriverName = completedCommissionDriverCorrection.driverName;
-      nextCommissionDriverSnapshot = completedCommissionDriverCorrection.snapshot;
+      // Job Ambil Titip: truck pada assignment job adalah truck pickup (B), bukan truck pekerjaan
+      // berkomisi. Plat dikosongkan supaya export komisi memakai plat asal titip yang tercatat.
+      nextCommissionDriverSnapshot = existing.rows[0].repo_picked_up_at
+        && String(form.commissionDriverAction || '').trim().toLowerCase() === 'move'
+        ? { ...completedCommissionDriverCorrection.snapshot, plateNumber: null }
+        : completedCommissionDriverCorrection.snapshot;
     }
     const completedAtForUpdate = nextStatus === 'completed'
       ? (documentOnlyUpdate
@@ -3742,6 +3923,12 @@ async function updateRepoPickupJob(client, {
   movement,
   pickupType,
 }) {
+  // Komisi tetap milik sopir yang menitipkan (A); sopir pickup (B) hanya mendapat UJ Repo. Data
+  // lama yang penerima komisinya belum terkunci dikunci dari assignment titip sebelum ditimpa B.
+  const storedAssignment = job.assignment_snapshot || {};
+  const lockStoredCommissionDriver = !job.commission_driver_id
+    && !normalizeOptionalText(job.commission_driver_name)
+    && Boolean(normalizeOptionalText(storedAssignment.driver));
   // Combo 2x20: kedua job satu grup assignment (= movement) sehingga boleh berbagi driver/truck
   // aktif; single tetap tanpa grup (exclusion constraint ex_container_jobs_*_active).
   await client.query(
@@ -3755,6 +3942,9 @@ async function updateRepoPickupJob(client, {
           repo_picked_up_at = $5::timestamptz,
           repo_picked_up_by_name = $6,
           assignment_group_id = $7,
+          commission_driver_id = case when $8::boolean then $9::uuid else commission_driver_id end,
+          commission_driver_name = case when $8::boolean then $10 else commission_driver_name end,
+          commission_driver_snapshot = case when $8::boolean then $11::jsonb else commission_driver_snapshot end,
           updated_by_name = $6,
           updated_at = now()
       where id = $1
@@ -3767,6 +3957,10 @@ async function updateRepoPickupJob(client, {
       runningAt,
       actorName,
       pickupType === 'combo_2x20' ? movement.id : null,
+      lockStoredCommissionDriver,
+      lockStoredCommissionDriver ? job.repo_released_driver_id || job.driver_id || null : null,
+      lockStoredCommissionDriver ? normalizeOptionalText(storedAssignment.driver) : null,
+      JSON.stringify(lockStoredCommissionDriver ? buildCommissionDriverSnapshot(storedAssignment) : {}),
     ],
   );
   await client.query(

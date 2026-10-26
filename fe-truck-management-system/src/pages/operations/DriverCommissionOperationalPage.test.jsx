@@ -12,14 +12,19 @@ import { downloadCsv } from '../../utils/csvExport';
 
 const notify = vi.fn();
 const confirmAction = vi.fn();
+const mockAuth = { role: 'operational' };
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: {
-      role: 'operational',
+      role: mockAuth.role,
       permissions: ['container_job.read', 'container_job.update'],
     },
   }),
+}));
+
+vi.mock('./CommissionRecipientCorrectionModal', () => ({
+  default: ({ row }) => <div role="dialog" aria-label="Koreksi penerima komisi">{row.containerNumber}</div>,
 }));
 
 vi.mock('../../contexts/FeedbackContext', () => ({
@@ -180,6 +185,7 @@ const previousPeriodReport = {
 describe('DriverCommissionOperationalPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuth.role = 'operational';
     fetchDriverCommissionBatches.mockResolvedValue({ rows: [] });
     fetchDriverCommissionPeriodReport.mockResolvedValue(reportFixture);
     submitDriverCommissionBatch.mockResolvedValue({ id: 'batch-1' });
@@ -430,5 +436,27 @@ describe('DriverCommissionOperationalPage', () => {
     const dialog = await screen.findByRole('dialog', { name: /Rahmat/i });
     expect(within(dialog).queryByRole('button', { name: /tambah potongan/i })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /^batalkan$/i })).not.toBeInTheDocument();
+  });
+
+  it('ritasi Perlu Cek: hanya Admin yang mendapat aksi koreksi penerima komisi', async () => {
+    const reviewReport = {
+      ...reportFixture,
+      reviewRows: [{
+        containerJobId: 'job-review', soNumber: 'SO-REV', containerNumber: 'SITU2688029', containerSize: '20FT',
+        customerName: 'PT Review', driverName: 'Sopir B', amount: 100000, completedDate: '2026-08-10',
+        reviewReasons: ['Penerima komisi tercatat sebagai sopir Ambil Titip'],
+      }],
+    };
+    fetchDriverCommissionPeriodReport.mockResolvedValue(reviewReport);
+    const { unmount } = render(<DriverCommissionOperationalPage />);
+    expect(await screen.findByText('Penerima komisi tercatat sebagai sopir Ambil Titip')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /koreksi penerima/i })).not.toBeInTheDocument();
+    unmount();
+
+    mockAuth.role = 'admin';
+    const user = userEvent.setup();
+    render(<DriverCommissionOperationalPage />);
+    await user.click(await screen.findByRole('button', { name: /koreksi penerima/i }));
+    expect(screen.getByRole('dialog', { name: 'Koreksi penerima komisi' })).toHaveTextContent('SITU2688029');
   });
 });

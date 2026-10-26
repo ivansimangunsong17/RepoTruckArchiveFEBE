@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { fetchContainerJobAssignmentHistory } from '../../services/archive/containerJobService';
 import { formatDateTime } from '../../utils/formatDate';
 
-const changeSourceLabel = {
+export const changeSourceLabel = {
   admin_correction: 'Koreksi Admin',
   operational: 'Operational',
+  repo_pickup: 'Ambil Titip',
+  repo_combo_pickup: 'Ambil Titip Combo 2x20',
 };
 
 function AssignmentHistorySection({ containerJobId }) {

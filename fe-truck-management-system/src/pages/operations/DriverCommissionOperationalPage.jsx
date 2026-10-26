@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFeedback } from '../../contexts/FeedbackContext';
-import { hasPermission } from '../../constants/roles';
+import { hasPermission, USER_ROLES } from '../../constants/roles';
+import CommissionRecipientCorrectionModal from './CommissionRecipientCorrectionModal';
 import {
   fetchDriverCommissionBatches,
   fetchDriverCommissionPeriodReport,
@@ -607,12 +608,14 @@ function DriverCommissionOperationalPage() {
   const [batchPickerOpen, setBatchPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [correctionRow, setCorrectionRow] = useState(null);
 
   const canSubmit = hasPermission(user, 'driver_commission.submit') || hasPermission(user, 'operations.update');
   const summary = report.summary || emptyReport.summary;
   const drivers = report.drivers || [];
   const commissionTotals = useMemo(() => summarizeDriverCommissions(drivers), [drivers]);
   const reviewRows = report.reviewRows || [];
+  const canCorrectRecipient = user?.role === USER_ROLES.ADMIN;
   const selectedDriver = drivers.find((driver) => (driver.driverKey || driver.driverId || driver.driverName) === selectedDriverKey) || drivers[0] || null;
   const activeBatch = report.activeBatch || null;
   const hasActiveBatch = Boolean(activeBatch?.id);
@@ -817,6 +820,7 @@ function DriverCommissionOperationalPage() {
                   <th className="px-4 py-3">Sopir Komisi</th>
                   <th className="px-4 py-3 text-right">Nominal</th>
                   <th className="px-4 py-3">Masalah</th>
+                  {canCorrectRecipient ? <th className="px-4 py-3">Aksi</th> : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-amber-100 bg-white">
@@ -838,12 +842,33 @@ function DriverCommissionOperationalPage() {
                         ))}
                       </div>
                     </td>
+                    {canCorrectRecipient ? (
+                      <td className="px-4 py-3">
+                        {row.containerJobId ? (
+                          <button className="secondary-button text-xs" type="button" onClick={() => setCorrectionRow(row)}>
+                            Koreksi penerima
+                          </button>
+                        ) : null}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </section>
+      ) : null}
+
+      {correctionRow ? (
+        <CommissionRecipientCorrectionModal
+          row={correctionRow}
+          onClose={() => setCorrectionRow(null)}
+          onCorrected={() => {
+            setCorrectionRow(null);
+            notify({ title: 'Penerima komisi dikoreksi', message: `${correctionRow.containerNumber || 'Ritasi'} kembali dicek ulang untuk batch komisi.` });
+            loadReport(periodStart, periodEnd);
+          }}
+        />
       ) : null}
 
       <section>

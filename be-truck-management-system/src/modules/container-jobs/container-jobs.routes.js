@@ -1,4 +1,5 @@
 import {
+  correctCommissionRecipientController,
   correctContainerJobExpenseController,
   createContainerJobExpenseController,
   generateContainerJobSpkController,
@@ -62,6 +63,12 @@ export const containerJobRoutes = [
     path: '/api/container-jobs/:id/assignment-history',
     permission: 'container_job.read',
     handler: listContainerJobAssignmentHistoryController,
+  },
+  {
+    method: 'PATCH',
+    path: '/api/container-jobs/:id/commission-recipient',
+    permission: 'container_job.update',
+    handler: correctCommissionRecipientController,
   },
   {
     method: 'POST',

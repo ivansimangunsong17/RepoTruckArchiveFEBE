@@ -1,4 +1,5 @@
 import {
+  correctContainerJobCommissionRecipient,
   correctContainerJobExpenseRecord,
   createContainerJobExpenseRecord,
   generateContainerJobSpk,
@@ -634,6 +635,28 @@ export function listContainerJobExpenses(id) {
 
 export function listContainerJobAssignmentHistory(id) {
   return findAssignmentHistory(id);
+}
+
+// Koreksi penerima komisi oleh Admin tanpa mengganti assignment aktual job (lihat repository).
+export function correctCommissionRecipient(id, payload = {}, actor = null) {
+  if (!isAdmin(actor)) {
+    const error = new Error('Koreksi penerima komisi hanya dapat dilakukan oleh Admin.');
+    error.statusCode = 403;
+    error.code = 'ADMIN_CORRECTION_ADMIN_ONLY';
+    throw error;
+  }
+  const reason = String(payload.reason || '').trim();
+  if (reason.length < ADMIN_CORRECTION_REASON_MIN_LENGTH) {
+    const error = new Error(`Alasan koreksi penerima komisi wajib diisi minimal ${ADMIN_CORRECTION_REASON_MIN_LENGTH} karakter.`);
+    error.statusCode = 400;
+    error.code = 'ADMIN_CORRECTION_REASON_REQUIRED';
+    throw error;
+  }
+  return correctContainerJobCommissionRecipient(id, {
+    driverId: payload.driverId,
+    reason,
+    actorName: actor?.fullName || actor?.name || 'Admin',
+  });
 }
 
 export function getContainerJobExpense(expenseId) {

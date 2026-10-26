@@ -10,6 +10,7 @@ export function rejectFinanceOperationalMutation(actor) {
 }
 import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js';
 import {
+  correctCommissionRecipient,
   correctContainerJobExpense,
   createContainerJobExpense,
   createContainerJobSpk,
@@ -238,6 +239,27 @@ export async function listContainerJobExpenseLedgerController(request, response)
 export async function listContainerJobAssignmentHistoryController(request, response) {
   const result = await listContainerJobAssignmentHistory(request.params.id);
   sendSuccess(response, result);
+}
+
+export async function correctCommissionRecipientController(request, response) {
+  const result = await correctCommissionRecipient(request.params.id, request.body, request.user);
+  await safeRecordActivityLog(request, {
+    action: 'CORRECT_DRIVER_COMMISSION_RECIPIENT',
+    module: 'driver_commissions',
+    entityType: 'container_job',
+    entityId: request.params.id,
+    beforeData: result.before,
+    afterData: result.after,
+    metadata: {
+      reason: String(request.body?.reason || '').trim(),
+      batchId: result.batchId,
+      batchStatus: result.batchStatus,
+      salesOrderId: result.job?.orderId,
+      soNumber: result.job?.soNumber,
+      containerNumber: result.job?.containerNumber,
+    },
+  });
+  sendSuccess(response, result.job, 'Penerima komisi berhasil dikoreksi');
 }
 
 export async function createContainerJobExpenseController(request, response) {
