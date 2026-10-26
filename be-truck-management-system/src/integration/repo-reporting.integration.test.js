@@ -1,18 +1,19 @@
 // Integrasi konsistensi laporan Repo (Phase 5) terhadap PostgreSQL sungguhan.
-// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
-// (salinan dev), bukan database dev/production, karena test ini menulis data.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi DAN lolos scratch-db-guard (database
+// scratch lokal), bukan database dev/production, karena test ini menulis data.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import { prepareScratchDatabase } from '../test-support/scratch-db-guard.js';
 
-const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+const scratch = await prepareScratchDatabase();
 
-if (!databaseUrl) {
-  test('repo reporting integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+if (scratch.skip) {
+  test('repo reporting integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: scratch.skip }, () => {});
 } else {
-  process.env.DATABASE_URL = databaseUrl;
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
-  const { query, closePool } = await import('../db/client.js');
+  const { query, withTransaction, closePool } = await import('../db/client.js');
+  const { createRepoRevenueLines } = await import('../modules/container-jobs/repo-pickup-revenue.js');
   const { pickupComboRepoContainerJobs, pickupSingleRepoContainerJob } = await import('../modules/container-jobs/container-jobs.repository.js');
   const { getUtilizationTripRows } = await import('../modules/reports/utilization-trips.repository.js');
   const { getMonthlyComparisonReport, getMonthlyRevenueReport } = await import('../modules/reports/reports.repository.js');
@@ -38,11 +39,10 @@ if (!databaseUrl) {
     const code = nextTag();
     return cloneRow('sales_orders', `
       select * from sales_orders
-      where status = 'completed' and finance_verification_status = 'verified'
-        and nullif(btrim(accurate_so_number), '') is not null
+      where status <> 'cancelled' and coalesce(is_vendor_order, false) = false
       order by created_at limit 1
     `, {
-      so_number: `SO-RP-${code}`, accurate_so_number: `ACC-RP-${code}`, customer_name: customerName,
+      so_number: `SO-RP-${code}`, accurate_so_number: `ACC-RP-${code}`, finance_verification_status: 'verified', is_vendor_order: false, debit_note_number: null, cancel_request_status: 'none', cancelled_at: null, customer_name: customerName,
       invoice_number: null, billing_status: 'belum_invoice', debit_note_document_uploaded_at: null, status: 'completed',
     });
   }
@@ -99,6 +99,31 @@ if (!databaseUrl) {
     .filter((row) => movementIds.includes(row.movementId))
     .reduce((sum, row) => sum + row.amount, 0);
 
+
+  // Revenue Repo LAMA: sebelum aturan 2026-10-26 dibuat saat Ambil Titip (draft). Pickup sekarang tidak
+  // membuatnya lagi (Biaya Titip ditagih sebagai Reimbursement saat titip), tetapi baris lama tetap
+  // dilaporkan dan dikelola Finance -- disimulasikan eksplisit sebagai data lama.
+  async function seedLegacyRepoRevenue(movementId, pickupType) {
+    return withTransaction(async (client) => {
+      const items = await client.query(
+        `select cpi.id, cj.id as job_id, cj.sales_order_id, cj.container_number
+         from container_pickup_items cpi join container_jobs cj on cj.id = cpi.container_job_id
+         where cpi.movement_id = $1 order by cpi.sequence_no`,
+        [movementId],
+      );
+      return createRepoRevenueLines(client, {
+        movementId,
+        pickupType,
+        items: items.rows.map((row) => ({ id: row.id, job: { id: row.job_id, sales_order_id: row.sales_order_id, container_number: row.container_number } })),
+        actorName: 'Data Lama',
+      });
+    });
+  }
+  const repoRevenueCount = async (jobIds) => (await query(
+    "select count(*)::int as n from manual_revenue_lines where charge_type = 'repo' and container_job_id = any($1::uuid[])",
+    [jobIds],
+  )).rows[0].n;
+
   let single;
   let combo;
 
@@ -112,6 +137,8 @@ if (!databaseUrl) {
     const truckB = await createVehicle('20FT');
     const singleResult = await pickupSingleRepoContainerJob(jobSingle.id, pickup(driverB, truckB, { repoUjAmount: 150000 }));
     single = { so: soSingle, job: jobSingle, driverA, truckA, driverB, truckB, movement: singleResult.movement };
+    single.revenueAtPickup = await repoRevenueCount([jobSingle.id]);
+    await seedLegacyRepoRevenue(singleResult.movement.id, 'single');
 
     // CASE C -- combo dari dua SO/customer berbeda, Repo truck C / sopir C.
     const soX = await createSalesOrder(`Customer X ${tag}`);
@@ -125,6 +152,8 @@ if (!databaseUrl) {
       containerJobIds: [jobX.id, jobY.id], repoUjAmount: 175000,
     }));
     combo = { soX, soY, jobX, jobY, driverX, truckX, driverY, truckY, driverC, truckC, movement: comboResult.movement };
+    combo.revenueAtPickup = await repoRevenueCount([jobX.id, jobY.id]);
+    await seedLegacyRepoRevenue(comboResult.movement.id, 'combo_2x20');
   });
 
   test.after(async () => {
@@ -149,6 +178,9 @@ if (!databaseUrl) {
     const uj = await query("select amount from operational_fund_transactions where source = 'repo_uj' and source_ref_id = $1 and status = 'posted'", [single.movement.id]);
     assert.equal(uj.rows.length, 1);
 
+    // Aturan baru: Ambil Titip tidak membuat Revenue Repo.
+    assert.equal(single.revenueAtPickup, 0);
+    // Revenue Repo lama (data lama) tetap dilaporkan sekali, milik truck/sopir Repo.
     const report = await monthReport();
     const repoRows = report.repoRevenueRows.filter((row) => row.movementId === single.movement.id);
     assert.equal(repoRows.length, 1);
@@ -178,6 +210,7 @@ if (!databaseUrl) {
     assert.equal(uj.rows.length, 1);
     assert.equal(Number(uj.rows[0].amount), 175000);
 
+    assert.equal(combo.revenueAtPickup, 0, 'Ambil Titip combo tidak membuat Revenue Repo');
     const report = await monthReport();
     const repoRows = report.repoRevenueRows.filter((row) => row.movementId === combo.movement.id);
     assert.equal(repoRows.length, 2);

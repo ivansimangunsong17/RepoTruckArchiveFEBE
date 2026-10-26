@@ -1,16 +1,16 @@
 // Integrasi UJ Repo (Phase 3) terhadap PostgreSQL sungguhan.
-// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
-// (salinan dev), bukan database dev/production, karena test ini menulis data.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi DAN lolos scratch-db-guard (database
+// scratch lokal), bukan database dev/production, karena test ini menulis data.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import { prepareScratchDatabase } from '../test-support/scratch-db-guard.js';
 
-const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+const scratch = await prepareScratchDatabase();
 
-if (!databaseUrl) {
-  test('repo UJ integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+if (scratch.skip) {
+  test('repo UJ integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: scratch.skip }, () => {});
 } else {
-  process.env.DATABASE_URL = databaseUrl;
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
   const { query, withTransaction, closePool } = await import('../db/client.js');
   const {

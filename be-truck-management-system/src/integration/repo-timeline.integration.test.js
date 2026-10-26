@@ -1,16 +1,16 @@
 // Integrasi timeline Repo (bug 2609/23-00250 / SKHU8711190) terhadap PostgreSQL sungguhan.
-// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
-// (salinan dev), bukan database dev/production, karena test ini menulis data.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi DAN lolos scratch-db-guard (database
+// scratch lokal), bukan database dev/production, karena test ini menulis data.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import { prepareScratchDatabase } from '../test-support/scratch-db-guard.js';
 
-const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+const scratch = await prepareScratchDatabase();
 
-if (!databaseUrl) {
-  test('repo timeline integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+if (scratch.skip) {
+  test('repo timeline integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: scratch.skip }, () => {});
 } else {
-  process.env.DATABASE_URL = databaseUrl;
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
   const { query, closePool } = await import('../db/client.js');
   const {
@@ -69,9 +69,10 @@ if (!databaseUrl) {
     });
     // Dokumen penyelesaian realtime (SPK, EIR, EIR Titip) supaya jalur normal bisa dipakai.
     for (const category of ['spkDocument', 'eirDocument', 'repoEirDocument']) {
-      await cloneRow('attachments', 'select * from attachments order by created_at limit 1', {
-        entity_type: 'container_job', entity_id: job.id, category,
-      });
+      await query(
+        "insert into attachments (entity_type, entity_id, category, file_name, mime_type) values ('container_job', $1, $2, $3, 'application/pdf')",
+        [job.id, category, `${category}.pdf`],
+      );
     }
     return job;
   }

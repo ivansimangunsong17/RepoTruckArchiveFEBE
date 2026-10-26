@@ -1,16 +1,16 @@
 // Integrasi constraint assignment aktif (combo 2x20) terhadap PostgreSQL sungguhan.
-// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
-// (salinan dev), bukan database dev/production, karena test ini menulis data.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi DAN lolos scratch-db-guard (database
+// scratch lokal), bukan database dev/production, karena test ini menulis data.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import { prepareScratchDatabase } from '../test-support/scratch-db-guard.js';
 
-const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+const scratch = await prepareScratchDatabase();
 
-if (!databaseUrl) {
-  test('combo assignment integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+if (scratch.skip) {
+  test('combo assignment integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: scratch.skip }, () => {});
 } else {
-  process.env.DATABASE_URL = databaseUrl;
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
   const { query, closePool } = await import('../db/client.js');
   const {
@@ -268,9 +268,10 @@ if (!databaseUrl) {
 
   async function attachCompletionDocuments(jobId) {
     for (const category of ['spkDocument', 'eirDocument', 'repoEirDocument']) {
-      await cloneRow('attachments', 'select * from attachments order by created_at limit 1', {
-        entity_type: 'container_job', entity_id: jobId, category,
-      });
+      await query(
+        "insert into attachments (entity_type, entity_id, category, file_name, mime_type) values ('container_job', $1, $2, $3, 'application/pdf')",
+        [jobId, category, `${category}.pdf`],
+      );
     }
   }
 
@@ -288,7 +289,7 @@ if (!databaseUrl) {
     assert.equal(await assign('40FT', 'COMBO'), 'allow'); // F
   });
 
-  test('10. Repo single 20FT dengan truck 40FT: pickup, update, selesai normal; UJ/revenue satu; utilisasi +0', async () => {
+  test('10. Repo single 20FT dengan truck 40FT: pickup, update, selesai normal; UJ satu, tanpa Revenue Repo; utilisasi +0', async () => {
     const [originalDriver, originalTruck] = [await createDriver(), await createVehicle('20FT')];
     const storedAt = new Date();
     const job = await createJob('repo_stored', {
@@ -314,9 +315,9 @@ if (!databaseUrl) {
     const uj = await query("select amount from operational_fund_transactions where source = 'repo_uj' and source_ref_id = $1 and status = 'posted'", [picked.movement.id]);
     assert.equal(uj.rows.length, 1);
     assert.equal(Number(uj.rows[0].amount), 150000);
+    // Aturan 2026-10-26: Ambil Titip tidak membuat Revenue Repo (Biaya Titip ditagih saat titip).
     const revenue = await query("select total_amount from manual_revenue_lines where charge_type = 'repo' and container_job_id = $1 and status <> 'void'", [job.id]);
-    assert.equal(revenue.rows.length, 1);
-    assert.equal(Number(revenue.rows[0].total_amount), 300000);
+    assert.equal(revenue.rows.length, 0);
 
     const trips = await getUtilizationTripRows({});
     assert.equal(trips.filter((row) => row.vehicleId === vehicle.id || row.driverId === driver.id).length, 0, 'Repo +0 truck/sopir');

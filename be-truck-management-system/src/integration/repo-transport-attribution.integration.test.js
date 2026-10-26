@@ -1,18 +1,19 @@
 // Integrasi atribusi revenue transport asli untuk job Repo terhadap PostgreSQL sungguhan.
-// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi -- arahkan ke database SCRATCH
-// (salinan dev), bukan database dev/production, karena test ini menulis data.
+// Opt-in: hanya jalan kalau ATMS_SCRATCH_DATABASE_URL diisi DAN lolos scratch-db-guard (database
+// scratch lokal), bukan database dev/production, karena test ini menulis data.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
+import { prepareScratchDatabase } from '../test-support/scratch-db-guard.js';
 
-const databaseUrl = process.env.ATMS_SCRATCH_DATABASE_URL;
+const scratch = await prepareScratchDatabase();
 
-if (!databaseUrl) {
-  test('repo transport attribution integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: 'opt-in' }, () => {});
+if (scratch.skip) {
+  test('repo transport attribution integration skipped without ATMS_SCRATCH_DATABASE_URL', { skip: scratch.skip }, () => {});
 } else {
-  process.env.DATABASE_URL = databaseUrl;
   process.env.AUTH_TOKEN_SECRET ||= 'test-auth-token-secret-minimum-32-characters';
-  const { query, closePool } = await import('../db/client.js');
+  const { query, withTransaction, closePool } = await import('../db/client.js');
+  const { createRepoRevenueLines } = await import('../modules/container-jobs/repo-pickup-revenue.js');
   const { pickupComboRepoContainerJobs, pickupSingleRepoContainerJob } = await import('../modules/container-jobs/container-jobs.repository.js');
   const {
     getCustomerPerformanceReport,
@@ -43,10 +44,9 @@ if (!databaseUrl) {
 
   const createSalesOrder = () => cloneRow('sales_orders', `
     select * from sales_orders
-    where status = 'completed' and finance_verification_status = 'verified'
-      and nullif(btrim(accurate_so_number), '') is not null
+    where status <> 'cancelled' and coalesce(is_vendor_order, false) = false
     order by created_at limit 1
-  `, { so_number: `SO-TA-${nextTag()}`, accurate_so_number: `ACC-TA-${nextTag()}`, status: 'completed' });
+  `, { so_number: `SO-TA-${nextTag()}`, accurate_so_number: `ACC-TA-${nextTag()}`, finance_verification_status: 'verified', is_vendor_order: false, debit_note_number: null, cancel_request_status: 'none', cancelled_at: null, status: 'completed' });
 
   const createDriver = () => cloneRow('drivers', 'select * from drivers where archived_at is null order by created_at limit 1', {
     name: `SOPIR TA ${nextTag()}`, nik: null, operational_status: 'Aktif', archived_at: null,
@@ -105,6 +105,31 @@ if (!databaseUrl) {
   const salesRevenue = (report, name) => report.rows
     .filter((row) => String(row.salesName || '').trim().toLowerCase() === String(name).trim().toLowerCase())
     .reduce((sum, row) => sum + Number(row.totalRevenue || 0), 0);
+
+  // Revenue Repo LAMA: sebelum aturan 2026-10-26 dibuat saat Ambil Titip (draft). Pickup sekarang tidak
+  // membuatnya lagi (Biaya Titip ditagih sebagai Reimbursement saat titip), tetapi baris lama tetap
+  // dilaporkan dan dikelola Finance -- disimulasikan eksplisit sebagai data lama.
+  async function seedLegacyRepoRevenue(movementId, pickupType) {
+    return withTransaction(async (client) => {
+      const items = await client.query(
+        `select cpi.id, cj.id as job_id, cj.sales_order_id, cj.container_number
+         from container_pickup_items cpi join container_jobs cj on cj.id = cpi.container_job_id
+         where cpi.movement_id = $1 order by cpi.sequence_no`,
+        [movementId],
+      );
+      return createRepoRevenueLines(client, {
+        movementId,
+        pickupType,
+        items: items.rows.map((row) => ({ id: row.id, job: { id: row.job_id, sales_order_id: row.sales_order_id, container_number: row.container_number } })),
+        actorName: 'Data Lama',
+      });
+    });
+  }
+  const repoRevenueCount = async (jobIds) => (await query(
+    "select count(*)::int as n from manual_revenue_lines where charge_type = 'repo' and container_job_id = any($1::uuid[])",
+    [jobIds],
+  )).rows[0].n;
+
   let single;
   let combo;
 
@@ -124,6 +149,8 @@ if (!databaseUrl) {
     });
     await finishRepo([job.id], picked.movement.id);
     single = { so, job, driverA, truckA, driverB, truckB, movement: picked.movement };
+    single.revenueAtPickup = await repoRevenueCount([job.id]);
+    await seedLegacyRepoRevenue(picked.movement.id, 'single');
 
     const soCombo = await createSalesOrder();
     const [driverX, truckX, driverY, truckY, driverC, truckC] = [
@@ -138,6 +165,8 @@ if (!databaseUrl) {
     });
     await finishRepo([jobX.id, jobY.id], pickedCombo.movement.id);
     combo = { jobX, jobY, truckX, truckY, driverX, driverY, truckC, driverC, movement: pickedCombo.movement };
+    combo.revenueAtPickup = await repoRevenueCount([jobX.id, jobY.id]);
+    await seedLegacyRepoRevenue(pickedCombo.movement.id, 'combo_2x20');
   });
 
   test.after(async () => {
@@ -155,7 +184,9 @@ if (!databaseUrl) {
     assert.equal(rowsFor(await report(10), single.job.id).length, 0, 'transport tidak muncul lagi di bulan Repo');
   });
 
-  test('D: Revenue Repo tetap Oktober dan milik truck/sopir Repo', async () => {
+  test('D: Ambil Titip tidak membuat Revenue Repo; Revenue Repo lama tetap Oktober dan milik truck/sopir Repo', async () => {
+    assert.equal(single.revenueAtPickup, 0);
+    assert.equal(combo.revenueAtPickup, 0);
     const october = await report(10);
     const repoRows = october.repoRevenueRows.filter((row) => row.movementId === single.movement.id);
     assert.equal(repoRows.length, 1);
