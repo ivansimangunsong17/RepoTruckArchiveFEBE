@@ -3,6 +3,7 @@ import { safeRecordActivityLog } from '../activity-logs/activity-logs.service.js
 import {
   fetchCustomerOutstandingSummary,
   getSalesOrder,
+  listActiveOperationalSalesOrders,
   listSalesOrders,
   removeSalesOrder,
   requestSalesOrderCancellation,
@@ -142,6 +143,12 @@ function backdateContainerMetadata(order = {}, container = {}) {
 
 export async function listSalesOrdersController(request, response) {
   const result = await listSalesOrders(request.query);
+  sendSuccess(response, result);
+}
+
+// Semua SO yang masih punya job aktif (tidak dibatasi 100 SO terbaru) untuk dashboard & status armada.
+export async function listActiveOperationalSalesOrdersController(request, response) {
+  const result = await listActiveOperationalSalesOrders(request.query);
   sendSuccess(response, result);
 }
 

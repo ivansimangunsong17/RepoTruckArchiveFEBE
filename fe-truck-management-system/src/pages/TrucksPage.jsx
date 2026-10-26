@@ -3,6 +3,8 @@ import MasterExpiryDate from '../components/master/MasterExpiryDate';
 import { buildOperationalJobs, getActiveOperationalJobs } from '../data/operationalDashboard';
 import { fallbackDrivers, fallbackTruckUnits } from '../data/truckData';
 import { useArchiveData } from '../hooks/useArchiveData';
+import { useOperationalOrders } from '../hooks/useOperationalOrders';
+import OperationalDataTruncatedNotice from '../components/common/OperationalDataTruncatedNotice';
 import { useAuth } from '../hooks/useAuth';
 import { useEffect, useState } from 'react';
 import { Edit3, Trash2 } from 'lucide-react';
@@ -712,7 +714,8 @@ function TruckStatus({ row, activeJobs }) {
 
 function TrucksPage({ readOnly = false }) {
   const archive = useArchiveData();
-  const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
+  const { orders: operationalOrders, truncated: operationalDataTruncated } = useOperationalOrders();
+  const activeJobs = getActiveOperationalJobs(buildOperationalJobs(operationalOrders));
   const truckRows = archive.isMasterDatabaseMode
     ? archive.masters?.trucks || []
     : archive.masters?.trucks?.length ? archive.masters.trucks : fallbackTruckUnits;
@@ -754,6 +757,8 @@ function TrucksPage({ readOnly = false }) {
   ];
 
   return (
+    <>
+    <OperationalDataTruncatedNotice truncated={operationalDataTruncated} />
     <MasterDataPage
       eyebrow="Master Data"
       title="Master Truck"
@@ -794,6 +799,7 @@ function TrucksPage({ readOnly = false }) {
       ]}
       readOnly={readOnly}
     />
+    </>
   );
 }
 

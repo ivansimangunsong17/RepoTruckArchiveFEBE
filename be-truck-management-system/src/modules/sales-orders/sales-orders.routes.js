@@ -3,6 +3,7 @@ import {
   createSalesOrderController,
   customerOutstandingSummaryController,
   getSalesOrderController,
+  listActiveOperationalSalesOrdersController,
   listSalesOrdersController,
   requestCancelSalesOrderController,
   reviewCancelSalesOrderController,
@@ -22,6 +23,12 @@ export const salesOrderRoutes = [
     path: '/api/sales-orders',
     permission: 'sales_order.create',
     handler: createSalesOrderController,
+  },
+  {
+    method: 'GET',
+    path: '/api/sales-orders/active-operational',
+    permission: 'sales_order.read',
+    handler: listActiveOperationalSalesOrdersController,
   },
   {
     method: 'GET',

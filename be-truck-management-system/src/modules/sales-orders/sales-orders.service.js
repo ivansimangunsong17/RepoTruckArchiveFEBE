@@ -1,6 +1,7 @@
 import {
   cancelSalesOrder,
   createSalesOrder,
+  findActiveOperationalSalesOrders,
   findSalesOrderById,
   findSalesOrdersPage,
   requestSalesOrderCancellation as requestSalesOrderCancellationRepository,
@@ -580,6 +581,10 @@ export function listSalesOrders(query) {
     dateTo: query.dateTo || '',
     vendorFilter: query.vendorFilter || '',
   });
+}
+
+export function listActiveOperationalSalesOrders(query = {}) {
+  return findActiveOperationalSalesOrders({ limit: query.limit });
 }
 
 export function fetchCustomerOutstandingSummary(customerName) {

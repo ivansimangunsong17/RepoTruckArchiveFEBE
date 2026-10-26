@@ -1105,3 +1105,32 @@ export async function reviewSalesOrderCancellation(id, patch = {}) {
     });
   });
 }
+
+// Status job yang masih menghasilkan pekerjaan/assignment aktif untuk dashboard dan status armada.
+export const ACTIVE_OPERATIONAL_JOB_STATUSES = ['received', 'running', 'inap', 'repo_stored'];
+export const ACTIVE_OPERATIONAL_ORDER_LIMIT = 1000;
+
+// Semua SO (bukan hanya 100 terbaru) yang masih punya job aktif, dengan bentuk data sama seperti list SO.
+// Memakai index container_jobs(status) dan container_jobs(sales_order_id); dibatasi limit sebagai pengaman.
+export async function findActiveOperationalSalesOrders({ limit = ACTIVE_OPERATIONAL_ORDER_LIMIT } = {}) {
+  const safeLimit = Math.max(1, Math.min(ACTIVE_OPERATIONAL_ORDER_LIMIT, Number(limit) || ACTIVE_OPERATIONAL_ORDER_LIMIT));
+  const orderColumns = await getSalesOrderColumns();
+  const result = await query(
+    `
+      select ${orderColumns}
+      from sales_orders
+      where status <> 'cancelled'
+        and id in (
+          select cj.sales_order_id
+          from container_jobs cj
+          where cj.status = any($1::text[])
+        )
+      order by created_at desc
+      limit $2
+    `,
+    [ACTIVE_OPERATIONAL_JOB_STATUSES, safeLimit + 1],
+  );
+  const truncated = result.rows.length > safeLimit;
+  const rows = await fetchOrdersWithJobs(result.rows.slice(0, safeLimit));
+  return { rows, total: rows.length, truncated };
+}

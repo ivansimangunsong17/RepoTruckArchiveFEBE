@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import StatusBadge from '../../components/common/StatusBadge';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { useOperationalOrders } from '../../hooks/useOperationalOrders';
+import OperationalDataTruncatedNotice from '../../components/common/OperationalDataTruncatedNotice';
 import {
   formatShortDate,
   getOperationalDashboardData,
@@ -45,7 +47,7 @@ function AdminDashboard() {
   const [selectedExistingJob, setSelectedExistingJob] = useState(null);
   const [selectedProspectGroup, setSelectedProspectGroup] = useState(null);
   const archive = useArchiveData();
-  const orders = archive.orders || [];
+  const { orders, truncated: operationalDataTruncated } = useOperationalOrders();
   const masters = archive.masters || {};
   const hasLiveOrders = archive.isDatabaseMode && orders.length > 0;
   const {
@@ -140,6 +142,7 @@ function AdminDashboard() {
       />
 
       {archive.error ? <div className="admin-alert"><AlertCircle size={17} /> {archive.error}</div> : null}
+      <OperationalDataTruncatedNotice truncated={operationalDataTruncated} />
 
       <section className="admin-control-band">
         <div>

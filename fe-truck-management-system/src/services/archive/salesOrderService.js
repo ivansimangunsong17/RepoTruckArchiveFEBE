@@ -356,6 +356,13 @@ export async function fetchSalesOrders() {
   return result.rows || [];
 }
 
+// Semua SO yang masih punya job aktif (received/running/inap/repo_stored), tidak dibatasi 100 SO terbaru.
+// truncated=true berarti backend memotong hasil di batas maksimum; data TIDAK lengkap.
+export async function fetchActiveOperationalSalesOrders() {
+  const result = await httpClient.get('/sales-orders/active-operational');
+  return { rows: result.rows || [], truncated: Boolean(result.truncated) };
+}
+
 export async function fetchSalesOrdersPage({
   page = 1,
   pageSize = 8,

@@ -1,6 +1,8 @@
 import MasterDataPage, { DetailDocumentActions } from '../../components/master/MasterDataPage';
 import MasterExpiryDate from '../../components/master/MasterExpiryDate';
 import DocumentLink from '../../components/common/DocumentLink';
+import { useOperationalOrders } from '../../hooks/useOperationalOrders';
+import OperationalDataTruncatedNotice from '../../components/common/OperationalDataTruncatedNotice';
 import { buildOperationalJobs, getActiveOperationalJobs } from '../../data/operationalDashboard';
 import { fallbackDrivers, fallbackTruckUnits } from '../../data/truckData';
 import { useArchiveData } from '../../hooks/useArchiveData';
@@ -300,7 +302,8 @@ async function prepareDriverSave({ payload, editingId, rows, confirmAction, acti
 function DriversPage({ readOnly = false }) {
   const archive = useArchiveData();
   const truckRows = archive.masters?.trucks?.length ? archive.masters.trucks : getTruckRows();
-  const activeJobs = getActiveOperationalJobs(buildOperationalJobs(archive.orders));
+  const { orders: operationalOrders, truncated: operationalDataTruncated } = useOperationalOrders();
+  const activeJobs = getActiveOperationalJobs(buildOperationalJobs(operationalOrders));
   const detailFields = [
     ...fields
       .filter((field) => !DRIVER_DOCUMENT_FIELD_KEYS.has(field.key))
@@ -328,6 +331,8 @@ function DriversPage({ readOnly = false }) {
   ];
 
   return (
+    <>
+    <OperationalDataTruncatedNotice truncated={operationalDataTruncated} />
     <MasterDataPage
       eyebrow="Master Data"
       title="Data Sopir"
@@ -385,6 +390,7 @@ function DriversPage({ readOnly = false }) {
       ]}
       readOnly={readOnly}
     />
+    </>
   );
 }
 

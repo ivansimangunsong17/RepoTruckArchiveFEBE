@@ -15,6 +15,8 @@ import PageHeader from '../../components/common/PageHeader';
 import StatusBadge from '../../components/common/StatusBadge';
 import { initialSalesOrders } from '../../data/salesOrders';
 import { useArchiveData } from '../../hooks/useArchiveData';
+import { useOperationalOrders } from '../../hooks/useOperationalOrders';
+import OperationalDataTruncatedNotice from '../../components/common/OperationalDataTruncatedNotice';
 import { formatShortDate, getOperationalDashboardData, normalizeSize } from '../../data/operationalDashboard';
 
 function routeView(job) {
@@ -106,7 +108,8 @@ function OperationalDashboard() {
   const [selectedExistingJob, setSelectedExistingJob] = useState(null);
   const archive = useArchiveData();
   const hasLiveOrders = archive.isDatabaseMode && archive.orders.length > 0;
-  const salesOrders = archive.isDatabaseMode ? archive.orders : initialSalesOrders;
+  const { orders: operationalOrders, truncated: operationalDataTruncated } = useOperationalOrders();
+  const salesOrders = archive.isDatabaseMode ? operationalOrders : initialSalesOrders;
   const {
     dueJobs,
     workQueues,
@@ -132,6 +135,7 @@ function OperationalDashboard() {
           </Link>
         }
       />
+      <OperationalDataTruncatedNotice truncated={operationalDataTruncated} />
 
       <div className="ops-dashboard-switch" role="tablist" aria-label="Pilih dashboard operational">
         <button type="button" className={activeDashboard === 'existing' ? 'active' : ''} onClick={() => setActiveDashboard('existing')}>
