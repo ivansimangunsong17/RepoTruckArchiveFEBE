@@ -585,7 +585,8 @@ export function ensureRepoStoragePayload(job, payload = {}) {
 }
 
 export function ensureInapPayload(job, payload = {}) {
-  if (payload.status !== 'inap') return;
+  // Menyimpan ulang job yang SUDAH inap (edit data tanpa transisi) bukan penandaan inap baru.
+  if (payload.status !== 'inap' || job?.status === 'inap') return;
 
   if (job?.status !== 'running') {
     const error = new Error('Container hanya bisa ditandai inap saat status pekerjaan Sedang Jalan.');

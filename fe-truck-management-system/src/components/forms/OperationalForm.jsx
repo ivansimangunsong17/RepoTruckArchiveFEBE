@@ -54,6 +54,13 @@ const statusOptions = [
     selectStyle: { borderColor: '#f59e0b', backgroundColor: '#fffbeb', color: '#92400e' },
   },
   {
+    value: 'inap',
+    label: 'Inap',
+    description: 'Perjalanan tertahan (inap). Pilih Sedang Jalan untuk melanjutkan.',
+    tone: 'border-orange-300 bg-orange-50 text-orange-700',
+    selectStyle: { borderColor: '#fb923c', backgroundColor: '#fff7ed', color: '#9a3412' },
+  },
+  {
     value: 'completed',
     label: 'Selesai',
     description: 'Pekerjaan selesai, data masih bisa diedit.',
@@ -504,7 +511,7 @@ export function shouldPersistRecommendedDriverCommission({
   hasDriverCommission,
   status,
 }) {
-  return Boolean(useRecommendation && hasDriverCommission && ['running', 'completed'].includes(status));
+  return Boolean(useRecommendation && hasDriverCommission && ['running', 'inap', 'completed'].includes(status));
 }
 
 function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTruckDefaultDriver, masterTrucks, masterDrivers, masterDestinations, masterLocations = [], activeJobs = [], currentUser, initialPhase = 'preparation' }) {
@@ -577,7 +584,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     travelDocument: container.travelDocument || '',
     travelDocumentFile: container.travelDocumentFile || null,
     otherDocuments: container.otherDocuments || [],
-    status: container.status === 'inap' ? 'running' : container.status || 'received',
+    // Job inap tidak diubah otomatis ke running saat form dibuka -- resume hanya lewat pilihan eksplisit.
+    status: container.status || 'received',
     runningAt: toDateTimeInputValue(container.runningAt),
     completedAt: toDateTimeInputValue(container.completedAt),
     repoPickedUpAt: toDateTimeInputValue(container.repoPickedUpAt) || (container.repoPickupMode ? nowForDateTimeInput() : ''),
@@ -679,7 +687,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const canEditContainerNumber = canUpdateOperational && !isRepoPickupMode && (
     canReviseLockedFields
       || canFillInitialContainerNumber
-      || (!['running', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid')
+      || (!['running', 'inap', 'completed', 'cancelled'].includes(form.status) && rpujStatus !== 'paid')
   );
   const isCompletedDocumentFollowUp = !canReviseLockedFields && form.status === 'completed';
   const canEditDocumentValue = (field) => canUpdateDocuments && (isDocumentOnlyMode || !isCompletedDocumentFollowUp || !String(container[field] || '').trim());
@@ -688,6 +696,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const canEditTimeline = canUpdateOperational && (canReviseLockedFields || container.status !== 'completed');
   const canStartTrip = canUpdateOperational && (isVendorExecution || hasCompleteAssignment || canReviseLockedFields);
   const availableStatusOptions = statusOptions.filter((option) => {
+    if (option.value === 'inap' && container.status !== 'inap') return false;
     if (isDocumentOnlyMode) return option.value === form.status;
     if (canReviseLockedFields) return true;
     if (container.status === 'completed') return option.value === 'completed';
@@ -729,7 +738,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       ? 'Simpan Biaya & SPK'
       : isReadyToStart
         ? 'Mulai Jalan'
-        : form.status === 'running'
+        : ['running', 'inap'].includes(form.status)
           ? 'Simpan Update Perjalanan'
           : form.status === 'completed'
             ? 'Simpan Closing'
@@ -1997,7 +2006,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                 ) : null}
               </div>
             ) : null}
-            {!canEditAssignment || assignmentChangeReasonRequired || !canEditContainerNumber || (!hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid')) ? (
+            {!canEditAssignment || assignmentChangeReasonRequired || !canEditContainerNumber || (!hasSavedContainerNumber && (['running', 'inap'].includes(form.status) || rpujStatus === 'paid')) ? (
               <div className="operational-lock-notices">
                 {!canEditAssignment ? (
                   <p><AlertTriangle size={14} /> <span>Driver dan truck terkunci karena UJ sudah ditransfer atau pekerjaan selesai. Hubungi admin untuk revisi.</span></p>
@@ -2006,7 +2015,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
                 ) : null}
                 {!canEditContainerNumber ? (
                   <p><AlertTriangle size={14} /> <span>{isRepoPickupMode ? 'No. Container terkunci saat ambil container titip. Operational hanya memastikan truck dan sopir perjalanan lanjutan.' : 'No. Container yang sudah tersimpan terkunci setelah pekerjaan berjalan, selesai, atau UJ ditransfer. Hubungi admin untuk revisi.'}</span></p>
-                ) : !hasSavedContainerNumber && (form.status === 'running' || rpujStatus === 'paid') ? (
+                ) : !hasSavedContainerNumber && (['running', 'inap'].includes(form.status) || rpujStatus === 'paid') ? (
                   <p className="is-success"><ShieldCheck size={14} /> <span>No. Container belum diketahui saat assignment. Nomor pertama tetap dapat diisi meskipun UJ sudah dikirim atau perjalanan sedang berjalan.</span></p>
                 ) : null}
               </div>

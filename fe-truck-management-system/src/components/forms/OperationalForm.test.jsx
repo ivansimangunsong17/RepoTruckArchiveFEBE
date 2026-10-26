@@ -2094,4 +2094,29 @@ describe('OperationalForm timeline Repo', () => {
       completedAt: '2026-10-09T08:41:00.000Z',
     })));
   });
+
+  it('mengedit job inap tidak otomatis melanjutkan perjalanan (status tetap inap)', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <OperationalForm
+        container={{
+          ...container,
+          status: 'inap',
+          driver: 'Sopir Inap',
+          plateNumber: 'B 1234 INP',
+          runningAt: '2026-10-20T01:00:00.000Z',
+          inapStartedAt: '2026-10-20T12:00:00.000Z',
+          inapReason: 'Curfew malam di rest area',
+        }}
+        masterTrucks={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].status).toBe('inap');
+  });
 });

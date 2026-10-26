@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getOperationalDashboardData, getOperationalWorkStage, isActiveOperationalJob } from './operationalDashboard';
+import { deriveOrderStatus } from '../contexts/ArchiveDataContext';
 
 describe('operationalDashboard', () => {
   it('menganggap truck tanggal sebelumnya tetap aktif jika job belum selesai', () => {
@@ -223,5 +224,14 @@ describe('operationalDashboard', () => {
     expect(result.workQueues.ready.map((job) => job.id)).toEqual(['job-ready']);
     expect(result.workQueues.attention.map((job) => job.id)).toEqual(['job-attention']);
     expect(result.workQueues.running.map((job) => job.id)).toEqual(['job-running']);
+  });
+
+  it('job inap tetap dihitung sebagai perjalanan berjalan, dan SO dengan job inap tetap running', () => {
+    expect(getOperationalWorkStage({ status: 'inap', plateNumber: 'B 1 AA', driver: 'SOPIR' })).toBe('running');
+    expect(deriveOrderStatus([{ status: 'inap' }])).toBe('running');
+    expect(deriveOrderStatus([{ status: 'inap' }, { status: 'cancelled' }])).toBe('running');
+    expect(deriveOrderStatus([{ status: 'received' }])).toBe('waiting_operational');
+    expect(deriveOrderStatus([{ status: 'completed' }, { status: 'cancelled' }])).toBe('completed');
+    expect(deriveOrderStatus([{ status: 'cancelled' }])).toBe('cancelled');
   });
 });

@@ -153,11 +153,11 @@ function findLocalContainerLocation(ordersList, containerId) {
   return null;
 }
 
-function deriveOrderStatus(containers) {
+export function deriveOrderStatus(containers) {
   const activeContainers = containers.filter((container) => container.status !== 'cancelled');
   const allCancelled = containers.length > 0 && activeContainers.length === 0;
   const allCompleted = activeContainers.length > 0 && activeContainers.every((container) => container.status === 'completed');
-  const hasProgress = activeContainers.some((container) => ['running', 'repo_stored', 'completed'].includes(container.status));
+  const hasProgress = activeContainers.some((container) => ['running', 'inap', 'repo_stored', 'completed'].includes(container.status));
   return allCancelled ? 'cancelled' : allCompleted ? 'completed' : hasProgress ? 'running' : 'waiting_operational';
 }
 

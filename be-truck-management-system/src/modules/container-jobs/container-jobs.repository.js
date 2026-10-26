@@ -1674,6 +1674,18 @@ export function shouldPreserveOriginalRunningAt(existing = {}, { allowAdminCorre
   return Boolean(existing.repo_stored_at && existing.running_at && !allowAdminCorrection);
 }
 
+export function resolveRunningAtForSave(existing = {}, form = {}, nextStatus, { documentOnlyUpdate = false, allowAdminCorrection = false } = {}) {
+  if (documentOnlyUpdate || nextStatus === 'cancelled') return existing.running_at;
+  if (shouldPreserveOriginalRunningAt(existing, { allowAdminCorrection }) && ['running', 'completed', 'repo_stored'].includes(nextStatus)) {
+    return existing.running_at;
+  }
+  // Inap adalah jeda di tengah perjalanan: waktu mulai tidak boleh hilang, supaya Selesai Inap
+  // (resume ke running) dan closing tidak perlu mengisi ulang waktu mulai.
+  if (nextStatus === 'inap') return existing.running_at;
+  if (['repo_stored', 'running', 'completed'].includes(nextStatus)) return form.runningAt || existing.running_at;
+  return null;
+}
+
 export async function requireCompletedJobReady(client, id, form, existing, options = {}) {
   // allowRetroactiveEntry mencakup historical backfill DAN ritasi susulan/backdate (Phase 2) --
   // keduanya sama-sama mencatat pekerjaan yang sudah selesai di masa lalu, jadi sama-sama boleh
@@ -3169,17 +3181,7 @@ async function updateContainerJobTransaction(id, form) {
     const nextUjSnapshotSource = allowAdminCorrection && hasOwnInput(form, 'ujAmountSnapshot')
       ? 'admin_correction'
       : existing.rows[0].uj_snapshot_source;
-    const runningAt = documentOnlyUpdate
-      ? existing.rows[0].running_at
-      : nextStatus === 'cancelled'
-      ? existing.rows[0].running_at
-      : shouldPreserveOriginalRunningAt(existing.rows[0], { allowAdminCorrection }) && ['running', 'completed', 'repo_stored'].includes(nextStatus)
-        ? existing.rows[0].running_at
-      : nextStatus === 'repo_stored'
-        ? form.runningAt || existing.rows[0].running_at
-      : ['running', 'completed'].includes(nextStatus)
-        ? form.runningAt || existing.rows[0].running_at
-        : null;
+    const runningAt = resolveRunningAtForSave(existing.rows[0], form, nextStatus, { documentOnlyUpdate, allowAdminCorrection });
     if (!documentOnlyUpdate && ['running', 'repo_stored', 'completed'].includes(nextStatus) && !runningAt) {
       throw validationError('Tanggal dan jam mulai perjalanan wajib diisi.', 'CONTAINER_JOB_RUNNING_TIME_REQUIRED', 400);
     }

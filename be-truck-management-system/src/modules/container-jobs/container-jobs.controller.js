@@ -603,7 +603,7 @@ export async function updateContainerJobController(request, response) {
         },
       });
     }
-    if (saved.status === 'inap') {
+    if (saved.status === 'inap' && before.status !== 'inap') {
       await safeRecordActivityLog(request, {
         action: 'INAP_CONTAINER_JOB',
         module: 'container_jobs',

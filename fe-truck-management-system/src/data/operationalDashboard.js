@@ -61,8 +61,9 @@ export function isAssigned(job) {
   return Boolean(job.plateNumber || job.truck || job.driver);
 }
 
+// Inap tetap perjalanan aktif (truck dan sopir masih terkunci ke job ini).
 export function isRunning(job) {
-  return ['running', 'Sedang Jalan'].includes(job.status);
+  return ['running', 'inap', 'Sedang Jalan'].includes(job.status);
 }
 
 export function isActiveOperationalJob(job, currentDateKey = todayKey()) {
