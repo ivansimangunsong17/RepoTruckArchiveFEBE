@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import OperationalForm, { shouldPersistRecommendedDriverCommission } from './OperationalForm';
+import OperationalForm, { resolveDriverOnTruckChange, shouldPersistRecommendedDriverCommission } from './OperationalForm';
 import { createContainerJobExpense, fetchContainerJobAssignmentHistory, uploadContainerJobExpenseProof } from '../../services/archive/containerJobService';
 
 vi.mock('../../services/archive/containerJobService', () => ({
@@ -2167,5 +2167,301 @@ describe('OperationalForm timeline Repo', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Batal' }));
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alertdialog', { name: /nomor container sudah tercatat/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('OperationalForm asal pilihan sopir saat truck diganti', () => {
+  const sourceTrucks = [
+    { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Sopir Satu', defaultDriverId: 'drv-1' },
+    { id: 'truck-2', plateNumber: 'B 2000 BB', unitCode: 'TRK-002', capacity: '20FT', brand: 'Fuso', type: 'FN', status: 'Aktif', defaultDriver: 'Sopir Dua', defaultDriverId: 'drv-2' },
+    { id: 'truck-3', plateNumber: 'B 3000 CC', unitCode: 'TRK-003', capacity: '20FT', brand: 'UD', type: 'Quester', status: 'Aktif' },
+  ];
+  const sourceDrivers = [
+    { id: 'drv-1', name: 'Sopir Satu', status: 'Aktif' },
+    { id: 'drv-2', name: 'Sopir Dua', status: 'Aktif' },
+    { id: 'drv-3', name: 'Sopir Tiga', status: 'Aktif' },
+  ];
+  const renderForm = (props = {}) => render(
+    <OperationalForm
+      container={container}
+      masterTrucks={sourceTrucks}
+      masterDrivers={sourceDrivers}
+      onClose={vi.fn()}
+      onSubmit={vi.fn()}
+      {...props}
+    />,
+  );
+  const driverInput = () => screen.getByLabelText('Sopir Aktual Ritasi');
+  const selectTruck = (user, plate) => user.selectOptions(screen.getByLabelText('Truck'), plate);
+  const mismatchNote = () => screen.queryByRole('note');
+
+  it('kebijakan murni: hanya sopir kosong atau hasil otomatis yang mengikuti truck', () => {
+    expect(resolveDriverOnTruckChange({ source: 'none', currentDriver: '', truckDefaultDriver: 'Sopir Dua' })).toBe('autofill');
+    expect(resolveDriverOnTruckChange({ source: 'none', currentDriver: '', truckDefaultDriver: '' })).toBe('keep');
+    expect(resolveDriverOnTruckChange({ source: 'auto', currentDriver: 'Sopir Satu', truckDefaultDriver: 'Sopir Dua' })).toBe('autofill');
+    expect(resolveDriverOnTruckChange({ source: 'auto', currentDriver: 'Sopir Satu', truckDefaultDriver: '' })).toBe('clear');
+    expect(resolveDriverOnTruckChange({ source: 'manual', currentDriver: 'Sopir Tiga', truckDefaultDriver: 'Sopir Dua' })).toBe('keep');
+    expect(resolveDriverOnTruckChange({ source: 'manual', currentDriver: 'Sopir Tiga', truckDefaultDriver: '' })).toBe('keep');
+    // Assignment tersimpan dipertahankan sampai truck diganti secara eksplisit, lalu mengikuti truck baru.
+    expect(resolveDriverOnTruckChange({ source: 'existing', currentDriver: 'Sopir Tiga', truckDefaultDriver: 'Sopir Dua' })).toBe('autofill');
+    expect(resolveDriverOnTruckChange({ source: 'existing', currentDriver: 'Sopir Tiga', truckDefaultDriver: '' })).toBe('clear');
+    expect(resolveDriverOnTruckChange({ source: 'manual', currentDriver: '  ', truckDefaultDriver: 'Sopir Dua' })).toBe('autofill');
+  });
+
+  it('1. sopir belum dipilih: memilih truck mengisi sopir default truck', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await selectTruck(user, 'B 1000 AA');
+    expect(driverInput()).toHaveValue('Sopir Satu');
+    expect(mismatchNote()).not.toBeInTheDocument();
+  });
+
+  it('2. sopir hasil otomatis mengikuti default truck baru saat truck diganti', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderForm({ onSubmit });
+    await selectTruck(user, 'B 1000 AA');
+    await selectTruck(user, 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    expect(mismatchNote()).not.toBeInTheDocument();
+
+    // Payload ke backend tetap bentuk lama (sopir/truck aktual), tanpa field baru.
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      plateNumber: 'B 2000 BB', vehicleId: 'truck-2', driver: 'Sopir Dua', driverId: 'drv-2',
+    }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('driverSelectionSource');
+  });
+
+  it('3. sopir dipilih manual tidak ditimpa saat truck diganti, dan perbedaannya diinformasikan', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await selectTruck(user, 'B 1000 AA');
+    await chooseDriver(user, 'Sopir Tiga');
+    await selectTruck(user, 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+    expect(mismatchNote()).toHaveTextContent('Sopir Sopir Tiga berbeda dari sopir default truck B 2000 BB (Sopir Dua)');
+    expect(mismatchNote()).toHaveTextContent('tetap boleh disimpan');
+  });
+
+  it('4. sopir otomatis dikosongkan bila truck baru tidak punya sopir default', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await selectTruck(user, 'B 1000 AA');
+    await selectTruck(user, 'B 3000 CC');
+    expect(driverInput()).toHaveValue('');
+    // Setelah dikosongkan, memilih truck berdefault kembali mengisi otomatis.
+    await selectTruck(user, 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+  });
+
+  it('manual tetap dipertahankan walau truck baru tidak punya sopir default', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await chooseDriver(user, 'Sopir Tiga');
+    await selectTruck(user, 'B 3000 CC');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+    expect(mismatchNote()).not.toBeInTheDocument();
+  });
+
+  it('6. job existing: assignment tersimpan dipertahankan saat dibuka, lalu mengikuti truck yang diganti eksplisit', async () => {
+    const user = userEvent.setup();
+    renderForm({
+      container: { ...container, plateNumber: 'B 1000 AA', vehicleId: 'truck-1', driver: 'Sopir Tiga', driverId: 'drv-3' },
+    });
+    expect(screen.getByLabelText('Truck')).toHaveValue('B 1000 AA');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+    expect(mismatchNote()).toHaveTextContent('default truck B 1000 AA (Sopir Satu)');
+    await selectTruck(user, 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    expect(mismatchNote()).not.toBeInTheDocument();
+    // Truck dikembalikan ke truck tersimpan: sopir tersimpan dipulihkan, bukan default truck.
+    await selectTruck(user, 'B 1000 AA');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+  });
+
+  it('8. sopir yang dipilih manual walau sama dengan default truck tetap dianggap manual', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await selectTruck(user, 'B 1000 AA');
+    await chooseDriver(user, 'Sopir Satu');
+    expect(mismatchNote()).not.toBeInTheDocument();
+    await selectTruck(user, 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Satu');
+    expect(mismatchNote()).toHaveTextContent('default truck B 2000 BB (Sopir Dua)');
+  });
+
+  it('sopir dikosongkan manual kembali mengikuti truck berikutnya', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await chooseDriver(user, 'Sopir Tiga');
+    await user.clear(driverInput());
+    await selectTruck(user, 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+  });
+});
+
+describe('OperationalForm koreksi Admin: ganti truck pada Container Job existing', () => {
+  const adminTrucks = [
+    { id: 'truck-1', plateNumber: 'B 1000 AA', unitCode: 'TRK-001', capacity: '20FT', brand: 'Hino', type: 'FG', status: 'Aktif', defaultDriver: 'Sopir Satu', defaultDriverId: 'drv-1' },
+    { id: 'truck-2', plateNumber: 'B 2000 BB', unitCode: 'TRK-002', capacity: '20FT', brand: 'Fuso', type: 'FN', status: 'Aktif', defaultDriver: 'Sopir Dua', defaultDriverId: 'drv-2' },
+    { id: 'truck-3', plateNumber: 'B 3000 CC', unitCode: 'TRK-003', capacity: '20FT', brand: 'UD', type: 'Quester', status: 'Aktif' },
+  ];
+  const adminDrivers = [
+    { id: 'drv-1', name: 'Sopir Satu', status: 'Aktif' },
+    { id: 'drv-2', name: 'Sopir Dua', status: 'Aktif' },
+    { id: 'drv-3', name: 'Sopir Tiga', status: 'Aktif' },
+  ];
+  const completedJob = {
+    ...container,
+    status: 'completed',
+    rpujStatus: 'paid',
+    plateNumber: 'B 1000 AA',
+    vehicleId: 'truck-1',
+    driver: 'Sopir Satu',
+    driverId: 'drv-1',
+    hasDriverCommission: true,
+    driverCommissionAmount: 100000,
+    commissionDriverName: 'Sopir Satu',
+    commissionBatchStatus: 'unsubmitted',
+    runningAt: '2026-10-19T08:00:00.000Z',
+    completedAt: '2026-10-19T12:00:00.000Z',
+  };
+  const renderAdmin = (props = {}) => render(
+    <OperationalForm
+      container={completedJob}
+      currentUser={{ role: 'admin' }}
+      masterTrucks={adminTrucks}
+      masterDrivers={adminDrivers}
+      onClose={vi.fn()}
+      onSubmit={vi.fn()}
+      {...props}
+    />,
+  );
+  const driverInput = () => screen.getByLabelText('Sopir Aktual Ritasi');
+  const truckSelect = () => screen.getByLabelText('Truck');
+  async function enableAdminCorrection(user) {
+    await user.click(screen.getByRole('checkbox', { name: /mode koreksi admin/i }));
+    await user.type(screen.getByLabelText(/alasan koreksi/i), 'Koreksi unit salah input');
+  }
+
+  it('membuka form edit tanpa ganti truck: assignment tersimpan utuh dan tersimpan apa adanya', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderAdmin({ onSubmit });
+    expect(truckSelect()).toHaveValue('B 1000 AA');
+    expect(driverInput()).toHaveValue('Sopir Satu');
+    await enableAdminCorrection(user);
+    expect(truckSelect()).toHaveValue('B 1000 AA');
+    expect(driverInput()).toHaveValue('Sopir Satu');
+    expect(screen.queryByText('Dampak Komisi Sopir')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ plateNumber: 'B 1000 AA', driver: 'Sopir Satu', driverId: 'drv-1' }));
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('commissionDriverAction');
+  });
+
+  it('ganti truck: sopir mengikuti default truck baru dan Admin wajib memilih dampak komisi secara eksplisit', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderAdmin({ onSubmit });
+    await enableAdminCorrection(user);
+    await user.selectOptions(truckSelect(), 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    expect(screen.getByText('Dampak Komisi Sopir')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /pindahkan assignment dan komisi/i })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: /ubah assignment saja/i })).not.toBeChecked();
+
+    // Tanpa pilihan eksplisit, komisi tidak diubah diam-diam: penyimpanan ditolak.
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('radio', { name: /ubah assignment saja/i }));
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      plateNumber: 'B 2000 BB', vehicleId: 'truck-2', driver: 'Sopir Dua', driverId: 'drv-2',
+      adminCorrectionMode: true, adminCorrectionReason: 'Koreksi unit salah input', commissionDriverAction: 'keep',
+    }));
+  });
+
+  it('ganti truck tanpa sopir default: sopir dikosongkan dan wajib dipilih manual sebelum simpan', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderAdmin({ onSubmit });
+    await enableAdminCorrection(user);
+    await user.selectOptions(truckSelect(), 'B 3000 CC');
+    expect(driverInput()).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await chooseDriver(user, 'Sopir Tiga');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+  });
+
+  it('override sopir manual setelah ganti truck tidak ditimpa saat truck diganti lagi', async () => {
+    const user = userEvent.setup();
+    renderAdmin();
+    await enableAdminCorrection(user);
+    await user.selectOptions(truckSelect(), 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    await chooseDriver(user, 'Sopir Tiga');
+    await user.selectOptions(truckSelect(), 'B 3000 CC');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+    // Kembali ke truck tersimpan: pilihan manual tetap dihormati.
+    await user.selectOptions(truckSelect(), 'B 1000 AA');
+    expect(driverInput()).toHaveValue('Sopir Tiga');
+  });
+
+  it('tidak ada perubahan data sebelum Save: menutup form tidak mengirim apa pun dan data job tidak dimutasi', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onClose = vi.fn();
+    const job = structuredClone(completedJob);
+    renderAdmin({ container: job, onSubmit, onClose });
+    await enableAdminCorrection(user);
+    await user.selectOptions(truckSelect(), 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    await user.click(screen.getByRole('button', { name: 'Tutup form' }));
+    expect(onClose).toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(job).toEqual(completedJob);
+  });
+
+  it('job Ambil Titip: ganti truck tidak memindahkan komisi Sopir A diam-diam; pilihan lama di-reset saat sopir berubah', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    renderAdmin({
+      onSubmit,
+      container: {
+        ...completedJob,
+        // Leg Ambil Titip oleh sopir B (Sopir Satu, truck B 1000 AA); komisi tetap milik Sopir A.
+        repoStoredAt: '2026-10-18T03:00:00.000Z',
+        repoPickedUpAt: '2026-10-19T02:00:00.000Z',
+        commissionDriverId: 'drv-a',
+        commissionDriverName: 'Sopir A Penitip',
+        commissionBatchStatus: 'paid',
+      },
+    });
+    await enableAdminCorrection(user);
+    await user.selectOptions(truckSelect(), 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    expect(screen.getByText(/Sopir A Penitip ke Sopir Dua/)).toBeInTheDocument();
+    // Komisi sudah dibayar: pindah komisi terkunci, hanya "ubah assignment saja".
+    expect(screen.getByRole('radio', { name: /pindahkan assignment dan komisi/i })).toBeDisabled();
+    expect(screen.getByText(/Batch sudah dikunci/)).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /ubah assignment saja/i }));
+
+    // Sopir berubah lagi lewat ganti truck saja: pilihan dampak komisi wajib dipilih ulang.
+    await user.selectOptions(truckSelect(), 'B 3000 CC');
+    await user.selectOptions(truckSelect(), 'B 2000 BB');
+    expect(driverInput()).toHaveValue('Sopir Dua');
+    expect(screen.getByRole('radio', { name: /ubah assignment saja/i })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('radio', { name: /ubah assignment saja/i }));
+    await user.click(screen.getByRole('button', { name: /simpan container job/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ commissionDriverAction: 'keep', driver: 'Sopir Dua', driverId: 'drv-2' }));
   });
 });

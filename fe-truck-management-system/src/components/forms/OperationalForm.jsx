@@ -131,6 +131,21 @@ function getTruckDefaultDriver(truck, fallbackRows = []) {
   return truck.defaultDriver || truck.default_driver_name || truck.defaultDriverName || fallbackTruck?.defaultDriver || fallbackTruck?.default_driver_name || '';
 }
 
+// Asal pilihan sopir di form: 'none' (kosong), 'auto' (diisi dari sopir default truck), 'manual'
+// (dipilih Operational setelah form dibuka), 'existing' (assignment tersimpan saat form dibuka).
+// Assignment tersimpan dipertahankan selama truck tidak diganti; begitu truck diganti secara
+// eksplisit (termasuk mode koreksi Admin), sopir mengikuti default truck baru seperti hasil
+// otomatis. Hanya pilihan manual yang tidak ditimpa.
+export function resolveDriverOnTruckChange({ source = 'none', currentDriver = '', truckDefaultDriver = '' } = {}) {
+  const hasDriver = Boolean(String(currentDriver || '').trim());
+  const hasDefault = Boolean(String(truckDefaultDriver || '').trim());
+  if (!hasDriver || source === 'auto' || source === 'existing') {
+    if (hasDefault) return 'autofill';
+    return hasDriver ? 'clear' : 'keep';
+  }
+  return 'keep';
+}
+
 function normalizeSize(value) {
   return String(value || '').toUpperCase().replace(/\s/g, '');
 }
@@ -603,6 +618,10 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
   const [notification, setNotification] = useState(null);
   const [executionSourceConfirmation, setExecutionSourceConfirmation] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  // Assignment tersimpan saat form dibuka bukan hasil auto-pilih: diperlakukan seperti pilihan manual.
+  const [driverSelectionSource, setDriverSelectionSource] = useState(() => (
+    String(container.driver || '').trim() ? 'existing' : 'none'
+  ));
   const [defaultDriverFormOpen, setDefaultDriverFormOpen] = useState(false);
   const [defaultDriverReason, setDefaultDriverReason] = useState('');
   const [defaultDriverSaving, setDefaultDriverSaving] = useState(false);
@@ -677,6 +696,19 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     && form.status !== 'received';
   const canSetTruckDefaultDriver = canUpdateOperational && hasPermission(currentUser, 'operations.truck_default_driver.update');
   const selectedTruckForDefault = trucks.find((truck) => truck.plateNumber === form.plateNumber) || null;
+  const selectedTruckDefaultDriverName = selectedTruckForDefault
+    ? findDriverById(selectedTruckForDefault.defaultDriverId)?.name || selectedTruckForDefault.defaultDriver || ''
+    : '';
+  // Sopir manual/tersimpan yang berbeda dari default truck hanya diinformasikan, tidak dilarang.
+  const driverDiffersFromTruckDefault = Boolean(
+    !isVendorExecution
+      && driverSelectionSource !== 'auto'
+      && selectedTruckDefaultDriverName
+      && String(form.driver || '').trim()
+      && (form.driverId && selectedTruckForDefault.defaultDriverId
+        ? form.driverId !== selectedTruckForDefault.defaultDriverId
+        : normalizeName(form.driver) !== normalizeName(selectedTruckDefaultDriverName)),
+  );
   const canTriggerSetDefaultDriver = Boolean(
     canSetTruckDefaultDriver
       && onSetTruckDefaultDriver
@@ -913,6 +945,7 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
 
   function applyExecutionSource(executionSource) {
     setError('');
+    if (executionSource === 'vendor') setDriverSelectionSource('none');
     setForm((current) => ({
       ...current,
       executionSource,
@@ -1011,33 +1044,77 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
       return;
     }
     const plateNumber = event.target.value;
+    // Truck tidak berubah: sopir (termasuk assignment tersimpan) tidak disentuh.
+    if (plateNumber === form.plateNumber) return;
     const truck = trucks.find((item) => item.plateNumber === plateNumber);
+    // Kendaraan yang sama dengan plat baru (plat diganti di Master Truck) bukan pergantian truck:
+    // hanya plat/detail yang diperbarui, sopir tetap.
+    if (truck?.id && form.vehicleId && String(truck.id) === String(form.vehicleId)) {
+      setError('');
+      setForm((current) => ({
+        ...current,
+        plateNumber,
+        chassis: `${truck.unitCode} - ${truck.brand} ${truck.type}`,
+      }));
+      return;
+    }
     if (truck && !isTruckCompatibleForRepoPickup(truck, containerSize, isRepoComboPickupMode)) {
       setError(isRepoComboPickupMode
         ? `Combo 2x20 wajib memakai truck/chassis 40FT. ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak bisa dipilih.`
         : `Truck ${truck.plateNumber} kapasitas ${truck.capacity || '-'} tidak sesuai untuk container ${containerSize || '-'}.`);
       return;
     }
-    // Sopir cuma di-auto-fill dari default truck kalau belum ada sopir terpilih sama sekali --
-    // begitu Operational sudah memilih sopir sendiri (independen dari truck), ganti truck tidak
-    // boleh menimpa pilihan itu. Dicoba dulu lookup by id (default_driver_id, lebih akurat, tidak
-    // rentan salah tangkap kalau ada nama kembar) baru fallback by name untuk truck lama yang
-    // cuma pernah diisi lewat halaman Master Truck (belum punya defaultDriverId).
-    const shouldAutoFillDriver = !String(form.driver || '').trim();
-    const driverByIdFallback = shouldAutoFillDriver ? findDriverById(truck?.defaultDriverId) : null;
-    const driverName = shouldAutoFillDriver ? (driverByIdFallback?.name || getTruckDefaultDriver(truck, localTruckRows)) : '';
-    const selectedDriver = shouldAutoFillDriver ? (driverByIdFallback || findDriverByName(driverName)) : null;
+    // Sopir mengikuti default truck hanya bila belum dipilih atau sebelumnya terisi otomatis dari
+    // truck (lihat resolveDriverOnTruckChange). Pilihan manual Operational dan assignment tersimpan
+    // tidak ditimpa. Default dicari by id dulu (default_driver_id, aman dari nama kembar) baru
+    // fallback by name untuk truck lama yang cuma pernah diisi lewat halaman Master Truck.
+    // Pilihan truck dikembalikan ke truck tersimpan: pulihkan sopir tersimpan (bukan default truck),
+    // kecuali Operational sudah memilih sopir manual setelah form dibuka.
+    const isOriginalTruck = truck?.id && container.vehicleId
+      ? String(truck.id) === String(container.vehicleId)
+      : Boolean(originalAssignedPlate) && plateNumber === originalAssignedPlate;
+    if (isOriginalTruck && originalAssignedDriver && driverSelectionSource !== 'manual') {
+      setDriverSelectionSource('existing');
+      setError('');
+      setForm((current) => ({
+        ...current,
+        plateNumber,
+        vehicleId: container.vehicleId || truck?.id || '',
+        driver: container.driver || '',
+        driverId: container.driverId || '',
+        commissionDriverAction: '',
+        ...initialDriverPayment,
+        chassis: truck ? `${truck.unitCode} - ${truck.brand} ${truck.type}` : container.chassis || '',
+      }));
+      return;
+    }
+    const defaultDriverById = findDriverById(truck?.defaultDriverId);
+    const truckDefaultDriverName = defaultDriverById?.name || getTruckDefaultDriver(truck, localTruckRows);
+    const driverAction = resolveDriverOnTruckChange({
+      source: driverSelectionSource,
+      currentDriver: form.driver,
+      truckDefaultDriver: truck ? truckDefaultDriverName : '',
+    });
+    const shouldAutoFillDriver = driverAction === 'autofill';
+    const driverName = shouldAutoFillDriver ? truckDefaultDriverName : '';
+    const selectedDriver = shouldAutoFillDriver ? (defaultDriverById || findDriverByName(driverName)) : null;
     if (shouldAutoFillDriver && truck && isDriverBlacklisted(selectedDriver) && truck.plateNumber !== container.plateNumber) {
       setError(`Sopir ${selectedDriver.name} masuk blacklist dan tidak bisa di-assign.`);
       return;
     }
-    const driverPayment = shouldAutoFillDriver ? getDriverPaymentInfo(selectedDriver) : null;
+    // Pilihan dampak komisi (pindah/tetap) milik sopir sebelumnya tidak boleh terbawa ke sopir lain:
+    // di-reset supaya Admin memilih ulang secara eksplisit untuk sopir yang baru.
+    const driverUpdate = driverAction === 'keep'
+      ? {}
+      : { driver: driverName, driverId: selectedDriver?.id || '', commissionDriverAction: '', ...getDriverPaymentInfo(selectedDriver) };
+    if (driverAction === 'autofill') setDriverSelectionSource('auto');
+    if (driverAction === 'clear') setDriverSelectionSource('none');
     setError('');
     setForm((current) => ({
       ...current,
       plateNumber,
       vehicleId: truck?.id || '',
-      ...(shouldAutoFillDriver ? { driver: driverName, driverId: selectedDriver?.id || '', ...driverPayment } : {}),
+      ...driverUpdate,
       chassis: truck ? `${truck.unitCode} - ${truck.brand} ${truck.type}` : '',
       status: !plateNumber && current.status === 'running'
           ? 'received'
@@ -1067,6 +1144,8 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
     }
     const driverPayment = getDriverPaymentInfo(selectedDriver);
     setError('');
+    // Dipilih/diketik Operational = manual, termasuk bila kebetulan sama dengan default truck.
+    setDriverSelectionSource(String(driverName || '').trim() ? 'manual' : 'none');
     setForm((current) => ({
       ...current,
       driver: driverName,
@@ -1930,6 +2009,15 @@ function OperationalForm({ container, onClose, onSubmit, onGenerateSpk, onSetTru
               <label>Catatan<textarea name="assignmentChangeNote" value={form.assignmentChangeNote} onChange={updateField} disabled={!canEditAssignment} placeholder="Catatan tambahan (opsional)" rows={2} /></label>
             </div>
             )}
+            {driverDiffersFromTruckDefault ? (
+              <p className="mt-2 flex items-start gap-1.5 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800" role="note">
+                <Info size={14} />
+                <span>
+                  Sopir {form.driver} berbeda dari sopir default truck {form.plateNumber} ({selectedTruckDefaultDriverName}).
+                  {' '}Kombinasi ini tetap boleh disimpan; pastikan sopir aktual ritasi sudah benar.
+                </span>
+              </p>
+            ) : null}
             {!isVendorExecution && completedCommissionDriverCorrection ? (
               <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
