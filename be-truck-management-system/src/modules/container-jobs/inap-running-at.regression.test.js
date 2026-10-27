@@ -83,3 +83,41 @@ test('mengedit job yang sudah inap tidak diperlakukan sebagai penandaan inap bar
   assert.throws(() => ensureInapPayload({ status: 'received' }, { status: 'inap', inapReason: 'Curfew malam di rest area' }), { code: 'CONTAINER_JOB_INAP_REQUIRES_RUNNING_STATUS' });
   assert.throws(() => ensureInapPayload({ status: 'running' }, { status: 'inap', inapReason: 'macet' }), { code: 'CONTAINER_JOB_INAP_REASON_REQUIRED' });
 });
+
+// G6: waktu mulai asli tidak boleh tergeser oleh runningAt di payload (mis. waktu resume yang diedit
+// user) selama perjalanan Inap. Perubahan hanya lewat Koreksi Admin.
+test('G6: runningAt di payload tidak menggeser waktu mulai asli saat masuk, lanjut, dan closing dari Inap', () => {
+  const later = '2026-10-20T07:00:00.000Z';
+  assert.equal(resolveRunningAtForSave(jobRow(), { status: 'inap', runningAt: later }, 'inap'), startedAt);
+  const inapJob = jobRow({ status: 'inap' });
+  assert.equal(resolveRunningAtForSave(inapJob, { status: 'running', runningAt: later }, 'running'), startedAt);
+  assert.equal(resolveRunningAtForSave(inapJob, { status: 'completed', runningAt: later }, 'completed'), startedAt);
+  assert.equal(resolveRunningAtForSave(inapJob, { runningAt: later }, 'inap'), startedAt);
+});
+
+test('G6: Koreksi Admin tetap dapat memperbaiki waktu mulai perjalanan Inap', () => {
+  const corrected = '2026-10-20T00:45:00.000Z';
+  const inapJob = jobRow({ status: 'inap' });
+  assert.equal(resolveRunningAtForSave(inapJob, { runningAt: corrected }, 'running', { allowAdminCorrection: true }), corrected);
+  assert.equal(resolveRunningAtForSave(inapJob, { runningAt: corrected }, 'completed', { allowAdminCorrection: true }), corrected);
+  assert.equal(resolveRunningAtForSave(inapJob, { runningAt: corrected }, 'inap', { allowAdminCorrection: true }), corrected);
+});
+
+test('G6: data Inap lama tanpa waktu mulai dapat dilengkapi dari payload', () => {
+  const filled = '2026-10-20T02:00:00.000Z';
+  assert.equal(resolveRunningAtForSave(jobRow({ status: 'inap', running_at: null }), { runningAt: filled }, 'running'), filled);
+  assert.equal(resolveRunningAtForSave(jobRow({ status: 'inap', running_at: null }), {}, 'inap'), null);
+});
+
+test('G6: closing langsung dari Inap memvalidasi waktu selesai terhadap waktu mulai asli', async () => {
+  const inapJob = jobRow({ status: 'inap' });
+  // Payload membawa runningAt lebih akhir dari waktu selesai; validasi tetap memakai waktu mulai asli.
+  const completedAt = '2026-10-20T03:00:00.000Z';
+  assert.equal(await requireCompletedJobReady(attachmentClient(), 'job-1', {
+    status: 'completed', runningAt: '2026-10-20T05:00:00.000Z', completedAt,
+  }, inapJob), completedAt);
+  // Payload membawa runningAt lebih awal; waktu selesai sebelum waktu mulai asli tetap ditolak.
+  await assert.rejects(requireCompletedJobReady(attachmentClient(), 'job-1', {
+    status: 'completed', runningAt: '2026-10-19T20:00:00.000Z', completedAt: '2026-10-19T23:00:00.000Z',
+  }, inapJob), { code: 'CONTAINER_JOB_COMPLETION_INVALID_TIME' });
+});

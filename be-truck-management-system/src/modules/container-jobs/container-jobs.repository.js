@@ -1843,13 +1843,19 @@ export function shouldPreserveOriginalRunningAt(existing = {}, { allowAdminCorre
 
 export function resolveRunningAtForSave(existing = {}, form = {}, nextStatus, { documentOnlyUpdate = false, allowAdminCorrection = false } = {}) {
   if (documentOnlyUpdate || nextStatus === 'cancelled') return existing.running_at;
-  if (shouldPreserveOriginalRunningAt(existing, { allowAdminCorrection }) && ['running', 'completed', 'repo_stored'].includes(nextStatus)) {
+  // Inap adalah jeda di tengah perjalanan yang sama: waktu mulai asli dipakai saat masuk Inap, Selesai Inap
+  // (resume ke running), maupun closing langsung dari Inap, walau payload membawa runningAt lain.
+  // Perubahan waktu mulai hanya lewat Koreksi Admin.
+  const preservesInapJourney = Boolean(
+    existing.running_at && (existing.status === 'inap' || nextStatus === 'inap') && !allowAdminCorrection,
+  );
+  if (
+    (preservesInapJourney || shouldPreserveOriginalRunningAt(existing, { allowAdminCorrection }))
+    && ['running', 'inap', 'completed', 'repo_stored'].includes(nextStatus)
+  ) {
     return existing.running_at;
   }
-  // Inap adalah jeda di tengah perjalanan: waktu mulai tidak boleh hilang, supaya Selesai Inap
-  // (resume ke running) dan closing tidak perlu mengisi ulang waktu mulai.
-  if (nextStatus === 'inap') return existing.running_at;
-  if (['repo_stored', 'running', 'completed'].includes(nextStatus)) return form.runningAt || existing.running_at;
+  if (['repo_stored', 'running', 'inap', 'completed'].includes(nextStatus)) return form.runningAt || existing.running_at;
   return null;
 }
 
@@ -1861,9 +1867,7 @@ export async function requireCompletedJobReady(client, id, form, existing, optio
   const allowAdminCorrection = Boolean(options.allowAdminCorrection);
   const isVendorExecution = Boolean(options.isVendorExecution);
 
-  const runningAt = shouldPreserveOriginalRunningAt(existing, { allowAdminCorrection })
-    ? existing.running_at
-    : form.runningAt || existing.running_at;
+  const runningAt = resolveRunningAtForSave(existing, form, 'completed', { allowAdminCorrection });
   const completedAt = resolveCompletedAtForSave(form, existing, 'completed');
   // Job Repo: selesai juga tidak boleh sebelum pickup Repo / mulai movement. Divalidasi sebelum
   // job, movement, atau efek samping penyelesaian apa pun disimpan.
@@ -3358,7 +3362,7 @@ async function updateContainerJobTransaction(id, form) {
       ? 'admin_correction'
       : existing.rows[0].uj_snapshot_source;
     const runningAt = resolveRunningAtForSave(existing.rows[0], form, nextStatus, { documentOnlyUpdate, allowAdminCorrection });
-    if (!documentOnlyUpdate && ['running', 'repo_stored', 'completed'].includes(nextStatus) && !runningAt) {
+    if (!documentOnlyUpdate && ['running', 'inap', 'repo_stored', 'completed'].includes(nextStatus) && !runningAt) {
       throw validationError('Tanggal dan jam mulai perjalanan wajib diisi.', 'CONTAINER_JOB_RUNNING_TIME_REQUIRED', 400);
     }
     const cancelledAt = nextStatus === 'cancelled'
